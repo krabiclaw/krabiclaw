@@ -23,7 +23,7 @@ import { paidOnline } from '~/server/domain/payments'
 import { isRecord } from '~/server/utils/type-guards'
 import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
-import { parsePhone } from '~/utils/phone'
+import { toE164 } from '~/utils/phone'
 import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { buildOwnerThreadInboxUrl } from '~/server/utils/dashboard-notification-links'
 import { HTTPError, type H3Event } from 'nitro'
@@ -76,12 +76,9 @@ export async function createTableReservation(event: H3Event, input: {
 
   const name       = cleanString(body.name, 100)
   const email      = cleanString(body.email, 200)
-  let phone = cleanString(body.phone, 30)
-  if (phone) {
-    const parsedPhone = parsePhone(phone)
-    if (parsedPhone.valid && parsedPhone.e164) phone = parsedPhone.e164
-    else return creationResult({ error: 'Please enter a valid phone number.' }, { status: 400 })
-  }
+  const enteredPhone = cleanString(body.phone, 30)
+  const phone = enteredPhone ? toE164(enteredPhone) : null
+  if (enteredPhone && !phone) return creationResult({ error: 'Please enter a valid phone number.' }, { status: 400 })
   const date       = cleanString(body.date, 10)
   const time       = cleanString(body.time, 5)
   const guests     = cleanString(body.guests, 3)

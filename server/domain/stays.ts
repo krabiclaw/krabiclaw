@@ -25,6 +25,7 @@ import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
+import { toE164 } from '~/utils/phone'
 import { arrangeProductPhotos, readProductPhotos, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
@@ -1262,10 +1263,13 @@ function stayFields(input: Record<string, unknown>, home: StayHome): StayFields 
   if (!guestName) fail(422, 'INVALID_STAY_FIELD', 'guest_name is required', 'guest_name')
   const email = optionalText(input.guest_email, 'guest_email', 254)
   if (email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(422, 'INVALID_STAY_FIELD', 'guest_email must be an email address', 'guest_email')
+  const enteredPhone = optionalText(input.guest_phone, 'guest_phone', 40)
+  const phone = enteredPhone === null ? null : toE164(enteredPhone)
+  if (enteredPhone !== null && !phone) fail(422, 'INVALID_STAY_FIELD', 'guest_phone must be an international number with its country calling code, such as +66812345678', 'guest_phone')
   return {
     check_in_date: checkIn, check_out_date: checkOut, arrival_time: arrival, adults, children, infants, guest_name: guestName,
     guest_surname: optionalText(input.guest_surname, 'guest_surname', 200), guest_email: email,
-    guest_phone: optionalText(input.guest_phone, 'guest_phone', 40), total_minor: amount(input.total_minor, 'total_minor'),
+    guest_phone: phone, total_minor: amount(input.total_minor, 'total_minor'),
     notes: optionalText(input.notes, 'notes', 2000),
   }
 }

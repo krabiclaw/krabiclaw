@@ -6,7 +6,7 @@ import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-
 import { notifyBookingCreated, raiseSettledFailures } from '~/server/utils/notifications'
 import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
-import { parsePhone } from '~/utils/phone'
+import { toE164 } from '~/utils/phone'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { productPolicySummarySource, renderBookingPolicySummary } from '~/server/utils/reservations'
 import { getProduct, resolveVariantPrice } from '~/server/utils/product-management'
@@ -100,12 +100,8 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
   const guestName = cleanString(body.guest_name, 100)
   const guestEmail = cleanString(body.guest_email, 254)
   const guestPhone = cleanString(body.guest_phone, 30)
-  let normalizedGuestPhone: string | null = null
-  if (guestPhone) {
-    const parsedPhone = parsePhone(guestPhone)
-    if (!parsedPhone.valid || !parsedPhone.e164) return creationResult({ error: 'A valid phone number is required.' }, { status: 400 })
-    normalizedGuestPhone = parsedPhone.e164
-  }
+  const normalizedGuestPhone = guestPhone ? toE164(guestPhone) : null
+  if (guestPhone && !normalizedGuestPhone) return creationResult({ error: 'A valid phone number is required.' }, { status: 400 })
   const sessionId = cleanString(body.session_id, 64)
   const requestedVariantId = cleanString(body.variant_id, 64)
   const notes = cleanString(body.notes, 1000)
@@ -412,12 +408,8 @@ export async function createStayBooking(event: H3Event, context: { organizationI
   if (!guestName) stayBookingError(422, 'GUEST_NAME_REQUIRED', 'Name is required', 'guest_name')
   if (!guestEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) stayBookingError(422, 'GUEST_EMAIL_INVALID', 'A valid email address is required', 'guest_email')
   if (shouldSendRealEmail(env) && isReservedTestDomain(guestEmail)) stayBookingError(422, 'GUEST_EMAIL_INVALID', 'Please enter a real email address.', 'guest_email')
-  let phone: string | null = null
-  if (guestPhone) {
-    const parsed = parsePhone(guestPhone)
-    if (!parsed.valid || !parsed.e164) stayBookingError(422, 'GUEST_PHONE_INVALID', 'A valid phone number is required.', 'guest_phone')
-    phone = parsed.e164
-  }
+  const phone = guestPhone ? toE164(guestPhone) : null
+  if (guestPhone && !phone) stayBookingError(422, 'GUEST_PHONE_INVALID', 'A valid phone number is required.', 'guest_phone')
   const idempotencyKey = typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : ''
   if (!idempotencyKey || idempotencyKey.length > 200) stayBookingError(422, 'IDEMPOTENCY_KEY_REQUIRED', 'A stable booking request key is required', 'idempotency_key')
 

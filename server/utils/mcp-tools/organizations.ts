@@ -1,6 +1,6 @@
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
-import { SUPPORTED_CURRENCIES, currentUserObject, globalTool, pageInfoObject, paginationInputSchema, organizationSummaryItem, organizationTool, withToolAnnotations, workspaceContextObject } from './shared'
+import { SUPPORTED_CURRENCIES, currentUserObject, globalTool, pageInfoObject, paginationInputSchema, organizationSummaryItem, organizationTool, withToolAnnotations, workspaceContextObject, PHONE_FORMAT } from './shared'
 import { ALL_VERTICALS } from '~/utils/vertical-copy'
 import { PLATFORM_LOCALES } from '~/shared/platform-locales'
 import { timezoneSchema } from '~/utils/timezone'
@@ -72,7 +72,7 @@ const teamOutput = { type: 'object', properties: { team: teamObject }, required:
 const websiteDraftLocationSchema = {
   type: 'object', properties: {
     street_address: { type: 'string' }, address_line_2: { type: 'string' }, city: { type: 'string' }, region: { type: 'string' }, postal_code: { type: 'string' },
-    country: { type: 'string', pattern: '^[A-Z]{2}$' }, phone: { type: 'string' }, website_url: { type: 'string', format: 'uri' },
+    country: { type: 'string', pattern: '^[A-Z]{2}$' }, phone: { type: 'string', description: PHONE_FORMAT }, website_url: { type: 'string', format: 'uri' },
   }, additionalProperties: false,
 } as const
 const websiteDraftProductSchema = {

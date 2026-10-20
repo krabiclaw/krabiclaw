@@ -17,10 +17,10 @@
       <BillingPlanCard v-for="(plan, index) in plans" :key="plan.id" :plan="plan" photo :front-image="frontImage(plan.id)" :sequence="index" />
     </div>
     <p class="kc-pricing-plans__hint">Prices in USD. Paid subscription billed monthly.</p>
-    <!-- The services, offered under the plans they are added to; each starts only in Payments → Plan → Services. -->
+    <!-- The services, offered under the plans they are added to; each starts only in Plan and billing. -->
     <div class="kc-pricing-addons" data-parity-section="add-ons">
       <h3 class="kc-pricing-addons__title">Add-ons</h3>
-      <p class="kc-pricing-addons__lede">Services from KrabiClaw's own people, added to a paid plan from Payments → Plan → Services.</p>
+      <p class="kc-pricing-addons__lede">Services from KrabiClaw's own people, added to a paid plan from Plan and billing.</p>
       <ul class="kc-pricing-addons__list">
         <li v-for="service in services" :key="service.name" class="kc-pricing-addon">
           <h4>{{ service.name }}</h4>

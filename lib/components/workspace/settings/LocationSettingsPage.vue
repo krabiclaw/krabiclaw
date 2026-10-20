@@ -30,7 +30,7 @@ import type { LocationReservationConfig, LocationReservationConfigPatch } from '
 import { getErrorMessage } from '~/utils/errors'
 import { coordinatesFailure } from '~/utils/location-map'
 import { parsePostalAddress, postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
-import { getPhoneCountry } from '~/utils/phone'
+import { getPhoneCountry, toE164 } from '~/utils/phone'
 import { parseStayMapSharing, STAY_MAP_SHARING_MODES, type StayMapSharing } from '~/shared/stay-listing'
 
 
@@ -336,6 +336,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const validationMessage = computed(() => {
     if (key === 'name' && !detailsForm.title.trim()) return 'Enter a location name.'
     if (key === 'contact') {
+      if (detailsForm.phone && !toE164(detailsForm.phone)) return 'Enter a valid phone number and choose its country.'
       if (detailsForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(detailsForm.email)) return 'Enter a valid email address.'
     }
     if (key === 'stay-map-sharing') {

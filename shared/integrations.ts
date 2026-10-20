@@ -34,7 +34,7 @@ export interface IntegrationDefinition {
   does: readonly string[]
   /** Prompts the KrabiClaw app answers with this connection; brackets mark what the reader fills in. */
   prompts: readonly string[]
-  /** A service KrabiClaw's people offer on this connection, named with its price; sold in Payments → Plan. */
+  /** A service KrabiClaw's people offer on this connection, named with its price; sold in Plan and billing. */
 }
 
 export const INTEGRATIONS: readonly IntegrationDefinition[] = [

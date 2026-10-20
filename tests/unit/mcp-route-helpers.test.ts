@@ -5,14 +5,14 @@ import { asMcpError } from '../../server/utils/mcp-protocol.ts'
 
 test('a tool action carries its dashboard destination without unrelated private details', () => {
   const result = mcpToolErrorResult('A paid plan is required.', {
-    code: 'LANGUAGE_ENTITLEMENT_REQUIRED', dashboard_url: '/dashboard/kanpai/payments?tab=plan',
+    code: 'LANGUAGE_ENTITLEMENT_REQUIRED', dashboard_url: '/dashboard/kanpai/billing/upgrade',
     credential: 'private-value', customer_email: 'private@example.com',
   }, 'https://krabiclaw.com')
   assert.equal(result.isError, true)
   assert.equal('structuredContent' in result, false)
   assert.deepEqual(JSON.parse(result.content[0]!.text), {
     code: 'LANGUAGE_ENTITLEMENT_REQUIRED', message: 'A paid plan is required.',
-    dashboard_url: 'https://krabiclaw.com/dashboard/kanpai/payments?tab=plan',
+    dashboard_url: 'https://krabiclaw.com/dashboard/kanpai/billing/upgrade',
   })
   assert.equal(JSON.stringify(result).includes('private'), false)
 })

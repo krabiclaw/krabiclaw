@@ -74,7 +74,7 @@
             </div>
             <div v-else class="mt-8 flex items-center gap-2.5 text-sm uppercase tracking-widest text-white">
               <span class="size-1.5 rounded-full bg-zinc-300" />
-              <a v-if="displayPhone" :href="`tel:${dialablePhone}`" class="text-white/80 no-underline hover:text-white">{{ t('saya.location.call_us') }} · {{ displayPhone }}</a>
+              <a v-if="locationPhone" :href="`tel:${locationPhone}`" class="text-white/80 no-underline hover:text-white">{{ t('saya.location.call_us') }} · {{ formatPhone(locationPhone) }}</a>
               <span v-else>{{ t('saya.location.contact_us_for_hours') }}</span>
             </div>
             <div class="mt-10 flex flex-wrap gap-3">
@@ -131,8 +131,8 @@
           </div>
           <div>
             <p class="saya-eyebrow mb-4 text-muted">{{ t('saya.header.contact') }}</p>
-            <a v-if="displayPhone" :href="`tel:${dialablePhone}`" class="block text-sm text-default no-underline hover:underline">
-              {{ displayPhone }}
+            <a v-if="locationPhone" :href="`tel:${locationPhone}`" class="block text-sm text-default no-underline hover:underline">
+              {{ formatPhone(locationPhone) }}
             </a>
             <a v-if="displayEmail" :href="`mailto:${displayEmail}`" class="mt-2 block text-sm text-muted no-underline hover:underline break-all">
               {{ displayEmail }}
@@ -276,6 +276,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import SocialPosts from '~/components/social/SocialPosts.vue'
 import { formatOpeningHours, getIsOpenNow, getActiveSpecialClosure, formatClosureMessage } from '~/utils/formatters'
 import { getTodayHoursLabel, schemaOpeningHours } from '~/shared/reservation-hours'
@@ -350,11 +351,10 @@ const locationPageContent = computed(() => {
 
 
 // Contact details are location-owned; missing or placeholder values stay absent.
-const displayPhone = computed(() => {
+const locationPhone = computed(() => {
   const p = location.value?.phone
   return p && !p.includes('example.com') ? p : null
 })
-const dialablePhone = computed(() => displayPhone.value?.replace(/[^\d+]/g, '') ?? '')
 const displayEmail = computed(() => {
   const e = location.value?.email
   return e || null

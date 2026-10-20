@@ -42,7 +42,7 @@
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" label="Require online payment for paid sessions" />
         <template v-if="!paymentEntitled">
           <p class="mt-4 text-sm text-muted">Online payments require Business. Paid sessions can be booked without online payment when this setting is off.</p>
-          <UButton class="mt-3" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" variant="outline">View plans</UButton>
+          <UButton class="mt-3" :to="`/dashboard/${route.params.orgSlug}/billing/upgrade`" variant="outline">Upgrade to Business</UButton>
         </template>
       </UFormField>
       <UFormField v-else-if="concern === 'location'" name="held_online">

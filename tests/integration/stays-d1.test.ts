@@ -853,9 +853,9 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     await assert.rejects(updateStay(db, env, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-09', check_out_date: '2026-11-11' }), code('STAY_OVERLAP'))
     // A refused move leaves the stay and its nights where they were.
     assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-03' })).nights.map(night => night.stay_id), [stay.id, stay.id])
-    const moved = await updateStay(db, env, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-05', check_out_date: '2026-11-08', guest_phone: '+15551234567' })
+    const moved = await updateStay(db, env, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-05', check_out_date: '2026-11-08', guest_phone: '+61491570154' })
     assert.equal(moved.version, 2)
-    assert.equal(moved.guest_phone, '+15551234567')
+    assert.equal(moved.guest_phone, '+61491570154')
     const calendar = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-09' })
     // The calendar reads its full 500 nights, with the stays in them.
     const year = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2028-03-15' })

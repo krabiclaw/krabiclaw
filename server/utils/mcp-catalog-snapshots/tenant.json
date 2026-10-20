@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f48c7f4578fdfb1b2ce6e560ad3deb5c577cf6ac70a22730c21026b0e50c10e6",
-  "documentationFingerprint": "sha256:11bf9456a504242518f40d42e0f0c8e737534a5e634e239075166ed5d9492646",
+  "fingerprint": "sha256:594c9746e5c383dcb82630497bb47eec518feb18b1afc325ae0d0b98119255f0",
+  "documentationFingerprint": "sha256:15a66710a6cc2023926e10506c58ee0a0275a78ad076e02addc944913bba8df3",
   "tools": [
     {
       "name": "add_organization_language",
@@ -17713,6 +17713,7 @@
             "type": "string"
           },
           "phone": {
+            "description": "International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "special_hours": {
@@ -25807,7 +25808,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "Optional guest phone in international format.",
+            "description": "Optional. International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "idempotency_key": {
@@ -33576,7 +33577,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "International phone number with calling code.",
+            "description": "International number with its country calling code, e.g. +66812345678.",
             "type": [
               "string",
               "null"
@@ -34072,7 +34073,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "International phone number with calling code.",
+            "description": "International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "idempotency_key": {
@@ -62650,6 +62651,7 @@
                 "type": "string"
               },
               "phone": {
+                "description": "International number with its country calling code, e.g. +66812345678.",
                 "type": "string"
               },
               "postal_code": {
@@ -98747,6 +98749,7 @@
                 "type": "string"
               },
               "phone": {
+                "description": "International number with its country calling code, e.g. +66812345678.",
                 "type": "string"
               },
               "postal_code": {
@@ -98870,6 +98873,7 @@
                 "type": "string"
               },
               "phone": {
+                "description": "International number with its country calling code, e.g. +66812345678.",
                 "type": "string"
               },
               "postal_code": {
@@ -112357,7 +112361,7 @@
             "type": "string"
           },
           "phone": {
-            "description": "Public phone number shown to guests on the website and in booking/reservation confirmation emails.",
+            "description": "Public phone number shown to guests on the website and in booking/reservation confirmation emails. International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "short_description": {
@@ -128029,7 +128033,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "International phone number with calling code.",
+            "description": "International number with its country calling code, e.g. +66812345678.",
             "type": [
               "string",
               "null"
@@ -131662,14 +131666,14 @@
         "create_product": "sha256:267a19228604764a3953a9603c7e139c2b3da64cc653a2cd2b9f2d9f8f2c0dca",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
-        "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
+        "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
-        "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
+        "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
         "update_menu": "sha256:203ae23ae03f77e7a587e368d315d0a47f4368ec868e05be2b683abe23e1093c",
         "update_organization_settings": "sha256:b5488027b9a151e5759c0cf78e9010b60ff1d07ba783525d50e30cc233f2ef94",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
@@ -131745,7 +131749,7 @@
       "slug": "what-you-can-edit-through-chatgpt",
       "contentHash": "sha256:1aa095e046466e5231a1c6e06a28af5b90c19ad5afe3d229cc14e2560cf15d6c",
       "toolContracts": {
-        "create_location": "sha256:4429629ed87d336328d275ab17d4cb36caae241d3cc1ede22985d0a11979f23f",
+        "create_location": "sha256:76191e793ce66aae9289cf1e505b47bd44a04320d4b29660f173959391e9c5b0",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
@@ -131755,7 +131759,7 @@
         "list_stays": "sha256:5b9e594406177ab852bc7e715f13167cc4f72a0b1a2f5a7e78de728aa95188ea",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
+        "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
@@ -131781,7 +131785,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:09fbbd2f3d89627aa78eb5b60d27b5e949edc7b8304b610422045cf5a89671a1",
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
-        "create_product_booking": "sha256:8aa4d7188344f54de6be6fa3574f5d3736a8d9dc6f9736c9831d927aec10e36d",
+        "create_product_booking": "sha256:a05bb23c5fca92ad866321dd97cab8364ef398b0c4c46240d8457965c7727494",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_member_scheduling": "sha256:fe4a81a1b928b2e8ea93577b47cbbdb67be60a83586b5d57dec9524322bbd6fd",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
@@ -131830,7 +131834,7 @@
       "contentHash": "sha256:ef918a59f51075aabf427c0d67ecce375c65deb59579f716f759a2368dd3a988",
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
-        "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
+        "create_table_reservation": "sha256:9c27873124240d1f214c93c3e7ba73db383038fd555d7b93da570781ca2a4a18",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",

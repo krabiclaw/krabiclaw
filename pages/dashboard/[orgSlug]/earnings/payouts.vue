@@ -10,7 +10,7 @@
       <template v-else-if="data">
         <template v-if="data.configured === false">
           <p class="text-base text-muted">Payouts start once your business is connected to Stripe.</p>
-          <UButton class="mt-4" label="Add payout method" :to="`/dashboard/${route.params.orgSlug}/payments?tab=payouts`" />
+          <UButton class="mt-4" label="Add payout method" :to="`/dashboard/${route.params.orgSlug}/payments`" />
         </template>
         <template v-else>
           <section v-if="upcoming.length" class="mb-8">

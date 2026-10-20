@@ -247,7 +247,7 @@
                   <p class="font-semibold text-default">{{ locationName }}</p>
                   <p v-if="addressLine" class="mt-1 text-sm text-muted">{{ addressLine }}</p>
                   <p v-if="location?.stay_map_sharing && mapEmbedUrl" class="mt-2 text-sm leading-6 text-muted">{{ t(location.public_area?.approximate ? 'stay.general_location_notice' : 'stay.specific_location_notice') }}</p>
-                  <p v-if="location?.phone" class="mt-1 text-sm text-muted">{{ location.phone }}</p>
+                  <p v-if="location?.phone" class="mt-1 text-sm text-muted">{{ formatPhone(location.phone) }}</p>
                   <p v-if="meetingPoint" class="mt-3 whitespace-pre-line text-sm leading-6 text-default">{{ meetingPoint }}</p>
                   <a
                     v-if="location?.maps_url"
@@ -510,6 +510,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import HostedBy from '~/components/booking/HostedBy.vue'
 import ShareButton from '~/components/tenant/ShareButton.vue'
@@ -580,7 +581,7 @@ const props = defineProps<{
 const displayTitle = computed(() => props.product.name)
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
-const stayBooking = useStayBooking(() => ({ product: props.product, checkout: props.stayCheckoutAvailable }))
+const stayBooking = useStayBooking(() => ({ product: props.product, location: props.location, checkout: props.stayCheckoutAvailable }))
 const bookingLabel = computed(() => isStay.value
   ? stayBooking.quote.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
   : props.vertical === 'service'

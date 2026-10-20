@@ -169,8 +169,9 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 
   // Contact: the phone picker arrives seeded with that country, and the number
   // is accepted the way a Thai owner writes it, trunk zero included.
-  const phone = page.getByPlaceholder('Phone number')
-  await expect(phone).toBeEnabled()
+  const phone = page.getByLabel('Phone', { exact: true })
+  await expect(page.getByLabel(/^Phone country: /)).toContainText('+66')
+  await expect(phone).toHaveAttribute('placeholder', '081 234 5678')
   await phone.fill('0812345678')
   await expect(phone).toHaveValue('081 234 5678')
   await advance('Next', 'products')
@@ -320,7 +321,7 @@ test('a new owner picks their Google listing and it seeds location, contact and 
 
   // Contact: Google's national number, read in the place's own country.
   await expect(step('contact')).toBeVisible()
-  await expect(page.getByPlaceholder('Phone number')).toHaveValue('095 293 2112')
+  await expect(page.getByLabel('Phone', { exact: true })).toHaveValue('095 293 2112')
 
   // The saved draft names the Google place, which the server fetched itself.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')

@@ -1,6 +1,7 @@
 import { currencyForCountry, type CurrencyCode } from '~/shared/currencies'
 import type { PostalAddress } from '~/utils/postal-address'
 import { isValidTimezone } from '~/utils/timezone'
+import { toE164 } from '~/utils/phone'
 import type { OpeningHours, SpecialHours } from '~/shared/reservation-hours'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 import type { DraftBrandForm } from '~/lib/components/workspace/onboarding/DraftBrandCard.vue'
@@ -148,7 +149,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     id: 'contact', section: 'place',
     title: () => 'What is your business contact number?',
-    complete: state => state.details.phone.trim().length > 0,
+    complete: state => toE164(state.details.phone) !== null,
     optional: true,
   },
   {
