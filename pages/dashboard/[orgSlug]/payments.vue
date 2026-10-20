@@ -132,11 +132,14 @@ const payoutRows = computed<EditorNavigationItem[]>(() => [
     : { summary: connectStatusPresentation(account.value?.status).description, status: account.value ? 'neutral' as const : undefined }) },
   ...(account.value?.status === 'ready' ? [{ id: 'surcharge', label: 'Card surcharge', to: to('surcharge'), summary: account.value.surchargeBasisPoints === null ? 'Off. Pass credit card fees on to the buyer.' : `On at ${account.value.surchargeBasisPoints / 100}%.` }] : []),
 ])
+const refusedUsage = computed(() => (usage.value?.pending ?? []).filter(row => row.action_required).reduce((sum, row) => sum + row.event_count, 0))
 const planRows = computed<EditorNavigationItem[]>(() => [
   { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, to: to('plan') },
   ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value }] : []),
   ...(billing.value?.usage.rentalUnits != null ? [{ id: 'rental-units', label: 'Rental units', summary: rentalUnitsSummary.value }] : []),
   ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of payment volume, plus Stripe fees.${usage.value.pricing.ad_spend_rate_percent === null ? '' : ` ${usage.value.pricing.ad_spend_rate_percent}% of monthly ad spend for campaigns we manage.`} Billed at the end of the period. Fees aren’t returned after a refund or dispute.` }] : []),
+  // Usage Stripe has not accepted stays in the outbox with its reason; the owner sees it until it is resolved.
+  ...(refusedUsage.value ? [{ id: 'usage:refused', label: 'Payments fees not reported', summary: `${refusedUsage.value} ${refusedUsage.value === 1 ? 'charge' : 'charges'} could not be reported to Stripe and ${refusedUsage.value === 1 ? 'is' : 'are'} not billed yet. Contact support to resolve ${refusedUsage.value === 1 ? 'it' : 'them'}.`, status: 'error' as const }] : []),
   ...(billing.value && (scheduledPlan.value || billing.value.cancelAtPeriodEnd) && currentPlan.value ? [{ id: 'restore', label: `Keep ${currentPlan.value.name}`, summary: scheduledPlan.value ? `Stay on ${currentPlan.value.name} instead of changing to ${scheduledPlan.value.name}.` : `Stay on ${currentPlan.value.name} after ${formatExactDateTime(billing.value.currentPeriodEnd!)}.`, action: { label: 'Keep plan' } }] : []),
   ...(!onStarter.value && billing.value && !billing.value.cancelAtPeriodEnd && !scheduledPlan.value ? [{ id: 'cancel', label: 'Cancel plan', summary: 'If you cancel, you keep full access to your plan features until the end of your billing period.', to: to('cancel') }] : []),
 ])
