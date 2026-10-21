@@ -914,6 +914,8 @@ explicit active physical location and its timezone before a time can be saved.
 Saved occurrences retain their own timezones when Location settings change.
 Online sessions use the assigned host's existing working hours; `online` is a
 public booking scope, never a physical Location or Price ID.
+An online-only offering leads to Bookable times even with All locations
+selected. Switching to All bookings clears that virtual Online scope.
 
 Airbnb's [Experience calendar guide](https://www.airbnb.com/help/article/2645)
 describes Calendar → Add availability and optional daily or weekly repetition.
