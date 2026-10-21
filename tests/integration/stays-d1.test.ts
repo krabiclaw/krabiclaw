@@ -551,8 +551,8 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     const second = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
     assert.notEqual(first.room.id, second.room.id)
     const unansweredAccessibility: StayPhotoRoom['accessibility'] = [{ feature: 'step_free_access', available: null, photo_ids: [] }, { feature: 'wide_doorway', available: null, photo_ids: [] }]
-    const roomA: StayPhotoRoom = { id: first.room.id, type: 'bedroom', photo_ids: [], amenities: [], accessibility: unansweredAccessibility, sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
-    const roomB: StayPhotoRoom = { id: second.room.id, type: 'bedroom', photo_ids: [], amenities: [], accessibility: unansweredAccessibility, sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+    let roomA: StayPhotoRoom = { id: first.room.id, type: 'bedroom', photo_ids: [], amenities: [], accessibility: unansweredAccessibility, sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+    let roomB: StayPhotoRoom = { id: second.room.id, type: 'bedroom', photo_ids: [], amenities: [], accessibility: unansweredAccessibility, sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
     // A bedroom added after a different type still groups with the original
     // bedroom, retaining creation order and identities within their type.
     const grouped = [roomA, roomB, { id: intervening.room.id, type: 'living_room' as const, photo_ids: [], amenities: [], accessibility: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }]
@@ -636,11 +636,31 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.equal(finalCount, finalAllocation.beds)
     for (const current of finalAllocation.photo_rooms) {
       await updateStayPhotoRoom(db, env, manager, cabin.id, current.id, { expected_details_version: current.details_version, sleeping_arrangements: null, private_attached_bathroom: null })
-      const expected = current.id === roomA.id ? roomA : roomB
-      expected.details_version = current.details_version + 1
     }
+    // Only the winning allocation and privacy writes advance the occupied
+    // room; the free room advances only when its total-race write wins.
+    roomA = { ...roomA, details_version: 5 + (allocationRace[0]!.status === 'fulfilled' ? 2 : Number(totalRace[0]!.status === 'fulfilled')) }
+    roomB = { ...roomB, details_version: 2 + (allocationRace[1]!.status === 'fulfilled' ? 2 : Number(totalRace[0]!.status === 'fulfilled')) }
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { beds: 3 } } })
     assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [roomA, roomB])
+    const beforeRoomAppend = await getProduct(db, ORG, cabin.id)
+    const { results: beforeAppendPlacements } = await db.prepare("SELECT * FROM media_placements WHERE organization_id = ? AND owner_type = 'product' AND owner_id = ? ORDER BY slot, sort_order").bind(ORG, cabin.id).all()
+    await assert.rejects(addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-library', room_id: foreignRoom.room.id }), { status: 404, data: { code: 'PHOTO_ROOM_NOT_FOUND', field: 'room_id' } })
+    // A room removed or changed after validation must fail in the same batch
+    // as the Product placements, leaving no Additional photo behind.
+    await assert.rejects(arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id,
+      from: ['room-a', 'room-b', 'room-c'], to: ['room-a', 'room-b', 'room-c', 'room-library'],
+      roomAssignment: { assetId: 'room-library', roomId: foreignRoom.room.id },
+    }), { status: 409, data: { code: 'PHOTOS_CHANGED', field: 'photos' } })
+    assert.deepEqual(await getProduct(db, ORG, cabin.id), beforeRoomAppend)
+    assert.deepEqual((await db.prepare("SELECT * FROM media_placements WHERE organization_id = ? AND owner_type = 'product' AND owner_id = ? ORDER BY slot, sort_order").bind(ORG, cabin.id).all()).results, beforeAppendPlacements)
+    await addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-library', room_id: roomA.id })
+    const appendedRoomPhoto = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(appendedRoomPhoto.stay?.photo_rooms, [{ ...roomA, photo_ids: ['room-library'] }, roomB])
+    const appendedPublicPhoto = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert.deepEqual(appendedPublicPhoto!.product.gallery.map(photo => photo.asset_id), ['room-b', 'room-c', 'room-library'])
+    await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-library')
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB])
 
     // A room describes where a listing amenity is available. Selecting it here
     // promotes that same canonical listing fact; it never creates another list
@@ -1381,9 +1401,9 @@ test('home location sharing protects every public projection after localization 
         if (mode === 'general') {
           assert.equal(projected.latitude, null)
           assert.equal(projected.longitude, null)
-          assert.notEqual(projected.public_area?.center?.latitude, location.latitude)
-          assert.notEqual(projected.public_area?.center?.longitude, location.longitude)
-          assert(!projected.map_embed_url?.includes('8.0326'))
+          assert.deepEqual(projected.public_area?.center, { latitude: 8.03, longitude: 98.83 })
+          assert.equal(projected.public_area?.radius_meters, 2000)
+          assert.equal(new URL(projected.map_embed_url!).searchParams.get('q'), '8.03,98.83')
         } else {
           assert.deepEqual([projected.latitude, projected.longitude], [location.latitude, location.longitude])
           assert.equal(new URL(projected.map_embed_url!).searchParams.get('q'), '8.0326,98.822')

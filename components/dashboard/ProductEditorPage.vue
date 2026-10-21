@@ -283,7 +283,7 @@ export interface ProductEditor {
   updateStayAccessibility: (answer: StayHomeAccessibility, expectedUpdatedAt: string) => Promise<boolean>
   deleteStayPhotoRoom: (roomId: string) => Promise<boolean>
   moveStayPhotos: (photos: Array<{ photo_id: string; expected_room_id: string | null }>, target: { room_id: string | null } | { new_room_type: StayPhotoRoomType }) => Promise<boolean>
-  addStayPhoto: (assetId: string) => Promise<boolean>
+  addStayPhoto: (assetId: string, roomId?: string) => Promise<boolean>
   reorderStayPhotos: (photoIds: string[]) => Promise<boolean>
   describeStayPhoto: (photoId: string, text: string) => Promise<boolean>
   removeStayPhotos: (photoIds: string[]) => Promise<boolean>
@@ -1818,10 +1818,10 @@ async function changeStayPhotos(change: () => Promise<unknown>): Promise<boolean
   }
 }
 
-async function addStayPhoto(assetId: string) {
+async function addStayPhoto(assetId: string, roomId?: string) {
   return await changeStayPhotos(async () => {
     if (photoAssets.value.some(photo => photo.asset_id === assetId)) throw new Error('This photo is already on the listing.')
-    await dashboardApi(stayPhotoUrl(), { method: 'POST', body: { asset_id: assetId }, validate: isStayPhotoMutation })
+    await dashboardApi(stayPhotoUrl(), { method: 'POST', body: { asset_id: assetId, ...(roomId ? { room_id: roomId } : {}) }, validate: isStayPhotoMutation })
   })
 }
 

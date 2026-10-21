@@ -83,23 +83,25 @@
     </div>
   </section>
 
-  <!-- Every other page opens on the site's band; a divider closing the hero section cuts the shield from it -->
+  <!-- Every other page opens on the site's action color; a divider closing the hero section cuts the shield from the band beneath -->
   <template v-else>
-    <section class="relative overflow-hidden bg-[var(--tenant-band)]" data-parity-section="page-hero">
+    <!-- It takes the brand's own action color in both color modes (dark mode lightens
+         that color for text, not for a fill), and its button the accent, which stands out on it. -->
+    <section class="relative overflow-hidden bg-[var(--site-action-light)] text-[var(--site-on-action-light)] [--site-button-bg:var(--site-accent-light)] [--site-button-text:var(--site-on-accent-light)]" data-parity-section="page-hero">
       <div class="tenant-container relative pb-16 pt-20 sm:pb-24 sm:pt-28">
         <div class="mx-auto max-w-4xl text-center">
-          <p v-if="eyebrow" class="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--tenant-accent-strong)]">
+          <p v-if="eyebrow" class="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--tenant-accent)]">
             {{ eyebrow }}
           </p>
-          <h1 v-if="title" class="tenant-display-md text-highlighted">
-            {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--tenant-accent-strong)]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
+          <h1 v-if="title" class="tenant-display-md">
+            {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--tenant-accent)]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
           </h1>
           <TenantRichText
             v-for="(part, index) in descriptionParts"
             :key="index"
             :content="part"
             unstyled
-            class="prose prose-lg mx-auto mt-6 max-w-2xl text-default"
+            class="mx-auto mt-6 max-w-2xl text-lg leading-8 opacity-90"
           />
           <div v-if="pageAction" class="mt-10">
             <TenantButton :to="pageAction.url" size="lg">

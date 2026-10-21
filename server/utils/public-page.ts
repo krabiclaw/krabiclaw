@@ -1,3 +1,4 @@
+import { publicCacheRevision } from '~/server/utils/edge-cache'
 import { oncePerRequest } from '~/server/utils/request-scope'
 import { publicLocationIsProtected } from '~/shared/location-sharing'
 import { projectPublicLocationReview, publicReviewLocationProtectedSql } from '~/server/utils/public-location-privacy'
@@ -260,6 +261,7 @@ async function loadPublicPageSource(
   // Also skipped if any query input is invalid to prevent unbounded cache entries.
   const host = (event.req.headers.get("host")) ?? "";
   const usePageCache = !isPreviewAuthorized && !isNonProductionHost(host) && allInputsValid;
+  const revision = usePageCache ? await publicCacheRevision(event, db, organizationId) : null;
   const cacheKey = buildPublicResourceCacheKey(organizationId, {
     contract: 'page',
     page,
@@ -267,7 +269,7 @@ async function loadPublicPageSource(
     datasets: [...requestedDatasets],
     blogSlug,
     locale,
-  });
+  }, revision);
   if (usePageCache) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const kv = (env as any).ORGANIZATION_CACHE as KVNamespace | undefined;
