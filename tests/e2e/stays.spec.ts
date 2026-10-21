@@ -1787,6 +1787,8 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
   expect((await alreadyMoved).status()).toBe(409)
   await expect(addBedroomPhotos).not.toBeVisible()
+  await expect(roomGrid.getByText('A selected photo moved to another room; reload the photo tour', { exact: true })).toBeVisible()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(3)
   const afterCompletedSelection = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(afterCompletedSelection.error).toBeNull()
   expect(afterCompletedSelection.data!.product.stay.photo_rooms).toEqual([{ ...afterRefusedRoomMove.data!.product.stay.photo_rooms[0]!, photo_ids: [red.id, blue.id, green.id] }])
