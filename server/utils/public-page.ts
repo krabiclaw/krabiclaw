@@ -39,7 +39,7 @@ import { publicLocationSql } from "~/server/utils/public-locations";
 import { isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
-import { normalizeVertical } from '~/utils/vertical-copy'
+import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { resolvePublicTemplate } from '~/utils/template-registry'
 import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
 import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
@@ -330,10 +330,9 @@ async function loadPublicPageSource(
     : null
   const locationId = locationRow?.id;
 
-  const normalizedVertical = normalizeVertical(organization.vertical)
   const localizedBlogPost = localizedLocale && blogSlug ? await queryFirst<{ id: string }>(db,
     `SELECT id FROM content_documents WHERE organization_id = ? AND kind = 'article' AND row_role = 'representation'
-      AND locale = ? AND path = ? LIMIT 1`, [organizationId, localizedLocale, '/' + (normalizedVertical === 'service' ? 'article' : 'blog') + '/' + blogSlug]) : null
+      AND locale = ? AND path = ? LIMIT 1`, [organizationId, localizedLocale, tenantBlogPostPath(blogSlug)]) : null
   const localizedBlogPostId = localizedBlogPost?.id ?? null
   if (localizedLocale && blogSlug && !localizedBlogPostId) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Localized blog post was not found' })
@@ -543,8 +542,7 @@ async function loadPublicPageSource(
   let representationDocumentId: string | undefined
   let representationResource: { type: LocalizedResourceType; id: string; routeSuffix?: string } | undefined
   if (postRow) {
-    const prefix = normalizedVertical === 'service' ? 'article' : 'blog'
-    representationSourcePath = `/${prefix}/${String(postRow.source_slug)}`
+    representationSourcePath = tenantBlogPostPath(String(postRow.source_slug))
     representationDocumentId = String(postRow.root_id)
   } else if (locationId && sourceLocationSlug) {
     const routeSuffix = page && page !== 'location' ? `/${page}` : ''
@@ -754,7 +752,7 @@ async function loadPublicPageSource(
     options.signal?.throwIfAborted();
     const loadedBlocks = await getContentBlocksForDocument(db, String(postRow.id));
     const contentBlocks = loadedBlocks
-      ? await attachPageQa(db, organizationId, tenantBlogPostPath({ themeId: organization.theme_id, vertical: organization.vertical }, String(postRow.source_slug)), loadedBlocks, localizedLocale ?? 'en')
+      ? await attachPageQa(db, organizationId, tenantBlogPostPath(String(postRow.source_slug)), loadedBlocks, localizedLocale ?? 'en')
       : loadedBlocks
     blogPost = (await localizeArticleCategories(env, db, orgId, localizedLocale ?? 'en',
       [attachArticleCategory(attachCoverMedia({ ...postRow, content_blocks: contentBlocks }))], publicLocalizations))[0]!;

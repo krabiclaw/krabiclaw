@@ -5,8 +5,8 @@ import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from
 /**
  * Shared global OG/social SEO contract (#259).
  *
- * This is the single normalized payload every page — platform marketing, Saya tenant,
- * Blawby tenant, and future templates — feeds into `composeSocialMetadata()` to get a
+ * This is the single normalized payload every page — KrabiClaw's own and every
+ * customer site's — feeds into `composeSocialMetadata()` to get a
  * complete, guaranteed set of `<title>`, meta description, canonical link, Open Graph,
  * and Twitter tags. Routes/composables provide data to this contract; they must not
  * assemble independent tag sets or image URLs themselves.
@@ -16,7 +16,7 @@ import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from
  */
 
 /** Registered render templates. Keep in sync with server/utils/og-image/renderers/index.ts. */
-export type SocialTemplate = 'platform' | 'saya' | 'blawby'
+export type SocialTemplate = 'platform' | 'tenant'
 
 export type SocialPageType = 'website' | 'article' | 'profile'
 

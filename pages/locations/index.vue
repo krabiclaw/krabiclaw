@@ -3,8 +3,8 @@
 
     <!-- Page header -->
     <header class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
-      <p class="saya-kicker mb-6">{{ locationsCopy.findUsKicker }}</p>
-      <h1 class="saya-display-md text-default">
+      <p class="tenant-kicker mb-6">{{ locationsCopy.findUsKicker }}</p>
+      <h1 class="tenant-display-md text-default">
         {{ locationsCopy.locationGroupLine(locations.length) }}
       </h1>
     </header>
@@ -13,7 +13,7 @@
     <div v-if="pending" class="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8">
       <div :class="['grid gap-8', 'md:grid-cols-2']">
         <div v-for="i in 2" :key="i" class="overflow-hidden border border-default">
-          <div class="aspect-16/10 animate-[sayaPulse_1.6s_ease-in-out_infinite] bg-muted" />
+          <div class="aspect-16/10 animate-pulse bg-muted" />
           <div class="p-8 space-y-3">
             <div class="h-8 w-48 animate-pulse rounded bg-elevated" />
             <div class="h-4 w-28 animate-pulse rounded bg-elevated" />
@@ -61,7 +61,7 @@
           <!-- Body -->
           <div class="p-8 pb-9">
             <!-- Open now meta -->
-            <div class="saya-eyebrow mb-5 flex items-center gap-2 text-muted">
+            <div class="tenant-eyebrow mb-5 flex items-center gap-2 text-muted">
               <template v-if="loc.isOpenNow !== undefined">
                 <span class="size-1.5 rounded-full" :class="loc.isOpenNow ? 'bg-green-400' : 'bg-zinc-300'" />
                 {{ loc.isOpenNow ? locationsCopy.openNowLabel : locationsCopy.closedLabel }}
@@ -70,7 +70,7 @@
             </div>
 
             <!-- Location name -->
-            <div class="saya-display saya-italic text-4xl text-default leading-none">{{ loc.title }}</div>
+            <div class="tenant-display tenant-italic text-4xl text-default leading-none">{{ loc.title }}</div>
             <p v-if="addressPlaceName(loc.address as PostalAddress | null)" class="mt-1.5 text-sm text-muted">{{ addressPlaceName(loc.address as PostalAddress | null) }}</p>
 
             <!-- Address -->
@@ -78,7 +78,7 @@
 
             <!-- CTA -->
             <div class="mt-6 border-t border-default pt-5">
-              <span class="saya-eyebrow text-muted">{{ locationsCopy.visitLocationCta }}</span>
+              <span class="tenant-eyebrow text-muted">{{ locationsCopy.visitLocationCta }}</span>
             </div>
           </div>
         </NuxtLink>
@@ -88,7 +88,7 @@
       <div v-else>
         <div class="border border-dashed border-default px-8 py-16 text-center">
           <TenantIcon name="map-pin" class="mx-auto size-10 text-muted" />
-          <p class="mt-4 text-sm text-muted">{{ locale === 'en' ? 'No locations are published yet.' : t('saya.common.temporarily_unavailable') }}</p>
+          <p class="mt-4 text-sm text-muted">{{ locale === 'en' ? 'No locations are published yet.' : t('site.common.temporarily_unavailable') }}</p>
         </div>
         <div v-if="isAuthenticated" class="mt-8 text-center">
           <TenantButton to="/dashboard">
@@ -135,7 +135,7 @@ function locationAddress(location: ApiRecord): string {
 }
 
 function todayHours(location: ApiRecord): string {
-  return getTodayHoursLabel(location.opening_hours, t('saya.location.closed'), location.timezone, new Date(), location.special_hours, locale.value) ?? ''
+  return getTodayHoursLabel(location.opening_hours, t('site.location.closed'), location.timezone, new Date(), location.special_hours, locale.value) ?? ''
 }
 
 const organizationName = computed(() => unref(organization)?.name || '')
@@ -144,10 +144,10 @@ const organizationName = computed(() => unref(organization)?.name || '')
 useSocialMetadata(() => ({
   path: '/locations',
   socialImage: organization.social_image,
-  title: t('saya.locations.collection_title', { organization: organizationName.value }),
-  description: t('saya.locations.meta_description'),
+  title: t('site.locations.collection_title', { organization: organizationName.value }),
+  description: t('site.locations.meta_description'),
   breadcrumbs: [
-    { name: t('saya.header.locations'), url: '/locations' },
+    { name: t('site.header.locations'), url: '/locations' },
   ],
 }))
 </script>

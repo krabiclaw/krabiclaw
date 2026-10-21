@@ -1,12 +1,12 @@
 import type { OrganizationVertical } from '~/utils/vertical-copy'
-import type { PublicTemplateSlug } from '~/utils/template-registry'
+import { isLegalPractice, type PublicTemplateSlug } from '~/utils/template-registry'
 import { resolveProductPresentation } from '~/utils/product-presentation'
 
 export type CmsSectionId = 'pages' | 'collections' | 'locations' | 'media' | 'organization'
 
 // Explicit module identifiers a vertical/template/site/location can turn on.
 // 'consultations' and 'appointments' are declared (not yet wired to any catalog entry below) because
-// no distinct manager/route exists for them yet, and blawby's practice management lives
+// no distinct manager/route exists for them yet, and a legal practice's practice management lives
 // entirely on the single 'services' page. Reservation policies belong to locations because every
 // reservation is location-owned. Booking is a capability of a Product, configured where the
 // Product is, so it needs no module of its own. Wire distinct manager entries only when their
@@ -51,14 +51,14 @@ interface CmsTemplateCatalog {
   locationVocabularyDefault: 'location' | 'office/service area'
 }
 
-const sayaCorePages: readonly CmsPageCapability[] = [
+const venueCorePages: readonly CmsPageCapability[] = [
     { id: 'home', feature: 'contact', label: 'Home', route: '/', scope: 'organization', editor: 'tenant_pages' },
     { id: 'about', feature: 'contact', label: 'About', route: '/about', scope: 'organization', editor: 'tenant_pages' },
     { id: 'contact', feature: 'contact', label: 'Contact', route: '/contact', scope: 'organization', editor: 'tenant_pages' },
   { id: 'location', feature: 'locations', label: 'Location', route: '/locations/:location', scope: 'location', editor: 'tenant_pages' },
 ]
 
-const sayaCoreManagers: readonly CmsManagerCapability[] = [
+const venueCoreManagers: readonly CmsManagerCapability[] = [
   { key: 'organization.blog', id: 'blog', label: 'Blog', section: 'collections', route: 'blog', scope: 'organization' },
   { key: 'organization.qa', id: 'qa', label: 'Reviews and Q&A', section: 'collections', route: 'qa', scope: 'organization' },
   { key: 'organization.locations', id: 'locations', label: 'Locations', section: 'locations', route: '', scope: 'organization' },
@@ -71,21 +71,21 @@ const sayaCoreManagers: readonly CmsManagerCapability[] = [
 
 // Every feature a Saya site can EVER expose (restaurant + experience combined), tagged with its
 // owning feature id. Vertical defaults below select which of these are on.
-const sayaTemplateCatalog: CmsTemplateCatalog = {
+const venueSiteCatalog: CmsTemplateCatalog = {
   pages: [
-    ...sayaCorePages,
+    ...venueCorePages,
     { id: 'products', feature: 'products', label: 'Products', route: '/products', scope: 'organization', editor: 'tenant_pages' },
     { id: 'reservations', feature: 'reservations', label: 'Reservations', route: '/reservations', scope: 'organization', editor: 'tenant_pages' },
   ],
   managers: [
-    ...sayaCoreManagers,
+    ...venueCoreManagers,
     { key: 'location.products', id: 'products', label: 'Products', section: 'collections', route: ':location/products', scope: 'location' },
     { key: 'location.reservations', id: 'reservations', label: 'Reservations', section: 'collections', route: ':location/reservations', scope: 'location' },
   ],
   locationVocabularyDefault: 'location',
 }
 
-const blawbyTemplateCatalog: CmsTemplateCatalog = {
+const legalPracticeCatalog: CmsTemplateCatalog = {
   pages: [
     { id: 'home', feature: 'contact', label: 'Home', route: '/', scope: 'organization', editor: 'tenant_pages' },
     { id: 'about', feature: 'contact', label: 'About', route: '/about', scope: 'organization', editor: 'tenant_pages' },
@@ -114,7 +114,7 @@ const blawbyTemplateCatalog: CmsTemplateCatalog = {
 // so the pages index lists them without a catalog entry per page. The platform
 // owner's operations (organizations, every domain, platform analytics, staff) are
 // dashboard pages gated on this template, not content managers.
-const platformTemplateCatalog: CmsTemplateCatalog = {
+const platformSiteCatalog: CmsTemplateCatalog = {
   pages: [
     { id: 'home', feature: 'contact', label: 'Home', route: '/', scope: 'organization', editor: 'tenant_pages' },
     { id: 'contact', feature: 'contact', label: 'Help', route: '/help', scope: 'organization', editor: 'tenant_pages' },
@@ -127,20 +127,19 @@ const platformTemplateCatalog: CmsTemplateCatalog = {
   locationVocabularyDefault: 'office/service area',
 }
 
-export const templateCapabilityCatalog: Record<PublicTemplateSlug, CmsTemplateCatalog> = {
-  saya: sayaTemplateCatalog,
-  blawby: blawbyTemplateCatalog,
-  platform: platformTemplateCatalog,
+// A customer site's editors are its vertical's: a legal practice edits its
+// practice pages, every other vertical its venue pages. KrabiClaw's own site has its own.
+function catalogFor(vertical: OrganizationVertical, template: PublicTemplateSlug): CmsTemplateCatalog {
+  if (template === 'platform') return platformSiteCatalog
+  return isLegalPractice(vertical) ? legalPracticeCatalog : venueSiteCatalog
 }
 
-// Which (vertical, template) pairs are real products today. Not every catalog feature is
-// reachable from every vertical — this plus verticalDefaultFeatures is what keeps
-// resolveCmsCapabilities('restaurant', 'blawby') failing fast the way it always has.
+// Which (vertical, template) pairs are real products today: KrabiClaw's own site is a service site.
 const supportedCombinations: Record<OrganizationVertical, readonly PublicTemplateSlug[]> = {
-  restaurant: ['saya'],
-  experience: ['saya'],
-  service: ['blawby', 'platform'],
-  lodging: ['saya'],
+  restaurant: ['tenant'],
+  experience: ['tenant'],
+  service: ['tenant', 'platform'],
+  lodging: ['tenant'],
 }
 
 // Always-on features: 'contact'/'locations'/'settings' are infra; 'blog'/'qa'/
@@ -185,7 +184,7 @@ export function resolveCmsCapabilities(
   if (!supportedCombinations[vertical]?.includes(template)) {
     throw new Error(`Unsupported CMS capability combination: ${vertical}/${template}`)
   }
-  const catalog = templateCapabilityCatalog[template]
+  const catalog = catalogFor(vertical, template)
   const features = new Set<ProductFeature>([...verticalDefaultFeatures[vertical], ...ALWAYS_ON_FEATURES])
 
   const productPresentation = resolveProductPresentation(vertical)
@@ -257,7 +256,7 @@ export function validateCmsCapabilityRegistry(): void {
 /** All manager keys a template can ever produce across every vertical it supports. */
 export function allGuardableManagerKeys(): readonly string[] {
   const keys = new Set<string>()
-  for (const catalog of Object.values(templateCapabilityCatalog)) {
+  for (const catalog of [venueSiteCatalog, legalPracticeCatalog, platformSiteCatalog]) {
     for (const manager of catalog.managers) keys.add(manager.key)
   }
   return [...keys]

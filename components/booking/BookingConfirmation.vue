@@ -4,8 +4,8 @@
       <div class="mx-auto mb-5 flex size-13 items-center justify-center rounded-full" :class="cancelled ? 'bg-muted text-muted' : 'bg-primary text-on-primary'">
         <svg class="size-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
       </div>
-      <p class="saya-kicker mb-3">{{ kicker }}</p>
-      <h1 class="saya-display-sm text-default">
+      <p class="tenant-kicker mb-3">{{ kicker }}</p>
+      <h1 class="tenant-display-sm text-default">
         <slot name="title" />
       </h1>
       <p class="mt-5 text-sm leading-relaxed text-muted">
@@ -18,7 +18,7 @@
       <section :aria-label="itemTitle">
         <img v-if="imageUrl" :src="imageUrl" alt="" class="aspect-[16/9] w-full rounded-2xl object-cover" :class="cancelled ? 'opacity-60 grayscale' : undefined">
         <div :class="imageUrl ? 'mt-6' : undefined">
-          <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ itemTitle }}</h2>
+          <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ itemTitle }}</h2>
           <p v-if="itemSubtitle" class="mt-1 text-muted">{{ itemSubtitle }}</p>
         </div>
         <dl class="mt-6 grid grid-cols-2 gap-x-6 gap-y-5 border-t border-default pt-6">

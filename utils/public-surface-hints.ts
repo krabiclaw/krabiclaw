@@ -1,4 +1,3 @@
-import { resolvePublicTemplate } from '~/utils/template-registry'
 
 /*
   Platform routes on the `access` and `standalone` layouts render Nuxt UI, so
@@ -25,12 +24,5 @@ export function publicSurfaceStylesheetForRequest(input: {
   }
   if (input.tenantType !== 'tenant') return null
 
-  const template = resolvePublicTemplate({
-    themeId: input.themeId,
-    vertical: input.vertical,
-  })
-  if (template.slug === 'blawby' || template.slug === 'saya') {
-    return '/_nuxt/surfaces/tenant.css'
-  }
-  throw new Error(`Unsupported public template "${template.slug}".`)
+  return '/_nuxt/surfaces/tenant.css'
 }

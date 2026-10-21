@@ -50,7 +50,7 @@ test('the organization\'s picture is its share image, never its logo or a page\'
 test('social card generation keys change when a byte-producing source changes', () => {
   const base = {
     logoAssetId: 'logo-1',
-    payload: { template: 'saya' as const, title: 'Site', organizationName: 'Site', backgroundImageUrl: 'https://img.example/background.png' },
+    payload: { template: 'tenant' as const, title: 'Site', organizationName: 'Site', backgroundImageUrl: 'https://img.example/background.png' },
   }
   assert.notEqual(
     buildSocialCardGenerationKey({ ...base, sourceAssetId: 'source-1' }),

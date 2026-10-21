@@ -15,7 +15,7 @@
         :aria-labelledby="titleId"
       >
         <!-- Backdrop -->
-        <label :for="toggleId" class="absolute inset-0 bg-black/40 backdrop-blur-sm" :aria-label="t('saya.experience_detail.close_booking')"></label>
+        <label :for="toggleId" class="absolute inset-0 bg-black/40 backdrop-blur-sm" :aria-label="t('site.experience_detail.close_booking')"></label>
         
         <!-- Modal content -->
         <div class="relative bg-default border border-default rounded-xl shadow-xl w-full max-w-md h-[min(720px,90vh)] overflow-hidden flex flex-col">
@@ -32,8 +32,8 @@
             <div v-else class="size-9 shrink-0"></div> <!-- Spacer for alignment -->
 
             <div class="flex-1 min-w-0 text-center">
-              <p v-if="kicker" class="saya-eyebrow mb-1 truncate text-primary">{{ kicker }}</p>
-              <h2 :id="titleId" class="saya-display text-lg text-default truncate px-2">
+              <p v-if="kicker" class="tenant-eyebrow mb-1 truncate text-primary">{{ kicker }}</p>
+              <h2 :id="titleId" class="tenant-display text-lg text-default truncate px-2">
                 {{ title }}
               </h2>
             </div>
@@ -41,7 +41,7 @@
             <label
               :for="toggleId"
               role="button"
-              :aria-label="t('saya.experience_detail.close_booking')"
+              :aria-label="t('site.experience_detail.close_booking')"
               tabindex="0"
               class="flex size-9 items-center justify-center rounded-full border border-default hover:bg-muted text-default transition-colors shrink-0"
             >

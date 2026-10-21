@@ -1,10 +1,10 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <header class="mx-auto flex max-w-7xl flex-col items-center px-4 pt-16 pb-14 text-center sm:px-6 lg:px-8 lg:pt-20 lg:pb-18">
-      <p class="saya-kicker mb-6 inline-flex items-center justify-center rounded-full border border-default/10 bg-default/3 px-5 py-2 text-center">
+      <p class="tenant-kicker mb-6 inline-flex items-center justify-center rounded-full border border-default/10 bg-default/3 px-5 py-2 text-center">
         {{ resCopy.reservationPageKicker }}
       </p>
-      <h1 v-if="heroTitle" class="saya-display-md max-w-5xl text-default">
+      <h1 v-if="heroTitle" class="tenant-display-md max-w-5xl text-default">
         <!-- eslint-disable-next-line vue/no-v-html -->
         <span v-html="formatTitleItalics(heroTitle)" />
       </h1>
@@ -56,14 +56,14 @@
           </div>
 
           <div class="flex flex-col items-start p-6 text-left sm:p-8">
-            <p v-if="getLocationLabel(loc)" class="saya-eyebrow mb-3 text-muted">{{ getLocationLabel(loc) }}</p>
-            <h3 class="saya-display saya-italic text-3xl text-default leading-none sm:text-4xl">{{ loc.title }}</h3>
+            <p v-if="getLocationLabel(loc)" class="tenant-eyebrow mb-3 text-muted">{{ getLocationLabel(loc) }}</p>
+            <h3 class="tenant-display tenant-italic text-3xl text-default leading-none sm:text-4xl">{{ loc.title }}</h3>
             <p v-if="loc.short_description" class="mt-3 max-w-md text-sm leading-relaxed text-muted">{{ loc.short_description }}</p>
 
             <div class="mt-6 flex flex-wrap items-center gap-3">
               <TenantButton control-id="reservation-booking-toggle" @click="openBookingModal(loc)">{{ resCopy.reservationRequestButton }}</TenantButton>
-              <TenantButton v-if="loc.phone" :href="`tel:${loc.phone.replace(/\s/g, '')}`" variant="outline">
-                {{ loc.phone }}
+              <TenantButton v-if="loc.phone" :href="`tel:${loc.phone}`" variant="outline">
+                {{ formatPhone(loc.phone) }}
               </TenantButton>
             </div>
           </div>
@@ -74,8 +74,8 @@
     <section v-if="activeReservationPolicySummary" class="bg-muted">
         <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
           <div class="mb-10 max-w-xl">
-            <p class="saya-kicker mb-4">{{ resCopy.goodToKnowKicker }}</p>
-            <h2 class="saya-display-sm text-default">{{ activeReservationPolicySummary.heading }}</h2>
+            <p class="tenant-kicker mb-4">{{ resCopy.goodToKnowKicker }}</p>
+            <h2 class="tenant-display-sm text-default">{{ activeReservationPolicySummary.heading }}</h2>
           </div>
           <div v-if="activeReservationPolicySummary.items.length > 0" class="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             <div v-for="item in activeReservationPolicySummary.items" :key="item.id" class="border-t border-default pt-5">
@@ -137,11 +137,13 @@
           @edit="bookingStep = 2"
         />
         <BookingContactForm
-          :initial-state="{ name: reservationForm.name, email: reservationForm.email, phone: reservationForm.phone, notes: reservationForm.requests }"
+          v-model="contactForm"
+         
+          :default-country="defaultPhoneCountry"
           :loading="submitting"
           :submit-text="resCopy.reservationRequestButton"
           phone-required
-          @submit="handleContactSubmit"
+          @submit="handleReservation"
         />
         <div v-if="submitError" role="alert" class="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-500">
           {{ submitError }}
@@ -154,7 +156,7 @@
 <script setup lang="ts">
 import type { SubmissionMeasurement } from '~/composables/useOrganizationConversionTracking'
 import { isRecord, publicApiMutation, publicApiRequest, normalizeApiError } from '~/utils/api-clients'
-import BookingContactForm from '@/components/booking/BookingContactForm.vue'
+import BookingContactForm, { type ContactFormState } from '@/components/booking/BookingContactForm.vue'
 import BookingLocationStep from '@/components/booking/BookingLocationStep.vue'
 import BookingModal from '@/components/booking/BookingModal.vue'
 import BookingRecap from '@/components/booking/BookingRecap.vue'
@@ -164,10 +166,11 @@ import { formatTime, localDateAt, isValidInstant, isValidTimezone } from '~/util
 import { setBookingConfirmation } from '~/composables/useBookingHandoff'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { mediaStillUrl, type MediaPresentation } from '~/shared/media-placement-contract'
+import { getPhoneCountry, formatPhone } from '~/utils/phone'
 
 function formatTitleItalics(text: string | null | undefined): string {
   if (!text) return ''
-  return text.replace(/\*(.*?)\*/g, '<em class="saya-italic">$1</em>')
+  return text.replace(/\*(.*?)\*/g, '<em class="tenant-italic">$1</em>')
 }
 
 definePageMeta({ layout: 'tenant' })
@@ -201,15 +204,18 @@ const activeReservationPolicySummary = computed(() => {
 })
 
 // ── Form state ────────────────────────────────────────────────────────────
-const reservationForm = ref({ name: '', email: '', phone: '', location_id: '', date: '', time: '', guests: '', requests: '' })
+const reservationForm = ref({ location_id: '', date: '', time: '', guests: '' })
+const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
 
 // ── Contact & Locations ───────────────────────────────────────────────────
 const hasMultipleLocations = computed(() => locations.value.length > 1)
 const selectedLocation = computed(() =>
   locations.value.find(location => typeof location.id === 'string' && location.id === reservationForm.value.location_id),
 )
-
-
+const defaultPhoneCountry = computed(() => {
+  const address = selectedLocation.value?.address
+  return getPhoneCountry(isRecord(address) && typeof address.regionCode === 'string' ? address.regionCode : undefined)?.code
+})
 
 /**
  * The zone the chosen slot is stated in.
@@ -287,7 +293,7 @@ const bookingStep = ref(startStep.value)
 const modalTitle = computed(() => {
   if (bookingStep.value === 1) return resCopy.value.selectLocationLabel
   if (bookingStep.value === 2) return resCopy.value.selectTimeLabel
-  return t('saya.experience_detail.your_details')
+  return t('site.experience_detail.your_details')
 })
 
 function openBookingModal(loc?: ApiRecord) {
@@ -371,16 +377,7 @@ watch([isBookingModalOpen, () => reservationForm.value.location_id], ([open, loc
   }
 }, { immediate: true })
 
-async function handleContactSubmit(contactState: { name: string, email: string, phone?: string, notes?: string }) {
-  reservationForm.value.name = contactState.name
-  reservationForm.value.email = contactState.email
-  reservationForm.value.phone = contactState.phone ?? ''
-  reservationForm.value.requests = contactState.notes ?? ''
-
-  await handleReservation()
-}
-
-async function handleReservation() {
+async function handleReservation(contact: ContactFormState) {
   if (submitting.value || !organizationId || !timeSelection.value) return
   reservationForm.value.date = timeSelection.value.day
   reservationForm.value.time = timeSelection.value.time
@@ -389,7 +386,7 @@ async function handleReservation() {
   submitting.value = true
   submitError.value = null
   try {
-    const details = { ...reservationForm.value, name: reservationForm.value.name.trim(), email: reservationForm.value.email.trim(), phone: reservationForm.value.phone.trim(), requests: reservationForm.value.requests.trim() }
+    const details = { ...reservationForm.value, name: contact.name.trim(), email: contact.email.trim(), phone: contact.phone.trim(), requests: contact.notes.trim() }
     const fingerprint = JSON.stringify(details)
     if (fingerprint !== reservationFingerprint) {
       reservationRequestKey = crypto.randomUUID()
@@ -415,14 +412,14 @@ async function handleReservation() {
       locale: locale.value,
       organizationId,
       organizationName: brandName.value,
-      guestName: reservationForm.value.name,
-      guestEmail: reservationForm.value.email,
+      guestName: contact.name,
+      guestEmail: contact.email,
       operationalBookingId: res.operational_reservation_id,
       requestId: res.request_id,
       startsAt: res.starts_at,
       timezone: res.timezone,
       guests: reservationForm.value.guests,
-      requests: reservationForm.value.requests || null,
+      requests: contact.notes || null,
       cancelUrl: res?.id && res?.cancellationToken ? `${localePath('/reservations/cancel')}?id=${encodeURIComponent(res.id)}#${res.cancellationToken}` : null,
       contactPhone: contactPhone.value || null,
       contactEmail: contactEmail.value || null,

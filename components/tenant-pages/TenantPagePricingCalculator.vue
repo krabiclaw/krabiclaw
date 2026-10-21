@@ -35,7 +35,7 @@
 </template>
 
 <script setup lang="ts">
-import { calculateSlidingScaleRate, parsePricingAmount } from '~/utils/blawby-pricing'
+import { calculateSlidingScaleRate, parsePricingAmount } from '~/utils/pricing-calculator'
 
 const props = withDefaults(defineProps<{
   title?: string

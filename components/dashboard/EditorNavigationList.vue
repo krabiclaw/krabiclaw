@@ -50,6 +50,11 @@
             >
             <UIcon v-if="!item.lead.image" :name="item.lead.icon" class="size-7 text-dimmed" aria-hidden="true" />
           </span>
+          <!-- A requirement's state: met is a filled success check, open an empty circle. The summary says it in words. -->
+          <span v-else-if="item.mark === 'met'" class="flex size-6 shrink-0 items-center justify-center rounded-full bg-success" aria-hidden="true">
+            <UIcon name="i-lucide-check" class="size-4 text-inverted" />
+          </span>
+          <span v-else-if="item.mark === 'open'" class="size-6 shrink-0 rounded-full border-2 border-(--ui-text-dimmed)" aria-hidden="true" />
           <UIcon
             v-else-if="item.icon && variant !== 'cards'"
             :name="item.icon"
@@ -130,7 +135,7 @@
             v-if="item.action?.label"
             class="shrink-0 text-sm font-medium text-highlighted underline underline-offset-4"
           >{{ item.action.label }}</span>
-          <UIcon v-else-if="item.to && variant !== 'cards'" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted transition-transform group-hover:translate-x-0.5" />
+          <UIcon v-else-if="(item.to || item.action?.opens) && variant !== 'cards'" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted transition-transform group-hover:translate-x-0.5" />
         </component>
       </div>
     </section>
@@ -146,6 +151,8 @@ export interface EditorNavigationItem {
   summary?: string
   /** A recognizable destination or choice; plain fields need no decoration. */
   icon?: string
+  /** A requirement's state ahead of the label, in place of an icon: met, or still open. */
+  mark?: 'met' | 'open'
   /**
    * Where the row goes. A row with no `to` and no `action` states a value and
    * does nothing — the Google connection is read-only here — so it renders
@@ -180,7 +187,7 @@ export interface EditorNavigationItem {
    * label does not say what pressing it does — Languages → Localize. Log out
    * already does, so it carries none.
    */
-  action?: { label?: string }
+  action?: { label?: string; /** The action takes the owner somewhere — Stripe's portal — so the row carries the chevron a link would. */ opens?: boolean }
 }
 
 export interface EditorNavigationGroup {

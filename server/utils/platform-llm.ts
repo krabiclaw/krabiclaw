@@ -8,7 +8,6 @@ import { getContentBlocksForDocument } from './content/documents.ts'
 import { findAuthUsersByIds, type CloudflareEnv } from './auth.ts'
 import { collectionArticlePath } from '../../utils/article-collections.ts'
 import { tenantBlogPostPath } from '../../utils/tenant-blog-route.ts'
-import { PLATFORM_TEMPLATE } from '../../utils/template-registry.ts'
 import { blockVideo, youTubeVideoId, youTubeWatchUrl } from '../../shared/youtube-video.ts'
 import { getPlatformOrganization } from './platform-organization.ts'
 import { articleCategoryNameSql } from './content/article-categories.ts'
@@ -271,9 +270,9 @@ function renderBlogMarkdown(
   ].join('\n')
 }
 
-/** A site's template decides its article prefix (/blog or /article); the markdown mirror is always /blog-md. */
-export function renderTenantBlogMarkdown(post: TenantLlmBlogDetail, origin: string, template: { themeId?: string | null; vertical?: string | null }) {
-  const path = tenantBlogPostPath(template, post.slug)
+/** An article is at /blog/<slug>, and its markdown mirror at /blog-md/<slug>.md. */
+export function renderTenantBlogMarkdown(post: TenantLlmBlogDetail, origin: string) {
+  const path = tenantBlogPostPath(post.slug)
   const markdownPath = `/blog-md/${post.slug}.md`
   return renderBlogMarkdown(post, origin, { path, markdownPath })
 }
@@ -380,14 +379,14 @@ export function buildPlatformBlogLinkEntries(posts: PlatformLlmBlogSummary[], or
   })
 }
 
-export function buildTenantBlogLinkEntries(posts: TenantLlmBlogSummary[], origin: string, template: { themeId?: string | null; vertical?: string | null }): PlatformLlmLinkEntry[] {
+export function buildTenantBlogLinkEntries(posts: TenantLlmBlogSummary[], origin: string): PlatformLlmLinkEntry[] {
   const sortedPosts = [...posts].sort((a, b) => {
     const aDate = a.published_at ? new Date(a.published_at).getTime() : 0
     const bDate = b.published_at ? new Date(b.published_at).getTime() : 0
     return bDate - aDate
   })
   return sortedPosts.map((post) => {
-    const path = tenantBlogPostPath(template, post.slug)
+    const path = tenantBlogPostPath(post.slug)
     return {
       title: post.title,
       path,
@@ -501,7 +500,7 @@ export function buildLlmsFullTxt(
   }
 
   lines.push('## Blog')
-  const renderBlog = options.renderBlog || ((post: PlatformLlmBlogDetail, postOrigin: string) => renderTenantBlogMarkdown(post, postOrigin, PLATFORM_TEMPLATE))
+  const renderBlog = options.renderBlog || ((post: PlatformLlmBlogDetail, postOrigin: string) => renderTenantBlogMarkdown(post, postOrigin))
 
   for (const post of posts) {
     lines.push('', renderBlog(post, origin), '')

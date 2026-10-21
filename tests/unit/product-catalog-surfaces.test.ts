@@ -140,13 +140,14 @@ test('a home is named by its own slug, and a location that is one home is that h
 
 test('a card names what it opens by the product kind', () => {
   assert.equal(productCtaKey('stay'), 'stay.check_availability')
-  assert.equal(productCtaKey('dish'), 'saya.common.view_dish')
-  assert.equal(productCtaKey('experience'), 'saya.common.view_experience')
-  assert.equal(productCtaKey('item'), 'saya.common.view_item')
+  assert.equal(productCtaKey('dish'), 'site.common.view_dish')
+  assert.equal(productCtaKey('experience'), 'site.common.view_experience')
+  assert.equal(productCtaKey('item'), 'site.common.view_item')
 })
 
 test('catalog navigation links each section where the site\'s vertical lists it, and a site without a vertical is refused', () => {
-  assert.equal(presentationForSurface('service', 'products').collectionPath, '/products')
+  // A legal practice lists its practice areas at /services; it has no /products page.
+  assert.equal(presentationForSurface('service', 'products').collectionPath, '/services')
   assert.equal(presentationForSurface('experience', 'products').collectionPath, '/products')
   assert.equal(presentationForSurface(null, 'stays').collectionPath, '/stays')
   assert.equal(presentationForSurface(null, 'experiences').collectionPath, '/experiences')
@@ -156,9 +157,9 @@ test('catalog navigation links each section where the site\'s vertical lists it,
 
   const nav = catalogNavigation('restaurant', { products: true, menu: true, stays: true, experiences: true })
   assert.deepEqual(nav, [
-    { surface: 'menu', path: '/menu', labelKey: 'saya.footer.menu' },
-    { surface: 'products', path: '/products', labelKey: 'saya.footer.products' },
-    { surface: 'stays', path: '/stays', labelKey: 'saya.footer.stays' },
-    { surface: 'experiences', path: '/experiences', labelKey: 'saya.footer.experiences' },
+    { surface: 'menu', path: '/menu', labelKey: 'site.footer.menu' },
+    { surface: 'products', path: '/products', labelKey: 'site.footer.products' },
+    { surface: 'stays', path: '/stays', labelKey: 'site.footer.stays' },
+    { surface: 'experiences', path: '/experiences', labelKey: 'site.footer.experiences' },
   ])
 })

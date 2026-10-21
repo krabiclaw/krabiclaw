@@ -3,7 +3,7 @@
     Airbnb's Earnings page: a Performance card with this month's total, the
     year's bars, Paid and Upcoming and a way into the details; then Upcoming
     and Paid payouts as cards, and monthly Reports. The cog opens Payments
-    (payouts, plan, fees). A card on Menu, so Back returns there. Beside a pane
+    (payouts) and Plan and billing. A card on Menu, so Back returns there. Beside a pane
     it opens on Performance, the details its own card leads to.
   -->
   <DashboardIndexPanel id="earnings" title="Earnings" :auto-open="`${level.path.value}/performance`">
@@ -137,10 +137,9 @@ const reports = computed(() => [1, 2, 3].map((offset) => {
   return { month, name: formatCalendarDate(first.toString(), 'en', { month: 'long' }), year: String(first.year), figure: money(row ? row.paid - row.refunded : 0) }
 }))
 
-// Airbnb's cog: "Settings and documents" — the Payments page's tabs.
+// Airbnb's cog: "Settings and documents" — how payouts arrive, and the plan's own destination.
 const settingsItems = computed(() => [[
-  { label: 'Payments', icon: 'i-lucide-credit-card', to: `/dashboard/${route.params.orgSlug}/payments` },
-  { label: 'Payout settings', icon: 'i-lucide-landmark', to: `/dashboard/${route.params.orgSlug}/payments?tab=payouts` },
-  { label: 'Plan', icon: 'i-lucide-badge-check', to: `/dashboard/${route.params.orgSlug}/payments?tab=plan` },
+  { label: 'Payout settings', icon: 'i-lucide-landmark', to: `/dashboard/${route.params.orgSlug}/payments` },
+  { label: 'Plan and billing', icon: 'i-lucide-receipt', to: `/dashboard/${route.params.orgSlug}/billing` },
 ]])
 </script>

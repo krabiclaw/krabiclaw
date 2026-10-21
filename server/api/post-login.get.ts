@@ -56,7 +56,7 @@ export default defineHandler(async (event) => {
         chooseParams.set('plan', plan)
         return redirect(`${route.destination}?${chooseParams}`, 302)
       }
-      return redirect(`${route.destination}/payments?tab=plan&plan=${encodeURIComponent(plan)}`, 302)
+      return redirect(`${route.destination}/billing?plan=${encodeURIComponent(plan)}`, 302)
     }
 
     if (route.kind === 'onboard') {

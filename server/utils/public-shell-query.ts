@@ -14,7 +14,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { parsePostalAddress } from '~/utils/postal-address'
 import { publicLocationSocialMediaFromPlacements, type PublicMediaPlacement } from '~/server/utils/public-social-image'
 import { publicSocialMediaFromPlacements } from '~/utils/social-metadata'
-import type { PublicConsultationSettings, PublicCompliance, PublicBlawbyPageLink } from '~/types/blawby'
+import type { PublicConsultationSettings, PublicCompliance, PublicPageLink } from '~/types/public-site'
 
 type BatchResult = { results?: unknown[] }
 
@@ -163,7 +163,7 @@ export async function buildPublicShellPayload(
     consultation?: PublicConsultationSettings | null
     canSchedule?: boolean
     compliance?: PublicCompliance | null
-    pageLinks?: PublicBlawbyPageLink[]
+    pageLinks?: PublicPageLink[]
     searchConsoleVerification?: string | null
     localizations?: readonly ExactPublicLocalization[]
   },

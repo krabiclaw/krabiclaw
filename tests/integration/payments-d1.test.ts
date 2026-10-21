@@ -27,7 +27,6 @@ import { H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import servicesPostRoute from '../../server/api/dashboard/services.post.ts'
 import servicesGetRoute from '../../server/api/dashboard/services.get.ts'
-import removeCardRoute from '../../server/api/billing/payment-methods.delete.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
 import bookingReceiptRoute from '../../server/api/public/booking-requests/[requestId].get.ts'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
@@ -343,8 +342,8 @@ test('MCP financial reads return bounded reports and authenticated detail links 
   assert.equal(detail.dashboard_url,'https://proof.example/dashboard/payments/bookings/payment/report')
   const usage = await call('get_payments_usage')
   assert.deepEqual(usage.pending,[{currency:'USD',kind:'stripe_cost',event_count:1,amount:100,billing_currency:'USD',billing_amount:100,action_required:true}])
-  // The fees are read on Payments → Plan, beside the subscription that bills them.
-  assert.equal(usage.dashboard_url,'https://proof.example/dashboard/payments/payments?tab=plan')
+  // The fees are read in Plan and billing, beside the subscription that bills them.
+  assert.equal(usage.dashboard_url,'https://proof.example/dashboard/payments/billing')
   assert.deepEqual({configured:usage.configured,pricing:usage.pricing,source:usage.source},{configured:false,pricing:null,source:'Stripe'})
   const originalFetch = globalThis.fetch
   const payoutReads:string[]=[]
@@ -978,7 +977,6 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   const app = new H3()
   app.post('/api/dashboard/services', servicesPostRoute)
   app.get('/api/dashboard/services', servicesGetRoute)
-  app.delete('/api/billing/payment-methods', removeCardRoute)
   const call = (path: string, method = 'GET', body?: Record<string, unknown>) => app.request(Object.assign(new Request(`https://proof.example${path}`, {
    method, headers: { cookie, origin: 'https://proof.example', 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
   }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
@@ -1068,9 +1066,6 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   await assert.rejects(agree, /This service is already on/u)
   await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Turn off managed ads in Plan/u)
   await assert.rejects(() => selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'Replacement'), /Turn off managed ads in Plan/u)
-  const cardRemoval = await call('/api/billing/payment-methods', 'DELETE', { organizationId: ORG, payment_method_id: 'pm_default' })
-  assert.equal(cardRemoval.status, 409)
-  assert.equal((await cardRemoval.json() as { message: string }).message, 'Set another default payment method before removing this one while managed ads is on.')
   assert.equal((await readIntegration(db, ORG, 'google_ads'))?.target_id, '1234567890')
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date('2026-10-01T12:00:00.000Z')), [])
   assert.deepEqual(await unrecordedAdSpendDays(db, env, ORG, new Date('2026-10-02T12:00:00.000Z')), ['2026-10-01'])

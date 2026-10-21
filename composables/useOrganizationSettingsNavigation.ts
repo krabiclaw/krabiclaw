@@ -1,9 +1,10 @@
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
 import { canOpenPlatformAccounts } from '~/utils/platform-admin-access'
+import type { organizationRoles } from '~/utils/organization-access'
 
 // The rows on Menu. Menu is a launcher: every row is a destination of its own
-// — Website, Posts, Locations, Team — or an action, with no headings. The Menu
+// — Website, Posts, Locations, Team, Plan and billing — or an action, with no headings. The Menu
 // page and the desktop slideover render this one list, so a row exists in one
 // place. A destination is not nested under Menu; it names Menu as its tab.
 //
@@ -30,6 +31,18 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
     return Boolean(loaded && canOpenPlatformAccounts(loaded, (session.value.data?.user as { role?: string | null } | undefined)?.role))
   })
 
+  /**
+   * Plan and billing is read by owners and admins, by Better Auth's billing
+   * permission: the routed organization's role, otherwise the active member's,
+   * since the shell outside an organization's routes is the active one.
+   */
+  const activeMemberRole = authClient.useActiveMemberRole()
+  const showBilling = computed(() => {
+    const routed = dashboard.organization.value
+    const role = routed && routed.id === organization.value?.id ? routed.role : activeMemberRole.value.data?.role
+    return Boolean(role) && authClient.organization.checkRolePermission({ role: role as keyof typeof organizationRoles, permissions: { billing: ['read'] } })
+  })
+
   const items = computed(() => {
     if (!base.value) return []
     return [
@@ -37,6 +50,8 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
       { id: 'locations', icon: 'i-lucide-map-pin', label: 'Locations', to: `${base.value}/locations` },
       { id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` },
       { id: 'integrations', icon: 'i-lucide-plug', label: 'Integrations', to: `${base.value}/integrations` },
+      // What the organization pays KrabiClaw. Owners change it and admins read it; members have no row.
+      ...(showBilling.value ? [{ id: 'billing', icon: 'i-lucide-receipt', label: 'Plan and billing', to: `${base.value}/billing` }] : []),
       // "Team" is this organization's members; this is every account there is.
       ...(showPlatformAccounts.value
         ? [{ id: 'platform-accounts', icon: 'i-lucide-shield-user', label: 'Platform accounts', to: `${base.value}/platform-accounts` }]

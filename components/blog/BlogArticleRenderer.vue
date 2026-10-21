@@ -18,10 +18,10 @@
             <div>
               <p v-if="authorName" class="font-semibold">{{ authorName }}</p>
               <p class="flex flex-wrap items-center gap-x-2 text-sm opacity-65">
-                <time v-if="revisedAt" :datetime="revisedAt">{{ t('saya.posts.updated_on', { date: formatDate(revisedAt) }) }}</time>
+                <time v-if="revisedAt" :datetime="revisedAt">{{ t('site.posts.updated_on', { date: formatDate(revisedAt) }) }}</time>
                 <time v-else-if="publishedAt" :datetime="publishedAt">{{ formatDate(publishedAt) }}</time>
                 <span v-if="revisedAt || publishedAt" aria-hidden="true">·</span>
-                <span>{{ t('saya.posts.read_time', { count: readMinutes }) }}</span>
+                <span>{{ t('site.posts.read_time', { count: readMinutes }) }}</span>
               </p>
             </div>
           </div>
@@ -216,12 +216,12 @@ const props = withDefaults(defineProps<{
   authorImage?: string | null
   organizationName?: string | null
   editable?: boolean
-  template?: 'saya' | 'blawby' | 'platform' | string
+  template?: 'tenant' | 'platform'
   showHeader?: boolean
   showMeta?: boolean
 }>(), {
   excerpt: null, publishedAt: null, updatedAt: null, authorName: null, authorImage: null, organizationName: null,
-  editable: false, template: 'saya', showHeader: true, showMeta: true,
+  editable: false, template: 'tenant', showHeader: true, showMeta: true,
 })
 const emit = defineEmits<{ 'update:title': [value: string]; 'update:block': [index: number, block: BlogEditorBlock]; 'insert-block': [index: number, cursorPosition: number]; 'insert-block-type': [index: number, type: string]; 'move-block': [index: number, delta: -1 | 1]; 'merge-block': [index: number, direction: 'back' | 'forward']; 'split-insert': [index: number, payload: { after: string; blockType: 'image' | 'faq' | 'how_to'; editorMode: 'rich' | 'source' }] }>()
 const authorInitials = computed(() => String(props.authorName || props.organizationName || 'A').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase())
@@ -413,7 +413,6 @@ function aiAssistanceProps(block: BlogEditorBlock) {
 </script>
 
 <style scoped>
-.blog-article[data-template="blawby"] { color: var(--ui-text); }
-.blog-article[data-template="blawby"] .blog-article-header h1 { color: var(--blawby-primary, currentColor); }
-.blog-article[data-template="saya"] { color: var(--ui-text, inherit); }
+.blog-article[data-template="tenant"] { color: var(--ui-text); }
+.blog-article[data-template="tenant"] .blog-article-header h1 { color: var(--tenant-primary, currentColor); }
 </style>

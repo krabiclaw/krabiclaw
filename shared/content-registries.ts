@@ -1,5 +1,5 @@
 import { TENANT_PAGE_BLOCK_REGISTRY, type TenantPageBlockType, type TenantPageField } from '../utils/tenant-page-blocks'
-import { PRICING_CALCULATOR_SCHEMA } from '../utils/blawby-pricing'
+import { PRICING_CALCULATOR_SCHEMA } from '../utils/pricing-calculator'
 
 export const CONTENT_DOCUMENT_KINDS = [
   'page',

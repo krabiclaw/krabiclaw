@@ -17,7 +17,7 @@ export default defineHandler(async (event) => {
     const organizationName = (event.context.organization as { name?: string | null } | undefined)?.name?.trim() || ''
     if (!organizationName) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant brand name is not configured' })
     const posts = await listPublishedTenantBlogPostsForLlm(db, organizationId, env)
-    const entries = buildTenantBlogLinkEntries(posts ?? [], origin, { themeId: String(event.context.themeId ?? '') })
+    const entries = buildTenantBlogLinkEntries(posts ?? [], origin)
     return textResponse(
       buildNamedBlogRss(origin, entries, {
         title: `${organizationName} Blog`, description: `Published blog feed for ${organizationName}.`, }), {}, 'application/rss+xml; charset=utf-8', )

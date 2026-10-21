@@ -70,7 +70,7 @@ export interface OrganizationSettingsResponse {
   media?: Array<{ asset_id: string; slot: string; public_url?: string | null; presentation?: LogoPresentation | null }>
   contact_email?: string | null
   palette: SitePalette | null
-  palette_source: 'custom' | 'template' | null
+  palette_source: 'custom' | 'default' | null
   font_preset?: OrganizationFontPreset
   default_currency?: string | null
   seo_title: string | null
@@ -96,8 +96,8 @@ export interface OrganizationSettingsEditor {
   descriptionCharactersRemaining: ComputedRef<number>
   theme: ComputedRef<string | undefined>
   /** Whether the site wears its own palette or its template's. */
-  paletteSource: ComputedRef<'custom' | 'template' | null>
-  /** Returns the site to its template's colors. */
+  paletteSource: ComputedRef<'custom' | 'default' | null>
+  /** Returns the site to the default colors. */
   resetPalette: () => Promise<void>
   /** The saved website booking mode, or null where the organization has no consultation settings. */
   consultationMode: ComputedRef<OrganizationSettingsResponse['consultation_mode']>
@@ -185,8 +185,8 @@ const brandItems = computed<EditorNavigationItem[]>(() => [
   { id: 'sharing-image', label: 'Social sharing image', summary: loadedSettings.value?.media?.some(item => item.slot === 'social_share') ? 'Image selected' : 'Not set', to: `${brandPath.value}/sharing-image` },
   { id: 'description', label: 'Description', summary: explicitSummary(loadedSettings.value?.brand_description), to: `${brandPath.value}/description` },
   { id: 'announcement', label: 'Announcement', summary: loadedSettings.value?.announcement?.enabled ? explicitSummary(loadedSettings.value.announcement.headline) : 'Off', to: `${brandPath.value}/announcement` },
-  // Colors are Saya's and Blawby's; KrabiClaw's platform template keeps its own.
-  ...(loadedSettings.value?.palette ? [{ id: 'color', label: 'Colors', summary: paletteSource.value === 'custom' ? 'Your colors' : 'Template colors', to: `${brandPath.value}/color` }] : []),
+  // Every customer site has its colors; KrabiClaw's own site keeps fixed ones.
+  ...(loadedSettings.value?.palette ? [{ id: 'color', label: 'Colors', summary: paletteSource.value === 'custom' ? 'Your colors' : 'Default colors', to: `${brandPath.value}/color` }] : []),
   { id: 'font', label: 'Website font', summary: ORGANIZATION_FONT_OPTIONS.find(option => option.value === loadedSettings.value?.font_preset)?.label ?? 'Default', to: `${brandPath.value}/font` },
   { id: 'contact', label: 'Contact details', summary: explicitSummary(loadedSettings.value?.contact_email), to: `${brandPath.value}/contact` },
   { id: 'translations', label: 'Translations', summary: 'Translate the brand name and description', icon: 'i-lucide-languages', to: `${brandPath.value}?editMode=translations` },
