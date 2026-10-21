@@ -286,6 +286,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     const locationChoice = preview.getByRole('link', { name: location!.title })
     await expect(preview.getByRole('link')).toHaveCount(1)
     await locationChoice.click()
+    await expect(page).toHaveURL(`${catalog}/${located.id}/collections?editMode=preview&previewViewport=desktop&preview_location_id=${location!.id}`)
     const previewURL = new URL(page.url())
     expect(previewURL.pathname).toBe(`${catalog}/${located.id}/collections`)
     expect(Object.fromEntries(previewURL.searchParams)).toEqual({ editMode: 'preview', previewViewport: 'desktop', preview_location_id: location!.id })
@@ -297,6 +298,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     const guest = page.frameLocator('iframe[title="Dish preview"]')
     await expect(guest.getByRole('heading', { name: located.name, level: 1, exact: true })).toBeVisible()
     await preview.getByRole('tab', { name: 'Mobile view', exact: true }).click()
+    await expect(page).toHaveURL(`${catalog}/${located.id}/collections?editMode=preview&previewViewport=mobile&preview_location_id=${location!.id}`)
     await expect(preview.getByRole('tab', { name: 'Mobile view', exact: true })).toHaveAttribute('aria-selected', 'true')
     expect(new URL(page.url()).searchParams.get('previewViewport')).toBe('mobile')
     await expect(iframe).toHaveCSS('max-width', '390px')
@@ -305,6 +307,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await preview.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(preview).toBeHidden()
     await expect(page).toHaveURL(`${catalog}/${located.id}/collections`)
+    await expect(view).toBeFocused()
   } finally {
     try {
       const paths = [...sections.map(section => `${editor}/collections/${section.id}`), ...products.map(product => `${editor}/products/${product.id}`)]
