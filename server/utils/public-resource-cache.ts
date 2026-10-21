@@ -9,7 +9,7 @@ import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 // params instead of host + pathname — public resources are looked up by organizationId
 // directly, not by tenant hostname, so no hostname resolution is needed here.
 //
-// Cache key: public~<organizationId>~v18~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
+// Cache key: public~<organizationId>~v19~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
 // each field percent-encoded (mirrors composables/usePublicPageRequest.ts's
 // usePublicResourceKey() — cached entries are never preview/draft-authorized,
 // see the preview authorization guard in the shell and page services).
@@ -185,15 +185,15 @@ const encodeKeyField = (value: string | null | undefined): string =>
 
 /** The site's accepted payment methods, under the site's prefix so its purge clears them. */
 export function buildPublicPaymentMethodsCacheKey(organizationId: string): string {
-  return ['public', encodeKeyField(organizationId), 'v18', 'payment-methods'].join('~')
+  return ['public', encodeKeyField(organizationId), 'v19', 'payment-methods'].join('~')
 }
 
 export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams): string {
   return [
     'public',
     encodeKeyField(organizationId),
-    // v18: canonical tenant renderer, authored accessibility and explicit amenity answers.
-    'v18',
+    // v19: canonical tenant renderer, room/listing accessibility, explicit amenity answers and protected-home location privacy.
+    'v19',
     params.contract,
     encodeKeyField(params.page),
     encodeKeyField(params.location),
