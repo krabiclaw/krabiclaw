@@ -395,9 +395,10 @@ export async function createGoogleAdsSearchCampaign(
           status: input.status ?? 'PAUSED',
           advertisingChannelType: 'SEARCH',
           campaignBudget: `customers/${cid}/campaignBudgets/${tempBudgetId}`,
+          // Google Search only: Google refused Search Partners on create (CANNOT_TARGET_SEARCH_NETWORK).
           networkSettings: {
             targetGoogleSearch: true,
-            targetSearchNetwork: true,
+            targetSearchNetwork: false,
             targetContentNetwork: false,
             targetPartnerSearchNetwork: false,
           },

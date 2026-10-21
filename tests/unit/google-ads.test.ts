@@ -155,6 +155,7 @@ test('creating a search campaign submits its budget, targeting and copy atomical
     assert.equal(campaign.name, 'New Blog Post Campaign')
     assert.equal(campaign.status, 'PAUSED')
     assert.equal(campaign.advertisingChannelType, 'SEARCH')
+    assert.deepEqual(campaign.networkSettings, { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false })
     assert.equal(campaign.campaignBudget, budget.resourceName)
     assert.equal(adGroup.campaign, campaign.resourceName)
     assert.deepEqual(operations.slice(3, 5).map((operation: {
