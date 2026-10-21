@@ -881,7 +881,7 @@ test('a host describes a place to stay through its focused editors and previews 
   const previewCollections: string[] = []
   page.on('request', outgoing => {
     const url = new URL(outgoing.url())
-    if (url.hostname !== new URL(baseURL!).hostname && ['/api/analytics/track', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
+    if (outgoing.frame() !== page.mainFrame() && ['/api/analytics/track', '/api/analytics/interactions', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
   })
   await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
   await previewLink.click()
