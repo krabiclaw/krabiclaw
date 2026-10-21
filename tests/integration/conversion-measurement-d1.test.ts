@@ -177,15 +177,27 @@ test('the funnel joins a business site from visit to payment, by source and by l
         .bind(`reservation-${requestId}`, locationId, requestId, status, status === 'cancelled' ? now : null).run()
       await recordOrganizationConversionEvent(db, origin, { organizationId: 'org-funnel', eventName: 'reservation_submit', stage: 'submitted', surface: 'website', entityType: 'request', entityId: requestId, locationId })
     }
-    await recordOrganizationConversionEvent(db, ad, { organizationId: 'org-funnel', eventName: 'payment_paid', stage: 'completed', surface: 'stripe', entityType: 'payment', entityId: 'pay-1', locationId: 'loc-beach',
-      value: { basis: 'purchase', amount_minor: 150000, collected_minor: 160500, currency: 'THB', transaction_id: 'pi_1' } })
+    // A request made through checkout records no submit event: its payment is how it was made.
+    const now = '2026-09-10T06:00:00.000Z'
+    const checkout = requestInsertQueries({ id: 'req-checkout', kind: 'reservation', organization_id: 'org-funnel', location_id: 'loc-beach', user_id: null, review_id: null,
+      conversation_state: 'needs_attention', resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'paid@funnel.example', phone: '+66812345678' }), created_at: now, updated_at: now })
+    await db.batch(checkout.map(write => db.prepare(write.query).bind(...write.params)))
+    await db.prepare(`INSERT INTO reservations (id, organization_id, location_id, request_id, timezone, starts_at, ends_at, party_size, status)
+      VALUES ('reservation-req-checkout', 'org-funnel', 'loc-beach', 'req-checkout', 'Asia/Bangkok', '2026-09-21T12:00:00.000Z', '2026-09-21T14:00:00.000Z', 2, 'confirmed')`).run()
+    // One payment made the checkout request; the other pays for a request already submitted, which is not submitted twice.
+    for (const [paymentId, reservationId, collected] of [['pay-checkout', 'reservation-req-checkout', 160500], ['pay-beach', 'reservation-req-beach', 53500]] as const) {
+      await db.prepare(`INSERT INTO payments (id, organization_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, price_snapshot_json, created_at, updated_at)
+        VALUES (?, 'org-funnel', 'acct_funnel', 0, 'reservation', ?, 'loc-beach', 'THB', ?, '{}', ?, ?)`).bind(paymentId, reservationId, collected, now, now).run()
+      await recordOrganizationConversionEvent(db, ad, { organizationId: 'org-funnel', eventName: 'payment_paid', stage: 'completed', surface: 'stripe', entityType: 'payment', entityId: paymentId, locationId: 'loc-beach',
+        value: { basis: 'purchase', amount_minor: collected - 100, collected_minor: collected, currency: 'THB', transaction_id: `pi_${paymentId}` } })
+    }
 
     const { funnel } = await getAnalyticsReport(db, { organizationId: 'org-funnel', startDate: '2026-09-10', endDate: '2026-09-12', now: new Date('2026-09-13T00:00:00Z') })
     const steps = (counts: Omit<typeof funnel, 'bySource' | 'byLocation'>) => [counts.visits, counts.viewed, counts.intent, counts.submitted, counts.confirmed, counts.paid]
-    assert.deepEqual(steps(funnel), [2, 2, 1, 2, 1, 1])
-    assert.deepEqual(funnel.paidCollected, [{ currency: 'THB', collectedMinor: 160500 }])
-    assert.deepEqual(funnel.bySource.map(row => [row.channel, ...steps(row)]), [['Google Ads', 1, 1, 1, 1, 1, 1], ['Direct', 1, 1, 0, 1, 0, 0]])
-    assert.deepEqual(funnel.byLocation.map(row => [row.locationId, ...steps(row)]).sort(), [['loc-beach', 1, 1, 1, 1, 1, 1], ['loc-town', 1, 1, 0, 1, 0, 0]])
+    assert.deepEqual(steps(funnel), [2, 2, 1, 3, 2, 2])
+    assert.deepEqual(funnel.paidCollected, [{ currency: 'THB', collectedMinor: 214000 }])
+    assert.deepEqual(funnel.bySource.map(row => [row.channel, ...steps(row)]), [['Google Ads', 1, 1, 1, 2, 2, 2], ['Direct', 1, 1, 0, 1, 0, 0]])
+    assert.deepEqual(funnel.byLocation.map(row => [row.locationId, ...steps(row)]).sort(), [['loc-beach', 1, 1, 1, 2, 2, 2], ['loc-town', 1, 1, 0, 1, 0, 0]])
   } finally { await runtime.dispose() }
 })
 

@@ -17,7 +17,9 @@ sessions) → viewed → intent → submitted → confirmed → paid. Which even
 toward which step is the `funnel` field of the event catalog
 (`utils/organization-conversion-events.ts`). Confirmed is a submitted request
 whose booking, reservation or stay is confirmed now; paid is `payment_paid`
-with the cash collected per currency. The same counts are broken down by
+with the cash collected per currency. A request made through checkout (a paid
+stay or experience) records no submit event, so its paid payment counts as its
+submission. The same counts are broken down by
 channel (`attributionChannel`, from each event's attribution snapshot) and by
 location. Insights names the steps in the vertical's words.
 
