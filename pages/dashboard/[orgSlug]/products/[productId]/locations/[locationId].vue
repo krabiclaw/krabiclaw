@@ -27,7 +27,7 @@ const p = inject(productEditorKey)!
 const route = useRoute()
 const level = useRouteLevel()
 const locationId = computed(() => String(route.params.locationId))
-const location = computed(() => p.organizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
+const location = computed(() => p.allOrganizationLocations.value.find(entry => entry.id === locationId.value && (entry.status === 'active' || p.product.value?.locations.some(placement => placement.location_id === entry.id))) ?? null)
 // A location the product is not offered at starts off on both switches; saving
 // is what offers it there.
 watchEffect(() => {
@@ -38,6 +38,6 @@ const entry = computed(() => (location.value ? p.form.locations[locationId.value
 // A location this organization does not have is not a page.
 watchEffect(() => {
   if (level.mode.value === 'yield' || !p.product.value || p.loadError.value || p.organizationLocationsError.value) return
-  if (p.organizationLocations.value.length && !location.value) showError(createError({ statusCode: 404, statusMessage: 'Location not found' }))
+  if (p.allOrganizationLocations.value.length && !location.value) showError(createError({ statusCode: 404, statusMessage: 'Location not found' }))
 })
 </script>

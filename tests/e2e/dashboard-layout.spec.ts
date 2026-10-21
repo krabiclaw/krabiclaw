@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
@@ -601,87 +601,362 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('Dated session form saves times, capacity and status and restores the occurrence', async ({ page, baseURL }, testInfo) => {
+  let datedSessionRestore: {
+    owner: APIRequestContext | null
+    baseURL: string
+    organizationId: string
+    productId: string
+    original: SessionAvailability | null
+    release: (() => Promise<void>) | null
+  } | null = null
+  test.afterEach(async ({ page }) => {
+    const restore = datedSessionRestore
+    datedSessionRestore = null
+    if (!restore) return
+    const failures: unknown[] = []
+    try {
+      const original = restore.original
+      if (original) {
+        if (!restore.owner) throw new Error('The dated-session restoration owner is missing')
+        const endpoint = `/api/editor/organizations/${restore.organizationId}/products/${restore.productId}/sessions/${original.id}`
+        const currentResponse = await restore.owner.get(endpoint)
+        expect(currentResponse.status(), await currentResponse.text()).toBe(200)
+        const current = (await currentResponse.json() as { session: SessionAvailability }).session
+        expect(current).toMatchObject({ id: original.id, organization_id: restore.organizationId, product_id: restore.productId })
+        const restored = await mcpRequest(restore.owner, restore.baseURL, { method: 'tools/call', toolName: 'update_product_session', args: {
+          organization_id: restore.organizationId, product_id: restore.productId, session_id: original.id, expected_updated_at: current.updated_at,
+          starts_at: original.starts_at, ends_at: original.ends_at, capacity: original.capacity, status: original.status,
+        } })
+        expect(restored.status(), await restored.text()).toBe(200)
+        expect(mcpData<{ session: SessionAvailability }>(await restored.json()).session).toMatchObject({ id: original.id, starts_at: original.starts_at, ends_at: original.ends_at, capacity: original.capacity, status: original.status })
+        const readback = await restore.owner.get(endpoint)
+        expect(readback.status(), await readback.text()).toBe(200)
+        expect((await readback.json() as { session: SessionAvailability }).session).toMatchObject({
+          id: original.id, organization_id: restore.organizationId, product_id: restore.productId, location_id: original.location_id, timezone: original.timezone,
+          starts_at: original.starts_at, ends_at: original.ends_at, capacity: original.capacity, status: original.status,
+        })
+        if (!page.isClosed()) {
+          await open(page, `/dashboard/${restore.organizationId}/products/${restore.productId}/booking/sessions/${original.id}?location_id=${original.location_id}`)
+          const leaf = page.locator('#dashboard-panel-product-session')
+          const starts = localNow(original.timezone, new Date(original.starts_at))
+          const ends = localNow(original.timezone, new Date(original.ends_at))
+          await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(`${starts.date}T${starts.time}`)
+          await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(`${ends.date}T${ends.time}`)
+          await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('8')
+          await expect(leaf.getByRole('radio', { name: 'Scheduled', exact: true })).toBeChecked()
+          await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+        }
+      }
+    } catch (error) { failures.push(error) }
+    try {
+      await restore.owner?.dispose()
+    } catch (error) { failures.push(error) }
+    try {
+      await restore.release?.()
+    } catch (error) { failures.push(error) }
+    if (failures.length) throw new AggregateError(failures, 'Dated-session restoration failed')
+  })
+
+  test('Dated session form saves times, capacity and status and restores the occurrence', async ({ page, baseURL, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Session writes require isolated local D1.')
     const organizationId = 'org-user-pottery-house'
+    const productId = 'exp-ph-wheel'
+    const restore = {
+      owner: null as APIRequestContext | null, baseURL: baseURL!, organizationId, productId,
+      original: null as SessionAvailability | null, release: null as (() => Promise<void>) | null,
+    }
+    datedSessionRestore = restore
+    restore.release = await acquireTenantMutationLock(testInfo, organizationId)
+    await page.context().clearCookies()
+    await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
+    restore.owner = await playwright.request.newContext({ baseURL })
+    await loginAs(restore.owner, baseURL!, 'user-e2e-pottery-owner')
+    const endpoint = `/api/editor/organizations/${organizationId}/products/${productId}/sessions`
+    const from = new Date(Date.now() + 25 * 86_400_000).toISOString()
+    const to = new Date(Date.now() + 40 * 86_400_000).toISOString()
+    const list = async () => {
+      const response = await page.request.get(endpoint, { params: { from, to } })
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as { sessions: SessionAvailability[] }).sessions
+    }
+    const original = (await list()).find(row => row.location_id === 'loc-pottery-house' && row.status === 'scheduled' && row.claimed === 0 && localNow(row.timezone, new Date(row.starts_at)).time === '11:00')
+    restore.original = original ?? null
+    expect(original, 'the seeded product has an unclaimed daytime occurrence in its own location').toBeDefined()
+    expect(original!.capacity).toBe(8)
+    const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
+    const [productResponse, locationResponse] = await Promise.all([
+      page.request.get(productEndpoint),
+      page.request.get('/api/dashboard/locations', { params: { org: 'org-user-pottery-house', organization: 'true', status: 'all' } }),
+    ])
+    for (const response of [productResponse, locationResponse]) expect(response.status(), await response.text()).toBe(200)
+    const { product } = await productResponse.json() as { product: Product }
+    const { locations } = await locationResponse.json() as { locations: DashboardLocation[] }
+    const location = locations.find(row => row.id === original!.location_id)
+    expect(location, 'the occurrence’s physical location exists in its own organization').toBeDefined()
+    expect(location!.status).toBe('active')
+    expect(product.locations.some(row => row.location_id === location!.id)).toBe(true)
+    const localInput = (instant: string) => {
+      const value = localNow(original!.timezone, new Date(instant))
+      return `${value.date}T${value.time}`
+    }
+    const startsAt = new Date(Date.parse(original!.starts_at) + 15 * 60_000).toISOString()
+    const endsAt = new Date(Date.parse(original!.ends_at) + 15 * 60_000).toISOString()
+    const bookingPath = `/dashboard/org-user-pottery-house/products/${productId}/booking`
+    const schedulePath = `${bookingPath}/schedule`
+    const sessionsPath = `${bookingPath}/sessions`
+    const sessionListPath = `${sessionsPath}?location_id=${original!.location_id}`
+    const path = `${sessionsPath}/${original!.id}?location_id=${original!.location_id}`
+    const leaf = page.locator('#dashboard-panel-product-session')
+    const save = leaf.getByRole('button', { name: 'Save', exact: true })
+    const commit = async () => {
+      await expect(save).toBeEnabled()
+      const saved = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/${original!.id}` && response.request().method() === 'PATCH')
+      await save.click()
+      const response = await saved
+      expect(response.status(), await response.text()).toBe(200)
+      await expect(page).toHaveURL(sessionListPath)
+    }
+    await page.setViewportSize(WIDE)
+    await open(page, schedulePath)
+    await expect(page).toHaveURL(schedulePath)
+    const schedule = page.locator('#dashboard-panel-booking-schedule')
+    await expect(schedule.locator('[data-testid^="editor-row-"]')).toHaveCount(product.locations.length)
+    for (const placement of product.locations) {
+      const place = locations.find(row => row.id === placement.location_id)
+      expect(place, 'every location choice is a saved relationship in this organization').toBeDefined()
+      const choice = schedule.getByTestId(`editor-row-${place!.id}`)
+      await expect(choice).toContainText(place!.title)
+      await expect(choice).toContainText(placement.published ? 'Visible at this location' : 'Hidden at this location')
+      await expect(choice).toContainText(placement.active ? 'Accepting bookings' : 'Bookings paused')
+      if (place!.status === 'active') await expect(choice).toHaveAttribute('href', `${schedulePath}?location_id=${place!.id}`)
+      else {
+        await expect(choice).toContainText('Location inactive')
+        await expect(choice).not.toHaveAttribute('href')
+      }
+    }
+    await page.setViewportSize(PHONE)
+    await page.screenshot({ path: testInfo.outputPath('experience-weekly-location-chooser-phone.png') })
+    await schedule.getByTestId(`editor-row-${location!.id}`).click()
+    await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
+    await expect(schedule.getByTestId('editor-row-monday')).toHaveAttribute('href', `${schedulePath}/monday?location_id=${location!.id}`)
+    await schedule.getByTestId('editor-row-monday').click()
+    const weekday = page.locator('#dashboard-panel-booking-schedule-monday')
+    await expect(weekday.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await weekday.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
+
+    await open(page, sessionsPath)
+    const sessions = page.locator('#dashboard-panel-product-sessions')
+    await expect(sessions.getByRole('button', { name: 'Add a session', exact: true })).toBeDisabled()
+    await expect(sessions.getByTestId(`editor-row-${location!.id}`)).toHaveAttribute('href', sessionListPath)
+    await expect(sessions.getByTestId(`editor-row-${original!.id}`)).toHaveAttribute('href', path)
+    await page.screenshot({ path: testInfo.outputPath('experience-dated-location-chooser-phone.png') })
+    await open(page, `${sessionsPath}/new`)
+    await expect(leaf.getByRole('button', { name: 'Create session', exact: true })).toBeDisabled()
+    await expect(leaf.getByLabel('Starts', { exact: true })).toHaveCount(0)
+    await expect(leaf.getByRole('link', { name: 'Dated sessions', exact: true })).toHaveAttribute('href', sessionsPath)
+    await leaf.getByRole('link', { name: 'Dated sessions', exact: true }).click()
+    await sessions.getByTestId(`editor-row-${location!.id}`).click()
+    await expect(page).toHaveURL(sessionListPath)
+    await expect(sessions.getByRole('link', { name: 'Add a session', exact: true })).toHaveAttribute('href', `${sessionsPath}/new?location_id=${location!.id}`)
+    await sessions.getByRole('link', { name: 'Add a session', exact: true }).click()
+    await expect(leaf).toContainText(`Times are in ${location!.timezone}.`)
+    await expect(leaf.getByRole('button', { name: 'Create session', exact: true })).toBeDisabled()
+    await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(sessionListPath)
+    const scopedProductResponse = await page.request.get(productEndpoint)
+    expect(scopedProductResponse.status(), await scopedProductResponse.text()).toBe(200)
+    expect((await scopedProductResponse.json() as { product: Product }).product.locations).toEqual(product.locations)
+
+    await page.setViewportSize(NARROW)
+    await open(page, path)
+    await expect(save).toBeDisabled()
+    await leaf.getByLabel('Starts', { exact: true }).fill(localInput(startsAt))
+    await commit()
+    expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: original!.ends_at, capacity: 8, status: 'scheduled' })
+
+    await open(page, path)
+    await expect(save).toBeDisabled()
+    await leaf.getByLabel('Ends', { exact: true }).fill(localInput(endsAt))
+    await commit()
+    expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 8, status: 'scheduled' })
+
+    await open(page, path)
+    await expect(save).toBeDisabled()
+    await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
+    await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+    await commit()
+    expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'scheduled' })
+
+    await open(page, path)
+    await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('10')
+    await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+    const current = (await list()).find(row => row.id === original!.id)!
+    const concurrent = await page.request.patch(`${endpoint}/${original!.id}`, { data: { capacity: 9, expected_updated_at: current.updated_at } })
+    expect(concurrent.status(), await concurrent.text()).toBe(200)
+    const conflict = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/${original!.id}` && response.request().method() === 'PATCH')
+    await save.click()
+    expect((await conflict).status()).toBe(409)
+    await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('10')
+    // The write conflict is real. Only the subsequent saved-state GET is
+    // faulted, to prove a failed recovery cannot erase the submitted draft.
+    const interceptRecovery = (url: URL) => url.pathname === `${endpoint}/${original!.id}`
+    const recoveryFailure = 'The saved session could not be read for this verification.'
+    await page.route(interceptRecovery, async route => route.request().method() === 'GET'
+      ? await route.fulfill({ status: 503, json: { error: recoveryFailure } })
+      : await route.continue())
+    try {
+      const refusedRecovery = page.waitForResponse(response => interceptRecovery(new URL(response.url())) && response.request().method() === 'GET')
+      await leaf.getByRole('button', { name: 'Use saved values', exact: true }).click()
+      expect((await refusedRecovery).status()).toBe(503)
+      await expect(leaf.getByText(recoveryFailure, { exact: true })).toBeVisible()
+      await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('10')
+      await expect(save).toBeDisabled()
+    } finally { await page.unroute(interceptRecovery) }
+    await leaf.getByRole('button', { name: 'Use saved values', exact: true }).click()
+    await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('9')
+    await expect(save).toBeDisabled()
+    expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'scheduled' })
+
+    await open(page, path)
+    await expect(save).toBeDisabled()
+    await leaf.getByText('Cancelled', { exact: true }).click()
+    await expect(leaf.getByRole('radio', { name: 'Cancelled', exact: true })).toBeChecked()
+    await commit()
+    expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'cancelled' })
+  })
+
+  test('An assigned Experience host edits its saved product without gaining website preview access', async ({ page, baseURL, browser }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Assignment and role changes require isolated local D1.')
+    const organizationId = 'org-user-pottery-house'
+    const org = 'org-user-pottery-house'
+    const productId = 'exp-ph-wheel'
+    const endpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
+    const bookingEndpoint = `${endpoint}/booking`
+    const productPath = `/dashboard/${org}/products/${productId}`
     const release = await acquireTenantMutationLock(testInfo, organizationId)
+    let memberContext: BrowserContext | null = null
+    let original: Product | null = null
+    let actor: OrganizationMembersData['members'][number] | undefined
+    let bookingAttempted = false
+    let roleAttempted = false
+    let nameAttempted = false
+    const failures: unknown[] = []
     try {
       await page.context().clearCookies()
       await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
-      const productId = 'exp-ph-wheel'
-      const endpoint = `/api/editor/organizations/${organizationId}/products/${productId}/sessions`
-      const from = new Date(Date.now() + 25 * 86_400_000).toISOString()
-      const to = new Date(Date.now() + 40 * 86_400_000).toISOString()
-      const list = async () => {
-        const response = await page.request.get(endpoint, { params: { from, to } })
-        expect(response.status(), await response.text()).toBe(200)
-        return (await response.json() as { sessions: SessionAvailability[] }).sessions
-      }
-      const original = (await list()).find(row => row.location_id === 'loc-pottery-house' && row.status === 'scheduled' && row.claimed === 0 && localNow(row.timezone, new Date(row.starts_at)).time === '11:00')
-      expect(original, 'the seeded product has an unclaimed daytime occurrence in its own location').toBeDefined()
-      expect(original!.capacity).toBe(8)
-      const localInput = (instant: string) => {
-        const value = localNow(original!.timezone, new Date(instant))
-        return `${value.date}T${value.time}`
-      }
-      const startsAt = new Date(Date.parse(original!.starts_at) + 15 * 60_000).toISOString()
-      const endsAt = new Date(Date.parse(original!.ends_at) + 15 * 60_000).toISOString()
-      const sessionListPath = `/dashboard/org-user-pottery-house/products/${productId}/booking/sessions?location_id=${original!.location_id}`
-      const path = `/dashboard/org-user-pottery-house/products/${productId}/booking/sessions/${original!.id}?location_id=${original!.location_id}`
-      const leaf = page.locator('#dashboard-panel-product-session')
-      const save = leaf.getByRole('button', { name: 'Save', exact: true })
-      const commit = async () => {
-        await expect(save).toBeEnabled()
-        const saved = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/${original!.id}` && response.request().method() === 'PATCH')
-        await save.click()
-        const response = await saved
-        expect(response.status(), await response.text()).toBe(200)
-        await expect(page).toHaveURL(sessionListPath)
-      }
-      try {
-        await page.setViewportSize(NARROW)
-        await open(page, path)
-        await expect(save).toBeDisabled()
-        await leaf.getByLabel('Starts', { exact: true }).fill(localInput(startsAt))
-        await commit()
-        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: original!.ends_at, capacity: 8, status: 'scheduled' })
+      const [productResponse, memberResponse] = await Promise.all([
+        page.request.get(endpoint),
+        page.request.get('/api/dashboard/members', { params: { org } }),
+      ])
+      for (const response of [productResponse, memberResponse]) expect(response.status(), await response.text()).toBe(200)
+      original = (await productResponse.json() as { product: Product }).product
+      expect(original).toMatchObject({ id: productId, organization_id: organizationId, kind: 'experience' })
+      expect(original.booking, 'the seeded Experience already owns its booking configuration').not.toBeNull()
+      if (!original.booking) throw new Error('The seeded Experience booking configuration is missing')
+      actor = (await memberResponse.json() as OrganizationMembersData).members.find(member => member.userId === 'user-e2e-pottery-location-owner')
+      expect(actor, 'the canonical Pottery role actor already belongs to this organization').toBeDefined()
+      if (!actor) throw new Error('The canonical Pottery role actor is missing')
+      bookingAttempted = true
+      const assigned = await page.request.put(bookingEndpoint, { data: {
+        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id, assigned_team_id: null,
+      } })
+      expect(assigned.status(), await assigned.text()).toBe(200)
+      const assignmentRead = await page.request.get(endpoint)
+      expect(assignmentRead.status(), await assignmentRead.text()).toBe(200)
+      expect((await assignmentRead.json() as { product: Product }).product.booking).toMatchObject({
+        scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id, assigned_team_id: null,
+      })
+      roleAttempted = true
+      const demoted = await page.request.post('/api/auth/organization/update-member-role', {
+        headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
+      })
+      expect(demoted.status(), await demoted.text()).toBe(200)
+      const demotionRead = await page.request.get('/api/dashboard/members', { params: { org } })
+      expect(demotionRead.status(), await demotionRead.text()).toBe(200)
+      expect((await demotionRead.json() as OrganizationMembersData).members.find(member => member.id === actor!.id)?.role).toBe('member')
 
-        await open(page, path)
-        await expect(save).toBeDisabled()
-        await leaf.getByLabel('Ends', { exact: true }).fill(localInput(endsAt))
-        await commit()
-        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 8, status: 'scheduled' })
+      memberContext = await browser.newContext({ baseURL, viewport: WIDE })
+      await loginAs(memberContext.request, baseURL!, actor.userId)
+      const memberProduct = await memberContext.request.get(endpoint)
+      expect(memberProduct.status(), await memberProduct.text()).toBe(200)
+      expect((await memberProduct.json() as { product: Product }).product).toMatchObject({ id: productId, organization_id: organizationId, kind: 'experience', name: original.name })
+      const forbiddenPreview = await memberContext.request.get(`/api/editor/organizations/${organizationId}/context`)
+      expect(forbiddenPreview.status(), await forbiddenPreview.text()).toBe(404)
+      const deniedPreview = await forbiddenPreview.json()
+      expect(deniedPreview).not.toHaveProperty('context.previewToken')
+      expect(deniedPreview).not.toHaveProperty('previewToken')
+      const memberPage = await memberContext.newPage()
+      await dismissPreviewToolbar(memberPage)
+      await open(memberPage, `${productPath}/name`)
+      const cards = memberPage.getByTestId('experience-editor-cards')
+      await expect(cards).toBeVisible()
+      await expect(cards.getByTestId('editor-card-name')).toContainText(original.name)
+      await expect(memberPage.getByRole('link', { name: 'View', exact: true })).toHaveCount(0)
+      await expect(memberPage.getByRole('button', { name: 'View', exact: true })).toHaveCount(0)
+      const nameLeaf = memberPage.locator('#dashboard-panel-product-name')
+      await expect(nameLeaf.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(original.name)
+      const editedName = `${original.name.slice(0, 190)} — host edit ${Date.now().toString(36)}`
+      await nameLeaf.getByRole('textbox', { name: 'Name', exact: true }).fill(editedName)
+      await expect(nameLeaf.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+      const saved = memberPage.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      nameAttempted = true
+      await nameLeaf.getByRole('button', { name: 'Save', exact: true }).click()
+      const savedResponse = await saved
+      expect(savedResponse.status(), await savedResponse.text()).toBe(200)
+      const ownerRead = await page.request.get(endpoint)
+      expect(ownerRead.status(), await ownerRead.text()).toBe(200)
+      expect((await ownerRead.json() as { product: Product }).product.name).toBe(editedName)
+      await expect(cards.getByTestId('editor-card-name')).toContainText(editedName)
 
-        await open(page, path)
-        await expect(save).toBeDisabled()
-        await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
-        await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
-        await commit()
-        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'scheduled' })
-
-        await open(page, path)
-        await expect(save).toBeDisabled()
-        await leaf.getByText('Cancelled', { exact: true }).click()
-        await expect(leaf.getByRole('radio', { name: 'cancelled', exact: true })).toBeChecked()
-        await commit()
-        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'cancelled' })
-      } finally {
-        const current = (await list()).find(row => row.id === original!.id)
-        expect(current).toBeDefined()
-        const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_product_session', args: { organization_id: organizationId, product_id: productId, session_id: original!.id, expected_updated_at: current!.updated_at, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status } })
-        expect(restored.status(), await restored.text()).toBe(200)
-        expect(mcpData<{ session: SessionAvailability }>(await restored.json()).session).toMatchObject({ id: original!.id, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status })
-        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ id: original!.id, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status })
-        await open(page, path)
-        await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(localInput(original!.starts_at))
-        await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(localInput(original!.ends_at))
-        await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('8')
-        await expect(leaf.getByRole('radio', { name: 'scheduled', exact: true })).toBeChecked()
-        await expect(save).toBeDisabled()
-      }
+      await open(memberPage, `${productPath}?editMode=preview&previewViewport=desktop`)
+      await expect(memberPage.getByRole('dialog').getByText('Your role does not have access to website previews.', { exact: true })).toBeVisible()
+      await expect(memberPage.locator('iframe')).toHaveCount(0)
+    } catch (error) {
+      failures.push(error)
     } finally {
-      await release()
+      try {
+        if (nameAttempted && original) {
+          const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_product', args: {
+            organization_id: organizationId, product_id: productId, name: original.name,
+          } })
+          expect(restored.status(), await restored.text()).toBe(200)
+          expect(mcpData<{ product: Product }>(await restored.json()).product.name).toBe(original.name)
+          const restoredName = await page.request.get(endpoint)
+          expect(restoredName.status(), await restoredName.text()).toBe(200)
+          expect((await restoredName.json() as { product: Product }).product.name).toBe(original.name)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        if (bookingAttempted && original?.booking) {
+          const restored = await page.request.put(bookingEndpoint, { data: {
+            scheduling_mode: original.booking.scheduling_mode, assigned_member_id: original.booking.assigned_member_id, assigned_team_id: original.booking.assigned_team_id,
+          } })
+          expect(restored.status(), await restored.text()).toBe(200)
+          const restoredBooking = await page.request.get(endpoint)
+          expect(restoredBooking.status(), await restoredBooking.text()).toBe(200)
+          expect((await restoredBooking.json() as { product: Product }).product.booking).toEqual(original.booking)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        if (roleAttempted && actor) {
+          const restored = await page.request.post('/api/auth/organization/update-member-role', {
+            headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: actor.role },
+          })
+          expect(restored.status(), await restored.text()).toBe(200)
+          const restoredRole = await page.request.get('/api/dashboard/members', { params: { org } })
+          expect(restoredRole.status(), await restoredRole.text()).toBe(200)
+          expect((await restoredRole.json() as OrganizationMembersData).members.find(member => member.id === actor!.id)?.role).toBe(actor.role)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        await memberContext?.close()
+      } catch (error) { failures.push(error) }
+      try {
+        await release()
+      } catch (error) { failures.push(error) }
     }
+    if (failures.length) throw new AggregateError(failures, 'Assigned Experience host access or restoration failed')
   })
 
   test('Website opens Pages, and Catalog is a root that selects nothing', async ({ page }) => {

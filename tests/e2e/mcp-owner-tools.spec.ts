@@ -7,6 +7,7 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone'
 import type { OrganizationMembersData } from '../../utils/organization-members'
+import type { Product } from '../../server/types/products'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
 // for why. This group covers the bulk of an owner's MCP tool surface: site
@@ -951,6 +952,30 @@ test.describe('stateless MCP server', () => {
         const sessions = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, {headers: tenantTestExtraHeaders()})
         expect(sessions.status(),await sessions.text()).toBe(200)
         expect((await sessions.json()).sessions).toEqual([expect.objectContaining({starts_at:start.toISOString(),remaining:6,is_full:false})])
+        // Online is a public booking scope, not a physical Product location.
+        // Removing it from its own focused editor returns to the same Product
+        // and rereads saved state without following an invalid online address.
+        await call('set_product_publication', { product_id: product.id, published: false })
+        await call('set_product_booking_config', { product_id: product.id, held_online: true, scheduling_mode: 'provider' })
+        await loginAs(page.request, baseURL!)
+        await page.setExtraHTTPHeaders({})
+        const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
+        await page.goto(`${bookingPath}/location?location_id=online`)
+        const format = page.locator('#dashboard-panel-booking-location')
+        await expect(format.getByRole('switch', { name: 'Held online', exact: true })).toHaveAttribute('aria-checked', 'true')
+        await format.getByRole('switch', { name: 'Held online', exact: true }).click()
+        await format.getByRole('button', { name: 'Save', exact: true }).click()
+        await expect(page).toHaveURL(`${bookingPath}/duration`)
+        const offline = await call<{ product: Product }>('get_product', { product_id: product.id })
+        expect(offline.product.booking).toMatchObject({ held_online: false, scheduling_mode: 'provider', assigned_member_id: host.memberId })
+        expect(offline.product.locations).toEqual([{ location_id: locationId, active: true, published: true }])
+        await call('set_product_booking_config', { product_id: product.id, held_online: true })
+        await page.goto(`${bookingPath}/enabled?location_id=online`)
+        const calendar = page.locator('#dashboard-panel-booking-enabled')
+        await calendar.getByRole('switch', { name: 'Use a booking calendar', exact: true }).click()
+        await calendar.getByRole('button', { name: 'Save', exact: true }).click()
+        await expect(page).toHaveURL(`${bookingPath}/enabled`)
+        expect((await call<{ product: Product }>('get_product', { product_id: product.id })).product.booking).toBeNull()
       } finally {
         if (experienceId) expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId})).deleted).toBe(true)
         for (const section of menu?.sections.filter(section => section.collection.name.endsWith(stamp)) ?? []) {

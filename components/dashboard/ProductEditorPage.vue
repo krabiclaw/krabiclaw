@@ -1,7 +1,7 @@
 <template>
   <DashboardIndexPanel
     id="product"
-    :title="stayEditor ? 'Listing editor' : dishEditor ? 'Dish editor' : pageTitle"
+    :title="stayEditor ? 'Listing editor' : dishEditor ? 'Dish editor' : experienceEditor ? 'Experience editor' : pageTitle"
     :auto-open="autoOpenTarget"
     :create="firstStep"
     :paired-size="summaryCards ? 39 : undefined"
@@ -45,10 +45,10 @@
     <EditorNavigationList
       v-if="!loadError && (!arrivalTab || (arrivalHome && !arrivalError))"
       :groups="navigationGroups"
-      :active-item="level.child.value"
+      :active-item="activeNavigationItem"
       :variant="summaryCards ? 'cards' : 'rows'"
       :class="summaryCards ? 'mx-auto w-full max-w-82 pb-24' : undefined"
-      :data-testid="stayEditor ? 'stay-editor-cards' : dishEditor ? 'dish-editor-cards' : undefined"
+      :data-testid="stayEditor ? 'stay-editor-cards' : dishEditor ? 'dish-editor-cards' : experienceEditor ? 'experience-editor-cards' : undefined"
     >
       <template v-if="summaryCards" #summary="{ item }">
         <span v-if="arrivalTab && item.id === 'arrival-time'" class="grid grid-cols-2 gap-4 text-base">
@@ -74,7 +74,7 @@
             Add your first photo
           </span>
         </template>
-        <span v-else-if="dishEditor && item.icon" class="flex items-start gap-3">
+        <span v-else-if="(dishEditor || experienceEditor) && item.icon" class="flex items-start gap-3">
           <UIcon :name="item.icon" class="size-6 shrink-0" aria-hidden="true" />
           <span class="whitespace-pre-line break-words">{{ item.summary }}</span>
         </span>
@@ -89,10 +89,10 @@
           <span class="block">{{ item.summary }}{{ product?.stay?.cancellation_policy ? ' for short-term stays' : '' }}</span>
           <span v-if="product?.stay?.long_term_cancellation_policy" class="block">{{ STAY_LONG_TERM_CANCELLATION_POLICIES[product.stay.long_term_cancellation_policy].label }} for long-term stays</span>
         </span>
-        <span v-else :class="arrivalTab || dishEditor ? 'line-clamp-4 whitespace-pre-line break-words' : item.id === 'description' ? 'line-clamp-4' : undefined">{{ item.summary }}</span>
+        <span v-else :class="arrivalTab || dishEditor || experienceEditor ? 'line-clamp-4 whitespace-pre-line break-words' : item.id === 'description' ? 'line-clamp-4' : undefined">{{ item.summary }}</span>
       </template>
     </EditorNavigationList>
-    <template v-if="summaryCards" #footer>
+    <template v-if="summaryCards && canPreview" #footer>
       <div class="flex justify-center">
         <UButton ref="previewButton" :to="arrivalTab ? sectionPath('arrival-guide') : previewPath" :target="arrivalTab ? '_blank' : undefined" label="View" icon="i-lucide-eye" color="neutral" class="pointer-events-auto h-12 rounded-full px-6 shadow-lg" :disabled="saving" />
       </div>
@@ -255,7 +255,7 @@ export interface ProductEditor {
   itemLabel: ComputedRef<string>
   currency: string
   organizationId: string
-  /** The location this editor is scoped to by its URL, or null for the whole organization. */
+  /** The physical location this editor targets, or null for organization and online scopes. */
   locationId: ComputedRef<string | null>
   /** The location the scope names, once the organization's locations have loaded. */
   location: ComputedRef<DashboardLocation | null>
@@ -263,6 +263,8 @@ export interface ProductEditor {
   stayLocation: ComputedRef<DashboardLocation | null>
   stayLocationError: ComputedRef<string | null>
   organizationLocations: ComputedRef<DashboardLocation[]>
+  /** Saved location facts, including inactive places that still own product relationships. */
+  allOrganizationLocations: ComputedRef<DashboardLocation[]>
   organizationLocationsError: ComputedRef<string | null>
   /** Every collection the organization has, site-wide and per location. */
   collections: ComputedRef<Collection[]>
@@ -309,6 +311,7 @@ export interface ProductEditor {
   textValue: (definition: ProductDetailField) => string
   weekdays: ReadonlyArray<{ value: number; label: string }>
   scheduleError: ComputedRef<string | null>
+  reloadSchedule: () => Promise<void>
   savedSlotsFor: (weekday: number) => ScheduleSlotDraft[]
   slotsFor: (weekday: number) => ScheduleSlotDraft[]
   addSlot: (weekday: number) => void
@@ -353,6 +356,8 @@ import { formatTime, MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import { isNavigationFailure } from 'vue-router'
 import { dashboardOverlayOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
+import { authClient } from '~/lib/auth-client'
+import type { organizationRoles } from '~/utils/organization-access'
 import { STAY_HOME_ACCESSIBILITY_FEATURES, isStayHomeAccessibility } from '~/shared/stay-accessibility'
 import {
   STAY_PROPERTY_TYPES,
@@ -375,7 +380,9 @@ const dashboardApi = useDashboardApi()
 const productId = computed(() => String(route.params.productId ?? ''))
 // Catalog's explicit scope. No location is the whole organization: its own
 // prices and settings, not whichever location was visited last.
-const locationId = useLocationScope()
+const locationScope = useLocationScope()
+// Online is an explicit booking scope, never a physical location or a Price location id.
+const locationId = computed(() => locationScope.value === 'online' ? null : locationScope.value)
 // A product created from a collection joins it; the URL that opened the walk names it.
 const createCollectionId = computed(() => typeof route.query.collection_id === 'string' && route.query.collection_id ? route.query.collection_id : null)
 const level = useRouteLevel()
@@ -388,16 +395,22 @@ const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/p
  * which names its kind and the collection it will join.
  */
 function sectionPath(section: string) {
-  const query = isNew.value ? route.query : { location_id: locationId.value ?? undefined, ...(arrivalTab.value ? { guide: 'arrival' } : {}) }
+  const query = isNew.value ? route.query : { location_id: locationScope.value ?? undefined, ...(arrivalTab.value ? { guide: 'arrival' } : {}) }
   return router.resolve({ path: `${itemPath.value}/${section}`, query }).fullPath
 }
 
 const organizationId = await useDashboardOrganizationId()
 const { refresh: refreshCatalog, collectionProductIds, setCollectionProducts } = useProductCatalog(organizationId, ref(null))
 const dashboard = useDashboardOrganization()
+// The context mints a site-wide preview token. Assigned Product access alone
+// does not authorize unpublished content elsewhere in the organization.
+const canPreview = computed(() => {
+  const role = dashboard.organization.value?.role
+  return Boolean(role) && authClient.organization.checkRolePermission({ role: role as keyof typeof organizationRoles, permissions: { content: ['read'] } })
+})
 const { locations: allOrganizationLocations, error: locationsError, pending: locationsPending } = await useOrganizationLocations({ includeInactive: true })
 const organizationLocations = computed(() => allOrganizationLocations.value.filter(entry => entry.status === 'active'))
-const location = computed(() => organizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
+const location = computed(() => allOrganizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
 
 const vertical = dashboard.organization.value?.vertical
 if (!vertical) throw createError({ statusCode: 500, statusMessage: 'Organization vertical is not configured' })
@@ -420,13 +433,13 @@ const sectionLabels: Record<SectionKey, string> = {
   'photo': 'Photos',
   'name': 'Name',
   'price': 'Price',
-  'description': 'Description',
+  get description() { return product.value?.kind === 'experience' ? 'What you’ll do' : 'Description' },
   'page': 'Page content',
   'options': 'Variants',
-  'order-url': 'External link',
+  get 'order-url'() { return product.value?.kind === 'experience' ? 'External booking link' : 'External link' },
   get attributes() { return product.value?.kind === 'dish' ? 'Food information' : 'Details' },
   'publication': 'Status',
-  'booking': 'Scheduling',
+  get booking() { return product.value?.kind === 'experience' ? 'Bookings' : 'Scheduling' },
   'locations': 'Locations',
   'stay': 'Stay settings',
   'guests': 'Number of guests',
@@ -483,7 +496,7 @@ const isMutation = (value: unknown): value is { success: true; product: ProductM
 // The product in this scope, read before the level renders. Keyed by location
 // and product, so a scope change reads that location's prices and settings.
 const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
-  () => `dashboard-product:${organizationId}:${locationId.value ?? 'organization'}:${productId.value}`,
+  () => `dashboard-product:${organizationId}:${locationScope.value ?? 'organization'}:${productId.value}`,
   async () => {
     if (isNew.value) return null
     const id = locationId.value
@@ -493,10 +506,11 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
       dashboardApi(`/api/editor/organizations/${organizationId}/collections`, { validate: isCollectionList }),
       dashboardApi(id ? `/api/editor/organizations/${organizationId}/locations/${encodeURIComponent(id)}/products/${encodeURIComponent(productId.value)}` : `/api/editor/organizations/${organizationId}/products/${encodeURIComponent(productId.value)}`, { validate: isOne }),
     ])
+    if (locationScope.value === 'online' && !productResponse.product.booking?.held_online) throw createError({ statusCode: 404, statusMessage: 'This product is not held online' })
     let previewToken: string | null = null
-    if (productResponse.product.kind === 'stay' || productResponse.product.kind === 'dish') {
+    if (canPreview.value && ['stay', 'dish', 'experience'].includes(productResponse.product.kind)) {
       const response = await dashboardApi(`/api/editor/organizations/${organizationId}/context`, { validate: isRecord })
-      if (!isRecord(response.context) || typeof response.context.previewToken !== 'string' || !response.context.previewToken) throw new Error('The listing preview could not be loaded.')
+      if (!isRecord(response.context) || typeof response.context.previewToken !== 'string' || !response.context.previewToken) throw new Error('The product preview could not be loaded.')
       previewToken = response.context.previewToken
     }
     return { collections: collectionResponse.collections, product: productResponse.product, previewToken }
@@ -514,7 +528,8 @@ const bookingOffering = computed(() => Boolean(product.value?.booking) || ['stay
 const collections = computed(() => loaded.value?.collections ?? [])
 const stayEditor = computed(() => product.value?.kind === 'stay')
 const dishEditor = computed(() => product.value?.kind === 'dish')
-const summaryCards = computed(() => stayEditor.value || dishEditor.value)
+const experienceEditor = computed(() => product.value?.kind === 'experience')
+const summaryCards = computed(() => stayEditor.value || dishEditor.value || experienceEditor.value)
 const ARRIVAL_SECTIONS = ['arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'checkout-instructions', 'arrival-guide']
 const arrivalTab = computed(() => stayEditor.value && (route.query.guide === 'arrival' || ARRIVAL_SECTIONS.includes(detailKey.value ?? '')))
 async function changeStayTab(value: string | number) {
@@ -586,9 +601,9 @@ async function saveArrival(fields: readonly StayArrivalField[], target?: string)
   }
 }
 const runtimeConfig = useRuntimeConfig()
-const previewTitle = computed(() => dishEditor.value ? 'Dish preview' : 'Listing preview')
+const previewTitle = computed(() => dishEditor.value ? 'Dish preview' : experienceEditor.value ? 'Experience preview' : 'Listing preview')
 const previewLocationId = computed(() => typeof route.query.preview_location_id === 'string' ? route.query.preview_location_id : locationId.value)
-const previewNeedsLocation = computed(() => dishEditor.value && !previewLocationId.value)
+const previewNeedsLocation = computed(() => canPreview.value && dishEditor.value && !previewLocationId.value)
 const previewLocationChoices = computed<EditorNavigationGroup[]>(() => [{ id: 'preview-locations', items: allOrganizationLocations.value
   .filter(entry => product.value?.locations.some(placement => placement.location_id === entry.id))
   .map(entry => ({ id: entry.id, label: entry.title, summary: entry.status === 'active' ? 'View the saved dish at this location' : 'Location inactive',
@@ -613,6 +628,7 @@ const productPreviewUrl = computed(() => {
   if (!path) return null
   const url = new URL(path, origin)
   url.searchParams.set('preview_token', token)
+  if (experienceEditor.value && locationScope.value) url.searchParams.set('location_id', locationScope.value)
   return url.toString()
 })
 // Preview is a mode of the editor currently open, so its URL reconstructs the
@@ -624,7 +640,8 @@ const previewViewport = computed(() => route.query.previewViewport === undefined
   : route.query.previewViewport === 'desktop' || route.query.previewViewport === 'mobile' ? route.query.previewViewport : null)
 const previewNavigationError = ref('')
 const previewPath = computed(() => router.resolve({ path: route.path, query: { ...route.query, editMode: 'preview', previewViewport: 'desktop' }, hash: route.hash }).fullPath)
-const previewFailure = computed(() => previewNavigationError.value || loadError.value || (!summaryCards.value ? 'This product does not have a preview here.'
+const previewFailure = computed(() => previewNavigationError.value || loadError.value || (!canPreview.value ? 'Your role does not have access to website previews.'
+  : !summaryCards.value ? 'This product does not have a preview here.'
   : !productPreviewUrl.value ? 'The saved page or its selected location could not be loaded for preview.'
     : !previewViewport.value ? 'Choose Desktop view or Mobile view to open this preview.' : ''))
 const previewOpen = computed({
@@ -637,7 +654,7 @@ async function closePreview() {
     const result = await navigateTo({ path: route.path, query: { ...route.query, editMode: undefined, previewViewport: undefined, preview_location_id: undefined }, hash: route.hash })
     if (isNavigationFailure(result)) throw result
   } catch (error) {
-    previewNavigationError.value = getErrorMessage(error, 'The listing preview could not be closed')
+    previewNavigationError.value = getErrorMessage(error, 'The preview could not be closed')
   }
 }
 async function changePreviewViewport(value: string | number) {
@@ -723,12 +740,14 @@ const { data: scheduleData, error: scheduleFailure, refresh: refreshSchedule } =
 )
 const savedSchedule = computed<ScheduleSlotDraft[]>(() => scheduleData.value ?? [])
 const scheduleError = computed(() => scheduleUnplaced.value
-  ? 'Choose a location, or hold it online, in Meeting location before adding start times.'
+  ? 'Choose a location for the weekly schedule before adding start times.'
   : scheduleFailure.value ? getErrorMessage(scheduleFailure.value, 'Could not load the weekly schedule') : null)
 function savedSlotsFor(weekday: number) { return savedSchedule.value.filter(slot => slot.weekday === weekday) }
 // The draft the weekday leaves edit, seeded from every read of the schedule.
 const schedule = ref<ScheduleSlotDraft[]>([])
-watch(savedSchedule, (rows) => { schedule.value = rows.map(slot => ({ ...slot })) }, { immediate: true })
+watch([scheduleData, scheduleFailure], ([rows, error]) => {
+  if (!error) schedule.value = (rows ?? []).map(slot => ({ ...slot }))
+}, { immediate: true })
 async function reloadSchedule() {
   await refreshSchedule()
   if (scheduleFailure.value) throw scheduleFailure.value
@@ -1029,11 +1048,13 @@ function listSummary(values: readonly string[], empty: string) {
 const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
 /** The assignee by its loaded name; a read failure, a pending read or an unknown id says so. */
 function assignmentSummary(): string {
-  if (!form.assigned_team_id && !form.assigned_member_id) return 'Choose a host'
+  const assignment = isNew.value ? form : product.value?.booking
+  if (!assignment?.assigned_team_id && !assignment?.assigned_member_id) return experienceEditor.value ? 'No host assigned' : 'Choose a host'
   if (schedulingMembersError.value) return 'Team members could not be loaded'
   if (!schedulingMembers.value) return 'Loading team members…'
-  if (form.assigned_team_id) return schedulingMembers.value.teams.find(team => team.id === form.assigned_team_id)?.name ?? 'Assigned team not found in this business'
-  return schedulingMembers.value.members.find(member => member.id === form.assigned_member_id)?.name ?? 'Assigned member not found in this business'
+  if (assignment.assigned_team_id) return schedulingMembers.value.teams.find(team => team.id === assignment.assigned_team_id)?.name ?? 'Assigned team not found in this business'
+  const member = schedulingMembers.value.members.find(member => member.id === assignment.assigned_member_id)
+  return member ? `${member.name}${experienceEditor.value && member.scheduling?.public_approved !== 1 ? ' · Profile not published' : ''}` : 'Assigned member not found in this business'
 }
 
 /**
@@ -1059,10 +1080,19 @@ function priceSummary(): string {
 }
 
 function bookingSummary(): string {
+  const config = product.value?.booking
   // A duration not chosen yet says so; it is never shown as a number.
-  const minutes = form.booking_duration ? `${form.booking_duration} minutes` : 'No duration set'
+  const duration = isNew.value ? form.booking_duration : config?.duration_minutes
+  const minutes = duration ? `${duration} minutes` : 'No duration set'
+  if (experienceEditor.value && config) return [
+    minutes,
+    config.default_capacity === null ? 'No guest limit' : config.default_capacity === 0 ? 'Closed to new guests' : `Up to ${config.default_capacity} ${config.default_capacity === 1 ? 'guest' : 'guests'} per session`,
+    config.scheduling_mode === 'provider' ? 'Host’s working hours' : 'Weekly schedule and dated sessions',
+    config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request',
+    config.online_payment_required ? 'Online payment required for paid sessions' : 'No payment collected at booking',
+  ].join('\n')
   if (!scheduleData.value) return minutes
-  const count = schedule.value.filter(slot => slot.start_time.trim()).length
+  const count = savedSchedule.value.filter(slot => slot.start_time.trim()).length
   return count ? `${minutes} · ${count === 1 ? '1 start time' : `${count} start times`} a week` : `${minutes} · No weekly availability set`
 }
 
@@ -1082,19 +1112,22 @@ function collectionsSummary(): string {
   return names.length ? names.join(', ') : 'Not in a collection'
 }
 
-function dishDetailSummary(key: string): string {
+function detailSummary(key: string): string {
   const value = product.value?.details[key as ProductDetailKey]
   return Array.isArray(value) ? value.join(', ') : typeof value === 'string' ? value : value === true ? 'On' : value === false ? 'Off' : 'Not provided'
 }
 
-function dishLocationSummary(): string {
+function productLocationSummary(): string {
   if (locationsError.value) return getErrorMessage(locationsError.value, 'Locations could not be loaded')
   if (locationsPending.value) return 'Loading locations…'
-  return product.value?.locations.map(entry => {
+  const places = product.value?.locations.map(entry => {
     const place = allOrganizationLocations.value.find(candidate => candidate.id === entry.location_id)
-    if (!place) throw new Error('The dish references a location that could not be loaded')
+    if (!place) throw new Error('The product references a location that could not be loaded')
+    if (experienceEditor.value) return [place.title, ...(place.status === 'active' ? [] : ['Location inactive']), ...(entry.active ? [] : ['Bookings paused']), ...(entry.published ? [] : ['Hidden at this location'])].join(' · ')
     return `${place.title}${place.status !== 'active' ? ' · Location inactive' : !entry.active ? ' · Orders paused' : !entry.published ? ' · Hidden from this menu' : ''}`
-  }).join('\n') || 'Not offered at a location'
+  }) ?? []
+  if (experienceEditor.value && product.value?.booking?.held_online) places.push('Online')
+  return places.join('\n') || 'Not offered at a location'
 }
 
 const navigationGroups = computed<EditorNavigationGroup[]>(() => {
@@ -1109,11 +1142,48 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   }]
   // A product that failed to load has nothing to summarize; the level shows the failure.
   if (!product.value || loadError.value) return []
-  if (dishEditor.value) {
+  if (dishEditor.value || experienceEditor.value) {
     const row = product.value
+    const prices = row.variants.map(variant => {
+      const amount = formatProductMoney(selectPrice(variant.prices, { currency, location_id: locationId.value, at: new Date().toISOString() }))
+      const price = row.variants.length > 1 ? `${variant.name}: ${amount || 'No price set'}` : amount || (typeof row.details.pricing_note === 'string' ? row.details.pricing_note : 'No price set')
+      return `${price}${experienceEditor.value && !variant.active ? ' · Unavailable' : ''}`
+    }).join('\n') || 'No price set'
+    if (experienceEditor.value) {
+      const detailKeys = ['meeting_point', 'included_items', 'what_to_bring', 'preparation', 'cancellation_policy']
+      const fields = productDetailFields(row.kind)
+      const details = fields.filter(field => detailKeys.includes(field.key)).map(field => ({
+        id: field.key, label: field.name, icon: field.icon, summary: detailSummary(field.key), placeholder: row.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`),
+      }))
+      const detailNames = fields.filter(field => ![...detailKeys, PRICING_NOTE_HANDLE].includes(field.key)
+        && row.details[field.key] !== undefined && row.details[field.key] !== false).map(field => field.name)
+      const sections = row.collections.map(membership => {
+        const collection = collections.value.find(entry => entry.id === membership.collection_id)
+        if (!collection) throw new Error('The experience references a collection that could not be loaded')
+        return collection.name
+      })
+      const cover = photoAssets.value[0]
+      return [{ id: 'experience', items: [
+        { id: 'photo', label: 'Photos', image: cover ? mediaStillUrl(cover) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'No photo', placeholder: !photoAssets.value.length, to: sectionPath('photo') },
+        { id: 'name', label: 'Name', summary: row.name, to: sectionPath('name') },
+        { id: 'description', label: sectionLabels.description, summary: row.description || 'Nothing written yet', placeholder: !row.description, to: sectionPath('description') },
+        { id: 'price', label: location.value ? `Price at ${location.value.title}` : 'Price', summary: prices, placeholder: prices === 'No price set', to: pricePath.value },
+        { id: 'options', label: 'Options', summary: row.options.map(option => `${option.name}: ${option.values.map(value => value.value).join(', ')}`).join('\n') || (row.variants.length > 1 ? `${row.variants.length} variants` : 'One version'), to: sectionPath('options') },
+        { id: 'assignment', label: 'Host', icon: 'i-lucide-user-round', summary: row.booking ? assignmentSummary() : 'Set up bookings first', placeholder: !row.booking || !row.booking.assigned_team_id && !row.booking.assigned_member_id, to: sectionPath(row.booking ? 'booking/assignment' : 'booking') },
+        { id: 'booking', label: 'Bookings', icon: 'i-lucide-calendar-check', summary: row.booking ? bookingSummary() : 'No booking calendar', placeholder: !row.booking, to: sectionPath('booking') },
+        { id: 'locations', label: 'Locations', icon: 'i-lucide-map-pin', summary: productLocationSummary(), placeholder: !row.locations.length && !row.booking?.held_online, to: sectionPath('locations') },
+        ...details,
+        { id: 'publication', label: 'Website visibility', summary: publicationSummary(), status: published.value && row.active ? 'success' as const : 'neutral' as const, to: sectionPath('publication') },
+        { id: 'order-url', label: sectionLabels['order-url'], summary: row.order_url || 'No external booking link', placeholder: !row.order_url, to: sectionPath('order-url') },
+        ...(row.page ? [{ id: 'page', label: 'Page content', summary: row.page.path, to: `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(row.page.id)}` }] : []),
+        { id: 'attributes', label: 'More details', summary: detailNames.join(', ') || 'No other details provided', placeholder: !detailNames.length, to: sectionPath('attributes') },
+        { id: 'collections', label: sectionLabels.collections, summary: sections.join('\n') || 'Not in a collection', placeholder: !sections.length, to: sectionPath('collections') },
+        { id: 'kind', label: 'Type', summary: PRODUCT_KIND_LABELS[row.kind], to: sectionPath('kind') },
+      ] }]
+    }
     const food = ['dietary_notes', 'allergens', 'ingredients'].map(key => {
       const field = definitions.value.find(entry => entry.key === key)!
-      return { id: key, label: field.name, icon: field.icon, summary: dishDetailSummary(key), placeholder: row.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`) }
+      return { id: key, label: field.name, icon: field.icon, summary: detailSummary(key), placeholder: row.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`) }
     })
     const detailNames = definitions.value.filter(field => !['dietary_notes', 'allergens', 'ingredients', PRICING_NOTE_HANDLE].includes(field.key)
       && row.details[field.key] !== undefined && row.details[field.key] !== false).map(field => field.name)
@@ -1122,10 +1192,6 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       if (!section) throw new Error('The dish references a menu section that could not be loaded')
       return section.name
     })
-    const prices = row.variants.map(variant => {
-      const amount = formatProductMoney(selectPrice(variant.prices, { currency, location_id: locationId.value, at: new Date().toISOString() }))
-      return row.variants.length > 1 ? `${variant.name}: ${amount || 'No price set'}` : amount || (typeof row.details.pricing_note === 'string' ? row.details.pricing_note : 'No price set')
-    }).join('\n') || 'No price set'
     return [{ id: 'dish', items: [
       { id: 'photo', label: 'Photos', image: image ? mediaStillUrl(image) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'Add your first photo', placeholder: !image, to: sectionPath('photo') },
       { id: 'name', label: 'Name', summary: row.name, to: sectionPath('name') },
@@ -1134,7 +1200,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       ...food,
       { id: 'options', label: 'Options and portions', summary: row.options.map(option => `${option.name}: ${option.values.map(value => value.value).join(', ')}`).join('\n') || 'One version', to: sectionPath('options') },
       { id: 'collections', label: 'Menu sections', summary: sections.join('\n') || 'Not in a menu section', placeholder: !sections.length, to: sectionPath('collections') },
-      { id: 'locations', label: 'Locations', summary: dishLocationSummary(), placeholder: !row.locations.length, to: sectionPath('locations') },
+      { id: 'locations', label: 'Locations', summary: productLocationSummary(), placeholder: !row.locations.length, to: sectionPath('locations') },
       { id: 'publication', label: 'Website visibility', summary: publicationSummary(), status: published.value && row.active ? 'success' as const : 'neutral' as const, to: sectionPath('publication') },
       { id: 'order-url', label: 'Ordering link', summary: row.order_url || 'No external ordering link', placeholder: !row.order_url, to: sectionPath('order-url') },
       { id: 'attributes', label: 'More food information', summary: detailNames.join(', ') || 'Add details', placeholder: !detailNames.length, to: sectionPath('attributes') },
@@ -1256,6 +1322,12 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       },
     ].sort((left, right) => rowRank(left.id) - rowRank(right.id)),
   }]
+})
+
+const activeNavigationItem = computed(() => {
+  const directDetail = typeof route.params.definitionId === 'string' ? route.params.definitionId : null
+  if (detailKey.value === 'attributes' && directDetail && navigationGroups.value.some(group => group.items.some(item => item.id === directDetail))) return directDetail
+  return experienceEditor.value && detailKey.value === 'booking' && route.params.concern === 'assignment' ? 'assignment' : detailKey.value
 })
 
 /**
@@ -1532,7 +1604,7 @@ const { title: newTitle, firstStep, saveLabel: createSaveLabel, saveDisabled, sa
   commit,
 })
 
-const pageTitle = computed(() => isNew.value ? newTitle.value : form.name || itemLabel.value)
+const pageTitle = computed(() => isNew.value ? newTitle.value : (experienceEditor.value ? product.value?.name : form.name) || itemLabel.value)
 
 // Saving content and publishing the listing are separate owner decisions.
 const saveLabel = computed(() => createSaveLabel.value ?? 'Save')
@@ -1546,7 +1618,18 @@ async function save(target?: string, concern?: ProductConcern) {
 
 async function commit(concern?: ProductConcern) {
   const id = locationId.value
+  const removesOnlineScope = locationScope.value === 'online' && (concern === 'location' && !form.held_online || concern === 'enabled' && !form.bookable)
   let ordinaryDraft: { version: string | null; values: ProductForm } | null = null
+  const bookingDraft: Partial<ProductForm> | null = concern === 'enabled' ? { bookable: form.bookable }
+    : concern === 'duration' ? { booking_duration: form.booking_duration }
+    : concern === 'capacity' ? { booking_capacity: form.booking_capacity }
+    : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
+    : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
+    : concern === 'payment' ? { online_payment_required: form.online_payment_required }
+    : concern === 'location' ? { held_online: form.held_online }
+    : null
+  const scheduleDraft = typeof concern === 'number' ? schedule.value.map(slot => ({ ...slot })) : null
+  const bookingVersion = bookingDraft || scheduleDraft ? editVersion.value : null
   const publicationDraft = concern === 'publication-visibility' ? form.published : concern === 'publication-availability' ? form.active : null
   const propertyDraft = !isNew.value && editorKey.value === 'property-type' ? {
     stay_property_type_group: form.stay_property_type_group,
@@ -1629,6 +1712,14 @@ async function commit(concern?: ProductConcern) {
         method: 'PATCH', body: payload(), validate: isMutation,
       })
     }
+    if (removesOnlineScope) {
+      const result = await navigateTo({ path: route.path, query: { ...route.query, location_id: undefined }, hash: route.hash }, { replace: true })
+      if (isNavigationFailure(result)) throw result
+      if (closeTo.value) {
+        const destination = router.resolve(closeTo.value)
+        closeTo.value = router.resolve({ path: destination.path, query: { ...destination.query, location_id: undefined }, hash: destination.hash }).fullPath
+      }
+    }
     await reload()
     if (concern === 'additional-rules' || concern === 'arrival-time') restoreHouseRules(false)
     // A booking write changes what the schedule is: its start times, whether the
@@ -1637,8 +1728,11 @@ async function commit(concern?: ProductConcern) {
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
-    if (ordinaryDraft || locationDraft || safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
-      try { await reload() } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
+    if (ordinaryDraft || bookingDraft || scheduleDraft || locationDraft || safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+      try {
+        await reload()
+        if (scheduleDraft) await reloadSchedule()
+      } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
     }
     if (ordinaryDraft) {
       const draft = ordinaryDraft.values
@@ -1651,6 +1745,9 @@ async function commit(concern?: ProductConcern) {
       if (editorKey.value === 'locations') form.locations = draft.locations
       editVersion.value = ordinaryDraft.version
     }
+    if (bookingDraft) Object.assign(form, bookingDraft)
+    if (scheduleDraft) schedule.value = scheduleDraft
+    if (bookingDraft || scheduleDraft) editVersion.value = bookingVersion
     // A failed response may follow a committed write. Saved summaries
     // re-read it, while the failed leaf retains the choice it submitted.
     if (concern === 'publication-visibility' && publicationDraft !== null) form.published = publicationDraft
@@ -2077,6 +2174,7 @@ provide(productEditorKey, {
   stayLocation,
   stayLocationError,
   organizationLocations,
+  allOrganizationLocations: computed(() => allOrganizationLocations.value),
   organizationLocationsError: computed(() => locationsError.value ? getErrorMessage(locationsError.value, 'Locations could not be loaded') : null),
   collections,
   sectionPath,
@@ -2116,6 +2214,7 @@ provide(productEditorKey, {
   textValue,
   weekdays: WEEKDAYS,
   scheduleError,
+  reloadSchedule,
   savedSlotsFor,
   slotsFor,
   addSlot,

@@ -419,8 +419,8 @@ A counter
 (`44/50 available`) sits above the field in `text-sm`. `hint` exists only for
 `Optional`.
 
-**The index shows saved facts; the leaf owns the draft.** The lodging listing
-and Restaurant dish editors use saved-summary cards in `EditorNavigationList`;
+**The index shows saved facts; the leaf owns the draft.** The lodging listing,
+Restaurant dish and Experience editors use saved-summary cards in `EditorNavigationList`;
 menu sections use the same component for their saved name, description and
 photo. Show the actual image, price, membership and state, including No photo,
 No price set, unavailable and unpublished. For a saved record, a draft must not
@@ -866,7 +866,7 @@ snapshot leaves both sections unchanged, shows the conflict and offers Use
 current items; completion reads both saved orders through the full organization
 catalog. Visible location scope never replaces that membership owner.
 
-**Preview is the saved guest surface.** The lodging listing and Restaurant dish
+**Preview is the saved guest surface.** The lodging listing, Restaurant dish and Experience
 View action opens the real tenant page with its authorized preview token;
 Desktop and Mobile change the viewport of that same page. It is not a second
 rendering of the form draft, and opening it does not publish the record or
@@ -878,6 +878,25 @@ choose from its actual assigned locations. Never substitute the first
 candidate. Inactive locations retain their name and state, and an invalid
 location or unreadable page produces a visible failure. Closing preview returns
 to the same editor concern and restores its View control.
+
+An Experience uses its real `/experiences/:slug` page. Preserve the editor's
+explicit physical or online scope; an unscoped preview uses that page's existing
+booking-scope chooser. The website preview token requires organization-wide
+content access; an assigned host keeps their Product editor without receiving
+a token for other unpublished pages.
+
+**Experience details are guest decisions, not another model.** What you’ll do
+edits Product description. Where to meet, What is included, What to bring,
+Before you arrive and Cancellation policy open the existing Product detail
+editors directly. A cancellation description explains the host's terms; it
+does not configure an automatic refund policy.
+
+Physical start times belong to an explicit saved location. Weekly schedule and
+Dated sessions offer those locations by name and retain inactive, paused and
+hidden facts. Choosing a location changes the editor's scope, never its
+memberships. Adding a dated session requires an active physical location and
+its time zone. Online sessions use the assigned host's existing working hours;
+`online` is a public booking scope, never a physical Location or Price ID.
 
 **A control must not be able to build an invalid state.** If the server rejects
 a combination, the form should make it unrepresentable rather than allow it and

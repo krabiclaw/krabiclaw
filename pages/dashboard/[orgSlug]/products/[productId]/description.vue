@@ -25,7 +25,7 @@
   >
     <template v-if="p.isNew.value || p.product.value">
       <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/{{ PRODUCT_LIMITS.description }} available</p>
-      <UTextarea v-model="p.form.description" aria-label="Description" :rows="10" :maxlength="PRODUCT_LIMITS.description" autofocus class="w-full" />
+      <UTextarea v-model="p.form.description" :aria-label="p.sectionLabels.description" :rows="10" :maxlength="PRODUCT_LIMITS.description" autofocus class="w-full" />
     </template>
   </DashboardLeafPanel>
 </template>

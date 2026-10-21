@@ -349,7 +349,7 @@ for (const target of [
     await loginAs(page.request, baseURL!)
     const editor = `/api/editor/organizations/${target.org}/products`
     const inheritedPriceTerms = { tax_behavior: 'inclusive', compare_at_unit_amount: 200000, valid_from_at: '2020-01-01T00:00:00.000Z', valid_until_at: '2099-01-01T00:00:00.000Z' }
-    const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: 'THB', ...(target.kind === 'dish' ? inheritedPriceTerms : {}) }] }] } })
+    const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : target.experience ? `Clay & wheel workshop ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: 'THB', ...(target.kind === 'dish' ? inheritedPriceTerms : {}) }] }] } })
     expect(created.status(), await created.text()).toBe(201)
     const product = (await created.json() as { product: Product }).product
     try {
@@ -363,7 +363,7 @@ for (const target of [
       const detail = target.kind === 'dish' ? 'Vegetarian' : target.kind === 'experience' ? 'Arrive ten minutes before your class' : 'Hand wash in cold water'
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/attributes/${field}`)
       await page.getByRole('textbox', { name: label, exact: true }).fill(detail)
-      const description = 'Finished with roasted sesame and seasonal greens.'
+      const description = target.experience ? 'Shape your own bowl on the pottery wheel, then finish it with a hand-painted glaze.' : 'Finished with roasted sesame and seasonal greens.'
       if (target.kind === 'dish') {
         await page.getByRole('textbox', { name: label, exact: true }).press('Enter')
         const loaded = await page.request.get(`${editor}/${product.id}`)
@@ -395,6 +395,42 @@ for (const target of [
       await expect(page).toHaveURL(new RegExp(`/products/${product.id}/attributes$`))
       const locations = await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: true, published: true } })
       expect(locations.status(), await locations.text()).toBe(200)
+      if (target.experience) {
+        await page.setViewportSize({ width: 1440, height: 900 })
+        await page.goto(`/dashboard/${target.slug}/products/${product.id}/description?location_id=${target.location}`)
+        const cards = page.getByTestId('experience-editor-cards')
+        await expect(cards.getByTestId('editor-card-preparation')).toContainText(detail)
+        await expect(cards.getByTestId('editor-card-description')).toContainText('Nothing written yet')
+        await page.getByRole('textbox', { name: 'What you’ll do', exact: true }).fill(description)
+        await expect(cards.getByTestId('editor-card-description')).toContainText('Nothing written yet')
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
+        await expect(page).toHaveURL(`/dashboard/${target.slug}/products/${product.id}/photo?location_id=${target.location}`)
+        await expect(cards.getByTestId('editor-card-description')).toContainText(description)
+        await expect(cards.getByTestId('editor-card-preparation')).toHaveAttribute('href', `/dashboard/${target.slug}/products/${product.id}/attributes/preparation?location_id=${target.location}`)
+        await page.screenshot({ path: testInfo.outputPath('experience-editor-desktop.png'), fullPage: true, animations: 'disabled' })
+        // Draft preview uses the existing tenant Experience page and explicit
+        // public scope without publishing the offering or choosing another place.
+        const view = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
+        await view.click()
+        const preview = page.getByRole('dialog', { name: 'Experience preview', exact: true })
+        const iframe = preview.locator('iframe[title="Experience preview"]')
+        await expect(iframe).toBeVisible()
+        const previewURL = new URL((await iframe.getAttribute('src'))!)
+        expect(previewURL.pathname).toBe(`/experiences/${product.slug}`)
+        expect(previewURL.searchParams.get('location_id')).toBe(target.location)
+        expect(previewURL.searchParams.get('preview_token')).toBeTruthy()
+        const guest = iframe.contentFrame()
+        await expect(guest.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
+        await expect(guest.getByText(description, { exact: true })).toBeVisible()
+        await expect(guest.getByText(detail, { exact: true })).toBeVisible()
+        await preview.getByRole('tab', { name: 'Mobile view', exact: true }).click()
+        await expect(iframe).toHaveJSProperty('clientWidth', 390)
+        await expect(iframe).toHaveAttribute('src', previewURL.href)
+        await page.screenshot({ path: testInfo.outputPath('experience-preview-mobile.png'), fullPage: true, animations: 'disabled' })
+        await preview.getByRole('button', { name: 'Close', exact: true }).click()
+        await expect(preview).toBeHidden()
+        await expect(view).toBeFocused()
+      }
       if (target.kind === 'dish') {
         await page.goto(`/dashboard/${target.slug}/products/${product.id}/price?location_id=${target.location}`)
         await expect(page.getByTestId('product-price')).toHaveValue('1200.00')
@@ -416,6 +452,7 @@ for (const target of [
       const viaMcp = mcpData<{ product: Product }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(viaMcp.kind).toBe(target.kind)
       expect(viaMcp.details[field]).toEqual(target.kind === 'dish' ? [detail] : detail)
+      if (target.experience) expect(viaMcp.description).toBe(description)
       if (target.kind === 'dish') {
         expect(viaMcp.description).toBe(description)
         expect(viaMcp.variants).toHaveLength(1)
