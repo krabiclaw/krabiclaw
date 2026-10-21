@@ -249,7 +249,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByRole('heading', { name: products[0]!.name, exact: true, level: 1 })).toBeVisible()
     await expect(page.getByText('Free', { exact: true }).filter({ visible: true }).first()).toBeVisible()
     await expect(page.getByText('Staff review', { exact: true }).first()).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Upcoming availability', exact: true })).toBeVisible()
+    const availableTimes = page.getByRole('button', { name: /^Select a time / })
+    await expect(availableTimes).toHaveCount(4)
+    for (const choice of await availableTimes.all()) await expect(choice).toBeVisible()
     const pageTimezone = page.getByRole('button', { name: 'Time zone', exact: true })
     await expect(pageTimezone).toContainText('(America/New_York)')
     await pageTimezone.click()
@@ -279,7 +281,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     const providerSection=page.locator('section[aria-label="Meet your host"]')
     await waitForNuxtHydration(page)
     const failedProvider=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
-    await page.getByRole('button',{name:/^Select a time /}).first().click()
+    await availableTimes.first().click()
     expect((await failedProvider).status()).toBe(503)
     await page.getByRole('button',{name:'Close booking form',exact:true}).click()
     await expect(providerSection.getByText('Profile could not be loaded',{exact:true})).toBeVisible()
@@ -303,12 +305,13 @@ test('native online review uses canonical Products, holds capacity, and releases
     // This existing fixture has one cover and seven authored gallery placements.
     expect(gallery).toHaveLength(8)
     expect(gallery.map((media: { public_url: string; kind: string; thumbnail_url: string | null }) => ({ url: media.public_url, kind: media.kind, poster: media.thumbnail_url }))).toEqual(storedGallery.map(media => ({ url: media.public_url, kind: media.kind, poster: media.thumbnail_url })))
-    const visibleTiles = page.locator('[data-media-gallery] button')
-    await expect(visibleTiles).toHaveCount(4)
+    const visibleTiles = page.locator('[data-media-gallery]').getByRole('button', { name: `Open media, ${products[0]!.name}`, exact: true })
+    await expect(visibleTiles).toHaveCount(5)
+    await expect(page.locator('[data-media-gallery]').getByRole('button', { name: 'Show all 8 photos', exact: true })).toBeVisible()
     const tileBounds = await visibleTiles.evaluateAll(tiles => tiles.map(tile => { const box = tile.getBoundingClientRect(); const frame = tile.closest('[data-media-gallery]')!.getBoundingClientRect(); return { top: box.top - frame.top, bottom: box.bottom - frame.top, height: frame.height } }))
     expect(tileBounds.every(tile => tile.top >= 0 && tile.bottom <= tile.height + 1)).toBe(true)
     const lightbox = page.getByRole('dialog', { name: products[0]!.name, exact: true })
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < 5; index++) {
       await visibleTiles.nth(index).click()
       await expect(lightbox.locator('section').nth(index).locator('img').last()).toBeInViewport()
       await lightbox.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
@@ -489,15 +492,21 @@ test('native online review uses canonical Products, holds capacity, and releases
       await expect(page.locator('[data-media-gallery]')).toHaveCount(1)
       await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
       await page.goto('/schedule')
-      await expect(page.getByRole('combobox', { name: 'Service', exact: true })).toHaveCount(mode === 'native' ? 1 : 0)
+      await expect(page.getByRole('combobox', { name: 'Service', exact: true })).toHaveCount(0)
       await expect(page.locator('#consultations')).toHaveCount(mode === 'native' ? 1 : 0)
       expect(await scheduleBlocks.evaluateAll(elements => elements.map(element => element.getAttribute('data-block-type')))).toEqual(authoredSchedule.blocks.map(block => block.type))
-      if (mode === 'external_url') {
-        const externalAction = page.locator('main > div').getByRole('link', { name: modeShell.consultation!.cta_label, exact: true })
+      if (mode === 'native') {
+        await expect(consultationCard).toBeVisible()
+        await expect(consultationCard).toHaveAttribute('href', service.path)
+      } else if (mode === 'external_url') {
+        const authoredLabel = authoredSchedule.blocks[heroIndex]!.data.cta_label
+        const expectedLabel = typeof authoredLabel === 'string' && authoredLabel.trim() ? authoredLabel.trim() : modeShell.consultation!.cta_label
+        expect(expectedLabel).toBeTruthy()
+        const externalAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: expectedLabel, exact: true })
         await expect(externalAction).toHaveCount(1)
         await expect(externalAction).toHaveAttribute('href', modeShell.consultation!.external_url!)
       } else if (mode === 'native_disabled') {
-        const contactAction = page.locator('main > div').getByRole('link', { name: 'Contact', exact: true })
+        const contactAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)
         await expect(contactAction).toHaveAttribute('href', '/contact')
       }
