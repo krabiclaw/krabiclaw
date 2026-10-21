@@ -348,7 +348,8 @@ for (const target of [
     test.skip(!writableEnvironment, 'External checkout verification writes only local disposable products')
     await loginAs(page.request, baseURL!)
     const editor = `/api/editor/organizations/${target.org}/products`
-    const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: 'THB' }] }] } })
+    const inheritedPriceTerms = { tax_behavior: 'inclusive', compare_at_unit_amount: 200000, valid_from_at: '2020-01-01T00:00:00.000Z', valid_until_at: '2099-01-01T00:00:00.000Z' }
+    const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: 'THB', ...(target.kind === 'dish' ? inheritedPriceTerms : {}) }] }] } })
     expect(created.status(), await created.text()).toBe(201)
     const product = (await created.json() as { product: Product }).product
     try {
@@ -420,8 +421,9 @@ for (const target of [
         expect(viaMcp.variants).toHaveLength(1)
         expect(viaMcp.variants[0]!.id).toBe(product.variants[0]!.id)
         expect(viaMcp.variants[0]!.prices).toHaveLength(2)
-        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: 'THB', location_id: null }))
-        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ unit_amount: 135000, currency: 'THB', location_id: target.location }))
+        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: 'THB', location_id: null }))
+        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, unit_amount: 135000, currency: 'THB', location_id: target.location }))
+        expect(viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id).not.toBe(product.variants[0]!.prices[0]!.id)
       }
       const publicPath = target.experience ? `/experiences/${product.slug}` : `/locations/${target.locationSlug}/${target.kind === 'dish' ? 'menu' : 'products'}/${product.slug}`
       await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
@@ -452,8 +454,10 @@ for (const target of [
       const savedProduct = (await saved.json() as { product: PublicProduct }).product
       expect(savedProduct.order_url).toBe(externalUrl)
       if (target.kind === 'dish') {
-        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ unit_amount: 135000, currency: 'THB', location_id: target.location }))
-        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: 'THB', location_id: null }))
+        expect(savedProduct.variants[0]!.id).toBe(product.variants[0]!.id)
+        expect(savedProduct.variants[0]!.prices).toHaveLength(2)
+        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id, unit_amount: 135000, currency: 'THB', location_id: target.location }))
+        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: 'THB', location_id: null }))
       }
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/publication/availability`)
       const availability = page.getByRole('switch', { name: target.experience ? 'Accept bookings' : 'Accept orders', exact: true })

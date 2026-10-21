@@ -1302,6 +1302,16 @@ watchEffect(() => {
 })
 
 // ── Save / cancel ───────────────────────────────────────
+function carryPrice(price: Price) {
+  return {
+    id: price.id, unit_amount: price.unit_amount, currency: price.currency, location_id: price.location_id,
+    active: price.active, type: price.type, recurring_interval: price.recurring_interval,
+    recurring_interval_count: price.recurring_interval_count, tax_behavior: price.tax_behavior,
+    compare_at_unit_amount: price.compare_at_unit_amount, valid_from_at: price.valid_from_at,
+    valid_until_at: price.valid_until_at, source: price.source,
+  }
+}
+
 /** The options, variants and prices this form is describing, exactly as they would be sent. */
 function buildCatalog() {
   const declaredOptions = form.options.filter(option => option.name.trim() && option.values.length)
@@ -1315,25 +1325,19 @@ function buildCatalog() {
   // its own id, so editing the one amount on screen cannot silently retire the
   // ones that are not.
   const selection = { currency, location_id: priceLocationId(), at: new Date().toISOString() }
-  const carry = (price: Price) => ({
-    id: price.id, unit_amount: price.unit_amount, currency: price.currency, location_id: price.location_id,
-    active: price.active, type: price.type, recurring_interval: price.recurring_interval,
-    recurring_interval_count: price.recurring_interval_count, tax_behavior: price.tax_behavior,
-    compare_at_unit_amount: price.compare_at_unit_amount, valid_from_at: price.valid_from_at,
-    valid_until_at: price.valid_until_at, source: price.source,
-  })
   const priceFor = (variant: VariantDraft) => {
     const typed = variant.price_major.trim()
-    if (typed === variant.loaded_price_major.trim()) return variant.prices.map(carry)
+    if (typed === variant.loaded_price_major.trim()) return variant.prices.map(carryPrice)
     const governing = selectPrice(variant.prices.filter(price => price.location_id === selection.location_id), selection)
     // An empty box is not a price of zero. Zero is typed, and means free.
-    if (!typed) return variant.prices.filter(price => price.id !== governing?.id).map(carry)
+    if (!typed) return variant.prices.filter(price => price.id !== governing?.id).map(carryPrice)
     if (!governing) {
-      return [...variant.prices.map(carry), { unit_amount: majorAmountToMinor(typed, currency), currency, location_id: priceLocationId() }]
+      const displayed = selectPrice(variant.prices, selection)
+      return [...variant.prices.map(carryPrice), { ...(displayed ? carryPrice(displayed) : {}), id: undefined, unit_amount: majorAmountToMinor(typed, currency), currency, location_id: priceLocationId() }]
     }
     return variant.prices.map(price => (price.id === governing.id
-      ? { ...carry(price), unit_amount: majorAmountToMinor(typed, price.currency) }
-      : carry(price)))
+      ? { ...carryPrice(price), unit_amount: majorAmountToMinor(typed, price.currency) }
+      : carryPrice(price)))
   }
   const options = declaredOptions.map((option, index) => ({
       id: option.id.startsWith('new-option-') ? undefined : option.id,
@@ -1384,9 +1388,10 @@ function payload(concern?: ProductConcern) {
       if (!variant?.id) throw new Error('Choose a saved variant before editing its price.')
       const selection = { currency, location_id: priceLocationId(), at: new Date().toISOString() }
       const governing = selectPrice(variant.prices.filter(price => price.location_id === selection.location_id), selection)
+      const displayed = selectPrice(variant.prices, selection)
       const typed = variant.price_major.trim()
       const prices = typed === variant.loaded_price_major.trim() ? [] : typed
-        ? [governing ? { id: governing.id, unit_amount: majorAmountToMinor(typed, currency) } : { unit_amount: majorAmountToMinor(typed, currency), currency, location_id: selection.location_id }]
+        ? [governing ? { id: governing.id, unit_amount: majorAmountToMinor(typed, currency) } : { ...(displayed ? carryPrice(displayed) : {}), id: undefined, unit_amount: majorAmountToMinor(typed, currency), currency, location_id: selection.location_id }]
         : governing ? [{ id: governing.id, active: false }] : []
       return { ...version, ...(prices.length ? { variants: [{ id: variant.id, prices }] } : {}),
         ...(editorKey.value === 'price' ? { details_mode: 'merge', details: { [PRICING_NOTE_HANDLE]: form.details[PRICING_NOTE_HANDLE] || null } } : {}),
