@@ -1752,6 +1752,25 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
     .toEqual(uploadedPhotos.map(photo => ({ id: photo.id, status: 'active' })).sort((a, b) => a.id.localeCompare(b.id)))
   await page.reload()
   await expect(photoOverview.getByTestId('stay-additional-photos')).toContainText('1 photo')
+  // Append a retained library asset directly to an authored room through the
+  // picker. The native write must save the placement and membership together.
+  const detached = await request.delete(api(`stay-homes/${productId}/photos/${green.id}`), { headers: authRequestHeaders(baseURL!) })
+  expect(detached.status(), await detached.text()).toBe(200)
+  await page.goto(`${photoPath}/rooms/${bedroomId}`)
+  await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
+  await addBedroomPhotos.getByRole('button', { name: 'Add from media library', exact: true }).click()
+  const libraryPicker = page.getByRole('dialog', { name: 'Add photos', exact: true })
+  await libraryPicker.locator(`img[src="${green.url}"]`).click()
+  const roomAppend = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos` && response.request().method() === 'POST')
+  await libraryPicker.getByRole('button', { name: 'Done', exact: true }).click()
+  const appended = await roomAppend
+  expect(appended.status(), await appended.text()).toBe(201)
+  await expect(addBedroomPhotos).not.toBeVisible()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(3)
+  const afterLibraryRoomAppend = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterLibraryRoomAppend.error).toBeNull()
+  expect(afterLibraryRoomAppend.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id, green.id] }])
+  expect([afterLibraryRoomAppend.data!.product.image!.asset_id, ...afterLibraryRoomAppend.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, blue.id, green.id])
   expect(pageErrors).toEqual([])
 })
 

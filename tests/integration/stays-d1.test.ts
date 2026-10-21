@@ -496,7 +496,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     await assert.rejects(moveStayPhotos(db, env, manager, cabin.id, { room_id: roomA.id, photos: [{ photo_id: 'room-library', expected_room_id: null }] }), { status: 404, data: { code: 'PHOTO_NOT_FOUND', field: 'photo_id' } })
 
     const beforeRoomAppend = await getProduct(db, ORG, cabin.id)
-    const beforeAppendPlacements = await db.prepare("SELECT * FROM media_placements WHERE organization_id = ? AND owner_type = 'product' AND owner_id = ? ORDER BY slot, sort_order").bind(ORG, cabin.id).all()
+    const { results: beforeAppendPlacements } = await db.prepare("SELECT * FROM media_placements WHERE organization_id = ? AND owner_type = 'product' AND owner_id = ? ORDER BY slot, sort_order").bind(ORG, cabin.id).all()
     await assert.rejects(addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-library', room_id: foreignRoom.room.id }), { status: 404, data: { code: 'PHOTO_ROOM_NOT_FOUND', field: 'room_id' } })
     // A room removed or changed after validation must fail in the same batch
     // as the Product placements, leaving no Additional photo behind.
@@ -505,7 +505,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
       roomAssignment: { assetId: 'room-library', roomId: foreignRoom.room.id },
     }), { status: 409, data: { code: 'PHOTOS_CHANGED', field: 'photos' } })
     assert.deepEqual(await getProduct(db, ORG, cabin.id), beforeRoomAppend)
-    assert.deepEqual(await db.prepare("SELECT * FROM media_placements WHERE organization_id = ? AND owner_type = 'product' AND owner_id = ? ORDER BY slot, sort_order").bind(ORG, cabin.id).all(), beforeAppendPlacements)
+    assert.deepEqual((await db.prepare("SELECT * FROM media_placements WHERE organization_id = ? AND owner_type = 'product' AND owner_id = ? ORDER BY slot, sort_order").bind(ORG, cabin.id).all()).results, beforeAppendPlacements)
     await addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-library', room_id: roomA.id })
     const appendedRoomPhoto = await getProduct(db, ORG, cabin.id)
     assert.deepEqual(appendedRoomPhoto.stay?.photo_rooms, [{ ...roomA, photo_ids: ['room-library'] }, roomB])
