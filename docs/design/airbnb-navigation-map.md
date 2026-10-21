@@ -588,3 +588,28 @@ catalog. The observed Adjust pin mode adds map pan controls and a Save action.
 The owner explicitly chose to skip draggable-map work to avoid introducing new
 Maps JavaScript billing/key setup; existing embedded maps and address controls
 remain the intended scope.
+
+The remaining lodging implementation was verified against a production Worker
+on October 21. Thirteen distinct browser journeys passed: six lodging host/guest
+flows, three dish/item/experience CMS-to-MCP/public flows, the shared social
+viewer and native video controls, and Pottery House/North Carolina Legal Services
+home/detail routes. The focused listing and room journeys passed in 44.9 and
+32.6 seconds within their unchanged 60-second budgets. The final two rechecks
+corrected strict Home response expectations and exercised the existing mobile
+Back control; the approved desktop pair retains its single left-column Back.
+
+New fictional host/guest evidence includes listing accessibility
+([desktop](airbnb/screenshots/host-home-accessibility-desktop.png),
+[mobile](airbnb/screenshots/host-home-accessibility-mobile.png)), Bedroom
+accessibility ([saved summary](airbnb/screenshots/host-room-accessibility-desktop.png),
+[mobile editor](airbnb/screenshots/host-room-accessibility-feature-mobile.png)),
+guest evidence ([desktop](airbnb/screenshots/guest-home-accessibility-desktop.png),
+[mobile](airbnb/screenshots/guest-home-accessibility-mobile.png)), alarm answers
+([desktop](airbnb/screenshots/host-alarm-answers-desktop.png),
+[mobile](airbnb/screenshots/host-alarm-answers-mobile.png)) and
+[alarm details](airbnb/screenshots/host-alarm-description-mobile.png),
+neighborhood text ([desktop](airbnb/screenshots/host-location-neighborhood-desktop.png),
+[mobile](airbnb/screenshots/host-location-neighborhood-mobile.png)) and
+[scenic views](airbnb/screenshots/host-location-scenic-views-desktop.png).
+Solid-color photos are deliberate real-upload test images; they identify
+original gallery order and evidence membership without using customer images.
