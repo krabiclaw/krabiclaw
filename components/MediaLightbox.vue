@@ -1,61 +1,87 @@
 <template>
-  <Teleport to="body">
-    <div ref="lightboxRoot" v-if="openModel" class="fixed inset-0 z-100 h-dvh w-full overflow-hidden bg-black text-white" role="dialog" aria-modal="true" :aria-label="title || 'Media Lightbox'">
-      <!-- Header -->
-      <div class="absolute inset-x-0 top-0 z-30 flex items-center gap-3 px-4 pt-4 pb-4 bg-linear-to-b from-black/70 to-transparent">
-        <button
-          ref="closeButton"
-          class="order-last flex size-10 items-center justify-center rounded-full bg-black/30 backdrop-blur-md"
-          aria-label="Close"
-          @click="openModel = false"
-        >
-          <svg viewBox="0 0 24 24" class="size-6" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"><path d="m6 6 12 12M6 18 18 6"/></svg>
-        </button>
-
-        <div class="min-w-0 flex-1">
-          <div v-if="title" class="truncate text-base font-semibold">{{ title }}</div>
-          <div v-if="items.length > 1" class="text-xs text-white/70">{{ currentIndex + 1 }} / {{ items.length }}</div>
-        </div>
-        <button v-if="items.length > 1" type="button" class="grid size-10 place-items-center rounded-full bg-black/40 disabled:opacity-30" aria-label="Previous media" :disabled="currentIndex === 0" @click="navigate(currentIndex - 1)"><UIcon name="i-lucide-chevron-up" class="size-5" /></button>
-        <button v-if="items.length > 1" type="button" class="grid size-10 place-items-center rounded-full bg-black/40 disabled:opacity-30" aria-label="Next media" :disabled="currentIndex === items.length - 1" @click="navigate(currentIndex + 1)"><UIcon name="i-lucide-chevron-down" class="size-5" /></button>
-      </div>
-
-      <!-- Vertical viewer -->
-      <div
-        ref="scroller"
-        class="h-full w-full snap-y snap-mandatory overflow-y-auto overscroll-contain touch-pan-y scrollbar-hide"
-        @scroll.passive="onScroll"
-      >
-        <section
-          v-for="(item, i) in items"
-          :key="`${item.url}-${i}`"
-          class="relative h-dvh w-full snap-start snap-always overflow-hidden bg-black"
-        >
-          <!-- Blurred fill behind letterboxed media, TikTok-style -->
-          <img
-            v-if="backgroundUrl(item)"
-            :src="backgroundUrl(item)!"
-            alt=""
-            aria-hidden="true"
-            class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-50 blur-2xl select-none"
-          >
-
-          <div :class="item.description || $slots.caption ? 'lg:grid-cols-[minmax(0,1fr)_20rem]' : ''" class="relative z-10 grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4 px-4 pb-5 pt-20 lg:grid-rows-1 lg:gap-8 lg:px-16">
-            <div class="min-h-0 min-w-0">
-              <video v-if="item.kind === 'video'" :ref="el => setVideoRef(el, i)" :src="item.url" playsinline controls tabindex="0" :poster="typeof item.poster === 'string' ? item.poster : undefined" preload="metadata" class="h-full w-full object-contain" />
-              <img v-else :src="item.url" :alt="item.alt || ''" class="h-full w-full object-contain">
-            </div>
-            <div v-if="item.description || $slots.caption" class="max-h-[25dvh] min-h-0 overflow-y-auto overscroll-contain rounded-xl bg-black/70 p-5 lg:self-center lg:max-h-[80dvh]">
-              <slot name="caption" :item="item" :index="i">
-                <p v-if="item.description" class="whitespace-pre-line break-words text-base leading-relaxed [overflow-wrap:anywhere]">{{ item.description }}</p>
-              </slot>
-            </div>
+  <UModal v-model:open="openModel" fullscreen :title="overviewModel ? t('stay.photo_tour') : title || t('site.photos.gallery_title')" :ui="{ content: overviewModel ? 'bg-white text-gray-950 divide-y-0' : 'bg-black text-white divide-y-0' }">
+    <template #content>
+      <div class="relative h-dvh w-full overflow-hidden" @keydown="onKeydown">
+        <header class="absolute inset-x-0 top-0 z-30 flex h-20 items-center gap-3 px-4 sm:px-8" :class="overviewModel ? 'border-b border-gray-200 bg-white' : 'bg-linear-to-b from-black/70 to-transparent'">
+          <button v-if="groups.length && !overviewModel" type="button" class="grid size-10 shrink-0 place-items-center rounded-full hover:bg-white/15" :aria-label="t('stay.back_to_photo_tour')" @click="overviewModel = true"><UIcon name="i-lucide-chevron-left" class="size-5" /></button>
+          <div class="min-w-0 flex-1">
+            <h2 class="truncate text-base font-semibold">{{ overviewModel ? t('stay.photo_tour') : title }}</h2>
+            <p v-if="!overviewModel && items.length > 1" class="text-xs text-white/70">{{ currentIndex + 1 }} / {{ items.length }}</p>
           </div>
-        </section>
+          <template v-if="!overviewModel && items.length > 1">
+            <button type="button" class="grid size-10 place-items-center rounded-full bg-black/40 disabled:opacity-30" :aria-label="t('social_posts.previous_media')" :disabled="currentIndex === 0" @click="navigate(currentIndex - 1)"><UIcon name="i-lucide-chevron-up" class="size-5" /></button>
+            <button type="button" class="grid size-10 place-items-center rounded-full bg-black/40 disabled:opacity-30" :aria-label="t('social_posts.next_media')" :disabled="currentIndex === items.length - 1" @click="navigate(currentIndex + 1)"><UIcon name="i-lucide-chevron-down" class="size-5" /></button>
+          </template>
+          <button type="button" class="grid size-10 shrink-0 place-items-center rounded-full" :class="overviewModel ? 'hover:bg-gray-100' : 'bg-black/30 backdrop-blur-md'" :aria-label="t('site.photos.close_gallery')" @click="openModel = false"><UIcon name="i-lucide-x" class="size-5" /></button>
+        </header>
+
+        <div v-if="overviewModel" class="h-full overflow-y-auto overscroll-contain pt-20" data-photo-tour>
+          <div class="mx-auto max-w-6xl px-6 py-8 sm:px-10 sm:py-10">
+            <nav :aria-label="t('stay.photo_tour')" class="mb-10 flex gap-4 overflow-x-auto pb-3 sm:gap-6">
+              <a v-for="group in groups" :key="group.id" :href="`#photo-room-${group.id}`" class="w-28 shrink-0 rounded-xl text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-4 sm:w-32">
+                <img :src="backgroundUrl(group.entries[0]!.item)!" alt="" class="mb-2 aspect-square w-full rounded-xl object-cover">
+                {{ group.title }}
+              </a>
+            </nav>
+            <section v-for="group in groups" :id="`photo-room-${group.id}`" :key="group.id" class="scroll-mt-24 border-t border-gray-200 py-8 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] sm:gap-10 sm:py-10">
+              <div class="mb-5">
+                <h3 class="text-2xl font-semibold tracking-tight">{{ group.title }}</h3>
+                <ul v-if="group.details?.length" class="mt-3 space-y-2 text-sm leading-relaxed text-gray-600">
+                  <li v-for="detail in group.details" :key="detail">{{ detail }}</li>
+                </ul>
+                <ul v-if="group.features?.length" class="mt-3 space-y-3 text-sm leading-relaxed text-gray-600">
+                  <li v-for="feature in group.features" :key="feature.id" class="flex items-start gap-3">
+                    <UIcon :name="feature.icon" class="size-5 shrink-0" aria-hidden="true" />
+                    <div class="min-w-0">
+                      <p>{{ feature.label }}</p>
+                      <p v-if="feature.description" class="mt-1">{{ feature.description }}</p>
+                      <div v-if="feature.photos.length" class="mt-3 flex flex-wrap gap-2">
+                        <button v-for="(photo, position) in feature.photos" :key="photo.index" type="button" class="w-24 overflow-hidden rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4" :aria-label="t('stay.open_accessibility_photo', { feature: feature.label, number: position + 1 })" @click="openPhoto(photo.index)">
+                          <img :src="photo.item.url" alt="" class="aspect-4/3 w-full object-cover transition hover:brightness-95" loading="lazy">
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+              <div class="grid grid-cols-2 gap-2 sm:gap-3">
+                <button v-for="(entry, position) in group.entries" :key="entry.index" type="button" class="relative overflow-hidden rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4" :class="position === 0 && group.entries.length % 2 === 1 ? 'col-span-2' : ''" :aria-label="t('stay.open_room_photo', { room: group.title, number: position + 1 })" @click="openPhoto(entry.index)">
+                  <img :src="backgroundUrl(entry.item)!" :alt="entry.item.alt || ''" class="aspect-4/3 w-full object-cover transition hover:brightness-95">
+                  <span v-if="entry.item.kind === 'video'" class="absolute inset-0 grid place-items-center text-white"><UIcon name="i-lucide-circle-play" class="size-10 drop-shadow" /></span>
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div v-else ref="scroller" class="h-full w-full snap-y snap-mandatory overflow-y-auto overscroll-contain touch-pan-y scrollbar-hide" @scroll.passive="onScroll">
+          <section v-for="(item, i) in items" :key="`${item.url}-${i}`" class="relative h-dvh w-full snap-start snap-always overflow-hidden bg-black">
+            <img v-if="backgroundUrl(item)" :src="backgroundUrl(item)!" alt="" aria-hidden="true" class="pointer-events-none absolute inset-0 h-full w-full scale-110 object-cover opacity-50 blur-2xl select-none">
+            <div :class="item.description || $slots.caption ? 'lg:grid-cols-[minmax(0,1fr)_20rem]' : ''" class="relative z-10 grid h-full min-h-0 grid-rows-[minmax(0,1fr)_auto] gap-4 px-4 pb-5 pt-20 lg:grid-rows-1 lg:gap-8 lg:px-16">
+              <div class="min-h-0 min-w-0">
+                <video v-if="item.kind === 'video'" :ref="el => setVideoRef(el, i)" :src="item.url" playsinline controls tabindex="0" :poster="typeof item.poster === 'string' ? item.poster : undefined" preload="metadata" class="h-full w-full object-contain" />
+                <img v-else :src="item.url" :alt="item.alt || ''" class="h-full w-full object-contain">
+              </div>
+              <div v-if="item.description || $slots.caption" class="max-h-[25dvh] min-h-0 overflow-y-auto overscroll-contain rounded-xl bg-black/70 p-5 lg:self-center lg:max-h-[80dvh]">
+                <slot name="caption" :item="item" :index="i"><p v-if="item.description" class="whitespace-pre-line break-words text-base leading-relaxed [overflow-wrap:anywhere]">{{ item.description }}</p></slot>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
-  </Teleport>
+    </template>
+  </UModal>
 </template>
+
+<script lang="ts">
+export interface MediaGalleryGroup {
+  id: string
+  title: string
+  asset_ids: string[]
+  details?: string[]
+  features?: Array<{ id: string; label: string; icon: string; description?: string; asset_ids?: string[] }>
+}
+</script>
 
 <script setup lang="ts">
 interface LightboxItem {
@@ -71,182 +97,73 @@ const props = withDefaults(defineProps<{
   items?: LightboxItem[]
   index?: number
   title?: string
-}>(), {
-  open: false,
-  items: () => [],
-  index: 0,
-  title: undefined
-})
+  photoGroups?: MediaGalleryGroup[]
+  overview?: boolean
+}>(), { open: false, items: () => [], index: 0, title: undefined, photoGroups: () => [], overview: false })
 
-defineSlots<{
-  caption(_slotProps: { item: LightboxItem; index: number }): unknown
-}>()
-
-const emit = defineEmits<{
-  'update:open': [value: boolean]
-  'update:index': [value: number]
-}>()
-
-const openModel = computed({
-  get: () => props.open ?? false,
-  set: (value: boolean) => emit('update:open', value)
-})
-
-const indexModel = computed({
-  get: () => props.index ?? 0,
-  set: (value: number) => emit('update:index', value)
-})
-
-const items = computed(() => props.items ?? [])
+defineSlots<{ caption(_slotProps: { item: LightboxItem; index: number }): unknown }>()
+const emit = defineEmits<{ 'update:open': [value: boolean]; 'update:index': [value: number]; 'update:overview': [value: boolean] }>()
+const { t } = useI18n()
+const openModel = computed({ get: () => props.open, set: (value: boolean) => emit('update:open', value) })
+const indexModel = computed({ get: () => props.index, set: (value: number) => emit('update:index', value) })
+const overviewModel = computed({ get: () => props.overview && groups.value.length > 0, set: (value: boolean) => emit('update:overview', value) })
+const items = computed(() => props.items)
+const groups = computed(() => props.photoGroups.map(group => ({
+  ...group,
+  entries: items.value.flatMap((item, index) => typeof item.asset_id === 'string' && group.asset_ids.includes(item.asset_id) ? [{ item, index }] : []),
+  features: group.features?.map(feature => ({
+    ...feature,
+    photos: (feature.asset_ids ?? []).map(assetId => {
+      const index = items.value.findIndex(item => item.asset_id === assetId && item.kind === 'image')
+      const item = items.value[index]
+      if (!item) throw new TypeError('The accessibility photo is not in this listing gallery')
+      return { item, index }
+    }),
+  })),
+})).filter(group => group.entries.length > 0))
 const scroller = ref<HTMLElement | null>(null)
-const lightboxRoot = ref<HTMLElement | null>(null)
-const closeButton = ref<HTMLElement | null>(null)
 const videoRefs = ref<Record<number, HTMLVideoElement>>({})
-
-const { acquire: acquireScrollLock, release: releaseScrollLock } = useScrollLock()
-
-const currentIndex = computed(() => {
-  if (!items.value.length) return 0
-  return Math.min(Math.max(indexModel.value, 0), items.value.length - 1)
-})
-
-watch(items, () => {
-  videoRefs.value = {}
-})
+const currentIndex = computed(() => Math.min(Math.max(indexModel.value, 0), Math.max(0, items.value.length - 1)))
 
 function setVideoRef(el: Element | ComponentPublicInstance | null, index: number) {
-  if (el instanceof HTMLVideoElement) {
-    videoRefs.value[index] = el
-  }
+  if (el instanceof HTMLVideoElement) videoRefs.value[index] = el
 }
-
-function syncVideos() {
-  for (const [key, video] of Object.entries(videoRefs.value)) {
-    const i = Number(key)
-
-    if (i !== currentIndex.value) {
-      video.pause()
-    }
-  }
-}
-
 function pauseAllVideos() {
   Object.values(videoRefs.value).forEach(video => video.pause())
 }
-
 function backgroundUrl(item: LightboxItem): string | null {
-  return item.kind === 'video' && typeof item.poster === 'string' && item.poster
-    ? item.poster
-    : item.kind === 'video'
-      ? null
-      : item.url
+  return item.kind === 'video' ? typeof item.poster === 'string' && item.poster ? item.poster : null : item.url
 }
-
 function getPageHeight() {
   return scroller.value?.clientHeight || window.innerHeight
 }
-
-watch(indexModel, async () => {
+async function positionViewer() {
   pauseAllVideos()
   await nextTick()
-  syncVideos()
-})
-
-watch(() => props.open, async (open) => {
-  if (open) {
-    acquireScrollLock()
-    await nextTick()
-    // Focus the close button when lightbox opens
-    closeButton.value?.focus()
-  } else {
-    releaseScrollLock()
-    pauseAllVideos()
-    return
-  }
-
-  await nextTick()
-
-  scroller.value?.scrollTo({
-    top: currentIndex.value * getPageHeight(),
-    behavior: 'auto'
-  })
-
-  syncVideos()
-})
-
-function handleKeyDown(e: KeyboardEvent) {
-  if (!openModel.value) return
-  
-  if (e.key === 'Tab' && lightboxRoot.value) {
-    const focusableElements = Array.from(lightboxRoot.value.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), textarea:not([disabled]), input[type="text"]:not([disabled]), input[type="radio"]:not([disabled]), input[type="checkbox"]:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    ))
-    
-    if (focusableElements.length === 0) return
-    
-    const firstElement = focusableElements[0]
-    const lastElement = focusableElements[focusableElements.length - 1]
-    if (!firstElement || !lastElement) return
-    
-    if (e.shiftKey) {
-      // Shift+Tab on first element → focus last element
-      if (document.activeElement === firstElement) {
-        e.preventDefault()
-        lastElement.focus()
-      }
-    } else {
-      // Tab on last element → focus first element
-      if (document.activeElement === lastElement) {
-        e.preventDefault()
-        firstElement.focus()
-      }
-    }
-  }
+  if (openModel.value && !overviewModel.value) scroller.value?.scrollTo({ top: currentIndex.value * getPageHeight(), behavior: 'instant' })
 }
-
-onMounted(() => {
-  if (import.meta.client) {
-    document.addEventListener('keydown', handleKeyDown)
-  }
-})
-
-onUnmounted(() => {
-  if (import.meta.client) {
-    document.removeEventListener('keydown', handleKeyDown)
-    releaseScrollLock()
-    Object.values(videoRefs.value).forEach((video) => {
-      video.pause()
-      video.removeAttribute('src')
-      video.load()
-    })
-  }
-})
+watch([openModel, overviewModel], positionViewer)
+watch(items, () => { pauseAllVideos(); videoRefs.value = {}; void positionViewer() })
+watch(indexModel, pauseAllVideos)
+onBeforeUnmount(pauseAllVideos)
 
 function onScroll() {
   if (!scroller.value) return
   const nextIndex = Math.round(scroller.value.scrollTop / getPageHeight())
-  if (nextIndex !== indexModel.value && nextIndex >= 0 && nextIndex < items.value.length) {
-    indexModel.value = nextIndex
-  }
+  if (nextIndex !== indexModel.value && nextIndex >= 0 && nextIndex < items.value.length) indexModel.value = nextIndex
 }
-
 function navigate(index: number) {
   if (index < 0 || index >= items.value.length) return
   indexModel.value = index
   scroller.value?.scrollTo({ top: index * getPageHeight(), behavior: 'instant' })
 }
-function onKeydown(e: KeyboardEvent) {
-  if (!props.open) return
-  if (e.key === 'Escape') openModel.value = false
-  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-    e.preventDefault()
-    void navigate(currentIndex.value + (e.key === 'ArrowDown' ? 1 : -1))
-  }
+function openPhoto(index: number) {
+  indexModel.value = index
+  overviewModel.value = false
 }
-onMounted(() => window.addEventListener('keydown', onKeydown))
-onUnmounted(() => {
-  window.removeEventListener('keydown', onKeydown)
-  releaseScrollLock()
-  pauseAllVideos()
-})
+function onKeydown(event: KeyboardEvent) {
+  if (overviewModel.value || (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') || event.target instanceof HTMLVideoElement) return
+  event.preventDefault()
+  navigate(currentIndex.value + (event.key === 'ArrowDown' ? 1 : -1))
+}
 </script>

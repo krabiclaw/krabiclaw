@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Request, type Response } from '@playwright/test'
+import { expect, test, type Frame, type Page, type Request, type Response } from '@playwright/test'
 import { blawbyTestBaseUrl, blawbyTestExtraHeaders, tenantTestBaseUrl, potteryHouseTestBaseUrl, tenantTestExtraHeaders, potteryHouseTestExtraHeaders } from './test-env'
 
 export const tenantBaseURL = tenantTestBaseUrl()
@@ -102,7 +102,7 @@ export async function openTenantPage(page: Page, url: string, headers: Record<st
  * click that lands before Nuxt finishes hydrating is a click on a button with no
  * handler yet. Wait for the app to report hydration complete before interacting.
  */
-export async function waitForNuxtHydration(page: Page) {
+export async function waitForNuxtHydration(page: Page | Frame) {
   await page.waitForFunction(() => {
     const root = document.querySelector('#__nuxt') as (Element & {
       __vue_app__?: { $nuxt?: { isHydrating: boolean } }

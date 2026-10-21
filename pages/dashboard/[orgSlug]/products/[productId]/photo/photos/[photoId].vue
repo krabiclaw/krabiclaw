@@ -21,15 +21,19 @@
           :disabled="p.saving.value"
         />
       </div>
+      <UButton :label="`Move from ${roomName}?`" trailing-icon="i-lucide-chevron-right" color="neutral" variant="ghost" class="mt-6 w-full justify-between px-0 py-4 text-base" :disabled="p.saving.value" @click="openMove" />
     </div>
   </DashboardIndexPanel>
+  <StayPhotoRoomDialog v-model:open="moving" :photos="moveDraft" />
 </template>
 
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
+import StayPhotoRoomDialog from '~/components/dashboard/StayPhotoRoomDialog.vue'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { isNavigationFailure } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
+import { stayPhotoRoomName } from '~/shared/stay-photos'
 
 definePageMeta({ layout: 'dashboard', dashboardFrame: true })
 
@@ -44,7 +48,16 @@ const title = computed(() => {
   return index >= 0 ? `Photo ${index + 1}` : 'Photo'
 })
 const removing = ref(false)
+const moving = ref(false)
+const moveDraft = ref<Array<{ photo_id: string; expected_room_id: string | null }>>([])
+const room = computed(() => p.photoRooms.value.find(entry => entry.photo_ids.includes(photoId.value)) ?? null)
+const roomName = computed(() => room.value ? stayPhotoRoomName(room.value, p.photoRooms.value) : 'Additional photos')
 p.photoError.value = null
+
+function openMove() {
+  moveDraft.value = [{ photo_id: photoId.value, expected_room_id: room.value?.id ?? null }]
+  moving.value = true
+}
 
 async function makeCover() {
   if (!photo.value || p.saving.value) return

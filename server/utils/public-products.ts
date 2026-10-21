@@ -1,7 +1,9 @@
-import { calculateMapEmbedUrl } from '~/server/utils/google-places'
 import { HTTPError } from 'nitro'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { parseGoogleReviewMetadata, type GoogleReviewMetadata } from '~/shared/google-review'
+import type { GoogleReviewMetadata } from '~/shared/google-review'
+import type { PublicLocationDisclosure } from '~/types/public-location'
+import { projectPublicLocation, type PublicLocationPrivacySource } from '~/shared/location-sharing'
+import { projectPublicLocationReview, publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { bookingWindow, listSessions } from '~/server/utils/availability'
 import { getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
@@ -15,6 +17,7 @@ import {
   projectExactLocalizedResource,
   projectLocalizedMediaAlt,
   resolveLocalizedRouteResourceId,
+  type ExactPublicLocalization,
 } from '~/server/utils/public-localization'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
@@ -35,18 +38,13 @@ interface PublicProductOrganizationRow {
   default_currency: string
 }
 
-export interface PublicProductLocation {
+export interface PublicProductLocation extends PublicLocationDisclosure {
   id: string
   slug: string
   title: string
   /** The zone this branch states its times in — what turns a session into a wall clock. */
   timezone: string
-  /**
-   * Where a guest turns up. Parsed at the row boundary, because a localized
-   * page lays its translated address parts over this one and needs an object
-   * to lay them on: handed the stored string, the translation replaced it
-   * whole and every /th product page lost its regionCode and 500'd.
-   */
+  /** Ordinary business addresses remain public; homes share public_area instead. */
   address: PostalAddress | null
   phone: string | null
   maps_url: string | null
@@ -56,11 +54,22 @@ export interface PublicProductLocation {
   map_embed_url: string | null
 }
 
-type PublicProductLocationRow = Omit<PublicProductLocation, 'address' | 'map_embed_url'> & { address: string | null }
+type PublicProductLocationRow = Omit<PublicProductLocation, keyof PublicLocationDisclosure> & PublicLocationPrivacySource & {
+  address: string | null
+  maps_url: string | null
+  latitude: number | null
+  longitude: number | null
+}
 
-function publicProductLocation(row: PublicProductLocationRow): PublicProductLocation {
-  const address = parsePostalAddress(row.address)
-  return { ...row, address, map_embed_url: calculateMapEmbedUrl({ title: row.title, maps_url: row.maps_url, latitude: row.latitude, longitude: row.longitude, address }) }
+function publicProductLocations(rows: PublicProductLocationRow[], localizations?: readonly ExactPublicLocalization[]): PublicProductLocation[] {
+  const sources = new Map(rows.map(row => [row.id, row]))
+  const locations = rows.map(({ stay_map_sharing: _sharing, is_stay_location: _protected, ...row }) => ({ ...row, address: parsePostalAddress(row.address) }))
+  const localized = localizations ? projectExactLocalizedCollection('business_location', locations, localizations) : locations
+  return localized.map(location => {
+    const source = sources.get(location.id)
+    if (!source) throw new Error('Public product location privacy source is unavailable')
+    return projectPublicLocation(location, source)
+  })
 }
 
 export interface PublicProductCollection {
@@ -168,16 +177,17 @@ export async function loadPublicProductCollection(
   previewAuthorized: boolean,
   locationSlug?: string | null,
   env?: CloudflareEnv,
+  localizations?: readonly ExactPublicLocalization[],
 ): Promise<PublicProductCollection | null> {
   const [resolved, locationRows] = await Promise.all([
     loadProductOrganization(db, organizationId, routeKind, previewAuthorized),
     queryAll<PublicProductLocationRow>(db, `
-      SELECT id, slug, title, timezone, address, phone, maps_url, latitude, longitude
-        FROM business_locations
-       WHERE organization_id = ? AND status = 'active'
-         ${locationSlug ? 'AND slug = ?' : ''}
-       ORDER BY title, id
-    `, [organizationId, ...(locationSlug ? [locationSlug] : [])]).then(rows => rows.map(publicProductLocation)),
+      SELECT bl.id, bl.slug, bl.title, bl.timezone, bl.address, bl.phone, bl.maps_url, bl.latitude, bl.longitude, ${publicLocationPrivacySql('bl')}
+        FROM business_locations bl
+       WHERE bl.organization_id = ? AND bl.status = 'active'
+         ${locationSlug ? 'AND bl.slug = ?' : ''}
+       ORDER BY bl.title, bl.id
+    `, [organizationId, ...(locationSlug ? [locationSlug] : [])]).then(rows => publicProductLocations(rows, localizations)),
   ])
   if (!resolved) return null
   if (locationSlug && locationRows.length !== 1) return null
@@ -262,12 +272,12 @@ export async function loadPublicProductDetail(
   const localizedLocationPath = `/${locale}/locations/${locationSlug}`
   const locationId = resolveLocalizedRouteResourceId(localizations, 'business_location', localizedLocationPath)
   if (!locationId) return null
-  const sourceLocation = await queryFirst<PublicProductLocationRow>(db, `
-    SELECT id, slug, title, timezone, address, phone, maps_url, latitude, longitude FROM business_locations
+  const sourceLocation = await queryFirst<{ slug: string }>(db, `
+    SELECT slug FROM business_locations
      WHERE organization_id = ?  AND id = ? AND status = 'active' LIMIT 1
   `, [resolved.organization.id, locationId])
   if (!sourceLocation) return null
-  const collection = await loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, sourceLocation.slug, env)
+  const collection = await loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, sourceLocation.slug, env, localizations)
   const location = collection?.locations[0]
   if (!collection || !location) return null
   // The Product is named by the same slug its English route names: a Product
@@ -287,23 +297,21 @@ export async function loadPublicProductDetail(
       : null,
     gallery: projectLocalizedMediaAlt(localizedProduct.gallery, localizations),
   }
-  const localizedLocation = projectExactLocalizedResource('business_location', location, locationLocalization)
   const localizedOrganization = organizationLocalization
     ? projectExactLocalizedResource('organization', collection.organization, organizationLocalization)
     : { ...collection.organization, name: '' }
   const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
     organizationId: collection.organization.id,
     
-    sourcePath: collection.presentation.productPath(location.slug, sourceProduct.slug),
+    sourcePath: collection.presentation.productPath(sourceLocation.slug, sourceProduct.slug),
     resource: { type: 'product', id: sourceProduct.id },
   })
   return {
     ...collection,
     organization: localizedOrganization,
-    locations: projectExactLocalizedCollection('business_location', collection.locations, localizations),
     products: projectExactLocalizedCollection('product', collection.products, localizations),
     collections: projectExactLocalizedCollection('collection', collection.collections, localizations),
-    location: localizedLocation,
+    location,
     product,
     booking: sourceProduct.booking,
     localeRepresentations,
@@ -321,15 +329,14 @@ export async function loadPublicSiteProductDetail(
   locale?: string,
   requestedScope?: string | null,
 ): Promise<PublicProductDetail | null> {
-  const [sourceLocale, collection] = await Promise.all([
-    getSourceLocale(db, organizationId),
-    loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, undefined, env),
-  ])
+  const sourceLocale = await getSourceLocale(db, organizationId)
   locale ??= sourceLocale
+  const localizations = locale === sourceLocale ? undefined : await loadExactPublicLocalizations(env, db, organizationId, locale)
+  const collection = await loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, undefined, env, localizations)
   if (!collection) return null
   const found = collection.products.find(product => product.slug === productSlug && productSurfaceOf(null, product) === routeKind)
   if (!found) return null
-  return projectPublicOffering(env, db, collection, found, locale, requestedScope, collection.presentation.productPath('', found.slug), previewAuthorized, sourceLocale)
+  return projectPublicOffering(env, db, collection, found, locale, requestedScope, collection.presentation.productPath('', found.slug), previewAuthorized, localizations)
 }
 
 /** An authored page binds its offer by product ID, independent of the theme. */
@@ -355,10 +362,11 @@ export async function loadPublicPageProductDetail(
   // hydrates and checks the offering once, including its publication/readiness.
   const product = await queryFirst<{ kind: string }>(db, 'SELECT kind FROM products WHERE organization_id = ? AND id = ?', [organizationId, page.product_id])
   if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
-  const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, { kind: assertProductKind(product.kind) }), previewAuthorized, undefined, env)
+  const localizations = locale === sourceLocale ? undefined : await loadExactPublicLocalizations(env, db, organizationId, locale)
+  const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, { kind: assertProductKind(product.kind) }), previewAuthorized, undefined, env, localizations)
   const found = collection?.products.find(product => product.id === page.product_id)
   if (!collection || !found) return null
-  return projectPublicOffering(env, db, collection, found, locale, requestedScope, found.page?.path ?? pagePath, previewAuthorized, sourceLocale)
+  return projectPublicOffering(env, db, collection, found, locale, requestedScope, found.page?.path ?? pagePath, previewAuthorized, localizations)
 }
 
 async function projectPublicOffering(
@@ -370,7 +378,7 @@ async function projectPublicOffering(
   requestedScope: string | null | undefined,
   sourcePath: string,
   previewAuthorized: boolean,
-  sourceLocale?: string,
+  localizations?: readonly ExactPublicLocalization[],
 ): Promise<PublicProductDetail | null> {
   const organizationId = collection.organization.id
   const offeredAt = new Set(found.locations.filter(entry => previewAuthorized || (entry.published && entry.active)).map(entry => entry.location_id))
@@ -385,29 +393,22 @@ async function projectPublicOffering(
   const scopeRequired = !requestedScope && locations.length + Number(onlineAvailable) > 1
   let product = found
   let organization = collection.organization
-  let localizedLocations = locations
   let products = collection.products
   let collections = collection.collections
-  if (locale !== (sourceLocale ?? await getSourceLocale(db, organizationId))) {
-    const localizations = await loadExactPublicLocalizations(env, db, organizationId, locale)
+  if (localizations) {
     const localized = localizations.find(item => item.resourceType === 'product' && item.resourceId === found.id)
     if (!localized) return null
     product = projectExactLocalizedResource('product', found, localized)
     product = { ...product, image: product.image ? projectLocalizedMediaAlt([product.image], localizations)[0] ?? null : null, gallery: projectLocalizedMediaAlt(product.gallery, localizations) }
-    localizedLocations = projectExactLocalizedCollection('business_location', locations, localizations)
     products = projectExactLocalizedCollection('product', collection.products, localizations)
     collections = projectExactLocalizedCollection('collection', collection.collections, localizations)
-    if (location) {
-      location = localizedLocations.find(entry => entry.id === location!.id) ?? null
-      if (!location) return null
-    }
     const translatedOrganization = localizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
     if (translatedOrganization) organization = projectExactLocalizedResource('organization', organization, translatedOrganization)
   }
   const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
     organizationId, sourcePath, resource: { type: 'product', id: found.id },
   })
-  return { ...collection, organization, products, collections, locations: localizedLocations, location, product, booking: found.booking, scopeRequired, onlineAvailable, localeRepresentations }
+  return { ...collection, organization, products, collections, locations, location, product, booking: found.booking, scopeRequired, onlineAvailable, localeRepresentations }
 }
 
 /** One public response for server rendering and API navigation. */
@@ -443,14 +444,13 @@ export async function loadPublicProductApiCollection(
   const organization = await queryFirst<{ vertical: string }>(db, `SELECT vertical FROM organization WHERE id = ? AND ${publicTenantVisibilitySql('organization', previewAuthorized)} LIMIT 1`, [organizationId])
   const presentation = organization ? resolveProductPresentation(organization.vertical) : null
   if (!presentation) return null
-  const collection = await loadPublicProductCollection(db, organizationId, presentation.locationCollectionSegment, previewAuthorized, locationSlug, env)
+  const localizations = !locale || locale === await getSourceLocale(db, organizationId) ? undefined : await loadExactPublicLocalizations(env, db, organizationId, locale)
+  const collection = await loadPublicProductCollection(db, organizationId, presentation.locationCollectionSegment, previewAuthorized, locationSlug, env, localizations)
   if (!collection) return null
-  if (!locale || locale === await getSourceLocale(db, organizationId)) return collection
-  const localizations = await loadExactPublicLocalizations(env, db, organizationId, locale)
+  if (!localizations) return collection
   return {
     ...collection,
     products: projectExactLocalizedCollection('product', collection.products, localizations),
-    locations: projectExactLocalizedCollection('business_location', collection.locations, localizations),
     collections: projectExactLocalizedCollection('collection', collection.collections, localizations),
   }
 }
@@ -551,5 +551,6 @@ export async function loadPublicProductReviews(
      ORDER BY COALESCE(original_review_date, created_at) DESC, id DESC
      LIMIT 50
   `, [detail.organization.id, detail.location?.id ?? null, detail.product.id])
-  return rows.map(row => ({ ...row, google_review_metadata: parseGoogleReviewMetadata(row.google_review_metadata) }))
+  const protectedLocation = detail.organization.vertical === 'lodging' || (detail.location !== null && detail.location.stay_map_sharing !== null)
+  return rows.map(row => projectPublicLocationReview(row, protectedLocation))
 }

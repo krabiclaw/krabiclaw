@@ -69,7 +69,7 @@ export default {
   },
   "stay": {
     "confirmed_title": "Your stay is confirmed",
-    "confirmed_message": "Your stay at {home} is booked and paid.",
+    "confirmed_message": "Your stay at {home} is confirmed.",
     "cancellation_policy": "Cancellation policy",
     "receipt_missing_description": "Your stay is in your confirmation email, and in your KrabiClaw account once you create one with the email you booked with.",
     "your_stay": "Your stay",
@@ -120,7 +120,117 @@ export default {
     "safety_property": "Safety & property",
     "guests_maximum": "1 guest maximum | {count} guests maximum",
     "not_reported": "{item} not reported",
+    "not_installed": "{item} not installed",
     "where_youll_be": "Where you'll be",
+    "neighborhood_description": "Neighborhood description",
+    "getting_around": "Getting around",
+    "photo_tour": "Photo tour",
+    "additional_photos": "Additional photos",
+    "back_to_photo_tour": "Back to photo tour",
+    "open_room_photo": "Open {room}, photo {number}",
+    "open_accessibility_photo": "View {feature}, photo {number}",
+    "accessibility_features": {
+      "step_free_access": {
+        "label": "Step-free access",
+        "description": "The bedroom is on the ground floor or reached by a lift or ramp. The route from the guest entrance to the bedroom has no steps or thresholds higher than 5 cm (2 in)."
+      },
+      "wide_doorway": {
+        "label": "Entrance wider than 32 inches",
+        "description": "The bedroom entrance is at least 32 inches wide when the door is open."
+      }
+    },
+    "accessibility_title": "Accessibility features",
+    "home_accessibility_features": {
+      "disabled_parking_spot": {
+        "label": "Disabled parking spot",
+        "description": "A private parking space is at least 11 ft (3.35 m) wide, or a designated public accessible parking space has signs identifying it."
+      },
+      "path_to_entrance_lit_at_night": {
+        "label": "Path to entrance lit at night",
+        "description": "The path to the guest entrance is well lit at night."
+      },
+      "home_step_free_access": {
+        "label": "Step-free access",
+        "description": "The entire route from the arrival or parking area to the guest entrance has no steps or obstacles 5 cm (2 in) or higher, including shared paths, hallways and lifts."
+      },
+      "home_wide_doorway": {
+        "label": "Entrance wider than 32 inches",
+        "description": "The guest entrance is at least 32 in (81 cm) wide with the door fully open."
+      },
+      "pool_hoist": {
+        "label": "Pool or hot tub hoist",
+        "description": "A purpose-built hoist transfers a person into and out of the pool or hot tub."
+      },
+      "ceiling_hoist": {
+        "label": "Ceiling or mobile hoist",
+        "description": "A purpose-built ceiling-mounted or freestanding hoist transfers a person into and out of a wheelchair."
+      }
+    },
+    "where_youll_sleep": "Where you'll sleep",
+    "room_details": "Room details",
+    "no_sleeping_arrangements": "No sleeping arrangements",
+    "private_attached_bathroom": "Private attached bathroom",
+    "no_private_attached_bathroom": "No private attached bathroom",
+    "bed_types": {
+      "single": "1 single bed | {count} single beds",
+      "double": "1 double bed | {count} double beds",
+      "queen": "1 queen bed | {count} queen beds",
+      "king": "1 king bed | {count} king beds",
+      "small_double": "1 small double bed | {count} small double beds",
+      "bunk_bed": "1 bunk bed | {count} bunk beds",
+      "sofa_bed": "1 sofa bed | {count} sofa beds",
+      "couch": "1 couch | {count} couches",
+      "floor_mattress": "1 floor mattress | {count} floor mattresses",
+      "air_mattress": "1 air mattress | {count} air mattresses",
+      "crib": "1 crib | {count} cribs",
+      "toddler_bed": "1 toddler bed | {count} toddler beds",
+      "hammock": "1 hammock | {count} hammocks",
+      "water_bed": "1 water bed | {count} water beds"
+    },
+    "photo_room_types": {
+      "art_studio": "Art studio",
+      "backyard": "Backyard",
+      "balcony": "Balcony",
+      "bedroom": "Bedroom",
+      "bowling_alley": "Bowling alley",
+      "childrens_playroom": "Children’s playroom",
+      "courtyard": "Courtyard",
+      "darkroom": "Darkroom",
+      "deck": "Deck",
+      "dining_area": "Dining area",
+      "event_room": "Event room",
+      "exterior": "Exterior",
+      "front_yard": "Front yard",
+      "full_bathroom": "Full bathroom",
+      "full_kitchen": "Full kitchen",
+      "game_room": "Game room",
+      "garage": "Garage",
+      "garden": "Garden",
+      "gym": "Gym",
+      "half_bathroom": "Half bathroom",
+      "hot_tub": "Hot tub",
+      "kitchenette": "Kitchenette",
+      "laundry_area": "Laundry area",
+      "library": "Library",
+      "living_room": "Living room",
+      "movie_theater": "Movie theater",
+      "music_studio": "Music studio",
+      "office": "Office",
+      "patio": "Patio",
+      "photography_studio": "Photography studio",
+      "pool": "Pool",
+      "porch": "Porch",
+      "rooftop": "Rooftop",
+      "sunroom": "Sunroom",
+      "terrace": "Terrace",
+      "theme_room": "Theme room",
+      "wine_cellar": "Wine cellar",
+      "woodshop": "Woodshop",
+      "workshop": "Workshop",
+      "workspace": "Workspace"
+    },
+    "general_location_notice": "This map shows the approximate area. You’ll receive the exact location and street address after your reservation is confirmed.",
+    "specific_location_notice": "This map shows the specific location. You’ll receive the street address after your reservation is confirmed.",
     "error_unavailable": "Some of those nights are no longer available. Choose other dates.",
     "error_min_nights": "Stays on these dates are at least {count} nights.",
     "error_max_nights": "Stays on these dates are at most {count} nights.",
@@ -403,6 +513,9 @@ export default {
     },
     "photos": {
       "title": "Photos from every room.",
+      "gallery_title": "Photos and videos",
+      "close_gallery": "Close photos and videos",
+      "show_all": "Show all {count} photos",
       "empty_title": "No photos yet.",
       "empty_desc": "Photos added by the team will appear here.",
       "category_all": "All",

@@ -6,14 +6,33 @@ import type { UpdateProductInput } from '../../server/types/products.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
-import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, listStays, readStayCalendar, recordStayPayment, setStayNights, updateStay, type StayAccess } from '../../server/domain/stays.ts'
+import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
-import { H3 } from 'nitro/h3'
+import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import guestStayRoute from '../../server/api/public/guest-stays/[activityId].get.ts'
+import accountStayRoute from '../../server/api/account/stays/[activityId].get.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
+import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
+import { claimGuestThreadInvite, createGuestThreadInvite } from '../../server/domain/guest-threads/invites.ts'
+import publicLocationsRoute from '../../server/api/public/locations.get.ts'
+import publicLocationRoute from '../../server/api/public/locations/[slug].get.ts'
+import publicPageRoute from '../../server/api/public/page.get.ts'
+import { loadPublicShellSource } from '../../server/utils/public-shell.ts'
+import { loadPublicProductApiDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductReviews, type PublicProductLocation } from '../../server/utils/public-products.ts'
+import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
+import { getPublicTenantPageForPath } from '../../server/utils/public-tenant-pages.ts'
+import { putResourceLocalization, replaceResourceLocalizations } from '../../server/utils/localization.ts'
+import { projectExactLocalizedResource } from '../../server/utils/public-localization.ts'
+import { listOrganizationReviews } from '../../server/utils/organization-reviews.ts'
+import { loadPublicSocialMedia } from '../../server/utils/public-social-image.ts'
+import { arrangeProductPhotos, attachMediaPlacement, removeMediaPlacement, setSingleMediaPlacement } from '../../server/utils/media-placement.ts'
+import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
+import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
+import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
+import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 
 const ORG = 'org'
 const OWNER = 'owner-user'
@@ -29,7 +48,7 @@ async function boot() {
     name: 'stays-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { constructor(ctx) { this.ctx = ctx } async fetch(request) { if (new URL(request.url).pathname === "/observed") return Response.json(await this.ctx.storage.get("events") ?? []); if (new URL(request.url).pathname === "/failure") { await this.ctx.storage.put("failure", request.method === "PUT"); return new Response(null, { status: 204 }) } const event = await request.json(); await this.ctx.storage.put("events", [...await this.ctx.storage.get("events") ?? [], event]); if (await this.ctx.storage.get("failure")) return new Response("Publication refused", { status: 503 }); return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stays-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stays-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
@@ -258,7 +277,8 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.equal(cabin.unit_label, 'night')
     assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2,
       property_type_group: null, property_type: null, listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null,
-      bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, assigned_member_id: null, assigned_team_id: 'cleaning' })
+      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: null, long_term_cancellation_policy: null, assigned_member_id: null, assigned_team_id: 'cleaning', photo_rooms: [],
+      accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })) })
     // Its one location shows it; the product's publication decides whether anyone does.
     assert.deepEqual(cabin.locations, [{ location_id: 'cabin-site', active: true, published: true }])
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { location_id: 'lake-site', max_guests: 2 } as never } }), /keeps its location/)
@@ -380,7 +400,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
       await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details } }),
         (error: unknown) => (error as { status: number }).status === 400 && message.test((error as Error).message))
       assert.equal(await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'), beforeSafetyRefusals)
-      assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '["smoke_detector"]')
+      assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '[{"code":"smoke_detector","available":true}]')
     }
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: {
       details_mode: 'merge', details: { exterior_security_cameras: false, exterior_security_cameras_details: null },
@@ -400,7 +420,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.deepEqual(clearedSafety.details, { featured: true, house_rules: 'Leave shoes at the door.' })
     assert.deepEqual(clearedSafety.stay?.amenities, ['smoke_detector'])
     assert.deepEqual(JSON.parse((await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'))!), { featured: true, house_rules: 'Leave shoes at the door.' })
-    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '["smoke_detector"]')
+    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '[{"code":"smoke_detector","available":true}]')
 
     // A disclosure and an amenity cannot make opposite claims about the same
     // property's parking, whichever focused editor supplies the contradiction.
@@ -426,6 +446,464 @@ test('a place to stay is a Product at exactly one location, priced per night', {
         (error: unknown) => (error as { status: number }).status === 400 && /^Remove on-property parking amenities or change “No parking on the property” before saving\.$/.test((error as Error).message))
       assert.deepEqual(await db.prepare('SELECT p.details_json, c.amenities FROM products p JOIN product_stay_configs c ON c.product_id = p.id WHERE p.id = ?').bind(cabin.id).first(), beforeParkingAmenities)
     }
+
+    // Explicit alarm answers share the amenity owner. A positive-list editor
+    // preserves an explicit No, and clearing its former Yes means unknown.
+    await updateStayHome(env, db, manager, cabin.id, {
+      amenity_answers: [{ code: 'carbon_monoxide_detector', available: false }], smoke_detector_details: 'S'.repeat(300),
+    })
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { amenities: ['smoke_detector'] } } })
+    const alarmAnswers = [{ code: 'carbon_monoxide_detector', available: false }, { code: 'smoke_detector', available: true }]
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.amenity_answers, alarmAnswers)
+    const alarms = await readStayHome(db, manager, cabin.id)
+    assert.deepEqual({ answers: alarms.amenity_answers, amenities: alarms.amenities, smoke: alarms.smoke_detector_details, co: alarms.carbon_monoxide_detector_details }, {
+      answers: alarmAnswers, amenities: ['smoke_detector'], smoke: 'S'.repeat(300), co: null,
+    })
+    const beforeAlarmRefusals = await getProduct(db, ORG, cabin.id)
+    for (const patch of [
+      { stay: { amenities: null } },
+      { stay: { amenities: [], amenity_answers: [{ code: 'smoke_detector', available: true }] } },
+      { stay: { amenity_answers: [{ code: 'smoke_detector', available: true }, { code: 'smoke_detector', available: false }] } },
+      { details_mode: 'merge', details: { smoke_detector_details: 'S'.repeat(301) } },
+      { details_mode: 'merge', details: { carbon_monoxide_detector_details: 'A bedroom alarm.' } },
+    ]) {
+      await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: patch as UpdateProductInput }), (error: unknown) => (error as { status: number }).status === 400)
+      assert.deepEqual(await getProduct(db, ORG, cabin.id), beforeAlarmRefusals)
+    }
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('alarm-en', ?, 'en', 1, 'published'), ('alarm-th', ?, 'th', 0, 'published')").bind(ORG, ORG).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('alarm-growth', 'growth', ?, 'active', 4102444800)").bind(ORG).run()
+    const translated = await putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER,
+      values: { name: 'บ้าน', details: { house_rules: 'ถอดรองเท้า', smoke_detector_details: 'เครื่องตรวจจับควันในห้องนอน' } } })
+    assert.equal(translated.values.details && (translated.values.details as Record<string, unknown>).smoke_detector_details, 'เครื่องตรวจจับควันในห้องนอน')
+    const alarmRoom = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
+    const assigned = await updateStayPhotoRoom(db, env, manager, cabin.id, alarmRoom.room.id, { expected_details_version: 1, amenities: ['smoke_detector'] })
+    await updateStayHome(env, db, manager, cabin.id, { amenity_answers: [{ code: 'smoke_detector', available: false }] })
+    const noSmoke = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(noSmoke.stay!.amenity_answers, [{ code: 'carbon_monoxide_detector', available: false }, { code: 'smoke_detector', available: false }])
+    assert.equal(noSmoke.details.smoke_detector_details, undefined)
+    assert.deepEqual({ amenities: noSmoke.stay!.photo_rooms[0]!.amenities, version: noSmoke.stay!.photo_rooms[0]!.details_version }, { amenities: [], version: assigned.room.details_version + 1 })
+    assert.deepEqual(JSON.parse((await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json'))!), { name: 'บ้าน', details: { house_rules: 'ถอดรองเท้า' } })
+    await assert.rejects(putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER,
+      values: { details: { smoke_detector_details: 'old translation' } } }), (error: unknown) => (error as { status: number }).status === 422)
+    // Promotion through a room reuses the same positive fact and cannot revive
+    // cleared source or translated alarm descriptions.
+    await updateStayPhotoRoom(db, env, manager, cabin.id, alarmRoom.room.id, { expected_details_version: assigned.room.details_version + 1, amenities: ['smoke_detector'] })
+    const promoted = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(promoted.stay!.amenity_answers, alarmAnswers)
+    assert.equal(promoted.details.smoke_detector_details, undefined)
+    assert.equal(projectExactLocalizedResource('product', promoted, { resourceType: 'product', resourceId: cabin.id, locale: 'th', routePath: null,
+      values: { name: 'บ้าน', details: { smoke_detector_details: 'retained historical translation' } } }).details.smoke_detector_details, undefined)
+    await assert.rejects(putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER,
+      values: { details: { smoke_detector_details: 'old translation' } } }), (error: unknown) => (error as { status: number }).status === 422)
+    await updateStayHome(env, db, manager, cabin.id, { smoke_detector_details: 'By the bedroom door.' })
+    const concurrentAlarmEdits = await Promise.allSettled([
+      putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER, values: { details: { smoke_detector_details: 'พร้อมคำแปล' } } }),
+      updateStayHome(env, db, manager, cabin.id, { amenity_answers: [{ code: 'smoke_detector', available: false }] }),
+    ])
+    assert.equal(concurrentAlarmEdits[1]!.status, 'fulfilled')
+    if (concurrentAlarmEdits[0]!.status === 'rejected') {
+      const error = concurrentAlarmEdits[0].reason as { status: number; data: { code: string } }
+      assert([409, 422].includes(error.status))
+      assert.equal(error.data.code, 'LOCALIZATION_VALIDATION_FAILED')
+    }
+    assert.equal((await getProduct(db, ORG, cabin.id)).details.smoke_detector_details, undefined)
+    assert.equal(await db.prepare("SELECT json_extract(values_json, '$.details.smoke_detector_details') AS alarm FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first('alarm'), null)
+    const beforeBulkRefusal = await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json')
+    await assert.rejects(replaceResourceLocalizations(env, db, { organizationId: ORG, resourceType: 'product', locale: 'th', userId: OWNER, items: [{ resource_id: cabin.id, values: { name: 'Must not be saved', details: { smoke_detector_details: 'cleared source cannot be translated' } } }] }), { status: 409, data: { code: 'LOCALIZATION_VALIDATION_FAILED', field: 'details' } })
+    assert.equal(await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json'), beforeBulkRefusal)
+    await updateStayHome(env, db, manager, cabin.id, { amenity_answers: [{ code: 'smoke_detector', available: null }], carbon_monoxide_detector_details: null })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).amenity_answers, [{ code: 'carbon_monoxide_detector', available: false }])
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'))!), [{ code: 'carbon_monoxide_detector', available: false }])
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('authored photo rooms move photos atomically and follow the listing placements through removal without resurrecting membership', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('room-en', ?, 'en', 1, 'published')").bind(ORG).run()
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
+    // Like the CMS, carry the catalog item on the site while it is unlisted.
+    await setProductPublication(db, { env, organizationId: ORG, productId: cabin.id, published: false, actor: { actorId: OWNER } })
+    const membership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
+    assert(membership)
+    const principal = memberAccessPrincipal(membership, { env })
+    // Existing library pictures can have room-like alt text and categories;
+    // neither those nor aggregate bedroom counts author a room identity.
+    for (const [id, alt, category] of [['room-a', 'A bedroom with a bed', 'interior'], ['room-b', 'A living room with chairs', 'interior'], ['room-c', 'An exterior deck', 'exterior'], ['room-library', 'Another bedroom', 'interior'], ['room-evidence', 'The bedroom doorway', 'interior']] as const) {
+      await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, mime_type, width, height, alt_text, category, status) VALUES (?, ?, 'image', 'cloudflare_images', 'uploaded', ?, 'image/png', 1200, 800, ?, ?, 'active')")
+        .bind(id, ORG, `https://imagedelivery.example.test/hash/${id}/public`, alt, category).run()
+    }
+    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('foreign-host', 'Another host', 'foreign-host', 'USD', 'America/Denver')").run()
+    for (const [id, organizationId, kind, status] of [['room-video', ORG, 'video', 'active'], ['room-deleted', ORG, 'image', 'deleted'], ['foreign-room-photo', 'foreign-host', 'image', 'active']] as const) {
+      await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, thumbnail_url, status) VALUES (?, ?, ?, ?, 'uploaded', ?, ?, ?)")
+        .bind(id, organizationId, kind, kind === 'video' ? 'cloudflare_stream' : 'cloudflare_images', `https://imagedelivery.example.test/hash/${id}/public`, kind === 'video' ? 'https://videodelivery.net/room-video/thumbnails/thumbnail.jpg' : null, status).run()
+    }
+    await arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id, from: [], to: ['room-a', 'room-b', 'room-c'] })
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { bedrooms: 2, beds: 3, bathrooms: 1 } } })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [])
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [])
+
+    const first = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
+    const intervening = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'living_room' })
+    const second = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
+    assert.notEqual(first.room.id, second.room.id)
+    const unansweredAccessibility: StayPhotoRoom['accessibility'] = [{ feature: 'step_free_access', available: null, photo_ids: [] }, { feature: 'wide_doorway', available: null, photo_ids: [] }]
+    const roomA: StayPhotoRoom = { id: first.room.id, type: 'bedroom', photo_ids: [], amenities: [], accessibility: unansweredAccessibility, sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+    const roomB: StayPhotoRoom = { id: second.room.id, type: 'bedroom', photo_ids: [], amenities: [], accessibility: unansweredAccessibility, sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+    // A bedroom added after a different type still groups with the original
+    // bedroom, retaining creation order and identities within their type.
+    const grouped = [roomA, roomB, { id: intervening.room.id, type: 'living_room' as const, photo_ids: [], amenities: [], accessibility: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }]
+    const groupedProduct = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(groupedProduct.stay?.photo_rooms, grouped)
+    assert.deepEqual(groupedProduct.stay!.photo_rooms.map(room => stayPhotoRoomName(room, groupedProduct.stay!.photo_rooms)), ['Bedroom 1', 'Bedroom 2', 'Living room'])
+    const groupedPublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(groupedPublic)
+    assert.deepEqual(groupedPublic.product.stay?.photo_rooms, grouped)
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, intervening.room.id, { expected_details_version: 1, private_attached_bathroom: false }), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field: 'private_attached_bathroom' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, intervening.room.id, { expected_details_version: 1, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } }), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field: 'accessibility' } })
+    await removeStayPhotoRoom(db, env, manager, cabin.id, intervening.room.id)
+    const retainedRooms = (await getProduct(db, ORG, cabin.id)).stay!.photo_rooms
+    assert.deepEqual(retainedRooms, [roomA, roomB])
+    assert.deepEqual(retainedRooms.map(room => stayPhotoRoomName(room, retainedRooms)), ['Bedroom 1', 'Bedroom 2'])
+    await assert.rejects(createStayPhotoRoom(db, env, cleaner, cabin.id, { type: 'bedroom' }), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
+    await assert.rejects(createStayPhotoRoom(db, env, manager, cabin.id, { type: 'invented_room' }), { status: 422, data: { code: 'INVALID_PHOTO_ROOM', field: 'type' } })
+    const foreignRoom = await createStayPhotoRoom(db, env, manager, lake.id, { type: 'bedroom' })
+    await assert.rejects(moveStayPhotos(db, env, manager, cabin.id, { room_id: foreignRoom.room.id, photos: [{ photo_id: 'room-a', expected_room_id: null }] }), { status: 404, data: { code: 'PHOTO_ROOM_NOT_FOUND', field: 'room_id' } })
+    await assert.rejects(moveStayPhotos(db, env, manager, cabin.id, { room_id: roomA.id, photos: [{ photo_id: 'room-library', expected_room_id: null }] }), { status: 404, data: { code: 'PHOTO_NOT_FOUND', field: 'photo_id' } })
+
+    // Room facts are versioned independently, and unanswered facts cannot be
+    // manufactured from the listing's declared inventory or another room.
+    await assert.rejects(updateStayPhotoRoom(db, env, cleaner, cabin.id, roomA.id, { expected_details_version: 1, private_attached_bathroom: true }), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, foreignRoom.room.id, { expected_details_version: 1, private_attached_bathroom: true }), { status: 404, data: { code: 'PHOTO_ROOM_NOT_FOUND', field: 'room_id' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, { ...manager, organizationId: 'another-org' }, cabin.id, roomA.id, { expected_details_version: 1, sleeping_arrangements: [] }), { status: 404, data: { code: 'HOME_NOT_FOUND' } })
+    const unchangedDetails = await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom, details_version FROM product_stay_photo_rooms WHERE id = ?').bind(roomA.id).first()
+    for (const [body, field] of [
+      [{ sleeping_arrangements: [] }, 'expected_details_version'],
+      [{ expected_details_version: 1 }, 'room'],
+      [{ expected_details_version: 1, sleeping_arrangements: [{ type: 'imaginary', count: 1 }] }, 'sleeping_arrangements'],
+      ...[0, 51, 1.5].map(count => [{ expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count }] }, 'sleeping_arrangements']),
+      [{ expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }, { type: 'queen', count: 1 }] }, 'sleeping_arrangements'],
+      [{ expected_details_version: 1, private_attached_bathroom: 'yes' }, 'private_attached_bathroom'],
+    ] as const) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, body), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field } })
+      assert.deepEqual(await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom, details_version FROM product_stay_photo_rooms WHERE id = ?').bind(roomA.id).first(), unchangedDetails)
+    }
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, lake.id, foreignRoom.room.id, { expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }] }), { status: 409, data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'sleeping_arrangements', product_id: lake.id } })
+    const authored = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }, { type: 'single', count: 1 }], private_attached_bathroom: true })
+    assert.deepEqual(authored.room, { ...roomA, sleeping_arrangements: [{ type: 'single', count: 1 }, { type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: 2 })
+    assert.deepEqual(await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom, details_version FROM product_stay_photo_rooms WHERE id = ?').bind(roomA.id).first(), { sleeping_arrangements: '[{"type":"single","count":1},{"type":"queen","count":1}]', private_attached_bathroom: 1, details_version: 2 })
+    const authoredProduct = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(authoredProduct.stay!.photo_rooms[0], authored.room)
+    assert.deepEqual([authoredProduct.stay!.beds, authoredProduct.stay!.bedrooms, authoredProduct.stay!.bathrooms], [3, 2, 1])
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms[0], authored.room)
+    const authoredPublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(authoredPublic)
+    assert.deepEqual(authoredPublic.product.stay!.photo_rooms[0], authored.room)
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: 2, sleeping_arrangements: [] })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms[0], { ...roomA, sleeping_arrangements: [], private_attached_bathroom: true, details_version: 3 })
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: 3, sleeping_arrangements: null, private_attached_bathroom: false })
+    assert.deepEqual(await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom, details_version FROM product_stay_photo_rooms WHERE id = ?').bind(roomA.id).first(), { sleeping_arrangements: null, private_attached_bathroom: 0, details_version: 4 })
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: 2, private_attached_bathroom: true }), { status: 409, data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' } })
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { beds: 1 } } })
+    const allocationRace = await Promise.allSettled([
+      updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: 4, sleeping_arrangements: [{ type: 'queen', count: 1 }] }),
+      updateStayPhotoRoom(db, env, manager, cabin.id, roomB.id, { expected_details_version: 1, sleeping_arrangements: [{ type: 'single', count: 1 }] }),
+    ])
+    assert.equal(allocationRace.filter(result => result.status === 'fulfilled').length, 1)
+    for (const result of allocationRace) if (result.status === 'rejected') { assert.equal(result.reason.status, 409); assert.equal(result.reason.data.code, 'STAY_BED_ALLOCATION_EXCEEDED') }
+    const allocated = (await getProduct(db, ORG, cabin.id)).stay!
+    assert.equal(allocated.photo_rooms.reduce((sum, room) => sum + (room.sleeping_arrangements ?? []).reduce((n, bed) => n + bed.count, 0), 0), 1)
+    const occupied = allocated.photo_rooms.find(room => room.sleeping_arrangements?.length)!
+    const privacyRace = await Promise.allSettled([true, false].map(value => updateStayPhotoRoom(db, env, manager, cabin.id, occupied.id, { expected_details_version: occupied.details_version, private_attached_bathroom: value })))
+    assert.equal(privacyRace.filter(result => result.status === 'fulfilled').length, 1)
+    for (const result of privacyRace) if (result.status === 'rejected') { assert.equal(result.reason.status, 409); assert.equal(result.reason.data.code, 'ROOM_DETAILS_CHANGED') }
+    await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { name: 'Refused total change', stay: { beds: null } } }), error => (error as { status: number }).status === 409 && code('STAY_BED_ALLOCATION_EXCEEDED')(error))
+    assert.equal((await getProduct(db, ORG, cabin.id)).name, 'Cabin')
+    assert.equal((await getProduct(db, ORG, cabin.id)).stay!.beds, 1)
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { beds: 2 } } })
+    const free = (await getProduct(db, ORG, cabin.id)).stay!.photo_rooms.find(room => !room.sleeping_arrangements?.length)!
+    const totalRace = await Promise.allSettled([
+      updateStayPhotoRoom(db, env, manager, cabin.id, free.id, { expected_details_version: free.details_version, sleeping_arrangements: [{ type: 'double', count: 1 }] }),
+      updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { beds: 1 } } }),
+    ])
+    assert.equal(totalRace.filter(result => result.status === 'fulfilled').length, 1)
+    for (const result of totalRace) if (result.status === 'rejected') { assert.equal(result.reason.status, 409); assert.equal(result.reason.data.code, 'STAY_BED_ALLOCATION_EXCEEDED') }
+    const finalAllocation = (await getProduct(db, ORG, cabin.id)).stay!
+    const finalCount = finalAllocation.photo_rooms.reduce((sum, room) => sum + (room.sleeping_arrangements ?? []).reduce((n, bed) => n + bed.count, 0), 0)
+    assert.equal(finalCount, finalAllocation.beds)
+    for (const current of finalAllocation.photo_rooms) {
+      await updateStayPhotoRoom(db, env, manager, cabin.id, current.id, { expected_details_version: current.details_version, sleeping_arrangements: null, private_attached_bathroom: null })
+      const expected = current.id === roomA.id ? roomA : roomB
+      expected.details_version = current.details_version + 1
+    }
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { beds: 3 } } })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [roomA, roomB])
+
+    // A room describes where a listing amenity is available. Selecting it here
+    // promotes that same canonical listing fact; it never creates another list
+    // with a contradictory owner or loses a different room's selection.
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.amenities, [])
+    for (const amenities of [null, 'tv', ['invented_amenity'], ['tv', 'tv']]) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities }), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field: 'amenities' } })
+    }
+    await assert.rejects(updateStayPhotoRoom(db, env, cleaner, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities: ['tv'] }), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, foreignRoom.room.id, { expected_details_version: 1, amenities: ['tv'] }), { status: 404, data: { code: 'PHOTO_ROOM_NOT_FOUND', field: 'room_id' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, { ...manager, organizationId: 'another-org' }, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities: ['tv'] }), { status: 404, data: { code: 'HOME_NOT_FOUND' } })
+    const beforeAmenityVersion = roomA.details_version
+    const featuredRoom = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, {
+      expected_details_version: beforeAmenityVersion, amenities: ['wireless_internet', 'tv'], sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true,
+    })
+    assert.deepEqual(featuredRoom.room, { ...roomA, amenities: ['tv', 'wireless_internet'], sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: beforeAmenityVersion + 1 })
+    assert.deepEqual(await db.prepare('SELECT amenity_code FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY amenity_code').bind(ORG, cabin.id, roomA.id).all().then(result => result.results), [{ amenity_code: 'tv' }, { amenity_code: 'wireless_internet' }])
+    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE organization_id = ? AND product_id = ?').bind(ORG, cabin.id).first('amenities'), '[{"code":"tv","available":true},{"code":"wireless_internet","available":true}]')
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomB.id, { expected_details_version: roomB.details_version, amenities: ['wireless_internet'] })
+    roomB.amenities = ['wireless_internet']
+    roomB.details_version++
+    const featuredProduct = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(featuredProduct.stay!.amenities, ['tv', 'wireless_internet'])
+    assert.deepEqual(featuredProduct.stay!.photo_rooms, [featuredRoom.room, roomB])
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [featuredRoom.room, roomB])
+    const featuredPublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(featuredPublic)
+    assert.deepEqual(featuredPublic.product.stay!.photo_rooms, [featuredRoom.room, roomB])
+    assert.deepEqual(featuredPublic.product.stay!.amenities, ['tv', 'wireless_internet'])
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: beforeAmenityVersion, amenities: ['hot_water'], sleeping_arrangements: [], private_attached_bathroom: false }), { status: 409, data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' } })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay, featuredProduct.stay)
+
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: featuredRoom.room.details_version, amenities: [], sleeping_arrangements: null, private_attached_bathroom: null })
+    roomA.details_version = featuredRoom.room.details_version + 1
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [roomA, roomB])
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.amenities, ['tv', 'wireless_internet'])
+    // Removing the canonical listing fact prunes every room and invalidates an
+    // editor which still has that membership; re-adding cannot resurrect it.
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities: ['wireless_internet'] })
+    roomA.amenities = ['wireless_internet']
+    roomA.details_version++
+    const beforeGlobalRemoval = [roomA.details_version, roomB.details_version]
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { amenities: ['tv'] } } })
+    for (const room of [roomA, roomB]) { room.amenities = []; room.details_version++ }
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [roomA, roomB])
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ?').bind(ORG, cabin.id).first('n'), 0)
+    for (const [index, room] of [roomA, roomB].entries()) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, room.id, { expected_details_version: beforeGlobalRemoval[index], amenities: ['wireless_internet'] }), { status: 409, data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' } })
+    }
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { amenities: ['wireless_internet', 'tv'] } } })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [roomA, roomB])
+
+    // Canonical validation refuses the entire mixed write, including room facts
+    // and global promotion, when parking would contradict its disclosure.
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { no_property_parking: true } } })
+    const beforeParkingPromotion = await getProduct(db, ORG, cabin.id)
+    for (const parking of ['free_parking', 'paid_parking_on_premises']) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities: [parking], sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true }),
+        (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === 'Remove on-property parking amenities or change “No parking on the property” before saving.')
+      const refusedPromotion = await getProduct(db, ORG, cabin.id)
+      assert.deepEqual(refusedPromotion.stay, beforeParkingPromotion.stay)
+      assert.deepEqual(refusedPromotion.details, beforeParkingPromotion.details)
+      assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ?').bind(ORG, cabin.id).first('n'), 0)
+    }
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { no_property_parking: null } } })
+
+    // Accessibility answers require authored evidence. A saved library photo
+    // becomes a listing photo in the same write, without assigning a room.
+    await assert.rejects(updateStayPhotoRoom(db, env, cleaner, cabin.id, roomA.id, { expected_details_version: roomA.details_version, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } }), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, { ...manager, organizationId: 'foreign-host' }, cabin.id, roomA.id, { expected_details_version: roomA.details_version, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } }), { status: 404, data: { code: 'HOME_NOT_FOUND' } })
+    for (const accessibility of [
+      null,
+      [{ feature: 'step_free_access', available: false, photo_ids: [] }],
+      { feature: 'invented', available: false, photo_ids: [] },
+      { feature: 'step_free_access', available: 'yes', photo_ids: [] },
+      { feature: 'step_free_access', available: true, photo_ids: [] },
+      { feature: 'step_free_access', available: false, photo_ids: ['room-a'] },
+      { feature: 'step_free_access', available: null, photo_ids: ['room-a'] },
+      { feature: 'step_free_access', available: true, photo_ids: ['room-a', 'room-a'] },
+    ]) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, accessibility }), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field: 'accessibility' } })
+    }
+    const inaccessible = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } })
+    assert.deepEqual(inaccessible.room, { ...roomA, details_version: roomA.details_version + 1, accessibility: [{ feature: 'step_free_access', available: false, photo_ids: [] }, unansweredAccessibility[1]] })
+    assert.deepEqual((await db.prepare('SELECT feature_code, available FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomA.id).all()).results, [{ feature_code: 'step_free_access', available: 0 }])
+    const existingEvidence = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: inaccessible.room.details_version, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['room-a'] } })
+    assert.deepEqual(existingEvidence.room.accessibility, [{ feature: 'step_free_access', available: true, photo_ids: ['room-a'] }, unansweredAccessibility[1]])
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c'])
+    const libraryEvidence = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: existingEvidence.room.details_version, accessibility: { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] } })
+    assert.deepEqual(libraryEvidence.room.accessibility, [{ feature: 'step_free_access', available: true, photo_ids: ['room-a'] }, { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] }])
+    assert.deepEqual((await db.prepare('SELECT feature_code, available FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY feature_code').bind(ORG, cabin.id, roomA.id).all()).results, [{ feature_code: 'step_free_access', available: 1 }, { feature_code: 'wide_doorway', available: 1 }])
+    assert.deepEqual((await db.prepare('SELECT feature_code, asset_id FROM product_stay_room_accessibility_photos WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY feature_code, asset_id').bind(ORG, cabin.id, roomA.id).all()).results, [{ feature_code: 'step_free_access', asset_id: 'room-a' }, { feature_code: 'wide_doorway', asset_id: 'room-evidence' }])
+    const accessibleHome = await readStayHome(db, manager, cabin.id)
+    assert.deepEqual(accessibleHome.photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+    assert.deepEqual(accessibleHome.photo_rooms, [libraryEvidence.room, roomB])
+    assert.deepEqual(libraryEvidence.room.photo_ids, [])
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [libraryEvidence.room, roomB])
+    const accessiblePublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(accessiblePublic)
+    assert.deepEqual(accessiblePublic.product.stay!.photo_rooms, [libraryEvidence.room, roomB])
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: existingEvidence.room.details_version, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['room-library'] } }), { status: 409, data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' } })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [libraryEvidence.room, roomB])
+    const beforeInvalidEvidence = await getProduct(db, ORG, cabin.id)
+    for (const [assetId, message] of [
+      ['room-video', 'accessibility.photo_ids asset room-video must be image'],
+      ...['foreign-room-photo', 'room-deleted', 'missing-room-photo'].map(id => [id, `accessibility.photo_ids references an inactive, out-of-scope, or generated derivative media asset: ${id}`]),
+    ]) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, {
+        expected_details_version: libraryEvidence.room.details_version, accessibility: { feature: 'wide_doorway', available: true, photo_ids: ['room-library', assetId] },
+        sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, amenities: ['hot_water'],
+      }), (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === message)
+      await assert.rejects(updateStayHomeAccessibility(db, env, manager, cabin.id, {
+        expected_updated_at: beforeInvalidEvidence.updated_at, accessibility: { feature: 'home_wide_doorway', available: true, photo_ids: ['room-library', assetId] },
+      }), (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === message)
+      assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay, beforeInvalidEvidence.stay)
+      assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+    }
+
+    // Evidence is attached to the listing, independent of photo-tour grouping
+    // or the particular placement which currently supplies the cover.
+    await moveStayPhotos(db, env, manager, cabin.id, { room_id: roomB.id, photos: [{ photo_id: 'room-a', expected_room_id: null }] })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms[0]!.accessibility, libraryEvidence.room.accessibility)
+    await moveStayPhotos(db, env, manager, cabin.id, { room_id: null, photos: [{ photo_id: 'room-a', expected_room_id: roomB.id }] })
+    await attachMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'gallery' }, assetId: 'room-a' })
+    await setSingleMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-evidence' })
+    await removeMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'gallery' }, assetId: 'room-evidence' })
+    await reorderStayHomePhotos(db, env, manager, principal, cabin.id, { photo_ids: ['room-a', 'room-b', 'room-c', 'room-evidence'] })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [libraryEvidence.room, roomB])
+    // Every canonical media owner protects a positive answer's last placement;
+    // refusal leaves both the evidence and the actual active photo unchanged.
+    const evidenceRemovals = [
+      () => removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-a'),
+      () => removeMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-a' }),
+      () => setSingleMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-b' }),
+      () => arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id, from: ['room-a', 'room-b', 'room-c', 'room-evidence'], to: ['room-b', 'room-c', 'room-evidence'] }),
+      () => deleteMediaAsset(db, env, 'room-a', ORG, OWNER),
+    ]
+    for (const removeEvidence of evidenceRemovals) {
+      await assert.rejects(removeEvidence, { status: 409, data: { code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' } })
+      assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+      assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [libraryEvidence.room, roomB])
+      assert.equal((await getMediaAsset(db, 'room-a', ORG))?.status, 'active')
+    }
+
+    const clearedStep = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: libraryEvidence.room.details_version, accessibility: { feature: 'step_free_access', available: null, photo_ids: [] } })
+    assert.deepEqual(clearedStep.room.accessibility, [unansweredAccessibility[0], { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] }])
+    // The same media boundaries protect listing evidence after the room has
+    // released that photo, including the guard before provider storage deletion.
+    const listingEvidence = await updateStayHomeAccessibility(db, env, manager, cabin.id, { expected_updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['room-a'] } })
+    const listingPublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(listingPublic)
+    assert.deepEqual(listingPublic.product.stay!.accessibility, listingEvidence.home.accessibility)
+    assert.deepEqual(listingEvidence.home.photo_rooms, [clearedStep.room, roomB])
+    for (const removeEvidence of evidenceRemovals) {
+      await assert.rejects(removeEvidence, { status: 409, data: { code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' } })
+      assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.accessibility, listingEvidence.home.accessibility)
+      assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+      assert.equal((await getMediaAsset(db, 'room-a', ORG))?.status, 'active')
+    }
+    const listingRace = await Promise.allSettled([true, false].map(available => updateStayHomeAccessibility(db, env, manager, cabin.id, {
+      expected_updated_at: listingEvidence.home.product_updated_at, accessibility: { feature: 'ceiling_hoist', available, photo_ids: available ? ['room-a'] : [] },
+    })))
+    assert.equal(listingRace.filter(result => result.status === 'fulfilled').length, 1)
+    for (const result of listingRace) if (result.status === 'rejected') { assert.equal(result.reason.status, 409); assert.equal(result.reason.data.code, 'STAY_ACCESSIBILITY_CHANGED') }
+    for (const feature of ['home_step_free_access', 'ceiling_hoist']) await updateStayHomeAccessibility(db, env, manager, cabin.id, { expected_updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature, available: null, photo_ids: [] } })
+    await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-a')
+    await addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-a' })
+    await reorderStayHomePhotos(db, env, manager, principal, cabin.id, { photo_ids: ['room-a', 'room-b', 'room-c', 'room-evidence'] })
+    const clearedEvidence = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: clearedStep.room.details_version, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })
+    assert.deepEqual(clearedEvidence.room.accessibility, [unansweredAccessibility[0], { feature: 'wide_doorway', available: false, photo_ids: [] }])
+    await deleteMediaAsset(db, env, 'room-evidence', ORG, OWNER)
+    assert.equal((await getMediaAsset(db, 'room-evidence', ORG))?.status, 'deleted')
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c'])
+    const clearedAccessibility = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: clearedEvidence.room.details_version, accessibility: { feature: 'wide_doorway', available: null, photo_ids: [] } })
+    roomA.details_version = clearedAccessibility.room.details_version
+    assert.deepEqual(clearedAccessibility.room, roomA)
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomA.id).first('n'), 0)
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_room_accessibility_photos WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomA.id).first('n'), 0)
+
+    const evidenceRoom = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
+    await updateStayPhotoRoom(db, env, manager, cabin.id, evidenceRoom.room.id, { expected_details_version: 1, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['room-library'] } })
+    await removeStayPhotoRoom(db, env, manager, cabin.id, evidenceRoom.room.id)
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [roomA, roomB])
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-library'])
+    assert.equal((await getMediaAsset(db, 'room-library', ORG))?.status, 'active')
+    await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-library')
+
+    await moveStayPhotos(db, env, manager, cabin.id, { room_id: roomA.id, photos: [{ photo_id: 'room-a', expected_room_id: null }, { photo_id: 'room-b', expected_room_id: null }] })
+    const assigned = [{ ...roomA, photo_ids: ['room-a', 'room-b'] }, roomB]
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, assigned)
+    // One stale selection refuses the whole move, including an atomic new-room
+    // request: the valid sibling stays where it was and no empty room appears.
+    for (const destination of [{ room_id: roomB.id }, { new_room_type: 'deck' }]) {
+      await assert.rejects(moveStayPhotos(db, env, manager, cabin.id, { ...destination, photos: [{ photo_id: 'room-a', expected_room_id: roomA.id }, { photo_id: 'room-b', expected_room_id: null }] }), { status: 409, data: { code: 'PHOTOS_CHANGED', field: 'photos' } })
+      assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, assigned)
+    }
+    await moveStayPhotos(db, env, manager, cabin.id, { new_room_type: 'living_room', photos: [{ photo_id: 'room-b', expected_room_id: roomA.id }, { photo_id: 'room-c', expected_room_id: null }] })
+    const createdRooms = (await getProduct(db, ORG, cabin.id)).stay!.photo_rooms
+    assert.equal(createdRooms.length, 3)
+    const roomC = createdRooms[2]!
+    assert.equal(roomC.type, 'living_room')
+    assert.deepEqual(createdRooms, [{ ...roomA, photo_ids: ['room-a'] }, roomB, { ...roomC, photo_ids: ['room-b', 'room-c'] }])
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomC.id, { expected_details_version: roomC.details_version, amenities: ['ac'] })
+    roomC.amenities = ['ac']
+    roomC.details_version++
+    const race = await Promise.allSettled([
+      moveStayPhotos(db, env, manager, cabin.id, { room_id: roomB.id, photos: [{ photo_id: 'room-a', expected_room_id: roomA.id }] }),
+      moveStayPhotos(db, env, manager, cabin.id, { room_id: null, photos: [{ photo_id: 'room-a', expected_room_id: roomA.id }] }),
+    ])
+    assert.equal(race.filter(result => result.status === 'fulfilled').length, 1)
+    const refused = race.find(result => result.status === 'rejected')
+    assert(refused?.status === 'rejected')
+    assert.equal((refused.reason as { status: number }).status, 409)
+    assert.equal((refused.reason as { data: { code: string } }).data.code, 'PHOTOS_CHANGED')
+    const winner = race[0]!.status === 'fulfilled' ? roomB.id : null
+    const afterRace = (await getProduct(db, ORG, cabin.id)).stay!.photo_rooms
+    assert.deepEqual(afterRace, [roomA, { ...roomB, photo_ids: winner ? ['room-a'] : [] }, { ...roomC, photo_ids: ['room-b', 'room-c'] }])
+    await moveStayPhotos(db, env, manager, cabin.id, { room_id: roomC.id, photos: [{ photo_id: 'room-a', expected_room_id: winner }] })
+
+    // Reordering and a cover replacement retain authored membership even when
+    // the placement operation deletes and reinserts its own rows internally.
+    await reorderStayHomePhotos(db, env, manager, principal, cabin.id, { photo_ids: ['room-c', 'room-b', 'room-a'] })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-c', 'room-b', 'room-a'] }])
+    await attachMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'gallery' }, assetId: 'room-c' })
+    await setSingleMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-a' })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-a', 'room-b', 'room-c'] }])
+    await removeMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'gallery' }, assetId: 'room-c' })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-a', 'room-b'] }])
+    await addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-c' })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-a', 'room-b'] }])
+    await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-a')
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-b'] }])
+    assert.equal((await getMediaAsset(db, 'room-a', ORG))?.status, 'active')
+    await addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-a' })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-b'] }])
+    await deleteMediaAsset(db, env, 'room-b', ORG, OWNER)
+    assert.equal((await getMediaAsset(db, 'room-b', ORG))?.status, 'deleted')
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: [] }])
+    await assert.rejects(addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-b' }), { status: 404, data: { code: 'PHOTO_NOT_FOUND', field: 'asset_id' } })
+    await moveStayPhotos(db, env, manager, cabin.id, { room_id: roomC.id, photos: [{ photo_id: 'room-c', expected_room_id: null }, { photo_id: 'room-a', expected_room_id: null }] })
+    await reorderStayHomePhotos(db, env, manager, principal, cabin.id, { photo_ids: ['room-c', 'room-a'] })
+    const beforeRoomRemoval = await readStayHome(db, manager, cabin.id)
+    assert.deepEqual(beforeRoomRemoval.photos.map(photo => photo.id), ['room-c', 'room-a'])
+    assert.deepEqual(beforeRoomRemoval.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-c', 'room-a'] }])
+    const publicDetail = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(publicDetail)
+    assert.deepEqual(publicDetail.product.stay?.photo_rooms, beforeRoomRemoval.photo_rooms)
+    // Replacing the only placement through the generic media owner clears its
+    // old room too. Restoring the picture cannot restore that old membership.
+    await setSingleMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-library' })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-a'] }])
+    await setSingleMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-c' })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB, { ...roomC, photo_ids: ['room-a'] }])
+    await removeStayPhotoRoom(db, env, manager, cabin.id, roomC.id)
+    const afterRoomRemoval = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(afterRoomRemoval.stay?.photo_rooms, [roomA, roomB])
+    assert.deepEqual(afterRoomRemoval.stay!.amenities, ['ac', 'tv', 'wireless_internet'])
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomC.id).first('n'), 0)
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-c', 'room-a'])
+    for (const photoId of ['room-c', 'room-a']) assert.equal((await getMediaAsset(db, photoId, ORG))?.status, 'active')
+    await assert.rejects(removeStayPhotoRoom(db, env, manager, cabin.id, foreignRoom.room.id), { status: 404, data: { code: 'PHOTO_ROOM_NOT_FOUND', field: 'room_id' } })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB])
   } finally {
     await runtime.dispose()
   }
@@ -581,16 +1059,24 @@ test('members see only the homes they look after and change nothing; a home with
 test('a business’s site shows a guest the stay its signed link names, from any browser, and nothing else', { timeout: 120_000 }, async () => {
   const { runtime, db, env: bindings } = await boot()
   try {
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    const address = { regionCode: 'US', addressLines: ['12 Test Road', 'Apartment 4', 'East building'], languageCode: 'en', locality: 'Boulder', sublocality: 'North Boulder', administrativeArea: 'Colorado', postalCode: '80301' }
+    const location = { address, latitude: 40.014984, longitude: -105.270546, maps_url: 'https://maps.google.com/?cid=123456' }
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'site-stay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
-    // The anonymous Better Auth user the site's checkout made the stay for.
+    // A manual, pay-on-arrival stay is confirmed before collecting money. Its
+    // existing guest invite gives the Better Auth guest their own stay.
     const signIn = async () => {
       const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
       return { id: signed.response!.user.id, cookie: signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
     }
     const booker = await signIn()
-    await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(booker.id, stay.id).run()
+    const otherGuest = await signIn()
+    assert(stay.request_id)
+    const invite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: stay.request_id, actorUserId: OWNER })
+    const token = new URL(invite.url).pathname.split('/').at(-1)!
+    assert.equal((await claimGuestThreadInvite(db, { token, userId: booker.id })).thread_id, stay.request_id)
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
     const activityId = stay.request_id ?? stay.id
     // The link the confirmation email and the paid return carry, signed with the site's secret.
@@ -602,16 +1088,96 @@ test('a business’s site shows a guest the stay its signed link names, from any
       app.get('/api/public/guest-stays/:activityId', guestStayRoute)
       return app.request(Object.assign(new Request(`https://org.proof.example/api/public/guest-stays/${activityId}`, { headers: token ? { authorization: `Bearer ${token}` } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
+    const accountRead = (cookie?: string) => {
+      const app = new H3()
+      app.get('/api/account/stays/:activityId', accountStayRoute)
+      return app.request(Object.assign(new Request(`https://proof.example/api/account/stays/${activityId}`, { headers: cookie ? { cookie } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    }
 
     // No session is sent: the link alone opens the stay, as from the email on another device.
     const own = await read(ORG, link)
     assert.equal(own.status, 200)
-    const body = await own.json() as { organization_id: string; stay: { id: string; guest_email: string; cancellation_policy: string; check_in_date: string; check_out_date: string }; home: { name: string; check_in_time: string; check_out_time: string; image_url: string | null }; cancellation: unknown }
-    assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: body.home, cancellation: body.cancellation },
-      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null }, cancellation: null })
+    assert.equal(own.headers.get('cache-control'), 'private, no-store')
+    const body = await own.json() as GuestStay
+    const { location: guestLocation, ...guestHome } = body.home
+    assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: guestHome, cancellation: body.cancellation },
+      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: null, dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null }, cancellation: null })
+    assert(guestLocation?.maps_url)
+    assert.deepEqual({ address: guestLocation.address, latitude: guestLocation.latitude, longitude: guestLocation.longitude }, { address, latitude: 40.014984, longitude: -105.270546 })
+    assert.equal(new URL(guestLocation.maps_url).origin, 'https://maps.google.com')
+    assert.equal(new URL(guestLocation.maps_url).searchParams.get('q'), '40.014984,-105.270546')
+    assert.equal(new URL(guestLocation.maps_url).searchParams.has('cid'), false)
+    assert.deepEqual({ status: body.stay.status, payment: body.stay.payment_status, paid: body.stay.paid_minor }, { status: 'confirmed', payment: 'unpaid', paid: 0 })
+    const account = await accountRead(booker.cookie)
+    assert.equal(account.status, 200)
+    assert.equal(account.headers.get('cache-control'), 'private, no-store')
+    assert.deepEqual((await account.json() as GuestStay).home.location, guestLocation)
+    assert.equal((await accountRead(otherGuest.cookie)).status, 404)
+    assert.equal((await accountRead()).status, 401)
     assert.equal((await read('another-org', link)).status, 404)
     assert.equal((await read(ORG, otherLink)).status, 404)
     assert.equal((await read(ORG)).status, 401)
+
+    // The mutation response must carry the saved pin on an address-only edit
+    // and on clearing just the address, as the focused editor reads it back.
+    for (const nextAddress of [{ ...address, locality: 'Longmont' }, null, address]) {
+      const edited = await updateLocation(db, ORG, 'cabin-site', { address: nextAddress }, OWNER, env)
+      assert.equal(edited.status, 200)
+      assert('location' in edited.data && edited.data.location)
+      assert.deepEqual({ latitude: edited.data.location.latitude, longitude: edited.data.location.longitude }, { latitude: 40.014984, longitude: -105.270546 })
+      assert.equal(edited.data.location.maps_url, location.maps_url)
+      assert.equal(await db.prepare("SELECT maps_url FROM business_locations WHERE id = 'cabin-site'").first('maps_url'), location.maps_url)
+      const saved = await read(ORG, link)
+      assert.equal(saved.status, 200)
+      const savedLocation = (await saved.json() as GuestStay).home.location
+      assert(savedLocation)
+      assert.deepEqual({ address: savedLocation.address, latitude: savedLocation.latitude, longitude: savedLocation.longitude }, { address: nextAddress, latitude: 40.014984, longitude: -105.270546 })
+    }
+
+    // A broken stored pin fails visibly, rather than exposing a half pin or
+    // replacing invalid coordinates with a guessed destination.
+    for (const [latitude, longitude, field] of [[40.014984, null, 'longitude'], [91, -105.270546, 'latitude']] as const) {
+      await db.prepare("UPDATE business_locations SET latitude = ?, longitude = ? WHERE id = 'cabin-site'").bind(latitude, longitude).run()
+      for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
+        assert.equal(response.status, 500)
+        const refusal = await response.json() as { data: { code: string; field: string } }
+        assert.deepEqual(refusal.data, { code: 'INVALID_STORED_LOCATION', field })
+      }
+      assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+      const restored = await read(ORG, link)
+      assert.equal(restored.status, 200)
+      assert.deepEqual((await restored.json() as GuestStay).home.location, guestLocation)
+    }
+
+    // A confirmed guest sees only facts the location actually has.
+    const cleared = await updateLocation(db, ORG, 'cabin-site', { address: null, latitude: null, longitude: null, maps_url: null }, OWNER, env)
+    assert.equal(cleared.status, 200)
+    assert('location' in cleared.data && cleared.data.location)
+    assert.deepEqual({ latitude: cleared.data.location.latitude, longitude: cleared.data.location.longitude }, { latitude: null, longitude: null })
+    const unset = await read(ORG, link)
+    assert.equal(unset.status, 200)
+    assert.deepEqual((await unset.json() as GuestStay).home.location, { address: null, latitude: null, longitude: null, maps_url: null })
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+
+    // Pending app records are not currently made by checkout, but stored
+    // unconfirmed state must never disclose an exact location through either read.
+    await db.prepare("UPDATE stays SET status = 'pending' WHERE id = ?").bind(stay.id).run()
+    for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
+      assert.equal(response.status, 200)
+      const pending = await response.json() as GuestStay
+      assert.equal(pending.stay.status, 'pending')
+      assert.equal(pending.home.location, null)
+      for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(pending).includes(exact))
+    }
+    await db.prepare("UPDATE stays SET status = 'confirmed' WHERE id = ?").bind(stay.id).run()
+    await cancelStay(db, env, manager, stay.id, { expected_version: stay.version })
+    for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
+      assert.equal(response.status, 200)
+      const cancelled = await response.json() as GuestStay
+      assert.equal(cancelled.stay.status, 'cancelled')
+      assert.equal(cancelled.home.location, null)
+      for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(cancelled).includes(exact))
+    }
     // The link lasts as a booking's does: thirty days from when the stay was booked.
     await db.prepare("UPDATE stays SET created_at = ? WHERE id = ?").bind(new Date(Date.now() - 31 * 86_400_000).toISOString(), stay.id).run()
     assert.equal((await read(ORG, link)).status, 410)
@@ -628,11 +1194,15 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    const location = { address: { regionCode: 'TH', addressLines: ['56 Test Lane', 'Villa 8', 'Garden entrance'], languageCode: 'th', locality: 'Krabi Town', sublocality: 'Ao Nang', administrativeArea: 'Krabi', postalCode: '81180' }, latitude: 8.0326, longitude: 98.822, maps_url: null }
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
     const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const buyer = signed.response!.user.id
     const cookie = signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     // The checkout's own anonymous guest owns the stay until the paying browser proves the purchase.
-    const checkoutGuest = (await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })).response!.user.id
+    const checkoutSigned = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+    const checkoutGuest = checkoutSigned.response!.user.id
+    const checkoutCookie = checkoutSigned.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     // The stay a captured checkout made, as its conversion leaves it: the hold converted to it, the payment captured for it.
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'checkout:stay-pay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
     await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(checkoutGuest, stay.id).run()
@@ -660,6 +1230,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     app.use((event) => { event.context.organizationId = ORG })
     app.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
     app.get('/api/public/guest-stays/:activityId', guestStayRoute)
+    app.get('/api/account/stays/:activityId', accountStayRoute)
     const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
     const activityId = stay.request_id ?? stay.id
@@ -679,9 +1250,193 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // (conversion is covered by its own tests); this checks the receipt read shows them.
     const read = await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: `Bearer ${returned.receipt_token}` })
     assert.equal(read.status, 200)
-    const body = await read.json() as { stay: { id: string; paid_minor: number; cancellation_policy: string; guest_email: string }; cancellation: { policy: string; paid_minor: number } | null }
+    const body = await read.json() as GuestStay
     assert.deepEqual({ id: body.stay.id, paid: body.stay.paid_minor, policy: body.stay.cancellation_policy, email: body.stay.guest_email, quote: body.cancellation && { policy: body.cancellation.policy, paid: body.cancellation.paid_minor } },
       { id: stay.id, paid: 45_000, policy: 'moderate', email: 'ana@example.com', quote: { policy: 'moderate', paid: 45_000 } })
+    assert(body.home.location?.maps_url)
+    assert.deepEqual({ address: body.home.location.address, latitude: body.home.location.latitude, longitude: body.home.location.longitude }, { address: location.address, latitude: 8.0326, longitude: 98.822 })
+    assert.equal(new URL(body.home.location.maps_url).searchParams.get('q'), '8.0326,98.822')
+    const account = await call(`/api/account/stays/${activityId}`)
+    assert.equal(account.status, 200)
+    assert.deepEqual((await account.json() as GuestStay).home.location, body.home.location)
+    assert.equal((await call(`/api/account/stays/${activityId}`, {}, { cookie: checkoutCookie })).status, 404)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('home location sharing protects every public projection after localization while ordinary business locations remain public', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    // A mixed catalog owns a private home and an ordinary public branch. The
+    // unpublished home's location remains private even on another product.
+    await db.prepare("UPDATE organization SET vertical = 'restaurant' WHERE id = ?").bind(ORG).run()
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('public-en', ?, 'en', 1, 'published'), ('public-th', ?, 'th', 0, 'published')").bind(ORG, ORG).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('public-growth', 'growth', ?, 'active', 4102444800)").bind(ORG).run()
+    const address = { regionCode: 'TH', addressLines: ['56 Private Lane', 'Villa 8', 'Garden entrance'], languageCode: 'en', locality: 'Krabi Town', sublocality: 'Ao Nang', administrativeArea: 'Krabi', postalCode: '81180' }
+    const location = { address, latitude: 8.0326, longitude: 98.822, maps_url: 'https://maps.google.com/?cid=private-cid', google_place_id: 'private-place-id', google_review_url: 'https://search.google.com/local/writereview?placeid=private-place-id' }
+    const branchAddress = { regionCode: 'US', addressLines: ['123 Public Street'], locality: 'Boulder', administrativeArea: 'Colorado', postalCode: '80301' }
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+    assert.equal((await updateLocation(db, ORG, 'lake-site', { address: branchAddress, latitude: 40.014984, longitude: -105.270546, maps_url: 'https://maps.google.com/?cid=public-cid', google_place_id: 'public-place-id' }, OWNER, env)).status, 200)
+    const beforeInvalidMap = await db.prepare("SELECT maps_url, updated_at FROM business_locations WHERE id = 'cabin-site'").first()
+    const beforeLocationCount = await db.prepare('SELECT count(*) FROM business_locations').first('count(*)')
+    for (const [mapsUrl, error] of [['not a map URL', 'Invalid URL'], ['javascript:alert(1)', 'A map URL must use HTTP or HTTPS']] as const) {
+      const refusal = { status: 400, data: { error, code: 'INVALID_LOCATION_FIELD', field: 'maps_url' } }
+      assert.deepEqual(await updateLocation(db, ORG, 'cabin-site', { maps_url: mapsUrl }, OWNER, env), refusal)
+      assert.deepEqual(await createLocation(env, db, ORG, { title: 'Invalid map location', timezone: 'UTC', maps_url: mapsUrl }, OWNER), refusal)
+      assert.deepEqual(await db.prepare("SELECT maps_url, updated_at FROM business_locations WHERE id = 'cabin-site'").first(), beforeInvalidMap)
+      assert.equal(await db.prepare('SELECT count(*) FROM business_locations').first('count(*)'), beforeLocationCount)
+    }
+    const emptyMap = await updateLocation(db, ORG, 'cabin-site', { maps_url: '' }, OWNER, env)
+    assert.equal(emptyMap.status, 200)
+    assert('location' in emptyMap.data && emptyMap.data.location)
+    assert.equal(emptyMap.data.location.maps_url, '')
+    assert.equal(await db.prepare("SELECT maps_url FROM business_locations WHERE id = 'cabin-site'").first('maps_url'), '')
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', { maps_url: location.maps_url }, OWNER, env)).status, 200)
+    await home(db, env, { name: 'Private cabin', location: 'cabin-site' })
+    const dish = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'dish', name: 'Lunch', variants: [{ name: 'Default', prices: [{ unit_amount: 1500, currency: 'USD' }] }] } })
+    await setProductPublication(db, { env, organizationId: ORG, productId: dish.id, published: true, actor: { actorId: OWNER } })
+    await setProductLocation(db, { env, organizationId: ORG, productId: dish.id, locationId: 'cabin-site', published: true, actor: { actorId: OWNER } })
+    const translatedStreet = '56 ถนนส่วนตัว'
+    await putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'business_location', resourceId: 'cabin-site', locale: 'th', userId: OWNER,
+      values: { title: 'ที่พักส่วนตัว', address: { addressLines: [translatedStreet, 'วิลลา 8'], locality: 'เมืองกระบี่', sublocality: 'อ่าวนาง', administrativeArea: 'กระบี่' } } })
+    await putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: dish.id, locale: 'th', userId: OWNER, values: { name: 'อาหารกลางวัน' } })
+    await createContentDocumentWithBlocks(db, { id: 'public-home', organizationId: ORG, kind: 'page', rowRole: 'root', locale: 'en', title: 'Home', path: '/', status: 'published', visibility: 'listed', metadata: { page_type: 'custom' } },
+      [{ id: 'public-location-grid', type: 'location_grid', data: { location_ids: ['cabin-site', 'lake-site'] } }])
+    await createContentDocumentWithBlocks(db, { id: 'public-home-th', organizationId: ORG, kind: 'page', rowRole: 'representation', rootId: 'public-home', locale: 'th', title: 'หน้าแรก', path: '/' },
+      [{ id: 'public-location-grid-th', type: 'location_grid', data: { location_ids: ['cabin-site'] } }])
+    const reference = 'https://www.google.com/maps/reviews/data=private-review'
+    const flag = 'https://www.google.com/maps/review/report?placeid=private-place-id'
+    const metadata = { author_uri: null, author_photo_uri: null, language_code: 'en', original_text: null, original_language_code: null, flag_content_uri: flag, visit_date: null }
+    for (const [id, locationId] of [['private-review', 'cabin-site'], ['public-review', 'lake-site']] as const) {
+      await db.prepare("INSERT INTO reviews (id, organization_id, location_id, author_name, rating, content, source, status, original_reference, google_review_metadata) VALUES (?, ?, ?, 'Ana', 5, 'A lovely visit', 'google_places', 'approved', ?, ?)")
+        .bind(id, ORG, locationId, reference, JSON.stringify(metadata)).run()
+    }
+    // Existing generated artifacts may still contain an address drawn before
+    // privacy was enabled. Reading must exclude them without depending on a
+    // cleanup having already run; an ordinary branch keeps its generated card.
+    const privateCard = 'https://imagedelivery.example.test/hash/old-private-card/public'
+    const privateHero = 'https://imagedelivery.example.test/hash/private-hero/public'
+    const publicCard = 'https://imagedelivery.example.test/hash/public-card/public'
+    const publicHero = 'https://imagedelivery.example.test/hash/public-hero/public'
+    for (const [assetId, locationId, slot, url] of [
+      ['old-private-card', 'cabin-site', 'social_card', privateCard], ['private-hero', 'cabin-site', 'hero', privateHero],
+      ['public-card', 'lake-site', 'social_card', publicCard], ['public-hero', 'lake-site', 'hero', publicHero],
+    ] as const) {
+      await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, mime_type, width, height, generation_key, status, created_at, updated_at) VALUES (?, ?, 'image', 'cloudflare_images', ?, ?, 'image/png', 1200, 630, ?, 'active', ?, ?)")
+        .bind(assetId, ORG, slot === 'social_card' ? 'generated' : 'uploaded', url, slot === 'social_card' ? `historical-${assetId}` : null, NOW, NOW).run()
+      await db.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at) VALUES (?, ?, 'business_location', ?, ?, ?, 0, 'active', ?, ?)")
+        .bind(`placement-${assetId}`, ORG, locationId, slot, assetId, NOW, NOW).run()
+    }
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'cabin-site' AND slot = 'social_card' AND status = 'active'").first('count(*)'), 1)
+    const retained = await loadPublicSocialMedia(db, ORG, 'business_location', ['cabin-site', 'lake-site'])
+    assert.equal(retained.get('cabin-site')?.social_image?.url, privateHero)
+    assert.equal(retained.get('lake-site')?.social_image?.url, publicCard)
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'cabin-site' AND slot = 'social_card' AND status = 'active'").first('count(*)'), 1)
+
+    const app = new H3()
+    app.use(event => { event.context.organizationId = ORG })
+    app.get('/api/public/locations', publicLocationsRoute)
+    app.get('/api/public/locations/:slug', publicLocationRoute)
+    app.get('/api/public/page', publicPageRoute)
+    app.get('/shell', event => loadPublicShellSource(event, ORG, { locale: getQuery(event).locale as string | undefined }))
+    const read = (path: string) => app.request(Object.assign(new Request(`https://org.localhost${path}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const originalVersion = await db.prepare("SELECT updated_at FROM business_locations WHERE id = 'cabin-site'").first<string>('updated_at')
+    assert(originalVersion)
+    const invalid = await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: 'invalid' as 'general' }, OWNER, env)
+    assert.equal(invalid.status, 400)
+    assert.equal(await db.prepare("SELECT updated_at FROM business_locations WHERE id = 'cabin-site'").first('updated_at'), originalVersion)
+
+    for (const mode of ['general', 'specific'] as const) {
+      if (mode === 'specific') {
+        assert.equal((await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: mode, expected_updated_at: originalVersion }, OWNER, env)).status, 200)
+        assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'cabin-site' AND slot = 'social_card'").first('count(*)'), 0)
+        assert.equal(await db.prepare("SELECT status FROM media_assets WHERE id = 'old-private-card'").first('status'), 'active')
+        const stale = await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: 'general', expected_updated_at: originalVersion }, OWNER, env)
+        assert.deepEqual(stale, { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' } })
+      }
+      const collection = await loadPublicProductCollection(db, ORG, 'menu', false, 'cabin-site', env)
+      assert.equal(collection?.products[0]?.id, dish.id)
+      const detail = await loadPublicProductDetail(env, db, ORG, 'menu', false, 'cabin-site', dish.slug)
+      const apiDetail = await loadPublicProductApiDetail(env, db, ORG, false, 'cabin-site', dish.slug)
+      const translatedDetail = await loadPublicProductDetail(env, db, ORG, 'menu', false, 'cabin-site', dish.slug, 'th')
+      assert(detail && apiDetail && translatedDetail)
+      const projections: PublicProductLocation[] = [collection!.locations[0]!, detail.location, apiDetail.location, translatedDetail.location]
+      for (const path of ['/api/public/locations', '/api/public/locations/cabin-site', '/shell', '/shell?locale=th', '/api/public/page?page=location&location=cabin-site&datasets=location,reviews', '/api/public/page?page=location&location=cabin-site&datasets=location,reviews&locale=th']) {
+        const response = await read(path)
+        assert.equal(response.status, 200, `${path}: ${await response.clone().text()}`)
+        const payload = await response.json() as { locations?: PublicProductLocation[]; location?: PublicProductLocation; shell?: { locations: PublicProductLocation[] } }
+        const selected = payload.location ?? (payload.locations ?? payload.shell?.locations)?.find(item => item.id === 'cabin-site')
+        assert(selected, path)
+        assert.equal(selected.stay_map_sharing, mode, path)
+        projections.push(selected)
+        for (const exact of [...address.addressLines, translatedStreet, location.maps_url, location.google_place_id, reference, flag, privateCard]) assert(!JSON.stringify(payload).includes(exact), `${path} disclosed ${exact}`)
+        if (path.startsWith('/shell') || path.startsWith('/api/public/page')) assert.equal((selected as PublicProductLocation & { social_image: { url: string } }).social_image.url, privateHero)
+      }
+      for (const projected of projections) {
+        assert.equal(projected.address, null)
+        assert.equal(projected.maps_url, null)
+        assert.equal(projected.stay_map_sharing, mode)
+        assert.equal(projected.public_area?.approximate, mode === 'general')
+        if (mode === 'general') {
+          assert.equal(projected.latitude, null)
+          assert.equal(projected.longitude, null)
+          assert.notEqual(projected.public_area?.center?.latitude, location.latitude)
+          assert.notEqual(projected.public_area?.center?.longitude, location.longitude)
+          assert(!projected.map_embed_url?.includes('8.0326'))
+        } else {
+          assert.deepEqual([projected.latitude, projected.longitude], [location.latitude, location.longitude])
+          assert.equal(new URL(projected.map_embed_url!).searchParams.get('q'), '8.0326,98.822')
+        }
+      }
+      assert.equal(translatedDetail.location.public_area?.locality, 'เมืองกระบี่')
+      const grid = await getPublicTenantPageForPath(env, db, ORG, '/', { locale: 'th' })
+      assert(grid)
+      const items = grid.blocks.find(block => block.type === 'location_grid')?.data.items as Array<{ id: string; city: string; address?: string; public_area: { locality: string } }>
+      assert.equal(items.length, 1)
+      assert.equal(items[0]!.id, 'cabin-site')
+      assert.equal(items[0]!.city, 'เมืองกระบี่')
+      assert.equal(items[0]!.address, undefined)
+      assert(!JSON.stringify(grid).includes(translatedStreet))
+      const reviews = await loadPublicProductReviews(db, detail)
+      assert.equal(reviews.length, 1)
+      assert.equal(reviews[0]!.original_reference, null)
+      assert.equal(reviews[0]!.google_review_metadata?.flag_content_uri, null)
+      const locationReviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
+      assert.equal(locationReviews.length, 1)
+      assert.equal(locationReviews[0]!.original_reference, null)
+    }
+
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', { latitude: null, longitude: null, maps_url: null }, OWNER, env)).status, 200)
+    const missingPin = await read('/api/public/locations/cabin-site')
+    assert.equal(missingPin.status, 200)
+    const withoutPin = (await missingPin.json() as { location: PublicProductLocation }).location
+    assert.equal(withoutPin.stay_map_sharing, 'specific')
+    assert.deepEqual([withoutPin.latitude, withoutPin.longitude, withoutPin.public_area?.center, withoutPin.public_area?.radius_meters], [null, null, null, null])
+    assert.equal(withoutPin.public_area?.approximate, true)
+    assert(!withoutPin.map_embed_url?.includes(address.addressLines[0]!))
+
+    const branch = await read('/api/public/locations/lake-site')
+    assert.equal(branch.status, 200)
+    const publicBranch = (await branch.json() as { location: PublicProductLocation }).location
+    assert.deepEqual(publicBranch.address, branchAddress)
+    assert.deepEqual([publicBranch.latitude, publicBranch.longitude, publicBranch.maps_url, publicBranch.stay_map_sharing], [40.014984, -105.270546, 'https://maps.google.com/?cid=public-cid', null])
+    const branchReviews = await listOrganizationReviews(db, ORG, { locationId: 'lake-site', publishedOnly: true })
+    assert.equal(branchReviews[0]!.original_reference, reference)
+    assert.deepEqual(branchReviews[0]!.google_review_metadata, metadata)
+    assert.equal((await loadPublicSocialMedia(db, ORG, 'business_location', ['lake-site'])).get('lake-site')?.social_image?.url, publicCard)
+    // A lodging organization's location is private before any home is attached.
+    await db.prepare("UPDATE organization SET vertical = 'lodging' WHERE id = ?").bind(ORG).run()
+    const unassigned = await read('/api/public/locations/lake-site')
+    assert.equal(unassigned.status, 200)
+    const privateBranch = (await unassigned.json() as { location: PublicProductLocation }).location
+    assert.equal(privateBranch.address, null)
+    assert.equal(privateBranch.maps_url, null)
+    assert.equal(privateBranch.stay_map_sharing, 'general')
+    assert.deepEqual([privateBranch.latitude, privateBranch.longitude], [null, null])
+    const nowProtected = await loadPublicSocialMedia(db, ORG, 'business_location', ['lake-site'])
+    assert.equal(nowProtected.get('lake-site')?.social_image?.url, publicHero)
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'lake-site' AND slot = 'social_card' AND status = 'active'").first('count(*)'), 1)
   } finally {
     await runtime.dispose()
   }

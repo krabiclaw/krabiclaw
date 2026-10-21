@@ -6,6 +6,9 @@ import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, fo
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
 import { NOTIFICATION_CATEGORIES, PUSH_ONLY_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
+import { STAY_AMENITIES, STAY_MAP_SHARING_MODES, type StayAmenity } from "../../shared/stay-listing"
+import { STAY_PHOTO_ROOM_TYPES, type StayPhotoRoomType } from "../../shared/stay-photos"
+import { STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES, type StayHomeAccessibilityFeature, type StayRoomAccessibilityFeature } from "../../shared/stay-accessibility"
 
 export const account = sqliteTable("account", {
 	id: text().primaryKey(),
@@ -31,6 +34,7 @@ export const business_locations = sqliteTable("business_locations", {
 	slug: text().notNull(),
 	title: text().notNull(),
 	address: text(),
+	stay_map_sharing: text({ enum: STAY_MAP_SHARING_MODES }).default("general").notNull(),
 	phone: text(),
 	website_url: text(),
 	maps_url: text(),
@@ -73,6 +77,7 @@ export const business_locations = sqliteTable("business_locations", {
 	check("business_locations_opening_hours_check", sql`opening_hours IS NULL OR (json_valid(opening_hours) AND json_type(opening_hours) IS 'object' AND json_type(opening_hours, '$.periods') IS 'array')`),
 	check("business_locations_special_hours_check", sql`special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array')`),
 	check("business_locations_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
+	check("business_locations_stay_map_sharing_check", sql`stay_map_sharing IN (${sql.raw(STAY_MAP_SHARING_MODES.map(mode => `'${mode}'`).join(', '))})`),
 ]);
 
 
@@ -1127,7 +1132,7 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	beds: integer(),
 	// Whole and half baths (Airbnb's "3.5 baths").
 	bathrooms: real(),
-	// The amenity codes the home offers; an empty list offers none.
+	// Explicit catalog reports; missing codes are unknown. The positive list is a read projection.
 	amenities: text().default("[]").notNull(),
 	cancellation_policy: text(),
 	long_term_cancellation_policy: text(),
@@ -1176,6 +1181,109 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_directions_check", sql`directions IS NULL OR length(trim(directions)) BETWEEN 1 AND 5000`),
 	check("product_stay_configs_house_manual_check", sql`house_manual IS NULL OR length(trim(house_manual)) BETWEEN 1 AND 5000`),
 	check("product_stay_configs_checkout_instructions_check", sql`json_valid(checkout_instructions) AND json_type(checkout_instructions) = 'array'`),
+]);
+
+// Authored spaces in a home's photo tour. Counts and amenities do not create rooms.
+export const product_stay_photo_rooms = sqliteTable("product_stay_photo_rooms", {
+	id: text().primaryKey(),
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	type: text().$type<StayPhotoRoomType>().notNull(),
+	details_version: integer().default(1).notNull(),
+	sleeping_arrangements: text(),
+	private_attached_bathroom: integer({ mode: "boolean" }),
+	sort_order: integer().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	created_by: text().notNull(),
+}, table => [
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_stay_photo_rooms_home_fk" }).onDelete("cascade"),
+	unique("product_stay_photo_rooms_scope_id_unique").on(table.organization_id, table.product_id, table.id),
+	unique("product_stay_photo_rooms_scope_order_unique").on(table.organization_id, table.product_id, table.sort_order),
+	check("product_stay_photo_rooms_type_check", sql`type IN (${sql.raw(Object.keys(STAY_PHOTO_ROOM_TYPES).map(type => `'${type}'`).join(', '))})`),
+	check("product_stay_photo_rooms_order_check", sql`sort_order >= 0`),
+	check("product_stay_photo_rooms_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+	check("product_stay_photo_rooms_details_version_check", sql`details_version >= 1`),
+	check("product_stay_photo_rooms_sleeping_arrangements_check", sql`sleeping_arrangements IS NULL OR (json_valid(sleeping_arrangements) AND json_type(sleeping_arrangements) = 'array')`),
+	check("product_stay_photo_rooms_private_bathroom_check", sql`private_attached_bathroom IS NULL OR (type = 'bedroom' AND private_attached_bathroom IN (0, 1))`),
+]);
+
+// An asset may belong to one room per home. Its Product image/gallery
+// placements remain the photo source; no row means Additional photos.
+export const product_stay_photo_room_memberships = sqliteTable("product_stay_photo_room_memberships", {
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	asset_id: text().notNull(),
+	room_id: text().notNull(),
+}, table => [
+	primaryKey({ columns: [table.organization_id, table.product_id, table.asset_id] }),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.room_id], foreignColumns: [product_stay_photo_rooms.organization_id, product_stay_photo_rooms.product_id, product_stay_photo_rooms.id], name: "product_stay_photo_room_memberships_room_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.asset_id], foreignColumns: [media_assets.organization_id, media_assets.id], name: "product_stay_photo_room_memberships_asset_fk" }).onDelete("cascade"),
+	index("product_stay_photo_room_memberships_room_idx").on(table.organization_id, table.product_id, table.room_id),
+	index("product_stay_photo_room_memberships_asset_idx").on(table.organization_id, table.asset_id),
+]);
+
+// Room references to canonical listing amenities; removing a room keeps the listing facts.
+export const product_stay_photo_room_amenities = sqliteTable("product_stay_photo_room_amenities", {
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	room_id: text().notNull(),
+	amenity_code: text().$type<StayAmenity>().notNull(),
+}, table => [
+	primaryKey({ columns: [table.organization_id, table.product_id, table.room_id, table.amenity_code] }),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.room_id], foreignColumns: [product_stay_photo_rooms.organization_id, product_stay_photo_rooms.product_id, product_stay_photo_rooms.id], name: "product_stay_photo_room_amenities_room_fk" }).onDelete("cascade"),
+	check("product_stay_photo_room_amenities_code_check", sql`amenity_code IN (${sql.raw(Object.keys(STAY_AMENITIES).map(code => `'${code}'`).join(', '))})`),
+]);
+
+// An absent feature answer is unknown; stored answers are explicit yes/no.
+export const product_stay_room_accessibility = sqliteTable("product_stay_room_accessibility", {
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	room_id: text().notNull(),
+	feature_code: text().$type<StayRoomAccessibilityFeature>().notNull(),
+	available: integer({ mode: "boolean" }).notNull(),
+}, table => [
+	primaryKey({ columns: [table.organization_id, table.product_id, table.room_id, table.feature_code] }),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.room_id], foreignColumns: [product_stay_photo_rooms.organization_id, product_stay_photo_rooms.product_id, product_stay_photo_rooms.id], name: "product_stay_room_accessibility_room_fk" }).onDelete("cascade"),
+	check("product_stay_room_accessibility_feature_check", sql`feature_code IN (${sql.raw(Object.keys(STAY_ROOM_ACCESSIBILITY_FEATURES).map(code => `'${code}'`).join(', '))})`),
+	check("product_stay_room_accessibility_available_check", sql`available IN (0, 1)`),
+]);
+
+// Evidence uses stable library asset IDs, never regenerated placement IDs.
+export const product_stay_room_accessibility_photos = sqliteTable("product_stay_room_accessibility_photos", {
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	room_id: text().notNull(),
+	feature_code: text().$type<StayRoomAccessibilityFeature>().notNull(),
+	asset_id: text().notNull(),
+}, table => [
+	primaryKey({ columns: [table.organization_id, table.product_id, table.room_id, table.feature_code, table.asset_id] }),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.room_id, table.feature_code], foreignColumns: [product_stay_room_accessibility.organization_id, product_stay_room_accessibility.product_id, product_stay_room_accessibility.room_id, product_stay_room_accessibility.feature_code], name: "product_stay_room_accessibility_photos_answer_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.asset_id], foreignColumns: [media_assets.organization_id, media_assets.id], name: "product_stay_room_accessibility_photos_asset_fk" }).onDelete("restrict"),
+	index("product_stay_room_accessibility_photos_asset_idx").on(table.organization_id, table.asset_id),
+]);
+
+export const product_stay_accessibility = sqliteTable("product_stay_accessibility", {
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	feature_code: text().$type<StayHomeAccessibilityFeature>().notNull(),
+	available: integer({ mode: "boolean" }).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.organization_id, table.product_id, table.feature_code] }),
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_stay_accessibility_home_fk" }).onDelete("cascade"),
+	check("product_stay_accessibility_feature_check", sql`feature_code IN (${sql.raw(Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(code => `'${code}'`).join(', '))})`),
+	check("product_stay_accessibility_available_check", sql`available IN (0, 1)`),
+]);
+
+export const product_stay_accessibility_photos = sqliteTable("product_stay_accessibility_photos", {
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	feature_code: text().$type<StayHomeAccessibilityFeature>().notNull(),
+	asset_id: text().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.organization_id, table.product_id, table.feature_code, table.asset_id] }),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.feature_code], foreignColumns: [product_stay_accessibility.organization_id, product_stay_accessibility.product_id, product_stay_accessibility.feature_code], name: "product_stay_accessibility_photos_answer_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.asset_id], foreignColumns: [media_assets.organization_id, media_assets.id], name: "product_stay_accessibility_photos_asset_fk" }).onDelete("restrict"),
+	index("product_stay_accessibility_photos_asset_idx").on(table.organization_id, table.asset_id),
 ]);
 
 // Workspace-owned reply text, optionally scheduled for explicitly named homes.

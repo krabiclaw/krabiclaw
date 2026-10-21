@@ -54,6 +54,8 @@
         v-for="asset in media?.media ?? []"
         :key="asset.id"
         type="button"
+        :aria-label="asset.alt_text || asset.file_name || asset.kind"
+        :aria-pressed="selectedId === asset.id"
         class="group relative aspect-square overflow-hidden rounded-lg border-2 transition-all focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         :class="selectedId === asset.id
           ? 'border-primary'

@@ -3,6 +3,8 @@ import type { ResolvedMediaAsset } from '~/server/utils/media-asset-manager'
 import type { Price, PriceInput } from '~/shared/prices'
 import type { ProductDetails, ProductDetailsPatch, ProductKind } from '~/shared/product-details'
 import type { SocialImageSource } from '~/utils/social-metadata'
+import type { StayPhotoRoom } from '~/shared/stay-photos'
+import type { StayHomeAccessibility } from '~/shared/stay-accessibility'
 
 export type ProductSource = 'manual' | 'template' | 'ai' | 'import' | 'copy'
 
@@ -69,6 +71,10 @@ export type ProductBookingConfig = Pick<import('~/server/utils/availability').Pr
  * local HH:MM in that location's timezone.
  */
 export interface ProductStayConfig {
+  /** Authored rooms and their Product photo memberships; written through the photo tour operations. */
+  photo_rooms: StayPhotoRoom[]
+  /** Listing-wide host-authored answers and Product image evidence, in catalog order. */
+  accessibility: StayHomeAccessibility[]
   location_id: string
   check_in_time: string
   check_out_time: string
@@ -92,6 +98,8 @@ export interface ProductStayConfig {
   bathrooms: number | null
   /** The amenity codes the home offers, in catalog order; empty offers none. */
   amenities: StayAmenity[]
+  /** Explicit amenity reports in catalog order; absent codes are unknown. */
+  amenity_answers: import('~/shared/stay-listing').StayAmenityAnswer[]
   /** For stays shorter than 28 nights. Shown to guests; it does not refund by itself. */
   cancellation_policy: StayCancellationPolicy | null
   /** For stays of 28 nights or more. */
@@ -102,8 +110,8 @@ export interface ProductStayConfig {
 }
 
 /** What a home is and offers; unsaid when a home is created without them. */
-export type StayListingField = 'property_type_group' | 'property_type' | 'listing_type' | 'total_floors' | 'listing_floor' | 'year_built' | 'property_size' | 'property_size_unit' | 'bedrooms' | 'beds' | 'bathrooms' | 'amenities' | 'cancellation_policy' | 'long_term_cancellation_policy'
-export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField> & Partial<Pick<ProductStayConfig, StayListingField>>
+export type StayListingField = 'property_type_group' | 'property_type' | 'listing_type' | 'total_floors' | 'listing_floor' | 'year_built' | 'property_size' | 'property_size_unit' | 'bedrooms' | 'beds' | 'bathrooms' | 'amenities' | 'amenity_answers' | 'cancellation_policy' | 'long_term_cancellation_policy'
+export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'photo_rooms' | 'accessibility'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'>>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
 
 /** Who looks after a product: workspace state the public site never carries. */
 export type StaffAssignment = 'assigned_member_id' | 'assigned_team_id'
@@ -225,7 +233,7 @@ export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'va
   /** The Product updated_at from the caller's read; a stale snapshot refuses the entire edit. */
   expected_updated_at?: string
   /** Stay settings to change. The location a home is at is fixed when it is created. */
-  stay?: Partial<Omit<ProductStayConfig, 'location_id'>>
+  stay?: Partial<Omit<ProductStayConfig, 'location_id' | 'photo_rooms' | 'amenity_answers' | 'accessibility'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
   variants?: ProductVariantPatchInput[]
   /** Merge preserves unmentioned variants. Replace removes variants omitted from the supplied list. */
   variants_mode?: 'merge' | 'replace'

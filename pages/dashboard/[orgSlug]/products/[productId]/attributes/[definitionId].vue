@@ -38,14 +38,14 @@
 
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
-import { STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
+import { isStayFocusedDetail } from '~/shared/product-details'
 
 definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
 const route = useRoute()
 const level = useRouteLevel()
-const definition = computed(() => p.definitions.value.find(entry => entry.id === String(route.params.definitionId) && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(entry.key) && entry.key !== 'house_rules') ?? null)
+const definition = computed(() => p.definitions.value.find(entry => entry.id === String(route.params.definitionId) && !isStayFocusedDetail(entry.key)) ?? null)
 
 // An attribute this catalog does not define is not a page (DESIGN.md).
 watchEffect(() => {

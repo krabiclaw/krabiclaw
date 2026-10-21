@@ -468,3 +468,148 @@ recommendation.
 - **Help Center:** article content was not mapped.
 - **Phone width:** the narrow observations use a 520px Chrome window, not a
   390px device.
+
+## 12. Photo tour follow-up — 2026-10-20
+
+Read-only inspection of the owner's existing unlisted home in the live host
+editor. No room, photo or listing details were changed.
+
+- Photo tour shows authored room cards and an **Additional photos** card,
+  with an actual photo or a room pictogram, the room's name, and its photo
+  count or **Add photos**. It states that guests see the tour only once every
+  room has a photo. **All photos** remains a separate destination.
+- The plus menu offers **Add photos** and **Add a room or space**. The room
+  chooser is a grid of single-choice illustrated tiles with search and a
+  commit button. It includes indoor rooms and outdoor spaces; a bedroom
+  count does not supply the room identities.
+- Additional photos says that these photos remain in the listing even
+  though they are not assigned to a room or space.
+- An individual photo has **Move from Additional photos?** independently of
+  **Add a visual description** and the room/space caption. Move opens a
+  modal with existing room cards, Additional photos, and the room-type grid
+  for a new destination. Its footer is **Cancel / Move**. Closing the modal
+  leaves the photo unchanged.
+- The existing Bedroom has separate destinations for Sleeping arrangements,
+  Privacy info, Amenities and Accessibility features, plus **Delete room or
+  space**. The sleeping-arrangement editor shows actual per-type bed counts;
+  these are distinct from the listing's aggregate capacity.
+
+### Authored bedroom details — later on 2026-10-20
+
+The same existing Bedroom was opened again, without saving any changes.
+
+- **Sleeping arrangements** has fourteen bed-type steppers: Single, Double,
+  Queen, King, Small double, Bunk bed, Sofa bed, Couch, Floor mattress, Air
+  mattress, Crib, Toddler bed, Hammock and Water bed. The editor has one lead
+  sentence and **Cancel / Save**.
+- **Privacy info** opens **Bedroom privacy**, with a single **Private
+  attached bathroom** switch and **Cancel / Save**. It describes a bathroom
+  attached to the bedroom that is just for its guests.
+- Room **Amenities** opens **Add amenities**, with search and **All /
+  Suggested** pills. Suggested contains bedroom-relevant choices; All uses
+  the full amenity vocabulary, including alarms. The scope is explicitly
+  the room or space. No amenity selection was changed. A fresh read on October
+  20 showed Suggested selected by default, square checkboxes, pictograms and
+  plain labels. Its eleven Bedroom suggestions were Air conditioning, Bed
+  linens, Clothing storage, Essentials, Extra pillows and blankets, Hangers,
+  Heating, Iron, Room-darkening shades, Safe and TV. Search looks across All.
+  Cancel search returned to Suggested without changing any selection.
+  This read did not establish Airbnb's persistence behavior for adding a room
+  amenity that is absent from the listing.
+- Bedroom **Accessibility features** offers **Step-free access** and
+  **Entrance wider than 32 inches**. A feature opens its definition, example
+  photographs, photo guidelines and **I don't have / I have this feature**.
+  Selecting the latter in an unsaved draft revealed required photo evidence
+  and Airbnb's own review process. **Cancel** discarded that draft. This
+  review process must not be represented as a KrabiClaw approval service.
+
+The listing-level **Amenities** page was also rechecked on October 20. Its
+saved amenity rows include definition text for choices such as Air conditioning,
+Cooking basics, Dedicated workspace and Wifi; other rows such as Hangers have
+only a label. Room picker rows have plain labels. The live reference supports
+keeping the listing's saved definitions while keeping the room chooser compact.
+
+### Bedroom accessibility evidence — 2026-10-20
+
+The existing Bedroom's two accessibility leaves were opened again. Each has a
+feature definition, example photos, a Photo guidelines dialog, an explicit
+Have / Don't have choice and Cancel / Save. A positive draft requires photos
+before Save becomes available. Both drafts were cancelled; no Airbnb data was
+saved or uploaded.
+
+Step-free access describes a ground-floor bedroom or a route reached by lift
+or ramp, with no step or threshold higher than 5 cm (2 in) between the guest
+entrance and bedroom. Its guidance asks for an open-door view from outside the
+room that clearly includes the threshold. The wide-doorway definition requires
+at least 32 inches. Its photo guidance asks for a fully open door and a readable
+tape measure inside the frame with both ends visible.
+
+Only the existing Bedroom is available in this listing's authored tour. These
+two bedroom features are the verified scope; bathroom-specific or other feature
+catalogs were not inferred. Airbnb's positive-draft copy names its own photo
+review service. KrabiClaw uses host-authored facts and evidence, with no invented
+approval process. Evidence can reference an existing Product photo without
+moving it between authored rooms.
+
+### Listing accessibility, alarms and Location — 2026-10-21
+
+The live listing editor was read again without saving changes or uploading
+Airbnb photos. Listing-level Accessibility features has six destinations,
+separate from the existing Bedroom's two features:
+
+| Feature | Authored fact and photo guidance observed |
+| --- | --- |
+| Disabled parking spot | A private space at least 11 ft (3.35 m) wide, or a public space designated for disabled parking. Show the private space's full width or the public space's identifying signs. |
+| Lit path to the guest entrance | The entrance path is well lit at night. Show the lights and their relationship to the path; light from inside the listing does not count. |
+| Step-free access | The whole arrival/parking-to-entrance route, including shared paths, corridors and lifts, has no obstacle 5 cm (2 in) or higher. Photograph the route with doors/gates open and ramps in place, at intervals of about 3 m, plus the open entrance and threshold from outside. |
+| Guest entrance wider than 32 inches | The entrance is at least 32 in (81 cm) wide. Show a tape at the narrowest open-doorframe points, the whole measurement and readable units. |
+| Swimming pool or hot tub hoist | A device designed to transfer a person into and out of the pool or hot tub. Show the hoist and its position beside the water. |
+| Ceiling or mobile hoist | A fixed or freestanding device designed to transfer a person into and out of a wheelchair. Show the device and its position in the bedroom or bathroom. |
+
+These listing facts do not create a room or imply a room assignment. The
+bedroom-only scope above remains the observed room catalog; bathroom-specific
+catalogs were not inferred. KrabiClaw's feature controls reuse one evidence
+editor with explicit listing/room scope and retain host-authored facts rather
+than inventing Airbnb's photo review process.
+
+Guest safety → Safety devices shows the two existing alarm amenities alongside
+camera and sound-level-monitor controls, using explicit Off/On choices. An
+installed alarm offers a 300-character details leaf asking where each alarm is
+located. An unsaved CO-alarm Off draft also showed Airbnb's own necessity
+confirmation; the whole draft was cancelled. KrabiClaw keeps alarm presence in
+Amenities, distinguishes absent from unanswered, and uses the existing Product
+details owner for location text. No second safety alarm Boolean is introduced.
+
+Location shows its saved map and Address, Location sharing, Location features,
+Neighborhood description, Getting around and Scenic views. The two description
+editors are simple textareas with Cancel/Save. Scenic views is a plain multiple
+selection list with 21 choices; those choices belong to the existing amenity
+catalog. The observed Adjust pin mode adds map pan controls and a Save action.
+The owner explicitly chose to skip draggable-map work to avoid introducing new
+Maps JavaScript billing/key setup; existing embedded maps and address controls
+remain the intended scope.
+
+The remaining lodging implementation was verified against a production Worker
+on October 21. Thirteen distinct browser journeys passed: six lodging host/guest
+flows, three dish/item/experience CMS-to-MCP/public flows, the shared social
+viewer and native video controls, and Pottery House/North Carolina Legal Services
+home/detail routes. The focused listing and room journeys passed in 44.9 and
+32.6 seconds within their unchanged 60-second budgets. The final two rechecks
+corrected strict Home response expectations and exercised the existing mobile
+Back control; the approved desktop pair retains its single left-column Back.
+
+New fictional host/guest evidence includes listing accessibility
+([desktop](airbnb/screenshots/host-home-accessibility-desktop.png),
+[mobile](airbnb/screenshots/host-home-accessibility-mobile.png)), Bedroom
+accessibility ([saved summary](airbnb/screenshots/host-room-accessibility-desktop.png),
+[mobile editor](airbnb/screenshots/host-room-accessibility-feature-mobile.png)),
+guest evidence ([desktop](airbnb/screenshots/guest-home-accessibility-desktop.png),
+[mobile](airbnb/screenshots/guest-home-accessibility-mobile.png)), alarm answers
+([desktop](airbnb/screenshots/host-alarm-answers-desktop.png),
+[mobile](airbnb/screenshots/host-alarm-answers-mobile.png)) and
+[alarm details](airbnb/screenshots/host-alarm-description-mobile.png),
+neighborhood text ([desktop](airbnb/screenshots/host-location-neighborhood-desktop.png),
+[mobile](airbnb/screenshots/host-location-neighborhood-mobile.png)) and
+[scenic views](airbnb/screenshots/host-location-scenic-views-desktop.png).
+Solid-color photos are deliberate real-upload test images; they identify
+original gallery order and evidence membership without using customer images.

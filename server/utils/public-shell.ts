@@ -21,7 +21,6 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { isLegalPracticeSite } from '~/utils/template-registry'
 import {
   indexStoredPublicLocalizations,
-  projectExactLocalizedCollection,
   projectExactLocalizedResource,
   type StoredPublicLocalizationRow,
 } from '~/server/utils/public-localization'
@@ -99,6 +98,7 @@ export async function loadPublicShellSource(
     sourceCompliance,
     publishedPages,
     verification,
+    localizedRows,
   ] = await Promise.all([
     assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale),
     executeBatch(db, shellQueries),
@@ -111,6 +111,12 @@ export async function loadPublicShellSource(
       SELECT (SELECT i.verification_token FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_search_console') AS token
         FROM organization WHERE id = ? LIMIT 1
     `, [organization.id]),
+    locale && locale !== sourceLocale ? queryAll<StoredPublicLocalizationRow>(db, `
+      SELECT resource_type, resource_id, locale, values_json, route_path
+       FROM resource_localizations
+       WHERE organization_id = ? AND locale = ?
+         AND resource_type IN ('organization', 'business_location')
+    `, [organization.id, locale]) : [],
   ])
   options.signal?.throwIfAborted()
 
@@ -131,6 +137,7 @@ export async function loadPublicShellSource(
     pageLinks.push({ id: 'experiences', path: '/experiences', title })
   }
 
+  const localizations = locale && locale !== sourceLocale ? indexStoredPublicLocalizations(localizedRows) : undefined
   const payload = {
     success: true,
     ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env, experiences, {
@@ -139,6 +146,7 @@ export async function loadPublicShellSource(
       compliance: sourceCompliance,
       pageLinks,
       searchConsoleVerification: verification?.token ?? organization.search_console_verification ?? null,
+      localizations,
     })),
     count: shellResults[shellIndexes.locations]?.results?.length ?? 0,
     platformMessages: entitlement.platform_messages,
@@ -148,17 +156,9 @@ export async function loadPublicShellSource(
       throw new HTTPError({ statusCode: 500, statusMessage: 'Published platform locale messages are unavailable' })
     }
     payload.platformMessages = entitlement.platform_messages
-    const localizedRows = await queryAll<StoredPublicLocalizationRow>(db, `
-      SELECT resource_type, resource_id, locale, values_json, route_path
-       FROM resource_localizations
-       WHERE organization_id = ?  AND locale = ?
-         AND resource_type IN ('organization', 'business_location')
-    `, [organization.id, locale])
     // The shell reads the site and its locations; neither carries details,
     // so no definition is in scope here.
-    const localizations = indexStoredPublicLocalizations(localizedRows)
-    const organizationLocalization = localizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
-    payload.locations = projectExactLocalizedCollection('business_location', payload.locations, localizations)
+    const organizationLocalization = localizations?.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
     const localizedOrganization = organizationLocalization
       ? projectExactLocalizedResource('organization', { ...payload.organization, id: organizationId }, organizationLocalization)
       : { ...payload.organization, id: organizationId, name: null, brand_description: null }

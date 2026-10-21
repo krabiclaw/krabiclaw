@@ -406,7 +406,7 @@ test('KrabiClaw social viewer keyboard navigation changes the visible media', as
   await page.locator('[data-social-posts=block]').getByRole('tab', { name: 'Go to slide 1', exact: true }).click()
   // The viewer opens on the card that was clicked; the first card puts the first picture at the top.
   await firstCard.click()
-  const viewer = page.getByRole('dialog', { name: 'Media Lightbox' })
+  const viewer = page.getByRole('dialog', { name: 'Photos and videos', exact: true })
   await expect(viewer).toBeVisible()
   const pictures = viewer.locator('section')
   const mediaBounds = await pictures.first().locator('img:not([aria-hidden]), video').boundingBox()
@@ -415,7 +415,7 @@ test('KrabiClaw social viewer keyboard navigation changes the visible media', as
   expect(captionBounds).not.toBeNull()
   expect(captionBounds!.x >= mediaBounds!.x + mediaBounds!.width || captionBounds!.y >= mediaBounds!.y + mediaBounds!.height).toBe(true)
   expect(await pictures.count()).toBeGreaterThan(1)
-  const close = viewer.getByRole('button', { name: 'Close', exact: true })
+  const close = viewer.getByRole('button', { name: 'Close photos and videos', exact: true })
   await close.press('ArrowDown')
   await expect.poll(() => pictures.nth(1).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(0)
   await expect.poll(() => pictures.nth(1).locator('img:not([aria-hidden]), video').evaluate(element => element instanceof HTMLVideoElement ? element.videoWidth : (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
@@ -464,7 +464,7 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
   await video.click({ position: { x: 24, y: bounds!.height - 48 } })
   await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
   await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
-  await viewer.getByRole('button', { name: 'Close', exact: true }).click()
+  await viewer.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
   await expect(viewer).toHaveCount(0)
 })
 

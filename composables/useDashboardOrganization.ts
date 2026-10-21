@@ -1,6 +1,8 @@
 import { dashboardFetch, type DashboardRequestScope } from '~/composables/dashboardFetch'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 import { organizationRoles } from '~/utils/organization-access'
+import { STAY_MAP_SHARING_MODES, type StayMapSharing } from '~/shared/stay-listing'
+import { coordinatesFailure } from '~/utils/location-map'
 
 /**
  * The tenant, as the dashboard reads it.
@@ -31,10 +33,13 @@ export interface DashboardLocation {
   id: string
   slug: string
   title: string
+  stay_map_sharing: StayMapSharing
   status: string
   timezone: string
   city: string | null
   address: PostalAddress | null
+  latitude: number | null
+  longitude: number | null
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>
   picture_url: string | null
   social_image: { url: string; width?: number; height?: number; type?: string } | null
@@ -81,6 +86,10 @@ const isDashboardLocation = (value: unknown): value is DashboardLocation =>
   && typeof value.id === 'string'
   && typeof value.slug === 'string'
   && typeof value.title === 'string'
+  && STAY_MAP_SHARING_MODES.includes(value.stay_map_sharing as StayMapSharing)
+  && (value.latitude === null || typeof value.latitude === 'number')
+  && (value.longitude === null || typeof value.longitude === 'number')
+  && !coordinatesFailure({ latitude: value.latitude, longitude: value.longitude })
   && typeof value.status === 'string'
   && typeof value.timezone === 'string'
   && isSocialImage(value.social_image)

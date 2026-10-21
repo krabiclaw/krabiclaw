@@ -254,13 +254,14 @@ import { minorAmountToMajor, type Price } from '~/shared/prices'
 import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
 import { groupProductsByCollection, productCtaKey, productLocationCollectionPath, staySpecLabels } from '~/utils/product-presentation'
 import { addressPlaceName, type PostalAddress } from '~/utils/postal-address'
+import type { PublicLocationArea } from '~/types/public-location'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { extractDietarySchemaUrls } from '~/utils/product-seo'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { resolveSeoUrl } from '~/utils/social-metadata'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
 
-interface LocationSummary { id: string; slug: string; title: string; address?: PostalAddress | null }
+interface LocationSummary { id: string; slug: string; title: string; address?: PostalAddress | null; public_area?: PublicLocationArea | null }
 
 // Resolved once: a dynamic `:is` given the string 'NuxtLink' renders a literal
 // <NuxtLink> element that no browser follows, so the card looked linked in the
@@ -333,7 +334,10 @@ const locationSlug = (id: string) => {
   return location.slug
 }
 /** Where a home is, as a guest reads it: the town in its location's address. */
-const placeName = (id: string) => addressPlaceName(locationMap.value.get(id)?.address ?? null)
+const placeName = (id: string) => {
+  const location = locationMap.value.get(id)
+  return location?.public_area?.locality || location?.public_area?.administrative_area || addressPlaceName(location?.address ?? null)
+}
 const locationTitle = (id: string) => {
   const location = locationMap.value.get(id)
   if (!location) throw new Error(`Product location is missing: ${id}`)
