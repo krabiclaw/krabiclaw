@@ -28,13 +28,14 @@ import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHo
 import type { Ref } from 'vue'
 import type { LocationReservationConfig, LocationReservationConfigPatch } from '~/server/utils/reservations'
 import { getErrorMessage } from '~/utils/errors'
-import { toE164 } from '~/utils/phone'
-import { postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
+import { parsePostalAddress, postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
+import { getPhoneCountry, toE164 } from '~/utils/phone'
 
 
 export interface BusinessLocation {
   id: string
   slug: string
+  updated_at: string
   title: string
   address: PostalAddress | null
   phone: string | null
@@ -154,7 +155,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const newLocation = useNewLocation(organizationId, key === 'name' || key === 'hours' ? key : null)
   const isNew = newLocation.isNew
   const dashboardApi = useDashboardApi()
-    const editorError = ref<string | null>(null)
+  const nuxtApp = useNuxtApp()
+  const editorError = ref<string | null>(null)
   const dashboard = useDashboardOrganization()
 
 
@@ -166,6 +168,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     if (!isRecord(value)) return false
     return typeof value.id === 'string'
       && typeof value.slug === 'string'
+      && typeof value.updated_at === 'string'
       && typeof value.title === 'string'
       && typeof value.status === 'string'
       && (value.address === null || isRecord(value.address))
@@ -200,15 +203,23 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
    * street with no country is refused here exactly as it is there.
    */
   function addressFromForm(): PostalAddress | null {
-    const [streetAddress, ...rest] = detailsForm.addressLines.split('\n').map(line => line.trim()).filter(Boolean)
-    return postalAddressFromAnswers({
-      streetAddress: streetAddress ?? null,
-      addressLine2: rest.join(', ') || null,
+    if (!addressDraftKeys.some(field => detailsForm[field].trim())) return null
+    if (!getPhoneCountry(detailsForm.regionCode.trim())) throw new Error('Choose a valid country for the address.')
+    const addressLines = detailsForm.addressLines.split('\n').filter(line => line.trim())
+    const address = postalAddressFromAnswers({
+      streetAddress: addressLines[0] ?? null,
+      addressLine2: null,
       city: detailsForm.locality,
       region: detailsForm.administrativeArea,
       postalCode: detailsForm.postalCode,
       country: detailsForm.regionCode,
       sublocality: detailsForm.sublocality,
+    })
+    if (!address) throw new Error('Enter a street address, city or state for the address.')
+    return parsePostalAddress({
+      ...address,
+      addressLines: addressLines.length ? addressLines : address.addressLines,
+      ...(location.value?.address?.languageCode ? { languageCode: location.value.address.languageCode } : {}),
     })
   }
 
@@ -230,6 +241,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     assigned_member_id: null as string | null,
     assigned_team_id: null as string | null,
   })
+  const addressDraftKeys = ['addressLines', 'regionCode', 'locality', 'sublocality', 'administrativeArea', 'postalCode'] as const
   const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
   const locationLocalizationFields = computed(() => [
     { key: 'title', label: 'Name', source: location.value?.title },
@@ -314,6 +326,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       if (detailsForm.phone && !toE164(detailsForm.phone)) return 'Enter a valid phone number and choose its country.'
       if (detailsForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(detailsForm.email)) return 'Enter a valid email address.'
     }
+    if (key === 'address') {
+      try { addressFromForm() } catch (error) { return getErrorMessage(error, 'Enter a valid address.') }
+    }
     if (key === 'hours') {
       if (!hoursForm.value.timezone) return 'Choose the location timezone.'
       try {
@@ -326,7 +341,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const dirty = computed(() => editorSignature(key) !== originalSignature.value)
   const saveDisabled = computed(() => isNew.value
     ? newLocation.saveDisabled.value || validationMessage.value !== null
-    : !dirty.value || validationMessage.value !== null)
+    : (!dirty.value && !(key === 'address' && editorError.value)) || validationMessage.value !== null || (key === 'address' && !location.value))
 
 
   function resetDraft() {
@@ -339,6 +354,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
 
   async function patchLocation(body: Record<string, unknown>) {
     const requestedLocationId = locationId.value
+    const addressDraft = key === 'address' ? addressDraftKeys.map(field => detailsForm[field]) : null
     detailsSaving.value = true
     editorError.value = null
     try {
@@ -346,23 +362,47 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
         `/api/dashboard/locations/${requestedLocationId}`,
         { method: 'PATCH', body, validate: isLocationResponse },
       )
-      if (locationId.value !== requestedLocationId) return
-      const previousSlug = String(route.params.locationSlug)
+      if (locationId.value !== requestedLocationId) return false
+      const previousSlug = typeof route.params.locationSlug === 'string' ? route.params.locationSlug : null
       // Every editor of this location reads one shared resource; refreshing it
       // refills them all, so the index beside this leaf shows what was saved.
-      await refreshLocationWorkspace()
-      // The location's own index draws the same location from its own read.
-      await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
-      if (response.location.slug !== previousSlug) {
+      if (key === 'address') await refreshAddressReads(requestedLocationId)
+      else {
+        await refreshLocationWorkspace()
+        // The location's own index draws the same location from its own read.
+        await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
+      }
+      if (previousSlug && response.location.slug !== previousSlug) {
         await dashboard.refresh()
         // The record moved: same level, its new address.
         await navigateTo(route.path.replace(`/locations/${previousSlug}`, `/locations/${response.location.slug}`), { replace: true })
       }
+      return true
     } catch (error) {
-      editorError.value = getErrorMessage(error, 'Failed to save location')
+      const failures = [getErrorMessage(error, 'Failed to save location')]
+      if (addressDraft && locationId.value === requestedLocationId) {
+        try { await refreshAddressReads(requestedLocationId) } catch (readError) { failures.push(getErrorMessage(readError, 'Failed to reload location')) }
+        await nextTick()
+        if (locationId.value === requestedLocationId) addressDraftKeys.forEach((field, index) => { detailsForm[field] = addressDraft[index]! })
+      }
+      editorError.value = [...new Set(failures)].join(' ')
+      return false
     } finally {
       detailsSaving.value = false
     }
+  }
+
+  async function refreshAddressReads(requestedLocationId: string | null) {
+    const orgSlug = String(route.params.orgSlug)
+    const keys = [`dashboard-location-overview:${organizationId}:${requestedLocationId}`, `dashboard-org-locations:${orgSlug}`, `dashboard-org-locations:${orgSlug}:all`]
+    const reads = await Promise.allSettled([refreshLocationWorkspace(), refreshNuxtData(keys)])
+    const failures = reads.flatMap(result => result.status === 'rejected' ? [getErrorMessage(result.reason, 'Failed to reload location')] : [])
+    if (locationSettingsError.value) failures.push(getErrorMessage(locationSettingsError.value, 'Failed to reload location'))
+    for (const cacheKey of keys) {
+      const cacheError = nuxtApp.payload._errors[cacheKey]
+      if (cacheError) failures.push(getErrorMessage(cacheError, 'Failed to reload locations'))
+    }
+    if (failures.length) throw new Error([...new Set(failures)].join(' '))
   }
 
   async function saveReservationPolicy() {
@@ -414,8 +454,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       return
     }
     if (key === 'address') {
-      await patchLocation({ address: addressFromForm() })
-      return
+      return patchLocation({ address: addressFromForm(), expected_updated_at: location.value!.updated_at })
     }
     if (key === 'contact') {
       await patchLocation({
