@@ -674,12 +674,13 @@ test.describe('dashboard pane hierarchy', () => {
       await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
       const from = new Date(Date.now() + 25 * 86_400_000).toISOString()
       const to = new Date(Date.now() + 40 * 86_400_000).toISOString()
-      const [sessionResponse, productResponse, locationResponse] = await Promise.all([
+      const [sessionResponse, productResponse, locationResponse, offeringsResponse] = await Promise.all([
         page.request.get(endpoint, { params: { from, to } }),
         page.request.get(productEndpoint),
         page.request.get('/api/dashboard/locations', { params: { org: organizationId, organization: 'true', status: 'all' } }),
+        page.request.get(`/api/editor/organizations/${organizationId}/products`),
       ])
-      for (const response of [sessionResponse, productResponse, locationResponse]) expect(response.status(), await response.text()).toBe(200)
+      for (const response of [sessionResponse, productResponse, locationResponse, offeringsResponse]) expect(response.status(), await response.text()).toBe(200)
       const originalSessions = (await sessionResponse.json() as { sessions: SessionAvailability[] }).sessions
       const original = originalSessions.find(session => session.location_id === 'loc-pottery-house' && session.status === 'scheduled' && session.claimed === 0 && localNow(session.timezone, new Date(session.starts_at)).time === '11:00')
       expect(original, 'the seeded Experience has a saved daytime occurrence to select').toBeDefined()
@@ -690,6 +691,13 @@ test.describe('dashboard pane hierarchy', () => {
       expect(location, 'the saved occurrence belongs to a location in its organization').toBeDefined()
       expect(location!.status).toBe('active')
       expect(product.locations.some(placement => placement.location_id === location!.id)).toBe(true)
+      const { products } = await offeringsResponse.json() as { products: Product[] }
+      const otherOffering = products.find(entry => entry.id !== productId && ['experience', 'service'].includes(entry.kind) && entry.booking?.duration_minutes
+        && entry.locations.length > 0 && entry.locations.every(placement => placement.location_id !== location!.id)
+        && entry.locations.some(placement => locations.some(place => place.id === placement.location_id && place.status === 'active')))
+      expect(otherOffering, 'another authorized configured offering has physical locations that exclude the selected location').toBeDefined()
+      expect(otherOffering!.organization_id).toBe(organizationId)
+      for (const placement of otherOffering!.locations) expect(locations.some(place => place.id === placement.location_id), 'the other offering locations belong to this organization').toBe(true)
       const sessionDay = localNow(original!.timezone, new Date(original!.starts_at)).date
       const leaf = page.locator('#dashboard-panel-product-session')
       await page.setViewportSize(WIDE)
@@ -794,12 +802,17 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(calendar.locator(`time[datetime="${nextMonth}"]`)).toHaveText(nextMonthLabel)
       await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(product.name)
       await expect(locationFilter).toContainText(location!.title)
+      const calendarTimeZone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
+      const currentCalendarMonth = localNow(calendarTimeZone).date.slice(0, 7)
+      const returnedMonthQuery = sessionMonth === currentCalendarMonth ? {} : { month: sessionMonth }
       await calendar.getByRole('button', { name: 'Previous month', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('month') === (sessionMonth === currentCalendarMonth ? null : sessionMonth))
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, locationId: location!.id, ...returnedMonthQuery })
       const selectedDayLabel = new Intl.DateTimeFormat('en', { weekday: 'long', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${sessionDay}T12:00:00Z`))
       const selectedDay = calendar.getByRole('button', { name: selectedDayLabel, exact: true })
       await selectedDay.click()
       await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/${sessionDay}`)
-      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: sessionMonth, locationId: location!.id })
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, locationId: location!.id, ...returnedMonthQuery })
       const day = page.locator('#dashboard-panel-calendar-day')
       const daySessions = originalSessions.filter(session => session.location_id === location!.id && localNow(session.timezone, new Date(session.starts_at)).date === sessionDay)
       await expect(day.locator('[data-session-id]')).toHaveCount(daySessions.length)
@@ -836,6 +849,27 @@ test.describe('dashboard pane hierarchy', () => {
       const afterCancelledCreation = (await readback.json() as { sessions: SessionAvailability[] }).sessions
       expect(afterCancelledCreation.map(session => session.id).sort()).toEqual(originalSessions.map(session => session.id).sort())
       expect(afterCancelledCreation.find(session => session.id === original!.id)).toMatchObject({ starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status })
+
+      await calendar.getByRole('button', { name: 'View: Month', exact: true }).click()
+      await page.getByRole('menuitemcheckbox', { name: 'List', exact: true }).click()
+      await expect(calendar.getByRole('button', { name: 'View: List', exact: true })).toBeVisible()
+      await expect(page).toHaveURL(url => url.searchParams.get('view') === 'list' && url.searchParams.get('locationId') === location!.id)
+      const beforeOfferingChange = new URL(page.url()).searchParams
+      expect(Object.fromEntries(beforeOfferingChange)).toEqual({ product_id: productId, locationId: location!.id, date: sessionDay, ...returnedMonthQuery, view: 'list' })
+      const otherSessionsRead = page.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${otherOffering!.id}/sessions` && response.request().method() === 'GET')
+      await calendar.getByRole('combobox', { name: 'Offering', exact: true }).click()
+      await page.getByRole('option', { name: otherOffering!.name, exact: true }).click()
+      const otherSessionsResponse = await otherSessionsRead
+      expect(otherSessionsResponse.status(), await otherSessionsResponse.text()).toBe(200)
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === otherOffering!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({
+        product_id: otherOffering!.id,
+        ...(beforeOfferingChange.has('month') ? { month: beforeOfferingChange.get('month') } : {}),
+        ...(beforeOfferingChange.has('view') ? { view: beforeOfferingChange.get('view') } : {}),
+      })
+      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(otherOffering!.name)
+      await expect(locationFilter).toContainText('All locations')
+      await expect(calendar.getByRole('button', { name: 'View: List', exact: true })).toBeVisible()
     } finally {
       await release()
     }
