@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f0f0f02a255feec7be34417531f60404fb51f3c8ad63f5d83e9d4ad57fe104b5",
-  "documentationFingerprint": "sha256:18e802e56e5736125bbed008650b8c99e055a9fd28391ad5201cdeaac9548226",
+  "fingerprint": "sha256:db51d271ab8fe7da587bf6a234b3cd43edb9e6d9e4e59561996e544f4a3ae5b8",
+  "documentationFingerprint": "sha256:d6cf725539dfd7674b98c3536e72da8a3acb0f88800057c455fd678291bec3db",
   "tools": [
     {
       "name": "add_organization_language",
@@ -48734,6 +48734,275 @@
             },
             "type": "array"
           },
+          "funnel": {
+            "additionalProperties": false,
+            "properties": {
+              "byLocation": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "confirmed": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "intent": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "locationId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "paid": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "paidCollected": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "collectedMinor": {
+                            "type": "number"
+                          },
+                          "currency": {
+                            "enum": [
+                              "THB",
+                              "USD",
+                              "EUR",
+                              "GBP",
+                              "JPY",
+                              "AUD",
+                              "CAD",
+                              "SGD",
+                              "HKD",
+                              "MYR",
+                              "IDR",
+                              "PHP",
+                              "VND",
+                              "INR"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "currency",
+                          "collectedMinor"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "submitted": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "viewed": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "visits": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "locationId",
+                    "visits",
+                    "viewed",
+                    "intent",
+                    "submitted",
+                    "confirmed",
+                    "paid",
+                    "paidCollected"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "bySource": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "channel": {
+                      "enum": [
+                        "Google Ads",
+                        "Instagram",
+                        "Facebook",
+                        "Organic search",
+                        "Direct",
+                        "Referral",
+                        "Other",
+                        "Not recorded"
+                      ],
+                      "type": "string"
+                    },
+                    "confirmed": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "intent": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "paid": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "paidCollected": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "collectedMinor": {
+                            "type": "number"
+                          },
+                          "currency": {
+                            "enum": [
+                              "THB",
+                              "USD",
+                              "EUR",
+                              "GBP",
+                              "JPY",
+                              "AUD",
+                              "CAD",
+                              "SGD",
+                              "HKD",
+                              "MYR",
+                              "IDR",
+                              "PHP",
+                              "VND",
+                              "INR"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "currency",
+                          "collectedMinor"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "submitted": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "viewed": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "visits": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "channel",
+                    "visits",
+                    "viewed",
+                    "intent",
+                    "submitted",
+                    "confirmed",
+                    "paid",
+                    "paidCollected"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "confirmed": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "intent": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "paid": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "paidCollected": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "collectedMinor": {
+                      "type": "number"
+                    },
+                    "currency": {
+                      "enum": [
+                        "THB",
+                        "USD",
+                        "EUR",
+                        "GBP",
+                        "JPY",
+                        "AUD",
+                        "CAD",
+                        "SGD",
+                        "HKD",
+                        "MYR",
+                        "IDR",
+                        "PHP",
+                        "VND",
+                        "INR"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "currency",
+                    "collectedMinor"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "submitted": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "viewed": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "visits": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "visits",
+              "viewed",
+              "intent",
+              "submitted",
+              "confirmed",
+              "paid",
+              "paidCollected",
+              "bySource",
+              "byLocation"
+            ],
+            "type": "object"
+          },
           "metrics": {
             "additionalProperties": false,
             "properties": {
@@ -49171,6 +49440,7 @@
           "values",
           "bookingValue",
           "net",
+          "funnel",
           "signupCohort",
           "coverage",
           "countries",
@@ -139582,7 +139852,7 @@
       "toolContracts": {
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
-        "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
+        "get_organization_analytics": "sha256:9cefa0a9158269dbd5b5e5d1b69b2cad708446df5edfb4e8619dc02c0c2b72aa",
         "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
