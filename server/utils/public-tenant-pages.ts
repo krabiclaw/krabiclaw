@@ -347,8 +347,10 @@ async function hydrateBlocks(
       })
     : parsedLocations
   const locationCopy = getVerticalCopy(organizationRow.vertical, locale)
+  // A legal practice lists the offices a client can visit: those with an address
+  // it shows. A practice that works online, or keeps its address private, has none.
   const defaultLocations = legalPractice
-    ? locations.filter(location => location.address || location.asset_id || location.description?.trim() || location.short_description?.trim())
+    ? (addressVisible ? locations.filter(location => location.address) : [])
     : locations
   if (defaultLocationGrid && defaultLocations.length) {
     blocks = [...blocks, {
