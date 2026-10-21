@@ -75,7 +75,7 @@
 
           <!-- Today's hours -->
           <p v-if="loc.todayHours" class="text-sm text-muted">
-            <span class="text-default font-medium">{{ t('saya.location.today') }}: </span>{{ loc.todayHours }}
+            <span class="text-default font-medium">{{ t('site.location.today') }}: </span>{{ loc.todayHours }}
           </p>
 
           <!-- Phone -->
@@ -87,7 +87,7 @@
     <!-- Continue button -->
     <div class="pt-6">
       <TenantButton size="lg" block :disabled="!modelValue" @click="$emit('next')">
-        {{ t('saya.experience_detail.continue') }}
+        {{ t('site.experience_detail.continue') }}
       </TenantButton>
     </div>
   </div>

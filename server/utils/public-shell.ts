@@ -18,6 +18,7 @@ import { recordRequestPhase } from '~/server/utils/request-metrics'
 import { isPublicShellPayload } from '~/utils/public-resource-contracts'
 import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
 import { getSourceLocale } from '~/server/utils/organization-locales'
+import { isLegalPracticeSite } from '~/utils/template-registry'
 import {
   indexStoredPublicLocalizations,
   projectExactLocalizedResource,
@@ -102,7 +103,8 @@ export async function loadPublicShellSource(
     assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale),
     executeBatch(db, shellQueries),
     listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, env }),
-    getOptionalPublicConsultationSettings(db, organization.id),
+    // Only a legal practice books consultations; a venue's site has no schedule page.
+    isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical }) ? getOptionalPublicConsultationSettings(db, organization.id) : null,
     getPublicCompliance(db, organization.id),
     listPublishedTenantPagePaths(db, organization.id, locale ?? sourceLocale),
     queryFirst<{ token: string | null }>(db, `
@@ -131,7 +133,7 @@ export async function loadPublicShellSource(
     .map(page => ({ id: page.id, path: page.path, title: page.title }))
 
   if (experiences.length && !pageLinks.some(page => page.path === '/experiences')) {
-    const title = platformLocale(locale ?? sourceLocale)?.messages['saya.footer.experiences'] || 'Experiences'
+    const title = platformLocale(locale ?? sourceLocale)?.messages['site.footer.experiences'] || 'Experiences'
     pageLinks.push({ id: 'experiences', path: '/experiences', title })
   }
 

@@ -29,7 +29,7 @@ import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, parseStayAmenityAnswers }
 import { isRecord } from '~/server/utils/type-guards'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/template-registry'
 
 
 export interface OrganizationLocaleRecord {
@@ -553,7 +553,7 @@ export async function putResourceLocalization(
   const canonical = await queryFirst<{ id: string; kind?: string; slug?: string; theme_id?: string; vertical?: string }>(db, canonicalResourceQuery(resourceType, 'one'), [input.organizationId, input.resourceId])
   if (!canonical) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Canonical resource was not found', { resource_type: resourceType, resource_id: input.resourceId })
   const values = validateLocalizedValues(resourceType, input.values, resourceType === 'product' ? assertProductKind(canonical.kind) : undefined,
-    status === 'published' && resourceType === 'organization' ? { publishedTemplate: resolvePublicTemplate({ themeId: canonical.theme_id, vertical: canonical.vertical }).slug } : undefined)
+    status === 'published' && resourceType === 'organization' ? { publishedLegalPractice: isLegalPracticeSite({ themeId: canonical.theme_id, vertical: canonical.vertical }) } : undefined)
   if (resourceType === 'product' && canonical.kind === 'stay' && isRecord(values.details) && STAY_ALARM_AMENITIES.some(code => Object.hasOwn(values.details as object, STAY_ALARM_DETAIL_KEYS[code]))) {
     const source = await queryFirst<{ amenities: string; details_json: string }>(db, 'SELECT c.amenities, p.details_json FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = ? AND p.id = ?', [input.organizationId, input.resourceId])
     if (!source) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source home is no longer available', { field: 'details' })
@@ -731,7 +731,7 @@ export async function deleteLocalization(
   if (status === 'published' && resourceType === 'organization') {
     const canonical = await queryFirst<{ theme_id: string; vertical: string }>(db, canonicalResourceQuery(resourceType, 'one'), [input.organizationId, input.resourceId])
     if (!canonical) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Canonical organization was not found', { organization_id: input.organizationId })
-    if (resolvePublicTemplate({ themeId: canonical.theme_id, vertical: canonical.vertical }).slug === 'blawby') {
+    if (isLegalPracticeSite({ themeId: canonical.theme_id, vertical: canonical.vertical })) {
       localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'Disable the language before deleting its organization translation', { locale })
     }
   }
@@ -857,7 +857,7 @@ export async function replaceResourceLocalizations(
     return {
       resourceId: item.resourceId,
       values: validateLocalizedValues(resourceType, item.values, resource.kind,
-        status === 'published' && resourceType === 'organization' ? { publishedTemplate: resolvePublicTemplate({ themeId: resource.theme_id, vertical: resource.vertical }).slug } : undefined),
+        status === 'published' && resourceType === 'organization' ? { publishedLegalPractice: isLegalPracticeSite({ themeId: resource.theme_id, vertical: resource.vertical }) } : undefined),
       routePath: validateLocalizedRoutePath(resourceType, locale, item.routePath, resource.slug),
     }
   })

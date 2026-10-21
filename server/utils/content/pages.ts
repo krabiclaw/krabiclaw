@@ -320,7 +320,8 @@ export async function assertTenantPagePathAvailable(
   if (!templateAllowsPageDocumentAt(input.template, CLAIMED_PUBLIC_ROUTES, path)) {
     conflict('This path is reserved by a platform or product route')
   }
-  const locationPath = input.template.slug === 'saya' ? /^\/locations\/([^/]+)$/.exec(path) : null
+  // A venue's location overview may carry an authored page; it needs its location.
+  const locationPath = (input.template.pageDocuments.patterns ?? []).includes('/locations/:slug()') ? /^\/locations\/([^/]+)$/.exec(path) : null
   if (locationPath && !await queryFirst(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND slug = ? LIMIT 1', [input.organizationId, locationPath[1]!])) {
     notFound('The location for this page was not found')
   }

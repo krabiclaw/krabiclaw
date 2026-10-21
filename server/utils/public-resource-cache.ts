@@ -183,23 +183,6 @@ export interface PublicResourceCacheParams {
 const encodeKeyField = (value: string | null | undefined): string =>
   encodeURIComponent(value ?? '').replace(/~/g, '%7E')
 
-export function buildPublicBlawbyDocumentCacheKey(
-  organizationId: string,
-  recipe: string,
-  slug?: string | null,
-  locale?: string,
-): string {
-  return [
-    'public',
-    encodeKeyField(organizationId),
-    'v18',
-    'blawby-document',
-    encodeKeyField(recipe),
-    encodeKeyField(slug),
-    encodeKeyField(locale),
-  ].join('~')
-}
-
 /** The site's accepted payment methods, under the site's prefix so its purge clears them. */
 export function buildPublicPaymentMethodsCacheKey(organizationId: string): string {
   return ['public', encodeKeyField(organizationId), 'v18', 'payment-methods'].join('~')
@@ -209,6 +192,7 @@ export function buildPublicResourceCacheKey(organizationId: string, params: Publ
   return [
     'public',
     encodeKeyField(organizationId),
+    // v18: canonical tenant renderer, authored accessibility and explicit amenity answers.
     'v18',
     params.contract,
     encodeKeyField(params.page),

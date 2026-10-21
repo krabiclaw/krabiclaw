@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:722dcd468846e0cda81491326b36ec725458019b1960cbf191a83112e7b04679",
-  "documentationFingerprint": "sha256:7368c1f2426945f1752d3061a186d94f7fd46fec11b37d03078320707d3d6e59",
+  "fingerprint": "sha256:84403705e259a8c4664f7d2287b9ed7058d9cbab0c4524dcff6015f0329b99a0",
+  "documentationFingerprint": "sha256:d5233e84d3f5a7fc928279850bdb59691065715579fe3a055ea3e1517819cf5b",
   "tools": [
     {
       "name": "add_organization_language",
@@ -182,6 +182,76 @@
         "properties": {
           "home": {
             "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
               "address": {
                 "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
@@ -1261,6 +1331,11 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
               "property_size": {
                 "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                 "exclusiveMinimum": 0,
@@ -1418,6 +1493,7 @@
             },
             "required": [
               "product_id",
+              "product_updated_at",
               "name",
               "location_id",
               "timezone",
@@ -1462,7 +1538,8 @@
               "assigned_team_id",
               "channel",
               "photos",
-              "photo_rooms"
+              "photo_rooms",
+              "accessibility"
             ],
             "type": "object"
           },
@@ -1954,7 +2031,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -3805,7 +3881,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -7743,7 +7818,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -9619,8 +9693,78 @@
                   "type": "string"
                 },
                 "stay": {
-                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                   "properties": {
+                    "accessibility": {
+                      "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "disabled_parking_spot",
+                              "path_to_entrance_lit_at_night",
+                              "home_step_free_access",
+                              "home_wide_doorway",
+                              "pool_hoist",
+                              "ceiling_hoist"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 6,
+                      "minItems": 6,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                       "items": {
@@ -10576,6 +10720,7 @@
                     "assigned_member_id",
                     "assigned_team_id",
                     "photo_rooms",
+                    "accessibility",
                     "property_type_group",
                     "property_type",
                     "listing_type",
@@ -12748,7 +12893,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -14057,7 +14201,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -19690,7 +19833,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -23935,7 +24077,7 @@
                 ]
               },
               "title": {
-                "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+                "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
                 "type": "string"
               }
             },
@@ -25644,8 +25786,78 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                 "properties": {
+                  "accessibility": {
+                    "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                    "items": {
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "available": {
+                              "const": true
+                            },
+                            "photo_ids": {
+                              "minItems": 1
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "available": {
+                              "enum": [
+                                false,
+                                null
+                              ]
+                            },
+                            "photo_ids": {
+                              "maxItems": 0
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "available": {
+                          "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "feature": {
+                          "enum": [
+                            "disabled_parking_spot",
+                            "path_to_entrance_lit_at_night",
+                            "home_step_free_access",
+                            "home_wide_doorway",
+                            "pool_hoist",
+                            "ceiling_hoist"
+                          ],
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 50,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "feature",
+                        "available",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 6,
+                    "minItems": 6,
+                    "type": "array"
+                  },
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                     "items": {
@@ -26601,6 +26813,7 @@
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
+                  "accessibility",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -27316,7 +27529,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -30861,7 +31073,7 @@
             ]
           },
           "title": {
-            "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -30974,7 +31186,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -35709,7 +35920,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -40489,7 +40699,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -45127,6 +45336,76 @@
         "properties": {
           "home": {
             "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
               "address": {
                 "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
@@ -46206,6 +46485,11 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
               "property_size": {
                 "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                 "exclusiveMinimum": 0,
@@ -46363,6 +46647,7 @@
             },
             "required": [
               "product_id",
+              "product_updated_at",
               "name",
               "location_id",
               "timezone",
@@ -46407,7 +46692,8 @@
               "assigned_team_id",
               "channel",
               "photos",
-              "photo_rooms"
+              "photo_rooms",
+              "accessibility"
             ],
             "type": [
               "object",
@@ -49143,13 +49429,23 @@
                 ]
               },
               "button_casing": {
+                "description": "Button text casing: uppercase or none (natural case). Absent when the site uses the Default.",
                 "enum": [
                   "uppercase",
                   "none"
                 ],
                 "type": "string"
               },
+              "button_color": {
+                "description": "Button fill: action (the palette's action color) or accent (the palette's accent color). Absent when the site uses the Default.",
+                "enum": [
+                  "action",
+                  "accent"
+                ],
+                "type": "string"
+              },
               "button_shape": {
+                "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners). Absent when the site uses the Default.",
                 "enum": [
                   "pill",
                   "rounded",
@@ -49207,7 +49503,8 @@
                   "montserrat",
                   "lora",
                   "playfair-display",
-                  "cormorant-garamond"
+                  "cormorant-garamond",
+                  "marcellus"
                 ],
                 "type": "string"
               },
@@ -49218,6 +49515,7 @@
                 ]
               },
               "heading_casing": {
+                "description": "Display heading casing: uppercase or none (natural case). Absent when the site uses the Default.",
                 "enum": [
                   "uppercase",
                   "none"
@@ -49273,7 +49571,7 @@
                 "type": "string"
               },
               "palette": {
-                "description": "The colors the site renders, light and dark: its own, or its template's. Null on the platform template.",
+                "description": "The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw's own site.",
                 "properties": {
                   "dark": {
                     "additionalProperties": false,
@@ -49344,7 +49642,7 @@
               "palette_source": {
                 "enum": [
                   "custom",
-                  "template",
+                  "default",
                   null
                 ],
                 "type": [
@@ -51473,8 +51771,78 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                 "properties": {
+                  "accessibility": {
+                    "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                    "items": {
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "available": {
+                              "const": true
+                            },
+                            "photo_ids": {
+                              "minItems": 1
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "available": {
+                              "enum": [
+                                false,
+                                null
+                              ]
+                            },
+                            "photo_ids": {
+                              "maxItems": 0
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "available": {
+                          "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "feature": {
+                          "enum": [
+                            "disabled_parking_spot",
+                            "path_to_entrance_lit_at_night",
+                            "home_step_free_access",
+                            "home_wide_doorway",
+                            "pool_hoist",
+                            "ceiling_hoist"
+                          ],
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 50,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "feature",
+                        "available",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 6,
+                    "minItems": 6,
+                    "type": "array"
+                  },
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                     "items": {
@@ -52430,6 +52798,7 @@
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
+                  "accessibility",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -54263,7 +54632,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -58566,7 +58934,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -62819,6 +63186,76 @@
           },
           "home": {
             "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
               "address": {
                 "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
@@ -63898,6 +64335,11 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
               "property_size": {
                 "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                 "exclusiveMinimum": 0,
@@ -64055,6 +64497,7 @@
             },
             "required": [
               "product_id",
+              "product_updated_at",
               "name",
               "location_id",
               "timezone",
@@ -64099,7 +64542,8 @@
               "assigned_team_id",
               "channel",
               "photos",
-              "photo_rooms"
+              "photo_rooms",
+              "accessibility"
             ],
             "type": "object"
           },
@@ -70361,6 +70805,76 @@
         "properties": {
           "home": {
             "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
               "address": {
                 "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
@@ -71440,6 +71954,11 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
               "property_size": {
                 "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                 "exclusiveMinimum": 0,
@@ -71597,6 +72116,7 @@
             },
             "required": [
               "product_id",
+              "product_updated_at",
               "name",
               "location_id",
               "timezone",
@@ -71641,7 +72161,8 @@
               "assigned_team_id",
               "channel",
               "photos",
-              "photo_rooms"
+              "photo_rooms",
+              "accessibility"
             ],
             "type": "object"
           }
@@ -72107,7 +72628,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -76315,7 +76835,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -80435,7 +80954,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -86925,8 +87443,78 @@
                   "type": "string"
                 },
                 "stay": {
-                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                   "properties": {
+                    "accessibility": {
+                      "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "disabled_parking_spot",
+                              "path_to_entrance_lit_at_night",
+                              "home_step_free_access",
+                              "home_wide_doorway",
+                              "pool_hoist",
+                              "ceiling_hoist"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 6,
+                      "minItems": 6,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                       "items": {
@@ -87882,6 +88470,7 @@
                     "assigned_member_id",
                     "assigned_team_id",
                     "photo_rooms",
+                    "accessibility",
                     "property_type_group",
                     "property_type",
                     "listing_type",
@@ -89190,7 +89779,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -90385,8 +90973,78 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                 "properties": {
+                  "accessibility": {
+                    "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                    "items": {
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "available": {
+                              "const": true
+                            },
+                            "photo_ids": {
+                              "minItems": 1
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "available": {
+                              "enum": [
+                                false,
+                                null
+                              ]
+                            },
+                            "photo_ids": {
+                              "maxItems": 0
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "available": {
+                          "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "feature": {
+                          "enum": [
+                            "disabled_parking_spot",
+                            "path_to_entrance_lit_at_night",
+                            "home_step_free_access",
+                            "home_wide_doorway",
+                            "pool_hoist",
+                            "ceiling_hoist"
+                          ],
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 50,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "feature",
+                        "available",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 6,
+                    "minItems": 6,
+                    "type": "array"
+                  },
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                     "items": {
@@ -91342,6 +92000,7 @@
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
+                  "accessibility",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -91589,6 +92248,76 @@
         "properties": {
           "home": {
             "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
               "address": {
                 "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
@@ -92668,6 +93397,11 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
               "property_size": {
                 "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                 "exclusiveMinimum": 0,
@@ -92825,6 +93559,7 @@
             },
             "required": [
               "product_id",
+              "product_updated_at",
               "name",
               "location_id",
               "timezone",
@@ -92869,7 +93604,8 @@
               "assigned_team_id",
               "channel",
               "photos",
-              "photo_rooms"
+              "photo_rooms",
+              "accessibility"
             ],
             "type": "object"
           }
@@ -93929,7 +94665,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -94273,7 +95008,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -96075,7 +96809,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -101134,7 +101867,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -101467,7 +102199,6 @@
                             "enum": [
                               "media",
                               "gallery",
-                              "background",
                               "featured",
                               "decoration",
                               "parallax_sky",
@@ -102634,6 +103365,7 @@
                     "enum": [
                       "logo",
                       "logo_dark",
+                      "favicon",
                       "social_share",
                       "announcement"
                     ],
@@ -102768,7 +103500,6 @@
                       {
                         "enum": [
                           "media",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -103173,7 +103904,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -105021,8 +105751,78 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                 "properties": {
+                  "accessibility": {
+                    "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                    "items": {
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "available": {
+                              "const": true
+                            },
+                            "photo_ids": {
+                              "minItems": 1
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "available": {
+                              "enum": [
+                                false,
+                                null
+                              ]
+                            },
+                            "photo_ids": {
+                              "maxItems": 0
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "available": {
+                          "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "feature": {
+                          "enum": [
+                            "disabled_parking_spot",
+                            "path_to_entrance_lit_at_night",
+                            "home_step_free_access",
+                            "home_wide_doorway",
+                            "pool_hoist",
+                            "ceiling_hoist"
+                          ],
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 50,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "feature",
+                        "available",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 6,
+                    "minItems": 6,
+                    "type": "array"
+                  },
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                     "items": {
@@ -105978,6 +106778,7 @@
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
+                  "accessibility",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -107150,8 +107951,78 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                 "properties": {
+                  "accessibility": {
+                    "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                    "items": {
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "available": {
+                              "const": true
+                            },
+                            "photo_ids": {
+                              "minItems": 1
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "available": {
+                              "enum": [
+                                false,
+                                null
+                              ]
+                            },
+                            "photo_ids": {
+                              "maxItems": 0
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "available": {
+                          "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "feature": {
+                          "enum": [
+                            "disabled_parking_spot",
+                            "path_to_entrance_lit_at_night",
+                            "home_step_free_access",
+                            "home_wide_doorway",
+                            "pool_hoist",
+                            "ceiling_hoist"
+                          ],
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 50,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "feature",
+                        "available",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 6,
+                    "minItems": 6,
+                    "type": "array"
+                  },
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                     "items": {
@@ -108107,6 +108978,7 @@
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
+                  "accessibility",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -108427,6 +109299,76 @@
           },
           "home": {
             "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
               "address": {
                 "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
@@ -109506,6 +110448,11 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
               "property_size": {
                 "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                 "exclusiveMinimum": 0,
@@ -109663,6 +110610,7 @@
             },
             "required": [
               "product_id",
+              "product_updated_at",
               "name",
               "location_id",
               "timezone",
@@ -109707,7 +110655,8 @@
               "assigned_team_id",
               "channel",
               "photos",
-              "photo_rooms"
+              "photo_rooms",
+              "accessibility"
             ],
             "type": "object"
           },
@@ -110589,7 +111538,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -111911,7 +112859,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -118284,8 +119231,78 @@
                         "type": "string"
                       },
                       "stay": {
-                        "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                        "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                         "properties": {
+                          "accessibility": {
+                            "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                            "items": {
+                              "additionalProperties": false,
+                              "oneOf": [
+                                {
+                                  "properties": {
+                                    "available": {
+                                      "const": true
+                                    },
+                                    "photo_ids": {
+                                      "minItems": 1
+                                    }
+                                  }
+                                },
+                                {
+                                  "properties": {
+                                    "available": {
+                                      "enum": [
+                                        false,
+                                        null
+                                      ]
+                                    },
+                                    "photo_ids": {
+                                      "maxItems": 0
+                                    }
+                                  }
+                                }
+                              ],
+                              "properties": {
+                                "available": {
+                                  "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                  "type": [
+                                    "boolean",
+                                    "null"
+                                  ]
+                                },
+                                "feature": {
+                                  "enum": [
+                                    "disabled_parking_spot",
+                                    "path_to_entrance_lit_at_night",
+                                    "home_step_free_access",
+                                    "home_wide_doorway",
+                                    "pool_hoist",
+                                    "ceiling_hoist"
+                                  ],
+                                  "type": "string"
+                                },
+                                "photo_ids": {
+                                  "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                  "items": {
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "maxItems": 50,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              },
+                              "required": [
+                                "feature",
+                                "available",
+                                "photo_ids"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 6,
+                            "minItems": 6,
+                            "type": "array"
+                          },
                           "amenities": {
                             "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                             "items": {
@@ -119241,6 +120258,7 @@
                           "assigned_member_id",
                           "assigned_team_id",
                           "photo_rooms",
+                          "accessibility",
                           "property_type_group",
                           "property_type",
                           "listing_type",
@@ -119889,6 +120907,14 @@
             ],
             "type": "string"
           },
+          "button_color": {
+            "description": "Button fill: action (the palette's action color) or accent (the palette's accent color).",
+            "enum": [
+              "action",
+              "accent"
+            ],
+            "type": "string"
+          },
           "button_shape": {
             "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners).",
             "enum": [
@@ -119932,7 +120958,7 @@
             "type": "string"
           },
           "font_preset": {
-            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
+            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter), marcellus (Marcellus with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
             "enum": [
               "default",
               "mali",
@@ -119946,7 +120972,8 @@
               "montserrat",
               "lora",
               "playfair-display",
-              "cormorant-garamond"
+              "cormorant-garamond",
+              "marcellus"
             ],
             "type": "string"
           },
@@ -119967,7 +120994,7 @@
           },
           "palette": {
             "additionalProperties": false,
-            "description": "Saya and Blawby website colors, each with a light and a dark value. Roles: ground (The page background.) surface (Cards, the header and footer, dialogs and fields.) text (Body copy and headings.) muted (Captions, details and supporting copy.) action (Buttons, links and selected states.) accent (Emphasis, decoration and highlighted buttons.) Start from a starter (coastal, forest, terracotta, ink, blossom, saffron, slate, midnight) and/or name only the roles to change; colors are #RRGGBB or a plain description such as \"forest green\". Borders and tints are derived. null returns to the template's colors. The result reports any text or button pair below WCAG AA contrast.",
+            "description": "Website colors, each with a light and a dark value. Roles: ground (The page background.) surface (Cards, the header and footer, dialogs and fields.) text (Body copy and headings.) muted (Captions, details and supporting copy.) action (Buttons, links and selected states.) accent (Emphasis, decoration and highlighted buttons.) Start from a starter (coastal, forest, terracotta, ink, blossom, saffron, slate, midnight) and/or name only the roles to change; colors are #RRGGBB or a plain description such as \"forest green\". Borders and tints are derived. null returns to the default colors. The result reports any text or button pair below WCAG AA contrast.",
             "properties": {
               "dark": {
                 "additionalProperties": false,
@@ -123457,8 +124484,78 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.",
                 "properties": {
+                  "accessibility": {
+                    "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                    "items": {
+                      "additionalProperties": false,
+                      "oneOf": [
+                        {
+                          "properties": {
+                            "available": {
+                              "const": true
+                            },
+                            "photo_ids": {
+                              "minItems": 1
+                            }
+                          }
+                        },
+                        {
+                          "properties": {
+                            "available": {
+                              "enum": [
+                                false,
+                                null
+                              ]
+                            },
+                            "photo_ids": {
+                              "maxItems": 0
+                            }
+                          }
+                        }
+                      ],
+                      "properties": {
+                        "available": {
+                          "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                          "type": [
+                            "boolean",
+                            "null"
+                          ]
+                        },
+                        "feature": {
+                          "enum": [
+                            "disabled_parking_spot",
+                            "path_to_entrance_lit_at_night",
+                            "home_step_free_access",
+                            "home_wide_doorway",
+                            "pool_hoist",
+                            "ceiling_hoist"
+                          ],
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 50,
+                          "type": "array",
+                          "uniqueItems": true
+                        }
+                      },
+                      "required": [
+                        "feature",
+                        "available",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 6,
+                    "minItems": 6,
+                    "type": "array"
+                  },
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                     "items": {
@@ -124414,6 +125511,7 @@
                   "assigned_member_id",
                   "assigned_team_id",
                   "photo_rooms",
+                  "accessibility",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -125236,7 +126334,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -128786,7 +129883,7 @@
             ]
           },
           "title": {
-            "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -128901,7 +129998,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -133000,113 +134096,95 @@
       "uiResourceUri": null
     },
     {
-      "name": "update_stay_arrival_guide",
-      "title": "Update stay arrival guide",
-      "description": "Save one home's private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site.",
+      "name": "update_stay_accessibility",
+      "title": "Update stay accessibility",
+      "description": "Save one listing accessibility answer under the Product updated_at value from the latest read. Other feature answers and authored rooms are retained. True requires active same-organization image evidence and atomically appends selected library images to Product photos, preserving existing cover/order and room groups. False/null requires []; null clears to unknown. Evidence photos cannot be removed until replaced or the answer cleared. No review or approval is implied. A stale Product or photo order refuses every change.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
-          "check_in_instructions": {
-            "maxLength": 5000,
-            "minLength": 1,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "check_in_method": {
-            "description": "How guests get in.",
-            "enum": [
-              "smart_lock",
-              "keypad",
-              "lockbox",
-              "building_staff",
-              "in_person",
-              "other",
-              null
-            ],
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "checkout_instructions": {
-            "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "details": {
-                  "description": "Required for additional.",
-                  "maxLength": 500,
-                  "minLength": 1,
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "task": {
-                  "enum": [
-                    "gather_towels",
-                    "throw_trash",
-                    "turn_off",
-                    "lock_up",
-                    "return_keys",
-                    "additional"
-                  ],
-                  "type": "string"
+          "accessibility": {
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "properties": {
+                  "available": {
+                    "const": true
+                  },
+                  "photo_ids": {
+                    "minItems": 1
+                  }
                 }
               },
-              "required": [
-                "task",
-                "details"
-              ],
-              "type": "object"
+              {
+                "properties": {
+                  "available": {
+                    "enum": [
+                      false,
+                      null
+                    ]
+                  },
+                  "photo_ids": {
+                    "maxItems": 0
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "available": {
+                "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "feature": {
+                "enum": [
+                  "disabled_parking_spot",
+                  "path_to_entrance_lit_at_night",
+                  "home_step_free_access",
+                  "home_wide_doorway",
+                  "pool_hoist",
+                  "ceiling_hoist"
+                ],
+                "type": "string"
+              },
+              "photo_ids": {
+                "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array",
+                "uniqueItems": true
+              }
             },
-            "type": "array"
+            "required": [
+              "feature",
+              "available",
+              "photo_ids"
+            ],
+            "type": "object"
           },
-          "directions": {
-            "maxLength": 5000,
+          "expected_updated_at": {
+            "description": "Product updated_at from list_products, or product_updated_at from the Home. A stale value refuses the entire edit.",
             "minLength": 1,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "house_manual": {
-            "maxLength": 5000,
-            "minLength": 1,
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "organization_id": {
             "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
             "type": "string"
           },
           "product_id": {
+            "description": "The place to stay: a product of kind stay, from list_products.",
             "minLength": 1,
             "type": "string"
-          },
-          "wifi_network": {
-            "maxLength": 100,
-            "minLength": 1,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "wifi_password": {
-            "maxLength": 100,
-            "minLength": 1,
-            "type": [
-              "string",
-              "null"
-            ]
           }
         },
         "required": [
-          "product_id"
+          "product_id",
+          "expected_updated_at",
+          "accessibility"
         ],
         "type": "object"
       },
@@ -133115,6 +134193,76 @@
         "properties": {
           "home": {
             "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
               "address": {
                 "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
@@ -134194,6 +135342,11 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
               "property_size": {
                 "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                 "exclusiveMinimum": 0,
@@ -134351,6 +135504,7 @@
             },
             "required": [
               "product_id",
+              "product_updated_at",
               "name",
               "location_id",
               "timezone",
@@ -134395,7 +135549,1510 @@
               "assigned_team_id",
               "channel",
               "photos",
-              "photo_rooms"
+              "photo_rooms",
+              "accessibility"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "home"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "stays",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "update_stay_arrival_guide",
+      "title": "Update stay arrival guide",
+      "description": "Save one home's private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "check_in_instructions": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "check_in_method": {
+            "description": "How guests get in.",
+            "enum": [
+              "smart_lock",
+              "keypad",
+              "lockbox",
+              "building_staff",
+              "in_person",
+              "other",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checkout_instructions": {
+            "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "details": {
+                  "description": "Required for additional.",
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "task": {
+                  "enum": [
+                    "gather_towels",
+                    "throw_trash",
+                    "turn_off",
+                    "lock_up",
+                    "return_keys",
+                    "additional"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "task",
+                "details"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "directions": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "house_manual": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "product_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "wifi_network": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wifi_password": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "home": {
+            "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
+              "address": {
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
+                "properties": {
+                  "address": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "ac",
+                    "dryer",
+                    "essentials",
+                    "heating",
+                    "hot_water",
+                    "kitchen",
+                    "tv",
+                    "washer",
+                    "wireless_internet",
+                    "bathtub",
+                    "bidet",
+                    "body_soap",
+                    "cleaning_products",
+                    "conditioner",
+                    "hair_dryer",
+                    "alfresco_shower",
+                    "shampoo",
+                    "shower_gel",
+                    "bed_linens",
+                    "wardrobe_or_closet",
+                    "clothes_drying_rack",
+                    "extra_pillows_and_blankets",
+                    "hangers",
+                    "iron",
+                    "mosquito_net",
+                    "room_darkening_shades",
+                    "safe",
+                    "arcade_machine",
+                    "batting_cage",
+                    "books",
+                    "bowling_alley",
+                    "climbing_wall",
+                    "ethernet_connection",
+                    "exercise_equipment",
+                    "game_console",
+                    "laser_tag",
+                    "life_size_games",
+                    "mini_golf",
+                    "home_theater",
+                    "piano",
+                    "ping_pong_table",
+                    "pool_table",
+                    "record_player",
+                    "skate_ramp",
+                    "sound_system",
+                    "theme_room",
+                    "baby_bath",
+                    "baby_monitor",
+                    "childrens_bike",
+                    "playroom",
+                    "stair_gates",
+                    "babysitter_recommendations",
+                    "board_games",
+                    "changing_table",
+                    "childrens_books_and_toys",
+                    "childrens_dinnerware",
+                    "crib",
+                    "fireplace_guards",
+                    "high_chair",
+                    "playground",
+                    "outlet_covers",
+                    "pack_n_play_travel_crib",
+                    "table_corner_guards",
+                    "window_guards",
+                    "ceiling_fan",
+                    "fireplace",
+                    "portable_fans",
+                    "carbon_monoxide_detector",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "smoke_detector",
+                    "laptop_friendly_workspace",
+                    "pocket_wifi",
+                    "baking_sheet",
+                    "barbeque_utensils",
+                    "bread_maker",
+                    "blender",
+                    "coffee",
+                    "coffee_maker",
+                    "cooking_basics",
+                    "dining_table",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "freezer",
+                    "hot_water_kettle",
+                    "kitchenette",
+                    "microwave",
+                    "mini_fridge",
+                    "oven",
+                    "refrigerator",
+                    "rice_maker",
+                    "stove",
+                    "toaster",
+                    "trash_compacter",
+                    "wine_glasses",
+                    "beach_access",
+                    "lake_access",
+                    "laundromat_nearby",
+                    "private_entrance",
+                    "resort_access",
+                    "ski_in_ski_out",
+                    "waterfront",
+                    "garden_or_backyard",
+                    "bbq_area",
+                    "beach_essentials",
+                    "bicycle",
+                    "boat_slip",
+                    "fire_pit",
+                    "hammock",
+                    "kayak",
+                    "alfresco_dining",
+                    "outdoor_seating",
+                    "outdoor_kitchen",
+                    "patio_or_belcony",
+                    "sun_loungers",
+                    "free_parking",
+                    "street_parking",
+                    "paid_parking_on_premises",
+                    "paid_parking",
+                    "free_parking_off_premises",
+                    "elevator",
+                    "ev_charger",
+                    "hockey_rink",
+                    "gym",
+                    "jacuzzi",
+                    "pool",
+                    "private_living_room",
+                    "sauna",
+                    "single_level_home",
+                    "ebike_charger",
+                    "solar_power",
+                    "recycling",
+                    "composting",
+                    "doorman",
+                    "gated_community",
+                    "breakfast",
+                    "cleaning_before_checkout",
+                    "long_term_stays_allowed",
+                    "luggage_dropoff_allowed",
+                    "bay_view",
+                    "beach_view",
+                    "canal_view",
+                    "city_view",
+                    "courtyard_view",
+                    "desert_view",
+                    "garden_view",
+                    "golf_view",
+                    "harbor_view",
+                    "lake_view",
+                    "marina_view",
+                    "mountain_view",
+                    "ocean_view",
+                    "park_view",
+                    "pool_view",
+                    "resort_view",
+                    "river_view",
+                    "sea_view",
+                    "valley_view",
+                    "vineyard_view",
+                    "landmark_view"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "amenity_answers": {
+                "description": "Explicit amenity reports, each code once, in catalog order. Missing codes are unknown. amenities is the true-only projection.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "available": {
+                      "type": "boolean"
+                    },
+                    "code": {
+                      "enum": [
+                        "ac",
+                        "dryer",
+                        "essentials",
+                        "heating",
+                        "hot_water",
+                        "kitchen",
+                        "tv",
+                        "washer",
+                        "wireless_internet",
+                        "bathtub",
+                        "bidet",
+                        "body_soap",
+                        "cleaning_products",
+                        "conditioner",
+                        "hair_dryer",
+                        "alfresco_shower",
+                        "shampoo",
+                        "shower_gel",
+                        "bed_linens",
+                        "wardrobe_or_closet",
+                        "clothes_drying_rack",
+                        "extra_pillows_and_blankets",
+                        "hangers",
+                        "iron",
+                        "mosquito_net",
+                        "room_darkening_shades",
+                        "safe",
+                        "arcade_machine",
+                        "batting_cage",
+                        "books",
+                        "bowling_alley",
+                        "climbing_wall",
+                        "ethernet_connection",
+                        "exercise_equipment",
+                        "game_console",
+                        "laser_tag",
+                        "life_size_games",
+                        "mini_golf",
+                        "home_theater",
+                        "piano",
+                        "ping_pong_table",
+                        "pool_table",
+                        "record_player",
+                        "skate_ramp",
+                        "sound_system",
+                        "theme_room",
+                        "baby_bath",
+                        "baby_monitor",
+                        "childrens_bike",
+                        "playroom",
+                        "stair_gates",
+                        "babysitter_recommendations",
+                        "board_games",
+                        "changing_table",
+                        "childrens_books_and_toys",
+                        "childrens_dinnerware",
+                        "crib",
+                        "fireplace_guards",
+                        "high_chair",
+                        "playground",
+                        "outlet_covers",
+                        "pack_n_play_travel_crib",
+                        "table_corner_guards",
+                        "window_guards",
+                        "ceiling_fan",
+                        "fireplace",
+                        "portable_fans",
+                        "carbon_monoxide_detector",
+                        "fire_extinguisher",
+                        "first_aid_kit",
+                        "smoke_detector",
+                        "laptop_friendly_workspace",
+                        "pocket_wifi",
+                        "baking_sheet",
+                        "barbeque_utensils",
+                        "bread_maker",
+                        "blender",
+                        "coffee",
+                        "coffee_maker",
+                        "cooking_basics",
+                        "dining_table",
+                        "dishes_and_silverware",
+                        "dishwasher",
+                        "freezer",
+                        "hot_water_kettle",
+                        "kitchenette",
+                        "microwave",
+                        "mini_fridge",
+                        "oven",
+                        "refrigerator",
+                        "rice_maker",
+                        "stove",
+                        "toaster",
+                        "trash_compacter",
+                        "wine_glasses",
+                        "beach_access",
+                        "lake_access",
+                        "laundromat_nearby",
+                        "private_entrance",
+                        "resort_access",
+                        "ski_in_ski_out",
+                        "waterfront",
+                        "garden_or_backyard",
+                        "bbq_area",
+                        "beach_essentials",
+                        "bicycle",
+                        "boat_slip",
+                        "fire_pit",
+                        "hammock",
+                        "kayak",
+                        "alfresco_dining",
+                        "outdoor_seating",
+                        "outdoor_kitchen",
+                        "patio_or_belcony",
+                        "sun_loungers",
+                        "free_parking",
+                        "street_parking",
+                        "paid_parking_on_premises",
+                        "paid_parking",
+                        "free_parking_off_premises",
+                        "elevator",
+                        "ev_charger",
+                        "hockey_rink",
+                        "gym",
+                        "jacuzzi",
+                        "pool",
+                        "private_living_room",
+                        "sauna",
+                        "single_level_home",
+                        "ebike_charger",
+                        "solar_power",
+                        "recycling",
+                        "composting",
+                        "doorman",
+                        "gated_community",
+                        "breakfast",
+                        "cleaning_before_checkout",
+                        "long_term_stays_allowed",
+                        "luggage_dropoff_allowed",
+                        "bay_view",
+                        "beach_view",
+                        "canal_view",
+                        "city_view",
+                        "courtyard_view",
+                        "desert_view",
+                        "garden_view",
+                        "golf_view",
+                        "harbor_view",
+                        "lake_view",
+                        "marina_view",
+                        "mountain_view",
+                        "ocean_view",
+                        "park_view",
+                        "pool_view",
+                        "resort_view",
+                        "river_view",
+                        "sea_view",
+                        "valley_view",
+                        "vineyard_view",
+                        "landmark_view"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "code",
+                    "available"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "base_price_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "carbon_monoxide_detector_details": {
+                "description": "Where each carbon monoxide alarm is located; a projection of Product.details, present only while the amenity is true.",
+                "maxLength": 300,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "channel": {
+                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "channex"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "importing",
+                      "connected",
+                      "disconnected"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "check_in_instructions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_method": {
+                "description": "How guests get in.",
+                "enum": [
+                  "smart_lock",
+                  "keypad",
+                  "lockbox",
+                  "building_staff",
+                  "in_person",
+                  "other",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "check_out_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "checkout_instructions": {
+                "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "details": {
+                      "description": "Required for additional.",
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task": {
+                      "enum": [
+                        "gather_towels",
+                        "throw_trash",
+                        "turn_off",
+                        "lock_up",
+                        "return_keys",
+                        "additional"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "details"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "currency": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "description": {
+                "description": "The listing description; empty when none is written.",
+                "type": "string"
+              },
+              "directions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "house_manual": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "listing_floor": {
+                "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "listing_type": {
+                "description": "Whether guests book the entire place, a private room or a shared room. Null when not said.",
+                "enum": [
+                  "entire_place",
+                  "private_room",
+                  "shared_room",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "max_guests": {
+                "type": "integer"
+              },
+              "min_nights": {
+                "type": "integer"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "photo_rooms": {
+                "description": "Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
+                    "amenities": {
+                      "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
+                      "items": {
+                        "enum": [
+                          "ac",
+                          "dryer",
+                          "essentials",
+                          "heating",
+                          "hot_water",
+                          "kitchen",
+                          "tv",
+                          "washer",
+                          "wireless_internet",
+                          "bathtub",
+                          "bidet",
+                          "body_soap",
+                          "cleaning_products",
+                          "conditioner",
+                          "hair_dryer",
+                          "alfresco_shower",
+                          "shampoo",
+                          "shower_gel",
+                          "bed_linens",
+                          "wardrobe_or_closet",
+                          "clothes_drying_rack",
+                          "extra_pillows_and_blankets",
+                          "hangers",
+                          "iron",
+                          "mosquito_net",
+                          "room_darkening_shades",
+                          "safe",
+                          "arcade_machine",
+                          "batting_cage",
+                          "books",
+                          "bowling_alley",
+                          "climbing_wall",
+                          "ethernet_connection",
+                          "exercise_equipment",
+                          "game_console",
+                          "laser_tag",
+                          "life_size_games",
+                          "mini_golf",
+                          "home_theater",
+                          "piano",
+                          "ping_pong_table",
+                          "pool_table",
+                          "record_player",
+                          "skate_ramp",
+                          "sound_system",
+                          "theme_room",
+                          "baby_bath",
+                          "baby_monitor",
+                          "childrens_bike",
+                          "playroom",
+                          "stair_gates",
+                          "babysitter_recommendations",
+                          "board_games",
+                          "changing_table",
+                          "childrens_books_and_toys",
+                          "childrens_dinnerware",
+                          "crib",
+                          "fireplace_guards",
+                          "high_chair",
+                          "playground",
+                          "outlet_covers",
+                          "pack_n_play_travel_crib",
+                          "table_corner_guards",
+                          "window_guards",
+                          "ceiling_fan",
+                          "fireplace",
+                          "portable_fans",
+                          "carbon_monoxide_detector",
+                          "fire_extinguisher",
+                          "first_aid_kit",
+                          "smoke_detector",
+                          "laptop_friendly_workspace",
+                          "pocket_wifi",
+                          "baking_sheet",
+                          "barbeque_utensils",
+                          "bread_maker",
+                          "blender",
+                          "coffee",
+                          "coffee_maker",
+                          "cooking_basics",
+                          "dining_table",
+                          "dishes_and_silverware",
+                          "dishwasher",
+                          "freezer",
+                          "hot_water_kettle",
+                          "kitchenette",
+                          "microwave",
+                          "mini_fridge",
+                          "oven",
+                          "refrigerator",
+                          "rice_maker",
+                          "stove",
+                          "toaster",
+                          "trash_compacter",
+                          "wine_glasses",
+                          "beach_access",
+                          "lake_access",
+                          "laundromat_nearby",
+                          "private_entrance",
+                          "resort_access",
+                          "ski_in_ski_out",
+                          "waterfront",
+                          "garden_or_backyard",
+                          "bbq_area",
+                          "beach_essentials",
+                          "bicycle",
+                          "boat_slip",
+                          "fire_pit",
+                          "hammock",
+                          "kayak",
+                          "alfresco_dining",
+                          "outdoor_seating",
+                          "outdoor_kitchen",
+                          "patio_or_belcony",
+                          "sun_loungers",
+                          "free_parking",
+                          "street_parking",
+                          "paid_parking_on_premises",
+                          "paid_parking",
+                          "free_parking_off_premises",
+                          "elevator",
+                          "ev_charger",
+                          "hockey_rink",
+                          "gym",
+                          "jacuzzi",
+                          "pool",
+                          "private_living_room",
+                          "sauna",
+                          "single_level_home",
+                          "ebike_charger",
+                          "solar_power",
+                          "recycling",
+                          "composting",
+                          "doorman",
+                          "gated_community",
+                          "breakfast",
+                          "cleaning_before_checkout",
+                          "long_term_stays_allowed",
+                          "luggage_dropoff_allowed",
+                          "bay_view",
+                          "beach_view",
+                          "canal_view",
+                          "city_view",
+                          "courtyard_view",
+                          "desert_view",
+                          "garden_view",
+                          "golf_view",
+                          "harbor_view",
+                          "lake_view",
+                          "marina_view",
+                          "mountain_view",
+                          "ocean_view",
+                          "park_view",
+                          "pool_view",
+                          "resort_view",
+                          "river_view",
+                          "sea_view",
+                          "valley_view",
+                          "vineyard_view",
+                          "landmark_view"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "details_version": {
+                      "description": "The room details_version from the latest photo_rooms read. A stale version refuses the entire edit.",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "private_attached_bathroom": {
+                      "description": "Whether this bedroom has a private attached bathroom. Null is unanswered. Only bedrooms may author this fact.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "sleeping_arrangements": {
+                      "description": "Room allocations from the declared listing bed total. Null is unanswered; [] explicitly states none. Each bed type occurs once; all room quantities together must fit within a known listing beds total.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "count": {
+                            "maximum": 50,
+                            "minimum": 1,
+                            "type": "integer"
+                          },
+                          "type": {
+                            "enum": [
+                              "single",
+                              "double",
+                              "queen",
+                              "king",
+                              "small_double",
+                              "bunk_bed",
+                              "sofa_bed",
+                              "couch",
+                              "floor_mattress",
+                              "air_mattress",
+                              "crib",
+                              "toddler_bed",
+                              "hammock",
+                              "water_bed"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "count"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 14,
+                      "type": [
+                        "array",
+                        "null"
+                      ]
+                    },
+                    "type": {
+                      "enum": [
+                        "art_studio",
+                        "backyard",
+                        "balcony",
+                        "bedroom",
+                        "bowling_alley",
+                        "childrens_playroom",
+                        "courtyard",
+                        "darkroom",
+                        "deck",
+                        "dining_area",
+                        "event_room",
+                        "exterior",
+                        "front_yard",
+                        "full_bathroom",
+                        "full_kitchen",
+                        "game_room",
+                        "garage",
+                        "garden",
+                        "gym",
+                        "half_bathroom",
+                        "hot_tub",
+                        "kitchenette",
+                        "laundry_area",
+                        "library",
+                        "living_room",
+                        "movie_theater",
+                        "music_studio",
+                        "office",
+                        "patio",
+                        "photography_studio",
+                        "pool",
+                        "porch",
+                        "rooftop",
+                        "sunroom",
+                        "terrace",
+                        "theme_room",
+                        "wine_cellar",
+                        "woodshop",
+                        "workshop",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "photo_ids",
+                    "details_version",
+                    "sleeping_arrangements",
+                    "private_attached_bathroom",
+                    "amenities",
+                    "accessibility"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "property_size": {
+                "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
+                "exclusiveMinimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "property_size_unit": {
+                "description": "The unit of property_size. Size and unit must both be set or both null.",
+                "enum": [
+                  "square_meters",
+                  "square_feet",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_type": {
+                "description": "Airbnb property type, one the property_type_group offers. Null with property_type_group when not said.",
+                "enum": [
+                  "apartment",
+                  "condominium",
+                  "serviced_apartment",
+                  "loft",
+                  "house",
+                  "townhouse",
+                  "bungalow",
+                  "cabin",
+                  "chalet",
+                  "earthhouse",
+                  "hut",
+                  "lighthouse",
+                  "villa",
+                  "dome",
+                  "cottage",
+                  "farmstay",
+                  "houseboat",
+                  "tiny_house",
+                  "guesthouse",
+                  "private_suite",
+                  "boat",
+                  "castle",
+                  "cave",
+                  "igloo",
+                  "island",
+                  "plane",
+                  "rv",
+                  "tent",
+                  "tipi",
+                  "train",
+                  "treehouse",
+                  "yurt",
+                  "other",
+                  "barn",
+                  "campsite",
+                  "windmill",
+                  "bus",
+                  "holiday_park",
+                  "ranch",
+                  "religious_building",
+                  "riad",
+                  "shipping_container",
+                  "tower",
+                  "bnb",
+                  "nature_eco_lodge",
+                  "boutique_hotel",
+                  "hostel",
+                  "aparthotel",
+                  "hotel",
+                  "resort",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_type_group": {
+                "description": "Airbnb's property group: apartments (Apartment: apartment, condominium, serviced_apartment, loft); houses (House: house, townhouse, bungalow, cabin, chalet, earthhouse, hut, lighthouse, villa, dome, cottage, farmstay, houseboat, tiny_house); secondary_units (Secondary unit: guesthouse, private_suite, farmstay); unique_homes (Unique space: boat, castle, cave, earthhouse, hut, igloo, island, lighthouse, plane, rv, tent, tipi, train, treehouse, yurt, other, dome, barn, campsite, farmstay, houseboat, tiny_house, windmill, bus, holiday_park, ranch, religious_building, riad, shipping_container, tower); bnb (Bed and breakfast: bnb, nature_eco_lodge, farmstay); boutique_hotels_and_more (Boutique hotel: boutique_hotel, nature_eco_lodge, hostel, serviced_apartment, aparthotel, hotel, resort). Set with property_type, both or neither.",
+                "enum": [
+                  "apartments",
+                  "houses",
+                  "secondary_units",
+                  "unique_homes",
+                  "bnb",
+                  "boutique_hotels_and_more",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "published": {
+                "description": "Whether the home is listed on the site.",
+                "type": "boolean"
+              },
+              "smoke_detector_details": {
+                "description": "Where each smoke alarm is located; a projection of Product.details, present only while the amenity is true.",
+                "maxLength": 300,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "total_floors": {
+                "description": "Total floors in the property; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "wifi_network": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wifi_password": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "year_built": {
+                "description": "Year the property was built; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "product_id",
+              "product_updated_at",
+              "name",
+              "location_id",
+              "timezone",
+              "currency",
+              "base_price_minor",
+              "base_price_tax_behavior",
+              "check_in_time",
+              "check_out_time",
+              "max_guests",
+              "min_nights",
+              "description",
+              "published",
+              "address",
+              "latitude",
+              "longitude",
+              "stay_map_sharing",
+              "property_type_group",
+              "property_type",
+              "listing_type",
+              "total_floors",
+              "listing_floor",
+              "year_built",
+              "property_size",
+              "property_size_unit",
+              "bedrooms",
+              "beds",
+              "bathrooms",
+              "amenities",
+              "amenity_answers",
+              "cancellation_policy",
+              "long_term_cancellation_policy",
+              "check_in_method",
+              "check_in_instructions",
+              "wifi_network",
+              "wifi_password",
+              "directions",
+              "house_manual",
+              "checkout_instructions",
+              "smoke_detector_details",
+              "carbon_monoxide_detector_details",
+              "assigned_member_id",
+              "assigned_team_id",
+              "channel",
+              "photos",
+              "photo_rooms",
+              "accessibility"
             ],
             "type": "object"
           }
@@ -134763,6 +137420,76 @@
         "properties": {
           "home": {
             "properties": {
+              "accessibility": {
+                "description": "All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "disabled_parking_spot",
+                        "path_to_entrance_lit_at_night",
+                        "home_step_free_access",
+                        "home_wide_doorway",
+                        "pool_hoist",
+                        "ceiling_hoist"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 6,
+                "minItems": 6,
+                "type": "array"
+              },
               "address": {
                 "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
@@ -135842,6 +138569,11 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "product_updated_at": {
+                "description": "The Product updated_at value to supply as expected_updated_at when saving listing accessibility.",
+                "minLength": 1,
+                "type": "string"
+              },
               "property_size": {
                 "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                 "exclusiveMinimum": 0,
@@ -135999,6 +138731,7 @@
             },
             "required": [
               "product_id",
+              "product_updated_at",
               "name",
               "location_id",
               "timezone",
@@ -136043,7 +138776,8 @@
               "assigned_team_id",
               "channel",
               "photos",
-              "photo_rooms"
+              "photo_rooms",
+              "accessibility"
             ],
             "type": "object"
           },
@@ -136562,18 +139296,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:3f6f9d12ce327eccad907dddd176437758ebcd944dcbd3f9d4974c481a29a0da",
-        "get_product": "sha256:a86f5058c84755d689ca219172697d00e7395b67364a8ca33d009ef401b5a17c",
+        "create_product": "sha256:41b29ae278e9c18a9ae5e57ab03dd152d89fd7bb1e8829218059b42099fa853f",
+        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:27ba555266f09b39e805b010b2b3628186828ab7ecccdb2e70cda0ec05731cdf",
+        "reconcile_products": "sha256:813875041bb00763e75aa026a7dd1398cc767ad501dddb8ac6b13c8b193234e0",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:c4b28213f8ae0c2dd241e1caacacac75f463627d668db2d5367bf7db72260332",
-        "update_product": "sha256:e60ba7f1ca687956632b1f8ca2690ab9d676881e02d8c72ae4092e50e064a85b"
+        "update_menu": "sha256:cb030295915c9e476e9628bff6ec5053391d87849f723e32e1c08219a3d054e0",
+        "update_product": "sha256:e250d7833b530232a7fd61b40ca0f2d5916bf761be35e8122bcd155e8cf5416e"
       }
     },
     {
@@ -136617,14 +139351,14 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:3f6f9d12ce327eccad907dddd176437758ebcd944dcbd3f9d4974c481a29a0da",
-        "get_product": "sha256:a86f5058c84755d689ca219172697d00e7395b67364a8ca33d009ef401b5a17c",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
+        "create_product": "sha256:41b29ae278e9c18a9ae5e57ab03dd152d89fd7bb1e8829218059b42099fa853f",
+        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871"
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b"
       }
     },
     {
@@ -136660,15 +139394,15 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and get_organization_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
-        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
+        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -136680,14 +139414,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:a86f5058c84755d689ca219172697d00e7395b67364a8ca33d009ef401b5a17c",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0"
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f"
       }
     },
     {
@@ -136699,9 +139433,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:3f6f9d12ce327eccad907dddd176437758ebcd944dcbd3f9d4974c481a29a0da",
+        "create_product": "sha256:41b29ae278e9c18a9ae5e57ab03dd152d89fd7bb1e8829218059b42099fa853f",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -136710,9 +139444,9 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
-        "update_menu": "sha256:c4b28213f8ae0c2dd241e1caacacac75f463627d668db2d5367bf7db72260332",
-        "update_organization_settings": "sha256:b5488027b9a151e5759c0cf78e9010b60ff1d07ba783525d50e30cc233f2ef94",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "update_menu": "sha256:cb030295915c9e476e9628bff6ec5053391d87849f723e32e1c08219a3d054e0",
+        "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -136725,7 +139459,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
-        "get_product": "sha256:a86f5058c84755d689ca219172697d00e7395b67364a8ca33d009ef401b5a17c",
+        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -136733,7 +139467,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:c007ea9559df74ac50714b2adf181eb57053b53523366adb89d0df9fff291b3b",
-        "update_product": "sha256:e60ba7f1ca687956632b1f8ca2690ab9d676881e02d8c72ae4092e50e064a85b",
+        "update_product": "sha256:e250d7833b530232a7fd61b40ca0f2d5916bf761be35e8122bcd155e8cf5416e",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -136746,15 +139480,15 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, get_organization_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_product": "sha256:e60ba7f1ca687956632b1f8ca2690ab9d676881e02d8c72ae4092e50e064a85b",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
+        "update_product": "sha256:e250d7833b530232a7fd61b40ca0f2d5916bf761be35e8122bcd155e8cf5416e",
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -136769,14 +139503,14 @@
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
-        "get_product": "sha256:a86f5058c84755d689ca219172697d00e7395b67364a8ca33d009ef401b5a17c",
+        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:e60ba7f1ca687956632b1f8ca2690ab9d676881e02d8c72ae4092e50e064a85b"
+        "update_product": "sha256:e250d7833b530232a7fd61b40ca0f2d5916bf761be35e8122bcd155e8cf5416e"
       }
     }
   ],
@@ -136804,7 +139538,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:a86f5058c84755d689ca219172697d00e7395b67364a8ca33d009ef401b5a17c",
+        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
@@ -136812,7 +139546,7 @@
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:c4b28213f8ae0c2dd241e1caacacac75f463627d668db2d5367bf7db72260332"
+        "update_menu": "sha256:cb030295915c9e476e9628bff6ec5053391d87849f723e32e1c08219a3d054e0"
       }
     },
     {
@@ -136840,13 +139574,13 @@
       "slug": "add-photos-and-video",
       "contentHash": "sha256:12d4c163d18a26ef149addaaf3ee345df1a5db52168d3c611513a27dfcbded2c",
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "delete_media_asset": "sha256:7cd7618939616504dc9e0ec08771cc009b09671c40b69c23485dfb172b18ec2e",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
-        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
+        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
+        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_media_asset": "sha256:25902033f7e73a819b6c9660c6a2e70b4ab3dfb972a49b594f1c3a34d8a1a8f7"
       }
     },
@@ -136854,12 +139588,12 @@
       "slug": "publish-a-post",
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
-        "create_blog_post": "sha256:eadc0eba432b4e9844c9c8ed23327aafee2fdfc4b3c306b36c9d235a4a109cfe",
+        "create_blog_post": "sha256:04ebcf9dff460dd7c58bee894fff23a76431073dc3e2deb1ac1be33be6d37150",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
-        "publish_blog_post": "sha256:8b9880534e39b242f4c5c498b6a3a8297ddf07080007e51ce633d3286db0c5c7",
+        "publish_blog_post": "sha256:844a8eb04331dba2c4b7e738b192222e3f68e0b3d24ca3555dd7c7b7a5c17440",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
         "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"

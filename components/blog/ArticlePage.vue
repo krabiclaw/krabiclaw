@@ -29,7 +29,7 @@
 
       <nav v-if="previousArticle || nextArticle" :aria-label="indexLabel" class="mt-12 grid gap-6 border-t border-default pt-6 sm:grid-cols-2">
         <NuxtLink v-if="previousArticle" :to="previousArticle.path" class="group flex min-w-0 flex-initial flex-col gap-1 no-underline">
-          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-muted">{{ t('saya.posts.previous') }}</span>
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-muted">{{ t('site.posts.previous') }}</span>
           <span class="flex w-full min-w-0 items-center gap-1.5 text-lg font-semibold text-default group-hover:text-primary">
             <PlatformIcon name="arrow-left" class="size-4 shrink-0" />
             <span class="min-w-0 break-words">{{ previousArticle.title }}</span>
@@ -37,7 +37,7 @@
         </NuxtLink>
         <span v-else />
         <NuxtLink v-if="nextArticle" :to="nextArticle.path" class="group flex min-w-0 flex-initial flex-col items-start gap-1 sm:items-end sm:text-right no-underline">
-          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-muted">{{ t('saya.posts.next') }}</span>
+          <span class="text-xs font-semibold uppercase tracking-[0.14em] text-muted">{{ t('site.posts.next') }}</span>
           <span class="flex w-full min-w-0 items-center gap-1.5 text-lg font-semibold text-default group-hover:text-primary">
             <span class="min-w-0 break-words">{{ nextArticle.title }}</span>
             <PlatformIcon name="arrow-right" class="size-4 shrink-0" />
@@ -80,8 +80,8 @@ const organizationName = organization.name
 const authorName = computed(() => post.value.author?.name ?? null)
 // Each collection's index is at its own prefix on every template; only a blog article's own path varies (/blog or /article).
 const indexPath = computed(() => localePath(ARTICLE_COLLECTIONS[props.collection].pathPrefix))
-const indexLabel = computed(() => props.collection === 'docs' ? t('saya.footer.docs') : t('saya.footer.blog'))
-const articlePath = computed(() => localePath(tenantBlogPostPath(template, post.value.slug, props.collection)))
+const indexLabel = computed(() => props.collection === 'docs' ? t('site.footer.docs') : t('site.footer.blog'))
+const articlePath = computed(() => localePath(tenantBlogPostPath(post.value.slug, props.collection)))
 // The index, the article's category, the article: the category is a page of its own.
 const breadcrumbs = computed(() => [
   { name: indexLabel.value, url: indexPath.value },

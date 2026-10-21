@@ -298,7 +298,7 @@ export type SiteProductSurface = 'experiences' | 'stays'
 
 export interface ProductPresentation {
   feature: 'products'
-  collectionPath: '/menu' | '/products' | '/experiences' | '/stays' | '/schedule'
+  collectionPath: '/menu' | '/products' | '/services' | '/experiences' | '/stays' | '/schedule'
   locationCollectionSegment: ProductSurface
   productPath: (_locationSlug: string, _productSlug: string) => string
   collectionLabel: 'Menu' | 'Products' | 'Experiences' | 'Consultations' | 'Services' | 'Places to stay'

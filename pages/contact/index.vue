@@ -1,6 +1,6 @@
 <template>
   <NuxtLayout :name="template.layout">
-    <TenantContact v-if="template.slug === 'blawby'" />
+    <TenantContact v-if="legalPractice" />
 
     <!-- Brand contact page (tenant sites only — the platform marketing contact page was retired in favor of /help) -->
     <div v-else>
@@ -9,8 +9,8 @@
       <div>
         <!-- Page header -->
         <header v-if="contactHeroEyebrow || contactHeroTitle || contactHeroSummary" class="mx-auto max-w-7xl px-4 pt-16 pb-12 sm:px-6 lg:px-8">
-          <p v-if="contactHeroEyebrow" class="saya-kicker mb-6">{{ contactHeroEyebrow }}</p>
-          <h1 v-if="contactHeroTitle" class="saya-display-md text-default">
+          <p v-if="contactHeroEyebrow" class="tenant-kicker mb-6">{{ contactHeroEyebrow }}</p>
+          <h1 v-if="contactHeroTitle" class="tenant-display-md text-default">
             {{ contactHeroTitle }}
           </h1>
           <p v-if="contactHeroSummary" class="mt-5 max-w-xl text-sm leading-relaxed text-muted">
@@ -26,9 +26,9 @@
 
           <!-- MESSAGE FORM -->
           <section class="border border-default bg-default p-10 lg:p-11">
-            <p class="saya-eyebrow mb-4 text-muted">{{ t('saya.contact_page.send_message') }}</p>
-            <h2 class="saya-display saya-italic text-3xl text-default">{{ t('saya.contact_page.anything_not_location_specific') }}</h2>
-            <p class="mt-4 text-sm leading-relaxed text-muted">{{ t('saya.contact_page.specific_questions') }}</p>
+            <p class="tenant-eyebrow mb-4 text-muted">{{ t('site.contact_page.send_message') }}</p>
+            <h2 class="tenant-display tenant-italic text-3xl text-default">{{ t('site.contact_page.anything_not_location_specific') }}</h2>
+            <p class="mt-4 text-sm leading-relaxed text-muted">{{ t('site.contact_page.specific_questions') }}</p>
 
             <form class="mt-10 space-y-7" novalidate @submit.prevent="handleTenantContact">
               <div v-if="tenantSubmitError" role="alert" class="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-red-500">
@@ -38,7 +38,7 @@
               <div class="grid gap-6 sm:grid-cols-2">
                 <TenantFormField
                   v-slot="{ id, describedBy, invalid }"
-                  :label="t('saya.contact_page.your_name')"
+                  :label="t('site.contact_page.your_name')"
                   name="name"
                   required
                   :error="tenantFieldError('name')"
@@ -47,7 +47,7 @@
                 </TenantFormField>
                 <TenantFormField
                   v-slot="{ id, describedBy, invalid }"
-                  :label="t('saya.contact_page.email')"
+                  :label="t('site.contact_page.email')"
                   name="email"
                   required
                   :error="tenantFieldError('email')"
@@ -56,7 +56,7 @@
                 </TenantFormField>
               </div>
 
-              <TenantFormField :label="t('saya.contact_page.what_about')" name="subject">
+              <TenantFormField :label="t('site.contact_page.what_about')" name="subject">
                 <div class="mt-2 flex flex-wrap gap-2">
                   <button
                     v-for="opt in subjectOptions"
@@ -77,7 +77,7 @@
 
               <TenantFormField
                 v-slot="{ id, describedBy, invalid }"
-                :label="t('saya.contact_page.your_message')"
+                :label="t('site.contact_page.your_message')"
                 name="message"
                 required
                 :error="tenantFieldError('message')"
@@ -86,32 +86,32 @@
               </TenantFormField>
 
               <TenantButton type="submit" :loading="tenantSubmitting" :disabled="isDraftPreview">
-                {{ t('saya.contact_page.send_message') }}
+                {{ t('site.contact_page.send_message') }}
               </TenantButton>
             </form>
           </section>
 
           <!-- DARK ASIDE: brand contact — hidden when no emails are configured -->
           <aside v-if="hasAnyBrandContact" class="bg-inverted p-10 text-inverted lg:p-11">
-            <p class="saya-eyebrow mb-4 text-inverted/60">{{ t('saya.contact_page.brand_inquiries') }}</p>
-            <h2 class="saya-display saya-italic text-3xl text-inverted">{{ t('saya.contact_page.reach_us_direct') }}</h2>
+            <p class="tenant-eyebrow mb-4 text-inverted/60">{{ t('site.contact_page.brand_inquiries') }}</p>
+            <h2 class="tenant-display tenant-italic text-3xl text-inverted">{{ t('site.contact_page.reach_us_direct') }}</h2>
 
             <dl class="mt-8 space-y-0">
               <div v-if="siteConfig.press_email" class="flex justify-between gap-4 border-b border-inverted/10 py-4">
-                <dt class="saya-eyebrow text-inverted/60">{{ t('saya.contact_page.press') }}</dt>
-                <dd class="m-0 saya-display saya-italic"><a :href="`mailto:${siteConfig.press_email}`" class="border-b border-inverted/30 pb-px text-inverted no-underline">{{ siteConfig.press_email }}</a></dd>
+                <dt class="tenant-eyebrow text-inverted/60">{{ t('site.contact_page.press') }}</dt>
+                <dd class="m-0 tenant-display tenant-italic"><a :href="`mailto:${siteConfig.press_email}`" class="border-b border-inverted/30 pb-px text-inverted no-underline">{{ siteConfig.press_email }}</a></dd>
               </div>
               <div v-if="siteConfig.partnerships_email" class="flex justify-between gap-4 border-b border-inverted/10 py-4">
-                <dt class="saya-eyebrow text-inverted/60">{{ t('saya.contact_page.partnerships') }}</dt>
-                <dd class="m-0 saya-display saya-italic"><a :href="`mailto:${siteConfig.partnerships_email}`" class="border-b border-inverted/30 pb-px text-inverted no-underline">{{ siteConfig.partnerships_email }}</a></dd>
+                <dt class="tenant-eyebrow text-inverted/60">{{ t('site.contact_page.partnerships') }}</dt>
+                <dd class="m-0 tenant-display tenant-italic"><a :href="`mailto:${siteConfig.partnerships_email}`" class="border-b border-inverted/30 pb-px text-inverted no-underline">{{ siteConfig.partnerships_email }}</a></dd>
               </div>
               <div v-if="siteConfig.catering_email" class="flex justify-between gap-4 border-b border-inverted/10 py-4">
-                <dt class="saya-eyebrow text-inverted/60">{{ vertCopy.contactSubjectCatering }}</dt>
-                <dd class="m-0 saya-display saya-italic"><a :href="`mailto:${siteConfig.catering_email}`" class="border-b border-inverted/30 pb-px text-inverted no-underline">{{ siteConfig.catering_email }}</a></dd>
+                <dt class="tenant-eyebrow text-inverted/60">{{ vertCopy.contactSubjectCatering }}</dt>
+                <dd class="m-0 tenant-display tenant-italic"><a :href="`mailto:${siteConfig.catering_email}`" class="border-b border-inverted/30 pb-px text-inverted no-underline">{{ siteConfig.catering_email }}</a></dd>
               </div>
               <div v-if="siteConfig.careers_email" class="flex justify-between gap-4 border-b border-inverted/10 py-4">
-                <dt class="saya-eyebrow text-inverted/60">{{ t('saya.contact_page.careers') }}</dt>
-                <dd class="m-0 saya-display saya-italic"><a :href="`mailto:${siteConfig.careers_email}`" class="border-b border-inverted/30 pb-px text-inverted no-underline">{{ siteConfig.careers_email }}</a></dd>
+                <dt class="tenant-eyebrow text-inverted/60">{{ t('site.contact_page.careers') }}</dt>
+                <dd class="m-0 tenant-display tenant-italic"><a :href="`mailto:${siteConfig.careers_email}`" class="border-b border-inverted/30 pb-px text-inverted no-underline">{{ siteConfig.careers_email }}</a></dd>
               </div>
             </dl>
 
@@ -122,8 +122,8 @@
         <section class="mt-24 bg-elevated">
           <div class="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8">
             <div class="mb-12 max-w-2xl">
-              <p class="saya-kicker mb-6">{{ t('saya.contact_page.by_location') }}</p>
-              <h2 class="saya-display-md text-default">
+              <p class="tenant-kicker mb-6">{{ t('site.contact_page.by_location') }}</p>
+              <h2 class="tenant-display-md text-default">
                 {{ vertCopy.contactLocationsByHeading }}
               </h2>
               <p class="mt-5 text-sm leading-relaxed text-muted">
@@ -161,8 +161,8 @@
                 <div class="flex flex-col gap-6 p-9">
                   <div class="flex flex-wrap items-start justify-between gap-4">
                     <div>
-                      <p v-if="addressPlaceName(loc.address ?? null)" class="saya-eyebrow mb-2 text-muted">{{ addressPlaceName(loc.address ?? null) }}</p>
-                      <h3 class="saya-display saya-italic text-4xl text-default leading-none">{{ loc.title }}</h3>
+                      <p v-if="addressPlaceName(loc.address ?? null)" class="tenant-eyebrow mb-2 text-muted">{{ addressPlaceName(loc.address ?? null) }}</p>
+                      <h3 class="tenant-display tenant-italic text-4xl text-default leading-none">{{ loc.title }}</h3>
                     </div>
                     <div class="flex items-center gap-2 text-xs uppercase tracking-widest text-default">
                       <span class="size-1.5 rounded-full" :class="loc.is_open ? 'bg-green-400' : 'bg-zinc-400'" />
@@ -172,19 +172,19 @@
 
                   <div class="grid grid-cols-2 gap-5 border-t border-default pt-6 sm:grid-cols-4">
                     <div>
-                      <p class="saya-eyebrow mb-2 text-muted">{{ t('saya.contact_page.address') }}</p>
+                      <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.contact_page.address') }}</p>
                       <p class="text-sm leading-relaxed text-default">{{ formatLocAddress(loc) }}</p>
                     </div>
                     <div v-if="loc.phone">
-                      <p class="saya-eyebrow mb-2 text-muted">{{ t('saya.contact_page.phone') }}</p>
+                      <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.contact_page.phone') }}</p>
                       <a :href="`tel:${loc.phone}`" class="border-b border-default pb-px text-sm text-default no-underline hover:opacity-70">{{ formatPhone(loc.phone) }}</a>
                     </div>
                     <div v-if="loc.email">
-                      <p class="saya-eyebrow mb-2 text-muted">{{ t('saya.contact_page.email') }}</p>
+                      <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.contact_page.email') }}</p>
                       <a :href="`mailto:${loc.email}`" class="border-b border-default pb-px text-sm text-default no-underline hover:opacity-70 break-all">{{ loc.email }}</a>
                     </div>
                     <div v-if="loc.hours_today">
-                      <p class="saya-eyebrow mb-2 text-muted">{{ t('saya.contact_page.today') }}</p>
+                      <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.contact_page.today') }}</p>
                       <p class="text-sm text-default">{{ loc.hours_today }}</p>
                     </div>
                   </div>
@@ -195,13 +195,13 @@
                       :to="localePath(`/locations/${loc.slug}/contact`)"
                       class="inline-flex items-center rounded-full bg-inverted px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-inverted no-underline transition hover:opacity-80"
                     >
-                      {{ t('saya.contact_page.plan_visit') }}
+                      {{ t('site.contact_page.plan_visit') }}
                     </NuxtLink>
                     <NuxtLink
                       :to="localePath(publicLocationPath(loc))"
                       class="inline-flex items-center rounded-full border border-default px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-default no-underline transition hover:bg-muted"
                     >
-                      {{ t('saya.contact_page.directions') }}
+                      {{ t('site.contact_page.directions') }}
                     </NuxtLink>
                     <NuxtLink
                       v-if="vertCopy.ctaRoute && vertCopy.reservationExploreLabel"
@@ -220,7 +220,6 @@
         <TenantPageRenderer
           v-if="contactAdditionalPage?.blocks.length"
           :page="contactAdditionalPage"
-          template="saya"
         />
       </div>
     </div>
@@ -238,13 +237,15 @@ const { previewAuthorized, organization } = useTenantOrganization()
 const { template, id: organizationId } = organization
 const isPlatform = organization.template.slug === 'platform'
 if (isPlatform) throw createError({ statusCode: 404 })
+// A legal practice's contact page is its authored page; a venue's is this form and its branches.
+const legalPractice = isLegalPractice(organization.vertical)
 
 const { locale, localePath, t } = useI18n()
 const vertCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // Plain-Tailwind form styling — replaces UInput/UTextarea's default look
-// now that this page no longer depends on Nuxt UI (see SayaFormField.vue).
+// now that this page no longer depends on Nuxt UI (see TenantFormField.vue).
 import { FORM_INPUT_CLASS } from '~/utils/form-constants'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { publicLocationPath } from '~/utils/product-presentation'
@@ -259,7 +260,7 @@ const isDraftPreview = computed(() => previewAuthorized)
 const { locations, config: siteConfig, tenantPage } = await usePublicPageData()
 const contactHero = computed(() => tenantPage.value?.blocks.find(block => block.type === 'hero') ?? null)
 const contactHeroEyebrow = computed(() => String(contactHero.value?.data.eyebrow || ''))
-const contactHeroTitle = computed(() => String(contactHero.value?.data.title || tenantPage.value?.title || t('saya.contact_page.headline') || ''))
+const contactHeroTitle = computed(() => String(contactHero.value?.data.title || tenantPage.value?.title || t('site.contact_page.headline') || ''))
 const contactHeroSummary = computed(() => String(contactHero.value?.data.subtitle || contactHero.value?.data.description || tenantPage.value?.summary || ''))
 const contactAdditionalPage = computed(() => tenantPage.value
   ? { ...tenantPage.value, blocks: tenantPage.value.blocks.filter(block => block.type !== 'hero') }
@@ -300,11 +301,11 @@ const hasAnyBrandContact = computed(() =>
 
 // ── Tenant form ──────────────────────────────────────────
 const subjectOptions = computed(() => [
-  { key: 'general', label: t('saya.contact_page.general') },
-  { key: 'press', label: t('saya.contact_page.press') },
-  { key: 'partnerships', label: t('saya.contact_page.partnerships') },
+  { key: 'general', label: t('site.contact_page.general') },
+  { key: 'press', label: t('site.contact_page.press') },
+  { key: 'partnerships', label: t('site.contact_page.partnerships') },
   { key: 'catering', label: vertCopy.value.contactSubjectCatering },
-  { key: 'careers', label: t('saya.contact_page.careers') }
+  { key: 'careers', label: t('site.contact_page.careers') }
 ])
 
 // A guest arriving from a product priced in words has the product named for
@@ -312,7 +313,7 @@ const subjectOptions = computed(() => [
 // language, and the rest is theirs to write.
 const route = useRoute()
 const aboutProduct = typeof route.query.about === 'string' ? route.query.about.trim().slice(0, 120) : ''
-const aboutPrefix = aboutProduct ? `${t('saya.contact_page.about_product', { product: aboutProduct })}\n\n` : ''
+const aboutPrefix = aboutProduct ? `${t('site.contact_page.about_product', { product: aboutProduct })}\n\n` : ''
 const tenantForm = ref<TenantContactForm>({
   name: '',
   email: '',
@@ -328,19 +329,19 @@ const tenantFieldError = (name: keyof TenantContactForm) =>
 
 const validateTenantContact = (state: TenantContactForm): TenantFieldError[] => {
   const errors: TenantFieldError[] = []
-  if (!state.name) errors.push({ name: 'name', message: t('saya.contact_page.enter_name') })
-  if (!state.email) errors.push({ name: 'email', message: t('saya.contact_page.enter_email') })
-  else if (!emailPattern.test(state.email)) errors.push({ name: 'email', message: t('saya.contact_page.invalid_email') })
+  if (!state.name) errors.push({ name: 'name', message: t('site.contact_page.enter_name') })
+  if (!state.email) errors.push({ name: 'email', message: t('site.contact_page.enter_email') })
+  else if (!emailPattern.test(state.email)) errors.push({ name: 'email', message: t('site.contact_page.invalid_email') })
   // The prefilled product line is context, not the guest's message.
   const written = state.message.startsWith(aboutPrefix) ? state.message.slice(aboutPrefix.length) : state.message
-  if (!written.trim()) errors.push({ name: 'message', message: t('saya.contact_page.enter_message') })
+  if (!written.trim()) errors.push({ name: 'message', message: t('site.contact_page.enter_message') })
   return errors
 }
 
 const handleTenantContact = async () => {
   if (isDraftPreview.value) return
   if (!organizationId) {
-    tenantSubmitError.value = t('saya.contact_page.message_failed')
+    tenantSubmitError.value = t('site.contact_page.message_failed')
     return
   }
   tenantSubmitError.value = null
@@ -356,7 +357,7 @@ const handleTenantContact = async () => {
       validate: (value): value is { success: true; measurement?: SubmissionMeasurement } => isRecord(value) && value.success === true,
     })
   } catch {
-    tenantSubmitError.value = t('saya.contact_page.message_failed')
+    tenantSubmitError.value = t('site.contact_page.message_failed')
     tenantSubmitting.value = false
     return
   }

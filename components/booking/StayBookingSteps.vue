@@ -4,7 +4,7 @@
     <BookingRecap
       :main-line="rangeLabel"
       :meta-line="quote ? `${nightsLabel(quote.nights)} · ${guestsLabel} · ${money(quote.total_minor)}` : ''"
-      :edit-label="t('saya.experience_detail.change')"
+      :edit-label="t('site.experience_detail.change')"
       @edit="bookingStep = 1"
     />
     <p class="mb-4 text-sm text-muted">{{ t('stay.charged_in_full') }}</p>

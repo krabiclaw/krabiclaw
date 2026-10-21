@@ -21,7 +21,8 @@ import {
 import { documentOfRootSql } from '~/server/utils/content/documents'
 import { listPublicLocaleRepresentations, resolvePublicDocumentSourcePath } from '~/server/utils/public-locale-representations'
 import { listPublicSocialPosts } from '~/server/utils/post-management'
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite, resolvePublicTemplate } from '~/utils/template-registry'
+import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { EXPERIENCE_PRESENTATION, presentationForProduct, publicLocationPath } from '~/utils/product-presentation'
 import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
 import { projectPublicLocation, type PublicLocationPrivacySource } from '~/shared/location-sharing'
@@ -259,16 +260,18 @@ async function hydrateBlocks(
   ])
   if (!organizationRow) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page site is unavailable' })
   const template = resolvePublicTemplate({ themeId: organizationRow.theme_id, vertical: organizationRow.vertical })
-  const defaultServices = pagePath === '/services' && template.slug === 'blawby' && blocks.length === 1 && blocks[0]?.type === 'hero'
+  // Legal practices list their practice areas on /services, and their offices
+  // link to the contact page rather than to location pages they do not have.
+  const legalPractice = isLegalPracticeSite({ themeId: organizationRow.theme_id, vertical: organizationRow.vertical })
+  const defaultServices = pagePath === '/services' && legalPractice && blocks.length === 1 && blocks[0]?.type === 'hero'
   const defaultLocationGrid = pagePath === '/' && template.slug !== 'platform' && !blocks.some(block => block.type === 'location_grid')
-  const addressVisible = template.slug !== 'blawby' || organizationRow.address_visibility === 'visible'
-  const articlePrefix = template.serviceRoutes.articleDetailPrefix
+  const addressVisible = !legalPractice || organizationRow.address_visibility === 'visible'
   // Each grid gets the products it named, and only those. Keyed by collection
   // rather than flattened into one list: two grids on a page name two different
   // collections, and a flat union rendered both collections in both grids.
   const currency = organizationRow.default_currency
   const homepage = pagePath === '/' && template.slug !== 'platform'
-  const homepageMenu = homepage && template.slug === 'saya'
+  const homepageMenu = homepage && !legalPractice
   // The default services list, the catalog and the branches all follow from the
   // template alone; one round trip reads the three.
   const [services, productCatalog, sourceLocations] = await Promise.all([
@@ -348,7 +351,7 @@ async function hydrateBlocks(
   const locations = localizedLocations.map(({ stay_map_sharing, is_stay_location, ...location }) =>
     projectPublicLocation(location, { stay_map_sharing, is_stay_location }))
   const locationCopy = getVerticalCopy(organizationRow.vertical, locale)
-  const defaultLocations = template.slug === 'blawby'
+  const defaultLocations = legalPractice
     ? locations.filter(location => location.address || location.asset_id || location.description?.trim() || location.short_description?.trim())
     : locations
   if (defaultLocationGrid && defaultLocations.length) {
@@ -403,8 +406,8 @@ async function hydrateBlocks(
       id: row.id,
       title: row.title,
       description: row.excerpt || undefined,
-      url: `${articlePrefix}/${row.slug}`,
-      labelKey: 'saya.posts.read_full_story',
+      url: tenantBlogPostPath(row.slug),
+      labelKey: 'site.posts.read_full_story',
       media: cover
         ? projectLocalizedMediaAlt([{ asset_id: cover.asset_id, slot: 'media', public_url: cover.public_url, thumbnail_url: cover.thumbnail_url, kind: cover.kind, alt_text: cover.alt_text }], localizations)
         : [],
@@ -425,7 +428,7 @@ async function hydrateBlocks(
           title: page.title,
           description: page.summary ?? undefined,
           url: page.path,
-          labelKey: 'saya.posts.cta_default',
+          labelKey: 'site.posts.cta_default',
           media: page.media,
         }
       })
@@ -463,7 +466,7 @@ async function hydrateBlocks(
         compare_at: product.compare_at_unit_amount === null || !product.currency
           ? undefined
           : formatMinorAmount(product.compare_at_unit_amount, product.currency as CurrencyCode, locale),
-        labelKey: 'saya.posts.cta_default',
+        labelKey: 'site.posts.cta_default',
         // A grid item carries the one image it is drawn with, which for a
         // product is its `image` placement — the same cover `hydrateProductMedia`
         // resolves for every other product surface. It carried the product's
@@ -491,7 +494,7 @@ async function hydrateBlocks(
           public_area: location.public_area,
           description: location.short_description || location.description || undefined,
           // A location that is one home is reached as that home.
-          url: template.slug === 'blawby' ? pagePath === '/contact' ? undefined : '/contact'
+          url: legalPractice ? pagePath === '/contact' ? undefined : '/contact'
             : location.home_slug ? `${localizations ? `/${locale}` : ''}${publicLocationPath(location)}`
               : 'public_path' in location && typeof location.public_path === 'string' ? location.public_path : publicLocationPath(location),
           label: locationCopy.visitLocationCta,

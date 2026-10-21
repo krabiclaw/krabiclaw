@@ -22,5 +22,5 @@ watchEffect(() => {
   if (p.product.value && !p.loadError.value && (p.product.value.kind !== 'stay' || !definition.value)) showNotFound()
 })
 onBeforeRouteLeave(() => p.revert())
-onBeforeRouteUpdate((to, from) => { if (to.params.field !== from.params.field) p.revert() })
+onBeforeRouteUpdate((to, from) => { if ('field' in to.params && 'field' in from.params && to.params.field !== from.params.field) p.revert() })
 </script>

@@ -75,7 +75,7 @@ export function categorySubtree(category: PublishedArticleCategory): PublishedAr
  */
 export async function usePublishedArticles(collection: MaybeRefOrGetter<ArticleCollection>) {
   const requestEvent = useRequestEvent()
-  const { id: organizationId, template } = useTenantOrganization().organization
+  const { id: organizationId } = useTenantOrganization().organization
   const { localePath } = useI18n()
   const locale = useState<string>('public-locale', () => 'en')
 
@@ -108,7 +108,7 @@ export async function usePublishedArticles(collection: MaybeRefOrGetter<ArticleC
   )
   const posts = computed<PublishedArticle[]>(() => (data.value?.posts ?? []).map(post => ({
     ...post,
-    path: localePath(tenantBlogPostPath(template, post.slug, toValue(collection))),
+    path: localePath(tenantBlogPostPath(post.slug, toValue(collection))),
     category: post.category ? { ...post.category, path: localePath(collectionCategoryPath(toValue(collection), post.category.slug)) } : null,
   })))
 

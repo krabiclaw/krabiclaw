@@ -3,7 +3,7 @@
     <!--
       Every home is its page document, drawn block by block like every other
       page on the site. Each template used to have its own home component that
-      composed a fixed list of sections — Saya's read no blocks at all — so the
+      composed a fixed list of sections — one template's read no blocks at all — so the
       one page every visitor lands on was the one page its owner could not edit.
     -->
     <TenantPublicPage :path="homePath" />

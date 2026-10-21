@@ -91,7 +91,7 @@ const countries = computed(() => {
     .sort((a, b) => a.name.localeCompare(b.name, locale.value))
 })
 const selectedCountry = computed(() => countries.value.find(item => item.code === country.value))
-const placeholder = computed(() => (country.value && examplePhone(country.value)) || t('saya.experience_detail.phone_number'))
+const placeholder = computed(() => (country.value && examplePhone(country.value)) || t('site.experience_detail.phone_number'))
 
 const isInternational = (value: string) => value.trim().startsWith('+')
 const parsed = computed(() => parsePhone(display.value, isInternational(display.value) || !country.value ? undefined : { defaultCountry: country.value }))

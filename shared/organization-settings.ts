@@ -76,13 +76,13 @@ export interface OrganizationSettings {
     careers_email?: string
     whatsapp_phone?: string
   }
-  consultation?: import('../types/blawby').PublicConsultationSettings & {
+  consultation?: import('../types/public-site').PublicConsultationSettings & {
     metadata_json: Record<string, unknown> | null
     created_at: string
     updated_at: string
     updated_by: string | null
   }
-  compliance?: Omit<import('../types/blawby').PublicCompliance, 'media'> & {
+  compliance?: Omit<import('../types/public-site').PublicCompliance, 'media'> & {
     metadata_json: Record<string, unknown> | null
     created_at: string
     updated_at: string

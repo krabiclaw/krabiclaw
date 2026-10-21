@@ -197,7 +197,7 @@ const methodLabel = computed(() => {
 
 const money = (minor: number) => paymentMoney(minor, handoff.value!.currency)
 const nightsLabel = (count: number) => count === 1 ? t('stay.one_night') : t('stay.nights_count', { count })
-const guestsLabel = (count: number) => `${count} ${t(count === 1 ? 'saya.experience_detail.guest' : 'saya.experience_detail.guests')}`
+const guestsLabel = (count: number) => `${count} ${t(count === 1 ? 'site.experience_detail.guest' : 'site.experience_detail.guests')}`
 const stayRange = computed(() => {
   const stay = handoff.value?.stay
   return stay ? `${formatCalendarDate(stay.check_in_date, locale.value, { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, locale.value, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''

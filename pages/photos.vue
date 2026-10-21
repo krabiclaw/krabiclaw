@@ -7,8 +7,8 @@
     <template v-else>
       <!-- Page header -->
       <header class="mx-auto max-w-7xl px-4 pt-16 pb-12 sm:px-6 lg:px-8 text-center">
-        <p class="saya-kicker mb-6">{{ t('saya.footer.gallery') }}</p>
-        <h1 class="saya-display-md saya-italic text-default">{{ t('saya.photos.title') }}</h1>
+        <p class="tenant-kicker mb-6">{{ t('site.footer.gallery') }}</p>
+        <h1 class="tenant-display-md tenant-italic text-default">{{ t('site.photos.title') }}</h1>
 
         <!-- Multi-location pills -->
         <div v-if="locations.length > 1" class="mt-8 flex flex-wrap justify-center gap-3">
@@ -26,8 +26,8 @@
 
       <!-- Empty state -->
       <div v-if="photos.length === 0" class="mx-auto max-w-xl px-4 py-24 text-center sm:px-6">
-        <h1 class="saya-display-md text-muted">{{ t('saya.photos.empty_title') }}</h1>
-        <p class="mt-4 text-sm text-muted">{{ t('saya.photos.empty_desc') }}</p>
+        <h1 class="tenant-display-md text-muted">{{ t('site.photos.empty_title') }}</h1>
+        <p class="mt-4 text-sm text-muted">{{ t('site.photos.empty_desc') }}</p>
       </div>
 
       <template v-else>
@@ -36,7 +36,7 @@
 
         <!-- Gallery -->
         <div class="mx-auto max-w-7xl px-4 pt-12 pb-24 sm:px-6 lg:px-8">
-          <div class="saya-masonry">
+          <div class="tenant-masonry">
             <button
               v-for="(photo, i) in sorted"
               :key="photo.id"
@@ -50,7 +50,7 @@
                 class="block w-full transition-opacity duration-200 group-hover:opacity-80"
               />
               <div class="absolute inset-0 flex items-end bg-linear-to-t from-black/60 to-transparent p-6 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-                <span v-if="photoLabel(photo)" class="saya-eyebrow rounded-full bg-white/25 px-4 py-1.5 text-[10px] font-bold tracking-widest text-white backdrop-blur-md border border-white/20">
+                <span v-if="photoLabel(photo)" class="tenant-eyebrow rounded-full bg-white/25 px-4 py-1.5 text-[10px] font-bold tracking-widest text-white backdrop-blur-md border border-white/20">
                   {{ photoLabel(photo) }}
                 </span>
               </div>
@@ -83,26 +83,26 @@ function locationTitle(photo) {
 }
 
 const photoCategoryKeys = {
-  FOOD: 'saya.photos.category_food',
-  INTERIOR: 'saya.photos.category_interior',
-  EXTERIOR: 'saya.photos.category_exterior',
-  MENU: 'saya.photos.category_menu',
-  TEAM: 'saya.photos.category_team',
-  OTHER: 'saya.photos.category_other',
+  FOOD: 'site.photos.category_food',
+  INTERIOR: 'site.photos.category_interior',
+  EXTERIOR: 'site.photos.category_exterior',
+  MENU: 'site.photos.category_menu',
+  TEAM: 'site.photos.category_team',
+  OTHER: 'site.photos.category_other',
 }
 const cats = computed(() => [
-  { key: 'ALL', label: t('saya.photos.category_all') },
-  { key: 'FOOD', label: t('saya.photos.category_food') },
-  { key: 'INTERIOR', label: t('saya.photos.category_interior') },
-  { key: 'EXTERIOR', label: t('saya.photos.category_exterior') },
-  { key: 'MENU', label: t('saya.photos.category_menu') },
-  { key: 'TEAM', label: t('saya.photos.category_team') }
+  { key: 'ALL', label: t('site.photos.category_all') },
+  { key: 'FOOD', label: t('site.photos.category_food') },
+  { key: 'INTERIOR', label: t('site.photos.category_interior') },
+  { key: 'EXTERIOR', label: t('site.photos.category_exterior') },
+  { key: 'MENU', label: t('site.photos.category_menu') },
+  { key: 'TEAM', label: t('site.photos.category_team') }
 ])
 const activeCategory = ref('ALL')
 
 function categoryLabel(category) {
   const key = photoCategoryKeys[category]
-  return typeof key === 'string' ? t(key) : t('saya.photos.category_other')
+  return typeof key === 'string' ? t(key) : t('site.photos.category_other')
 }
 
 function photoLabel(photo) {
@@ -138,14 +138,14 @@ const lightboxItems = computed(() =>
 
 useSocialMetadata(() => ({
   path: '/photos',
-  title: `${t('saya.subnav.photos')} | ${organizationName}`,
-  description: t('saya.photos.meta_description', {
+  title: `${t('site.subnav.photos')} | ${organizationName}`,
+  description: t('site.photos.meta_description', {
     count: photos.value.length,
     location: organizationName,
     organization: organizationName,
   }),
   breadcrumbs: [
-    { name: t('saya.subnav.photos'), url: '/photos' },
+    { name: t('site.subnav.photos'), url: '/photos' },
   ],
 }))
 </script>

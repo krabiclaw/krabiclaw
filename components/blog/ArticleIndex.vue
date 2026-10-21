@@ -15,7 +15,7 @@
     </header>
 
     <div v-if="posts.length === 0" class="py-16 text-center text-muted">
-      <p class="text-lg font-medium">{{ t('saya.posts.empty_title') }}</p>
+      <p class="text-lg font-medium">{{ t('site.posts.empty_title') }}</p>
     </div>
 
     <div v-else :class="collection === 'docs' ? 'space-y-10' : 'space-y-14'" data-parity-section="articles">
@@ -43,7 +43,7 @@ const { posts, categoryTree, index, localeRepresentations } = await usePublished
 // The index is read in every language the site publishes; the switcher offers them.
 useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = localeRepresentations.value
 
-const label = computed(() => props.collection === 'docs' ? t('saya.footer.docs') : t('saya.footer.blog'))
+const label = computed(() => props.collection === 'docs' ? t('site.footer.docs') : t('site.footer.blog'))
 const title = computed(() => index.value?.title?.trim() || label.value)
 // The first article leads the index, the way the list reads.
 const featured = computed(() => posts.value[0] ?? null)
@@ -58,9 +58,9 @@ useSocialMetadata(() => ({
   socialImage: organization.social_image,
   // KrabiClaw's layout already titles every page with its own name.
   title: isPlatform ? title.value : `${title.value} | ${organizationName}`,
-  description: index.value?.summary || t(props.collection === 'docs' ? 'saya.posts.docs_meta_description' : 'saya.posts.meta_description', { organization: organizationName }),
+  description: index.value?.summary || t(props.collection === 'docs' ? 'site.posts.docs_meta_description' : 'site.posts.meta_description', { organization: organizationName }),
   breadcrumbs: [
-    { name: t('saya.experience_detail.home'), url: localePath('/') },
+    { name: t('site.experience_detail.home'), url: localePath('/') },
     { name: label.value, url: localePath(path) },
   ],
 }))

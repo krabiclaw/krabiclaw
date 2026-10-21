@@ -3,7 +3,7 @@
     v-if="items.length"
     :id="isPlatform ? undefined : 'faq'"
     class="kc-faq"
-    :class="{ 'kc-faq--platform': isPlatform, 'kc-faq--pricing': isPlatform && page.path === '/pricing', 'kc-faq--service': !isPlatform && isService }"
+    :class="{ 'kc-faq--platform': isPlatform, 'kc-faq--pricing': isPlatform && page.path === '/pricing', 'kc-faq--tenant': !isPlatform }"
     :aria-label="heading"
     :data-parity-section="isPlatform ? 'faq' : 'qa'"
   >
@@ -46,7 +46,6 @@ const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { organization } = useTenantOrganization()
 
 const isPlatform = computed(() => organization.template.slug === 'platform')
-const isService = computed(() => organization.template?.slug === 'blawby' || organization.vertical === 'service')
 const accordionName = useId()
 const decorationUrl = computed(() => blockMedia(props.block, 'decoration')[0]?.public_url ?? null)
 const eyebrow = computed(() => blockTextOrNull(props.block.data.label))
@@ -76,7 +75,7 @@ const heading = computed(() => blockText(props.block.data.title) || 'Frequently 
 .kc-faq__answer :deep(:last-child) { margin-bottom: 0; }
 .kc-faq__answer :deep(a) { color: var(--ui-primary); text-underline-offset: .2em; }
 .kc-faq__decoration { position: absolute; top: 0; right: 0; width: 33%; opacity: .2; object-fit: contain; pointer-events: none; }
-.kc-faq--service { background: var(--blawby-accent-200); }
+.kc-faq--tenant { background: var(--tenant-band); }
 .kc-faq--pricing { background: #f9f8f4; --ui-text-highlighted: #252b43; --ui-text-muted: #646878; --ui-border: #d6d8de; }
 @media (max-width: 640px) {
   .kc-faq { padding-inline: 1.25rem; }

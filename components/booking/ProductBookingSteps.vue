@@ -3,7 +3,7 @@
           <!-- What is being booked. One option is not a choice; several are,
                and the guest makes it rather than the server picking an order. -->
           <fieldset v-if="sellableVariants.length > 1" class="mb-5">
-            <legend class="mb-2 text-sm font-medium">{{ t('saya.product_detail.choose_option') }}</legend>
+            <legend class="mb-2 text-sm font-medium">{{ t('site.product_detail.choose_option') }}</legend>
             <div class="flex flex-col gap-2">
               <label
                 v-for="variant in sellableVariants"
@@ -22,7 +22,7 @@
           <!-- A guest is choosing a time, so the empty state says what they
                asked: nothing in the window they can book. -->
           <p v-if="!bookingError && !sessionsPending && availabilityDates.length === 0" class="py-10 text-center text-sm text-muted">
-            {{ t('saya.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}
+            {{ t('site.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}
           </p>
           <template v-else>
           <BookingTimezoneSelect v-if="allowTimezoneSelection && bookingTimezone" :model-value="bookingTimezone" :options="timezoneOptions" class="mb-3" @update:model-value="guestTimezone = $event" />
@@ -48,8 +48,8 @@
           <BookingRecap
             v-if="timeSelection"
             :main-line="`${timeSelection.label} · ${formatTime(timeSelection.time, locale)}`"
-            :meta-line="allowTimezoneSelection ? (bookingTimezone ?? '') : showPartySize ? `${partySize} ${t(partySize === 1 ? 'saya.experience_detail.guest' : 'saya.experience_detail.guests')}` : ''"
-            :edit-label="t('saya.experience_detail.change')"
+            :meta-line="allowTimezoneSelection ? (bookingTimezone ?? '') : showPartySize ? `${partySize} ${t(partySize === 1 ? 'site.experience_detail.guest' : 'site.experience_detail.guests')}` : ''"
+            :edit-label="t('site.experience_detail.change')"
             @edit="bookingStep = 1"
           />
           <p v-if="bookingError" role="alert" class="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">
@@ -60,7 +60,7 @@
            
             :default-country="defaultPhoneCountry"
             :loading="submitting"
-            :submit-text="paymentRequired ? t('payment.continue_to_pay') : confirmationMode === 'review' ? t('booking.request_appointment') : t('saya.experience_detail.confirm_booking')"
+            :submit-text="paymentRequired ? t('payment.continue_to_pay') : confirmationMode === 'review' ? t('booking.request_appointment') : t('site.experience_detail.confirm_booking')"
             @submit="submitBooking"
           />
         </div>

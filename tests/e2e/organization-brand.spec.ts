@@ -188,13 +188,14 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
     const rejected = await (await update('https://example.com/font.css')).json()
     expect(() => mcpData(rejected)).toThrow()
 
-    const defaults = await renderedTypography(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.blawby-shell', 'default')
+    mcpData(await (await update('default')).json())
+    const defaults = await renderedTypography(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'default')
     for (const option of ORGANIZATION_FONT_OPTIONS.filter(option => option.value !== 'default')) {
       mcpData(await (await update(option.value)).json())
       const persisted = await owner.get(settingsUrl)
       await expectStatus(persisted, 200)
       expect((await persisted.json() as { settings: { font_preset: string } }).settings.font_preset).toBe(option.value)
-      const rendered = await renderedTypography(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.blawby-shell', option.value)
+      const rendered = await renderedTypography(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', option.value)
       const heading = firstFamily(rendered.heading)
       const body = firstFamily(rendered.body)
       expect(heading, option.value).not.toBe(firstFamily(defaults.heading))
@@ -324,8 +325,8 @@ test('a starter palette saved through Brand colors the Saya site in light and da
   }
 })
 
-test('palette changes through MCP reach the CMS and Blawby, and invalid colors are refused before writing', async ({ browser, playwright }) => {
-  const { TEMPLATE_PALETTES } = await import('../../shared/site-palette')
+test('palette changes through MCP reach the CMS and the legal site, and invalid colors are refused before writing', async ({ browser, playwright }) => {
+  const { DEFAULT_SITE_PALETTE } = await import('../../shared/site-palette')
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
@@ -334,13 +335,13 @@ test('palette changes through MCP reach the CMS and Blawby, and invalid colors a
   await expectStatus(initial, 200)
   const original = (await initial.json() as { settings: { palette: unknown; palette_source: string } }).settings
   const update = (palette: unknown) => mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'update_organization_settings', args: { organization_id: NCLS_ORGANIZATION_ID, palette } })
-  const readPalette = async () => (await (await owner.get(settingsUrl)).json() as { settings: { palette: typeof TEMPLATE_PALETTES.blawby } }).settings.palette
+  const readPalette = async () => (await (await owner.get(settingsUrl)).json() as { settings: { palette: typeof DEFAULT_SITE_PALETTE } }).settings.palette
   try {
     await expectStatus(await owner.patch(settingsUrl, { data: { palette: null } }), 200)
     mcpData(await (await update({ light: { action: '#0F4C5C', accent: '#F8FAFC' } })).json())
     const changed = await readPalette()
-    expect(changed.light).toEqual({ ...TEMPLATE_PALETTES.blawby.light, action: '#0F4C5C', accent: '#F8FAFC' })
-    expect(changed.dark).toEqual(TEMPLATE_PALETTES.blawby.dark)
+    expect(changed.light).toEqual({ ...DEFAULT_SITE_PALETTE.light, action: '#0F4C5C', accent: '#F8FAFC' })
+    expect(changed.dark).toEqual(DEFAULT_SITE_PALETTE.dark)
 
     // A color that is not #RRGGBB, or a role there is not, writes nothing.
     for (const invalid of [{ light: { action: '#12' } }, { light: { border: '#000000' } }]) {
@@ -358,12 +359,13 @@ test('palette changes through MCP reach the CMS and Blawby, and invalid colors a
     } finally { await dashboard.close() }
 
     // Blawby renders the palette, and its dark mode.
-    const light = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.blawby-shell', 'light')
+    const light = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'light')
     expect(light.primary).toBe('#0F4C5C')
+    // NCLS keeps its former accent buttons as its own button_color setting (migration 0012).
     expect(light.accentButton).toEqual({ color: 'rgb(0, 0, 0)', background: 'rgb(248, 250, 252)' })
-    const dark = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.blawby-shell', 'dark')
+    const dark = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'dark')
     expect(dark.dark).toBe(true)
-    expect(dark.background).toBe(rgb(TEMPLATE_PALETTES.blawby.dark.ground))
+    expect(dark.background).toBe(rgb(DEFAULT_SITE_PALETTE.dark.ground))
   } finally {
     const assertRestored = await restoreAll([
       ['palette', () => owner.patch(settingsUrl, { data: { palette: original.palette_source === 'custom' ? original.palette : null } })],

@@ -1879,10 +1879,13 @@ async function updateStayPhotoRoom(roomId: string, patch: Pick<StayPhotoRoom, 'd
 async function updateStayAccessibility(accessibility: StayHomeAccessibility, expectedUpdatedAt: string) {
   return await changeStayPhotos(async () => await dashboardApi(`${arrivalUrl()}/accessibility`, {
     method: 'PATCH', body: { expected_updated_at: expectedUpdatedAt, accessibility },
-    validate: (value: unknown): value is { home: { product_id: string; photos: unknown[]; accessibility: StayHomeAccessibility[] } } =>
-      isStayPhotoMutation(value) && isRecord(value.home) && Array.isArray(value.home.accessibility)
-      && value.home.accessibility.length === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).length
-      && value.home.accessibility.every((answer, index) => isStayHomeAccessibility(answer) && answer.feature === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES)[index]),
+    validate: (value: unknown): value is { home: { product_id: string; photos: unknown[]; accessibility: StayHomeAccessibility[] } } => {
+      if (!isRecord(value) || !isRecord(value.home)) return false
+      const home = value.home
+      return isStayPhotoMutation(value) && Array.isArray(home.accessibility)
+        && home.accessibility.length === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).length
+        && home.accessibility.every((answer, index) => isStayHomeAccessibility(answer) && answer.feature === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES)[index])
+    },
   }))
 }
 

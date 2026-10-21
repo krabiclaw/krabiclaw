@@ -1,10 +1,10 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <header class="mx-auto flex max-w-7xl flex-col items-center px-4 pt-16 pb-14 text-center sm:px-6 lg:px-8 lg:pt-20 lg:pb-18">
-      <p class="saya-kicker mb-6 inline-flex items-center justify-center rounded-full border border-default/10 bg-default/3 px-5 py-2 text-center">
+      <p class="tenant-kicker mb-6 inline-flex items-center justify-center rounded-full border border-default/10 bg-default/3 px-5 py-2 text-center">
         {{ resCopy.reservationPageKicker }}
       </p>
-      <h1 v-if="heroTitle" class="saya-display-md max-w-5xl text-default">
+      <h1 v-if="heroTitle" class="tenant-display-md max-w-5xl text-default">
         <!-- eslint-disable-next-line vue/no-v-html -->
         <span v-html="formatTitleItalics(heroTitle)" />
       </h1>
@@ -56,8 +56,8 @@
           </div>
 
           <div class="flex flex-col items-start p-6 text-left sm:p-8">
-            <p v-if="getLocationLabel(loc)" class="saya-eyebrow mb-3 text-muted">{{ getLocationLabel(loc) }}</p>
-            <h3 class="saya-display saya-italic text-3xl text-default leading-none sm:text-4xl">{{ loc.title }}</h3>
+            <p v-if="getLocationLabel(loc)" class="tenant-eyebrow mb-3 text-muted">{{ getLocationLabel(loc) }}</p>
+            <h3 class="tenant-display tenant-italic text-3xl text-default leading-none sm:text-4xl">{{ loc.title }}</h3>
             <p v-if="loc.short_description" class="mt-3 max-w-md text-sm leading-relaxed text-muted">{{ loc.short_description }}</p>
 
             <div class="mt-6 flex flex-wrap items-center gap-3">
@@ -74,8 +74,8 @@
     <section v-if="activeReservationPolicySummary" class="bg-muted">
         <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
           <div class="mb-10 max-w-xl">
-            <p class="saya-kicker mb-4">{{ resCopy.goodToKnowKicker }}</p>
-            <h2 class="saya-display-sm text-default">{{ activeReservationPolicySummary.heading }}</h2>
+            <p class="tenant-kicker mb-4">{{ resCopy.goodToKnowKicker }}</p>
+            <h2 class="tenant-display-sm text-default">{{ activeReservationPolicySummary.heading }}</h2>
           </div>
           <div v-if="activeReservationPolicySummary.items.length > 0" class="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             <div v-for="item in activeReservationPolicySummary.items" :key="item.id" class="border-t border-default pt-5">
@@ -170,7 +170,7 @@ import { getPhoneCountry, formatPhone } from '~/utils/phone'
 
 function formatTitleItalics(text: string | null | undefined): string {
   if (!text) return ''
-  return text.replace(/\*(.*?)\*/g, '<em class="saya-italic">$1</em>')
+  return text.replace(/\*(.*?)\*/g, '<em class="tenant-italic">$1</em>')
 }
 
 definePageMeta({ layout: 'tenant' })
@@ -293,7 +293,7 @@ const bookingStep = ref(startStep.value)
 const modalTitle = computed(() => {
   if (bookingStep.value === 1) return resCopy.value.selectLocationLabel
   if (bookingStep.value === 2) return resCopy.value.selectTimeLabel
-  return t('saya.experience_detail.your_details')
+  return t('site.experience_detail.your_details')
 })
 
 function openBookingModal(loc?: ApiRecord) {
