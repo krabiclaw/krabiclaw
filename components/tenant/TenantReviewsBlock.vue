@@ -51,19 +51,19 @@
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockRecords, splitAccent } from '~/utils/tenant-page-block-data'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const { localePath, t } = useI18n()
+const { localePath, t, locale } = useI18n()
+const { organization } = useTenantOrganization()
 const { locations, googleMaps } = useOrganizationShellState()
 
 const heading = computed(() => blockText(props.block.data.title))
 const kicker = computed(() => blockText(props.block.data.kicker))
 const description = computed(() => blockText(props.block.data.description))
-const splitTitle = computed(() => splitAccent(heading.value || t('site.reviews.heading'), blockText(props.block.data.accent)))
-
-const homeCopy = computed(() => ({
-  guestReviewsLabel: t('site.home.guest_reviews'),
-}))
+// A block without its own heading reads its vertical's: what guests, or a practice's clients, say.
+const homeCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
+const splitTitle = computed(() => splitAccent(heading.value || homeCopy.value.whatGuestsSayLabel, blockText(props.block.data.accent)))
 
 // Authored reviews from block items
 const authoredReviews = computed(() => blockRecords(props.block.data.items).map(item => {
