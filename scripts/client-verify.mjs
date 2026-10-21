@@ -23,7 +23,6 @@ import { parseArgs } from "node:util";
 import { writeFile, mkdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { existsSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import {
   environmentTenantAliasHostname,
   usesTenantHeader,
@@ -37,8 +36,6 @@ const { values: args } = parseArgs({
     "tenant-slug": { type: "string" },
     slug: { type: "string" },
     "out-dir": { type: "string" },
-    "evidence-dir": { type: "string" },
-    "require-screenshots": { type: "boolean", default: false },
     remote: { type: "boolean", default: false },
   },
   allowPositionals: false,
@@ -67,43 +64,6 @@ const TENANT_HEADERS =
 const OUT_DIR =
   args["out-dir"] ??
   (args.slug ? join(process.cwd(), "client-imports", args.slug) : null);
-
-if (VERTICAL === "service") {
-  const blawbyArgs = ["scripts/verify-blawby-site.mjs", "--url", BASE];
-  if (ORGANIZATION_ID) blawbyArgs.push("--organization-id", ORGANIZATION_ID);
-  if (args["tenant-slug"]) blawbyArgs.push("--tenant-slug", args["tenant-slug"]);
-
-  const importManifest = OUT_DIR ? join(OUT_DIR, "blawby-import.json") : null;
-  if (importManifest && existsSync(importManifest)) {
-    blawbyArgs.push("--import-manifest", importManifest);
-  }
-
-  const evidenceDir = args["evidence-dir"] ?? (args["require-screenshots"] ? OUT_DIR : null);
-  if (evidenceDir) {
-    blawbyArgs.push("--evidence-dir", evidenceDir);
-  }
-  if (args["require-screenshots"]) {
-    blawbyArgs.push("--require-screenshots");
-  }
-  if (OUT_DIR) {
-    blawbyArgs.push("--out", join(OUT_DIR, "blawby-evidence-bundle.json"));
-  }
-
-  const result = spawnSync(process.execPath, blawbyArgs, {
-    cwd: process.cwd(),
-    stdio: "inherit",
-    timeout: 10 * 60 * 1000,
-  });
-  if (result.error?.code === "ETIMEDOUT") {
-    console.error("Blawby verifier timed out after 10 minutes.");
-    process.exit(124);
-  }
-  if (result.error) {
-    console.error(`Blawby verifier failed to launch: ${result.error.message}`);
-    process.exit(1);
-  }
-  process.exit(result.status ?? 1);
-}
 
 // ── Copy constraints ──────────────────────────────────────────────────────────
 
@@ -155,7 +115,7 @@ const VERTICAL_ROUTES = {
   restaurant: ["/menu", "/reservations"],
   retail: ["/locations"],
   wellness: ["/products", "/reservations"],
-  service: ["/reservations"],
+  service: ["/services", "/schedule"],
 };
 
 const REQUIRED_ROUTES_BY_VERTICAL = {
@@ -163,7 +123,9 @@ const REQUIRED_ROUTES_BY_VERTICAL = {
   restaurant: [...CORE_ROUTES, "/menu", "/reservations"],
   retail: [...CORE_ROUTES],
   wellness: [...CORE_ROUTES, "/products", "/reservations"],
-  service: [...CORE_ROUTES, "/reservations"],
+  // A legal practice has offices rather than branches, and no reviews, Q&A or
+  // location pages of its own; its consultations are under /services and /schedule.
+  service: ["/", "/about", "/contact", "/posts", "/services", "/schedule"],
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

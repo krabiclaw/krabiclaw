@@ -1,4 +1,4 @@
-export interface BlawbyRateResult {
+export interface SlidingScaleRateResult {
   percentage: number
   rate: number
   standardRate: number
@@ -30,7 +30,7 @@ export function calculateSlidingScaleRate(input: {
   period: 'annual' | 'monthly'
   rows: unknown[][]
   rates?: { standard: number; at250: number; at350: number; at400: number }
-}): BlawbyRateResult {
+}): SlidingScaleRateResult {
   const rates = input.rates ?? { standard: 320, at250: 160, at350: 215, at400: 240 }
   const size = Math.min(8, Math.max(1, Math.trunc(input.householdSize)))
   const row = input.rows.find(candidate => Number(candidate[0]) === size) ?? input.rows[size - 1] ?? []

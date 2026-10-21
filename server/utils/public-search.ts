@@ -1,7 +1,6 @@
 import { HTTPError } from 'nitro'
 import { ARTICLE_COLLECTIONS, collectionArticlePath, isArticleCollection } from '~/utils/article-collections'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
-import { PLATFORM_TEMPLATE } from '~/utils/template-registry'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 import { queryAll, type DbClient } from '~/server/db'
@@ -454,7 +453,7 @@ export async function buildTenantBlogDocuments(db: DbClient, platformOrganizatio
       type: 'blog' as const,
       title: post.title,
       // Each template decides its blog prefix (/blog or /article); docs are at /docs.
-      path: tenantBlogPostPath({ themeId: post.theme_id, vertical: post.vertical }, post.slug, collection),
+      path: tenantBlogPostPath(post.slug, collection),
       snippet,
       section: post.category || ARTICLE_COLLECTIONS[collection].label,
       icon: 'newspaper',
@@ -722,7 +721,7 @@ export async function buildPlatformKnowledgeDocuments(db: DbClient): Promise<Pla
   })
 
   const blogRecords: PlatformKnowledgeDocument[] = (posts ?? []).flatMap((post) => {
-    const path = tenantBlogPostPath(PLATFORM_TEMPLATE, post.slug)
+    const path = tenantBlogPostPath(post.slug)
     const canonicalBody = contentBodies.get(post.id) ?? ''
     const snippet = truncateSnippet(post.excerpt || canonicalBody || post.title)
     const body = [

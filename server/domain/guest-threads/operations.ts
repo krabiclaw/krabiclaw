@@ -340,9 +340,9 @@ async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: Thr
   const labels = platformLocale(guest.locale)!.messages
   const titleKey = action === 'reject' ? 'booking.request_declined'
     : action === 'confirm' ? context.thread.kind === 'reservation' ? 'reservations.confirmed' : 'booking.confirmed'
-      : context.thread.kind === 'reservation' ? 'saya.reservation_cancel.cancelled_title' : 'saya.experience_cancel.cancelled_title'
+      : context.thread.kind === 'reservation' ? 'site.reservation_cancel.cancelled_title' : 'site.experience_cancel.cancelled_title'
   const subject = `${labels[titleKey]} — ${guest.productTitle ?? guest.organizationName}`
-  const guests = labels['saya.experience_detail.guest_count']!.replace('{count}', `${context.record.party_size}${partySizeIsMinimum(context.thread) ? '+' : ''}`)
+  const guests = labels['site.experience_detail.guest_count']!.replace('{count}', `${context.record.party_size}${partySizeIsMinimum(context.thread) ? '+' : ''}`)
   const body = [guest.locationName, formatTimestamp(context.record.starts_at, guest.locale, context.record.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), guests].filter(Boolean).join(' · ')
   const organizationLogoUrl = await organizationLogo(db, context.thread.organization_id)
   const email = await renderNotificationEmail(guestThreadStatusMessage({ locale: guest.locale, organizationName: guest.organizationName, organizationLogoUrl, heading: subject, body }), { platformDomain: getPlatformDomain(env) })

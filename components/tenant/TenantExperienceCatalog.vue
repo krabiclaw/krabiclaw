@@ -28,9 +28,9 @@ const experiences = computed(() => products.value.filter(isExperience))
 // has already left behind resolves with none at all, and answering that with
 // a 404 put an uncaught error on every guest who clicked twice quickly.
 if (pagePayload.value && experiences.value.length === 0) throw createError({ statusCode: 404 })
-const collectionTitle = computed(() => t('saya.experiences.collection_title', { organization: brandName }))
+const collectionTitle = computed(() => t('site.experiences.collection_title', { organization: brandName }))
 const productLocations = computed(() => locations.value.map(location => ({ id: String(location.id), slug: String(location.slug), title: String(location.title) })))
 // A page about the business: its image is the organization's.
 const { social_image: socialImage } = useTenantOrganization().organization
-useSocialMetadata(() => ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('saya.experiences.meta_description', { organization: brandName }) }))
+useSocialMetadata(() => ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('site.experiences.meta_description', { organization: brandName }) }))
 </script>

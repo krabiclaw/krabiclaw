@@ -61,11 +61,7 @@ async function markProvisioningFailed(db: D1Database, organizationId: string, ca
   return asError(cause)
 }
 
-// Registry-driven: the template (and therefore theme_id) a tenant gets is
-// derived from the same publicTemplateRegistry that already drives tenant
-// routing/rendering (utils/template-registry.ts) — this is the only place
-// provisioning decides a theme_id, so a future third template only needs a new
-// registry entry, not a second hardcoded vertical-to-theme switch here.
+// Every customer site gets the tenant theme id; its vertical decides its routes.
 function resolveThemeId(vertical: OrganizationVertical): string {
   return resolvePublicTemplate({ vertical }).themeId
 }
@@ -112,9 +108,9 @@ export async function provisionOrganization(
         return { status: 409, data: { error: 'This subdomain is already taken', code: 'SUBDOMAIN_TAKEN', missing_fields: ['subdomain'] } }
       }
       // Retry: the same subdomain in the same explicit organization is still
-      // pending/failed from a previous attempt. It may have been left under a
-      // stale default (theme_id='saya-theme-v1', vertical='restaurant') —
-      // correct both here so a professional-service retry can never be left on Saya.
+      // pending/failed from a previous attempt. It may have been left under the
+      // column's default vertical ('restaurant') — correct both here so a legal
+      // practice's retry never keeps a venue's routes.
       await executeBatch(db, [writeGuard, {
         query: "UPDATE organization SET theme_id = ?, vertical = ?, onboarding_status = 'pending', updated_at = ? WHERE id = ? AND onboarding_status IN ('pending', 'failed')",
         params: [themeId, vertical, now, organizationId],

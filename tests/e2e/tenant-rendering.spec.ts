@@ -10,9 +10,9 @@ import { mcpData, mcpRequest } from './helpers/mcp'
 import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' with { type: 'json' }
 import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
 
-// Two tenants stand in for the two shells this renderer produces: Pottery
-// House on .tenant-layout and NCLS on .blawby-shell. Kikuzuki renders through
-// the same Saya shell as Pottery and is exercised by tenant-client-navigation,
+// Two tenants stand in for the two verticals' routes this renderer serves:
+// Pottery House a venue and NCLS a legal practice, both on .tenant-layout.
+// Kikuzuki renders through the same shell and is exercised by tenant-client-navigation,
 // tenant-guest-journeys, and kikuzuki-localization, so repeating the generic
 // render matrix for it proves nothing the Pottery pass does not.
 type Tenant = {
@@ -41,7 +41,7 @@ const tenants: Tenant[] = [
   },
   {
     name: 'North Carolina Legal Services', baseURL: blawbyBaseURL, headers: blawbyExtraHeaders,
-    shell: '.blawby-shell', identity: /North Carolina Legal Services/i,
+    shell: '.tenant-layout', identity: /North Carolina Legal Services/i,
     definingContent: /Access to Justice|affordable legal services/i,
     primaryLabel: /services|get started|consultation/i, detailPath: '/services/family',
     detailContent: /Family Law|child custody|divorce/i, themeVar: '--ui-bg',
@@ -79,17 +79,17 @@ test('Blawby authored contact sections retain their forms and selected locations
     { slug: 'cedar-legal', documentId: 'cd961dbe-9250-4878-b05b-b7fe1e95591d', locationIds: ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf'], types: ['hero', 'divider', 'location_grid', 'contact_form'], locations: { id: 'ce64db84-0b72-41e2-a87b-2090c29103d7', title: 'Office Location & Contact Info', description: undefined }, formId: 'a0970094-2071-42a4-8605-2b1ab88b3dcd' },
   ]) {
     const headers = { 'x-preview-tenant': tenant.slug }
-    const response = await request.get(`${testBaseUrl()}/api/public/blawby/document`, { headers, params: { recipe: 'contact' } })
+    const response = await request.get(`${testBaseUrl()}/api/public/pages`, { headers, params: { path: '/contact' } })
     expect(response.status(), await response.text()).toBe(200)
-    const document = await response.json() as { route: { page: { id: string; blocks: Array<{ id: string; type: string; data: { title?: string; description?: string; location_ids?: string[]; items?: Array<{ id: string }> } }> } } }
-    expect(document.route.page.id).toBe(tenant.documentId)
-    expect(document.route.page.blocks.map(block => block.type)).toEqual(tenant.types)
-    const locations = document.route.page.blocks.find(block => block.type === 'location_grid')!
+    const document = await response.json() as { page: { id: string; blocks: Array<{ id: string; type: string; data: { title?: string; description?: string; location_ids?: string[]; items?: Array<{ id: string }> } }> } }
+    expect(document.page.id).toBe(tenant.documentId)
+    expect(document.page.blocks.map(block => block.type)).toEqual(tenant.types)
+    const locations = document.page.blocks.find(block => block.type === 'location_grid')!
     expect(locations).toMatchObject({ id: tenant.locations.id, data: { title: tenant.locations.title, location_ids: tenant.locationIds } })
     // Cedar's authored block carries no description at all.
     expect(locations.data.description).toBe(tenant.locations.description)
     expect(locations.data.items!.map(item => item.id)).toEqual(tenant.locationIds)
-    expect(document.route.page.blocks.find(block => block.type === 'contact_form')!.id).toBe(tenant.formId)
+    expect(document.page.blocks.find(block => block.type === 'contact_form')!.id).toBe(tenant.formId)
     await page.unrouteAll()
     const rendered = await openTenantPage(page, `${testBaseUrl()}/contact`, headers)
     expect(rendered?.status()).toBe(200)
@@ -706,7 +706,6 @@ test.describe('NCLS representative journeys', () => {
       // them apart is a section between the two.
       const body = page.locator('main [data-parity-section]'
         + ':not([data-parity-section="page-hero"])'
-        + ':not([data-parity-section="shield-divider"])'
         + ':not([data-parity-section="consultation"])')
       expect(await body.count(), `${journey.path} renders no section of its own`).toBeGreaterThan(0)
       // And those sections have to say something. /policies/privacy kept a

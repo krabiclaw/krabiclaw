@@ -23,7 +23,7 @@ test('deleting a tenant page takes its translations, placements and redirects', 
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone) VALUES (?,?,?,?,?,?, 'USD', 'UTC')`)
-      .bind('org', 'org', 'org', 'org', 'saya-theme-v1', 'restaurant').run()
+      .bind('org', 'org', 'org', 'org', 'tenant-theme-v1', 'restaurant').run()
     for (const locale of ['en', 'th']) {
       await db.prepare('INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,?,?,?)')
         .bind('loc-' + locale, 'org', locale, Number(locale === 'en'), 'published').run()
@@ -109,7 +109,7 @@ test('a translation deletes alone, and a page the template renders does not dele
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone) VALUES (?,?,?,?,?,?, 'USD', 'UTC')`)
-      .bind('org', 'org', 'org', 'org', 'saya-theme-v1', 'restaurant').run()
+      .bind('org', 'org', 'org', 'org', 'tenant-theme-v1', 'restaurant').run()
     for (const locale of ['en', 'th']) {
       await db.prepare('INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,?,?,?)')
         .bind('loc-' + locale, 'org', locale, Number(locale === 'en'), 'published').run()

@@ -25,12 +25,12 @@ if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMes
 const currency = rawCurrency
 const brandName = String(organization.value?.name ?? '').trim()
 if (!brandName) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
-const collectionTitle = computed(() => t('saya.stays.collection_title', { organization: brandName }))
+const collectionTitle = computed(() => t('site.stays.collection_title', { organization: brandName }))
 const productLocations = computed(() => locations.value.map(location => ({
   id: String(location.id),
   slug: String(location.slug),
   title: String(location.title),
   address: (location.address ?? null) as PostalAddress | null,
 })))
-useSocialMetadata(() => ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('saya.stays.meta_description', { organization: brandName }) }))
+useSocialMetadata(() => ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('site.stays.meta_description', { organization: brandName }) }))
 </script>

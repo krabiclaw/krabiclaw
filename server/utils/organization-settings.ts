@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { organizationSupportsBlawbyTemplate, resolvePublicTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite, PLATFORM_THEME_ID, resolvePublicTemplate } from '~/utils/template-registry'
 import { getPublicCompliance, getPublicConsultationSettings } from '~/server/utils/professional-services'
 import { deleteConfig, getConfig, setConfig } from '~/server/utils/organization-config'
 import { createSystemSubdomain, isSystemSubdomainSpent } from '~/server/utils/domains'
@@ -13,7 +13,8 @@ import { integrationSummary, listIntegrations } from '~/server/utils/organizatio
 import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { buildSingleMediaPlacementQueries, hydrateMediaAssetRefs, readMediaPlacements } from '~/server/utils/media-asset-manager'
-import { applySitePalettePatch, isPaletteTemplate, resolveSitePalette } from '~/shared/site-palette'
+import { applySitePalettePatch, resolveSitePalette } from '~/shared/site-palette'
+import { SITE_RECIPE_KEYS, SITE_RECIPE_OPTIONS, isSiteRecipeValue, parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~/shared/media-placement-contract'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { organizationAdapter } from '~/server/utils/member-access'
@@ -124,8 +125,8 @@ export async function loadSettingsPayload(
   }
 
   const siteConfig = await getConfig(db, organizationId)
-  const template = resolvePublicTemplate({ themeId: updatedOrganization.theme_id }).slug
-  const [compliance, consultation] = organizationSupportsBlawbyTemplate({ vertical: updatedOrganization.vertical, themeId: updatedOrganization.theme_id })
+  const template = resolvePublicTemplate({ themeId: updatedOrganization.theme_id, vertical: updatedOrganization.vertical }).slug
+  const [compliance, consultation] = isLegalPracticeSite({ vertical: updatedOrganization.vertical, themeId: updatedOrganization.theme_id })
     ? await Promise.all([getPublicCompliance(db, organizationId), getPublicConsultationSettings(db, organizationId)])
     : [null, null]
   // Both logos with their presentation, through the canonical placement reader.
@@ -186,12 +187,11 @@ export async function loadSettingsPayload(
     // The website's booking switch exists only where consultation settings do.
     consultation_mode: consultation?.mode ?? updatedOrganization.consultation_mode,
     ...(consultation ? { address_visibility: compliance?.address_visibility ?? 'hidden' } : {}),
-    palette: isPaletteTemplate(template) ? resolveSitePalette(template, siteConfig.palette) : null,
-    palette_source: isPaletteTemplate(template) ? (siteConfig.palette ? 'custom' : 'template') : null,
+    palette: template !== 'platform' ? resolveSitePalette(siteConfig.palette) : null,
+    palette_source: template !== 'platform' ? (siteConfig.palette ? 'custom' : 'default') : null,
     font_preset: resolveOrganizationFontPreset(siteConfig.font_preset),
-    button_shape: siteConfig.button_shape ?? (template === 'blawby' ? 'rounded' : 'pill'),
-    button_casing: siteConfig.button_casing ?? (template === 'blawby' ? 'uppercase' : 'none'),
-    heading_casing: siteConfig.heading_casing ?? (template === 'blawby' ? 'uppercase' : 'none'),
+    // A choice the site has not made reads as absent: the Default applies.
+    ...parseSiteRecipe(siteConfig),
     default_currency: updatedOrganization.default_currency,
     timezone: updatedOrganization.timezone,
     press_email: siteConfig.press_email || '',
@@ -302,9 +302,9 @@ async function attemptOrganizationUpdate(
 
   const settingsPatch: Record<string, unknown> = {}
   if (updates.font_preset !== undefined) settingsPatch.config = { font_preset: updates.font_preset }
-  if (updates.button_shape !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), button_shape: updates.button_shape }
-  if (updates.button_casing !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), button_casing: updates.button_casing }
-  if (updates.heading_casing !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), heading_casing: updates.heading_casing }
+  for (const key of SITE_RECIPE_KEYS) {
+    if (updates[key] !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), [key]: updates[key] }
+  }
   // Resolved to a whole palette by updateOrganizationSettingsFields; null removes
   // it (json_patch deletes a key patched with null), returning to the template's.
   if (updates.palette !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), palette: updates.palette }
@@ -459,9 +459,7 @@ async function attemptOrganizationUpdate(
     updates.font_preset !== undefined ||
     updates.palette !== undefined ||
     updates.announcement !== undefined ||
-    updates.button_shape !== undefined ||
-    updates.button_casing !== undefined ||
-    updates.heading_casing !== undefined
+    SITE_RECIPE_KEYS.some(key => updates[key] !== undefined)
   ) {
     if (!env.ORGANIZATION_CACHE) throw new Error('ORGANIZATION_CACHE is not bound; site caches cannot be purged')
     await purgeOrganizationCaches(db, env.ORGANIZATION_CACHE, organizationId, env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
@@ -534,32 +532,27 @@ export async function updateOrganizationSettingsFields(
 
   if (updates.address_visibility !== undefined) {
     if (updates.address_visibility !== 'visible' && updates.address_visibility !== 'hidden') return { status: 400, data: { error: 'address_visibility must be visible or hidden' } }
-    if (!organizationSupportsBlawbyTemplate({ vertical: organization.vertical, themeId: organization.theme_id })) return { status: 400, data: { error: 'Office address visibility is available for service websites' } }
+    if (!isLegalPracticeSite({ vertical: organization.vertical, themeId: organization.theme_id })) return { status: 400, data: { error: 'Office address visibility is available for service websites' } }
   }
 
   if (updates.font_preset !== undefined && !isOrganizationFontPreset(updates.font_preset)) {
     return { status: 400, data: { error: `font_preset must be one of: ${ORGANIZATION_FONT_PRESETS.join(', ')}` } }
   }
 
-  if (updates.button_shape !== undefined && !['pill', 'rounded', 'sharp'].includes(updates.button_shape)) {
-    return { status: 400, data: { error: 'button_shape must be one of: pill, rounded, sharp' } }
-  }
-  if (updates.button_casing !== undefined && !['uppercase', 'none'].includes(updates.button_casing)) {
-    return { status: 400, data: { error: 'button_casing must be one of: uppercase, none' } }
-  }
-  if (updates.heading_casing !== undefined && !['uppercase', 'none'].includes(updates.heading_casing)) {
-    return { status: 400, data: { error: 'heading_casing must be one of: uppercase, none' } }
+  for (const key of SITE_RECIPE_KEYS) {
+    if (updates[key] !== undefined && !isSiteRecipeValue(key, updates[key])) {
+      return { status: 400, data: { error: `${key} must be one of: ${SITE_RECIPE_OPTIONS[key].join(', ')}` } }
+    }
   }
 
   // A palette change resolves to the whole palette the site will render, so
   // what is stored is always complete and validated before anything is written.
   if (updates.palette !== undefined) {
-    const template = resolvePublicTemplate({ themeId: organization.theme_id }).slug
-    if (!isPaletteTemplate(template)) {
-      return { status: 400, data: { error: 'Website colors are available for the Saya and Blawby templates' } }
+    if (organization.theme_id === PLATFORM_THEME_ID) {
+      return { status: 400, data: { error: "KrabiClaw's own site has fixed colors" } }
     }
     if (updates.palette !== null) {
-      const current = resolveSitePalette(template, (await getConfig(db, organizationId)).palette)
+      const current = resolveSitePalette((await getConfig(db, organizationId)).palette)
       try {
         updates = { ...updates, palette: applySitePalettePatch(current, updates.palette) }
       } catch (error) {

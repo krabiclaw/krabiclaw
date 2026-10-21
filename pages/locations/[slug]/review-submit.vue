@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <section class="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
-      <NuxtLink :to="localePath(`/locations/${slug}`)" class="saya-kicker text-muted no-underline hover:text-default">
+      <NuxtLink :to="localePath(`/locations/${slug}`)" class="tenant-kicker text-muted no-underline hover:text-default">
         Back to {{ requestData?.location?.title || 'location' }}
       </NuxtLink>
 
@@ -32,7 +32,7 @@
       </div>
 
       <form v-else class="mt-12 rounded-lg border border-default p-8" @submit.prevent="submitReview">
-        <p class="saya-eyebrow text-muted">{{ requestData?.organization?.name }}</p>
+        <p class="tenant-eyebrow text-muted">{{ requestData?.organization?.name }}</p>
         <h1 class="mt-3 text-3xl font-semibold">How was your visit?</h1>
         <p class="mt-3 text-sm text-muted">{{ requestData?.location?.title }}</p>
 

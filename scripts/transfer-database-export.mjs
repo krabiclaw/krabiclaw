@@ -27,7 +27,7 @@ import { CONTENT_DOCUMENT_SCOPE_QUERY, MEDIA_PLACEMENT_OWNER_AUDIT_QUERY } from 
 import { isSupportedMediaPlacement } from '../shared/media-placement-contract.ts'
 import { organizationRoles } from '../utils/organization-access.ts'
 import { validateProductDetails, assertProductKind } from '../shared/product-details.ts'
-import { TEMPLATE_PALETTES, parseSitePalette } from '../shared/site-palette.ts'
+import { DEFAULT_SITE_PALETTE, parseSitePalette } from '../shared/site-palette.ts'
 import { getDarkModeVariant } from '../utils/color-utils.ts'
 
 register('../tests/unit/support/alias-hooks.mjs', import.meta.url)
@@ -124,7 +124,7 @@ function sitePaletteChanges(stage) {
     if (brandColor !== undefined) {
       assert(typeof brandColor === 'string' && /^#[0-9a-f]{6}$/iu.test(brandColor), `organization ${organization.id} brand_color ${JSON.stringify(brandColor)} is not a #RRGGBB color; no rows were copied`)
       assert(organization.theme_id === SAYA_THEME_ID, `organization ${organization.id} has a brand_color outside Saya; nothing maps it; no rows were copied`)
-      const saya = TEMPLATE_PALETTES.saya
+      const saya = DEFAULT_SITE_PALETTE
       settings.config.palette = parseSitePalette({
         light: { ...saya.light, action: brandColor },
         dark: { ...saya.dark, action: getDarkModeVariant(brandColor) },

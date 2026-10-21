@@ -1,6 +1,6 @@
 <template>
   <section class="relative pb-14 pt-14 sm:pb-20 sm:pt-14 lg:pb-14" :data-parity-section="paritySection">
-    <div :class="isService ? 'blawby-container' : 'tenant-container'" class="relative z-20">
+    <div class="tenant-container relative z-20">
       <TenantSectionHeading
         v-if="title || description"
         :title="title"
@@ -18,7 +18,6 @@
       height="400"
       loading="lazy"
       class="absolute bottom-0 w-full object-contain object-center"
-      :class="isService ? undefined : 'opacity-40'"
     >
   </section>
 </template>
@@ -29,10 +28,6 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockRecords, blockMedia } from '~/utils/tenant-page-block-data'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const { organization } = useTenantOrganization()
-
-const isService = computed(() => organization.template?.slug === 'blawby' || organization.vertical === 'service')
-
 const decorationUrl = computed(() => blockMedia(props.block, 'decoration')[0]?.public_url ?? null)
 
 const items = computed(() => blockRecords(props.block.data.items).map(item => ({

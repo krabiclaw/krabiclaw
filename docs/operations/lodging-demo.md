@@ -64,11 +64,11 @@ Financial approvals are same-origin browser actions, so the script stops before
 publishing until an owner of the organization has done both of these in the
 staging dashboard:
 
-1. **Plan** (`/dashboard/saltleaf-stays-demo/payments?tab=plan`): choose Business and pay with
+1. **Plan** (`/dashboard/saltleaf-stays-demo/billing`): choose Business and pay with
    Stripe's test card. Business grants the `payments` entitlement and its subscription carries the
    metered fee prices that accepting payments requires; each home's location is billed like any
    location at the end of the period. On Basic the script stops at the third home with `LOCATION_LIMIT`.
-2. **Payouts** (`/dashboard/saltleaf-stays-demo/payments?tab=payouts`): connect Stripe and finish the Stripe-hosted onboarding with
+2. **Payouts** (`/dashboard/saltleaf-stays-demo/payments`): connect Stripe and finish the Stripe-hosted onboarding with
    [Stripe's test values](https://docs.stripe.com/connect/testing). Staging uses
    the Stripe test-mode key, so the account is test-mode. Stripe Tax stays off.
 

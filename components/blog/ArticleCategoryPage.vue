@@ -12,7 +12,7 @@
           <h2 class="text-xl font-semibold leading-7 text-default">{{ featured.title }}</h2>
           <p v-if="featured.excerpt" class="mt-3 text-sm leading-6 text-muted">{{ featured.excerpt }}</p>
           <NuxtLink :to="featured.path" class="mt-5 inline-flex min-h-11 items-center gap-3 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-white no-underline hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary">
-            {{ t('saya.posts.read_guide') }} <PlatformIcon name="arrow-right" class="size-4" />
+            {{ t('site.posts.read_guide') }} <PlatformIcon name="arrow-right" class="size-4" />
           </NuxtLink>
         </div>
         <figure v-if="illustration" class="min-w-0 self-end">
@@ -21,7 +21,7 @@
       </section>
 
       <section v-if="guides.length" class="space-y-4">
-        <h2 class="text-base font-semibold text-default">{{ t('saya.posts.category_guides') }}</h2>
+        <h2 class="text-base font-semibold text-default">{{ t('site.posts.category_guides') }}</h2>
         <div class="grid gap-4 md:grid-cols-2" data-category-guides>
           <article v-for="article in guides" :key="article.id" class="group relative rounded-lg border border-default p-5 transition-colors hover:border-primary/40 hover:bg-elevated">
             <h3 class="text-sm font-semibold leading-6 text-default">
@@ -34,7 +34,7 @@
       <ArticleCategorySection v-for="child in category.children" :key="child.id" :category="child" compact />
 
       <section v-if="nextCategories.length" class="space-y-4 border-t border-default pt-7" data-category-next>
-        <h2 class="text-base font-semibold text-default">{{ t('saya.posts.next_steps') }}</h2>
+        <h2 class="text-base font-semibold text-default">{{ t('site.posts.next_steps') }}</h2>
         <div class="grid gap-x-8 gap-y-6 md:grid-cols-2">
           <section v-for="next in nextCategories" :key="next.id" class="space-y-2">
             <h3 class="text-sm font-semibold text-default"><NuxtLink :to="next.path" class="no-underline hover:text-primary">{{ next.name }}</NuxtLink></h3>
@@ -106,7 +106,7 @@ useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []
   .filter(representation => found.locales.includes(representation.locale))
   .map(representation => ({ ...representation, route_path: `${representation.route_path}/category/${encodeURIComponent(found.slug)}` }))
 
-const indexLabel = computed(() => props.collection === 'docs' ? t('saya.footer.docs') : t('saya.footer.blog'))
+const indexLabel = computed(() => props.collection === 'docs' ? t('site.footer.docs') : t('site.footer.blog'))
 const indexPath = ARTICLE_COLLECTIONS[props.collection].pathPrefix
 const path = computed(() => collectionCategoryPath(props.collection, category.value.slug))
 // The index, then each category above this one, then this one.
@@ -122,11 +122,11 @@ useSocialMetadata(() => ({
   path: path.value,
   socialImage: illustration.value ? { url: illustration.value.og, width: 1200, height: 630, type: 'image/png', alt: illustration.value.alt } : organization.social_image,
   title: isPlatform ? `${category.value.name} | ${indexLabel.value}` : `${category.value.name} | ${indexLabel.value} | ${organizationName}`,
-  description: category.value.description || t('saya.posts.category_meta_description', { category: category.value.name, collection: indexLabel.value, organization: organizationName }),
+  description: category.value.description || t('site.posts.category_meta_description', { category: category.value.name, collection: indexLabel.value, organization: organizationName }),
   schemaPageType: 'CollectionPage',
   schemaNodes: [itemList.value],
   breadcrumbs: [
-    { name: t('saya.experience_detail.home'), url: localePath('/') },
+    { name: t('site.experience_detail.home'), url: localePath('/') },
     ...breadcrumbs.value,
   ],
 }))

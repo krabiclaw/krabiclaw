@@ -1,5 +1,5 @@
 /**
- * Color utility functions for Saya theme color configurability
+ * Color utility functions for site palette configurability
  * Handles color manipulation, dark mode variants, and WCAG contrast compliance
  */
 

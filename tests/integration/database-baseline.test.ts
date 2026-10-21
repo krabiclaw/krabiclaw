@@ -129,7 +129,7 @@ test('a v11 export transfers into the v12 baseline, which has no capability over
 
 test('a v12 export transfers into the v13 baseline with one site palette and logo presentations', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
-  const { TEMPLATE_PALETTES } = await import('../../shared/site-palette.ts')
+  const { DEFAULT_SITE_PALETTE } = await import('../../shared/site-palette.ts')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v12-transfer-'))
   const v12 = JSON.parse(readFileSync('migrations-history/v12/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
   const blawbyTokens = { bg: '#fbfaf7', surface: '#ffffff', primary: '#25356c', primaryDark: '#161f3b', primary100: '#f2f5ff', primary200: '#b4c5e5', primary800: '#1d294f', accent: '#c19855', accent100: '#faf5ea', accent200: '#f8f0e1', accentButton: '#b58c4f', accentStrong: '#a37732', border: '#e5e7eb', ink: '#162033' }
@@ -161,13 +161,17 @@ test('a v12 export transfers into the v13 baseline with one site palette and log
       // The Saya brand color is its palette's action color; everything else is Saya's own.
       const saya = settings('saya')
       assert.equal(saya.config.brand_color, undefined)
-      assert.deepEqual(saya.config.palette.light, { ...TEMPLATE_PALETTES.saya.light, action: '#96826A' })
-      assert.equal(saya.config.palette.dark.ground, TEMPLATE_PALETTES.saya.dark.ground)
+      assert.deepEqual(saya.config.palette.light, { ...DEFAULT_SITE_PALETTE.light, action: '#96826A' })
+      assert.equal(saya.config.palette.dark.ground, DEFAULT_SITE_PALETTE.dark.ground)
       assert.notEqual(saya.config.palette.dark.action, '#96826A')
-      // Blawby's stored tokens were its defaults: it wears its template's palette.
+      // Blawby's stored tokens were its defaults. Once one look serves every site
+      // (migration 0012), the legal site keeps those defaults as its own settings.
       const blawby = settings('blawby')
       assert.equal(blawby.theme_by_template, undefined)
-      assert.equal(blawby.config.palette, undefined)
+      assert.deepEqual(blawby.config.palette.light, { ground: '#FBFAF7', surface: '#FFFFFF', text: '#162033', muted: '#565D6A', action: '#25356C', accent: '#C19855' })
+      assert.equal(blawby.config.font_preset, 'marcellus')
+      assert.equal(blawby.config.button_color, 'accent')
+      assert.equal((target.prepare("SELECT theme_id FROM organization WHERE id = 'blawby'").get() as { theme_id: string }).theme_id, 'tenant-theme-v1')
       const presentation = (id: string) => (target.prepare("SELECT presentation_json FROM media_placements WHERE organization_id = ? AND slot = 'logo'").get(id) as { presentation_json: string | null }).presentation_json
       assert.deepEqual(JSON.parse(presentation('saya')!), { shape: 'circle', focus: { x: 0.5, y: 0.5 } })
       assert.equal(presentation('blawby'), null)

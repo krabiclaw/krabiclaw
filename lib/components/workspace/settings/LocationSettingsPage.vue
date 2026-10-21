@@ -29,7 +29,7 @@ import type { Ref } from 'vue'
 import type { LocationReservationConfig, LocationReservationConfigPatch } from '~/server/utils/reservations'
 import { getErrorMessage } from '~/utils/errors'
 import { parsePostalAddress, postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
-import { getPhoneCountry } from '~/utils/phone'
+import { getPhoneCountry, toE164 } from '~/utils/phone'
 
 
 export interface BusinessLocation {
@@ -323,6 +323,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const validationMessage = computed(() => {
     if (key === 'name' && !detailsForm.title.trim()) return 'Enter a location name.'
     if (key === 'contact') {
+      if (detailsForm.phone && !toE164(detailsForm.phone)) return 'Enter a valid phone number and choose its country.'
       if (detailsForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(detailsForm.email)) return 'Enter a valid email address.'
     }
     if (key === 'address') {

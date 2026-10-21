@@ -18,7 +18,7 @@
       :guest-email="guestStay.stay.guest_email"
     >
       <template #title>
-        {{ guestStay.stay.status === 'cancelled' ? t('saya.experience_cancel.cancelled_title') : copy.thankYouLabel(guestStay.stay.guest_name ?? '') }}
+        {{ guestStay.stay.status === 'cancelled' ? t('site.experience_cancel.cancelled_title') : copy.thankYouLabel(guestStay.stay.guest_name ?? '') }}
       </template>
       <template #subtitle>
         {{ receiptDescription }}
@@ -72,12 +72,12 @@ onMounted(async () => {
 })
 
 const policy = computed(() => guestStay.value?.stay.cancellation_policy ? bookedPolicyTerms(guestStay.value.stay.cancellation_policy) : null)
-const receiptTitle = computed(() => t(guestStay.value?.stay.status === 'cancelled' ? 'saya.experience_cancel.cancelled_title' : guestStay.value?.stay.status === 'pending' ? 'booking.request_received' : 'stay.confirmed_title'))
+const receiptTitle = computed(() => t(guestStay.value?.stay.status === 'cancelled' ? 'site.experience_cancel.cancelled_title' : guestStay.value?.stay.status === 'pending' ? 'booking.request_received' : 'stay.confirmed_title'))
 const day = (date: string) => formatCalendarDate(date, locale.value, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
 const receiptDescription = computed(() => {
   const value = guestStay.value
   if (!value) return ''
-  if (value.stay.status === 'cancelled') return t('saya.experience_cancel.cancelled_desc', { date: day(value.stay.check_in_date) })
+  if (value.stay.status === 'cancelled') return t('site.experience_cancel.cancelled_desc', { date: day(value.stay.check_in_date) })
   return value.stay.status === 'pending' ? t('booking.pending_message') : t('stay.confirmed_message', { home: value.home.name })
 })
 // The receipt the guest's confirmation email gives, at the home's own check-in and checkout times.

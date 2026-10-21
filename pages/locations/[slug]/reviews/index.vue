@@ -17,12 +17,12 @@
 
       <!-- Compact Page header -->
       <header class="mx-auto max-w-7xl px-4 pt-12 pb-10 sm:px-6 lg:px-8 text-center">
-        <NuxtLink :to="localePath(`/locations/${slug}`)" class="saya-kicker mb-8 inline-block text-muted no-underline hover:text-default">
-          ← {{ t('saya.reviews_page.back_to', { title: location?.title }) }}
+        <NuxtLink :to="localePath(`/locations/${slug}`)" class="tenant-kicker mb-8 inline-block text-muted no-underline hover:text-default">
+          ← {{ t('site.reviews_page.back_to', { title: location?.title }) }}
         </NuxtLink>
         
         <div class="flex flex-col gap-2">
-          <h1 class="saya-display-md text-default">{{ t('saya.reviews_page.title') }}</h1>
+          <h1 class="tenant-display-md text-default">{{ t('site.reviews_page.title') }}</h1>
           <p class="text-sm text-muted">
             {{ location?.title }}
           </p>
@@ -33,7 +33,7 @@
         <div class="mx-auto grid max-w-7xl items-center gap-20 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_1.4fr] lg:px-8">
           <!-- Big score -->
           <div>
-            <div class="saya-display saya-italic text-default" style="font-size: clamp(72px, 10vw, 96px); line-height: 0.9; letter-spacing: -0.03em">
+            <div class="tenant-display tenant-italic text-default" style="font-size: clamp(72px, 10vw, 96px); line-height: 0.9; letter-spacing: -0.03em">
               {{ aggregate?.rating ? Number(aggregate.rating).toFixed(1) : '—' }}
             </div>
             <div class="mt-3 flex gap-1">
@@ -46,8 +46,8 @@
                 :class="s <= Math.round(aggregate?.rating ?? 0) ? 'text-primary' : 'text-muted'"
               />
             </div>
-            <p class="mt-4 text-sm text-default">{{ t('saya.reviews_page.based_on', { count: aggregate?.review_count?.toLocaleString() ?? 0 }) }}</p>
-            <a v-if="location.maps_url" :href="location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-1 block text-xs tracking-wide text-muted no-underline hover:underline">{{ t('saya.reviews_page.synced_live') }}</a>
+            <p class="mt-4 text-sm text-default">{{ t('site.reviews_page.based_on', { count: aggregate?.review_count?.toLocaleString() ?? 0 }) }}</p>
+            <a v-if="location.maps_url" :href="location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-1 block text-xs tracking-wide text-muted no-underline hover:underline">{{ t('site.reviews_page.synced_live') }}</a>
           </div>
 
           <!-- Star distribution -->
@@ -87,10 +87,10 @@
           <div class="flex gap-1 text-primary" aria-hidden="true">
             <TenantIcon v-for="s in 5" :key="s" name="star" solid class="size-5" :class="s <= Math.round(aggregate.rating) ? 'text-primary' : 'text-muted'" />
           </div>
-          <div class="mt-4 saya-display saya-italic text-3xl text-default">
-            {{ t('saya.reviews_page.aggregate_only_title', { rating: Number(aggregate.rating).toFixed(1), count: aggregate.review_count ?? 0 }) }}
+          <div class="mt-4 tenant-display tenant-italic text-3xl text-default">
+            {{ t('site.reviews_page.aggregate_only_title', { rating: Number(aggregate.rating).toFixed(1), count: aggregate.review_count ?? 0 }) }}
           </div>
-          <p class="mt-2 max-w-sm text-sm text-muted">{{ t('saya.reviews_page.aggregate_only_desc') }}</p>
+          <p class="mt-2 max-w-sm text-sm text-muted">{{ t('site.reviews_page.aggregate_only_desc') }}</p>
         </div>
 
         <!-- True empty: no reviews, no verified aggregate -->
@@ -98,19 +98,19 @@
           <div class="flex size-14 items-center justify-center rounded-full bg-elevated text-muted">
             <TenantIcon name="star" class="size-7" />
           </div>
-          <div class="mt-6 saya-display saya-italic text-3xl text-default">{{ t('saya.reviews_page.no_reviews_title') }}</div>
-          <p class="mt-2 max-w-sm text-sm text-muted">{{ t('saya.reviews_page.no_reviews_desc') }}</p>
+          <div class="mt-6 tenant-display tenant-italic text-3xl text-default">{{ t('site.reviews_page.no_reviews_title') }}</div>
+          <p class="mt-2 max-w-sm text-sm text-muted">{{ t('site.reviews_page.no_reviews_desc') }}</p>
         </div>
 
         <!-- Has reviews but active filter hides them -->
         <div v-else-if="filtered.length === 0" class="rounded-3xl border border-dashed border-default p-14 text-center">
-          <div class="saya-display saya-italic text-2xl text-default">{{ t('saya.reviews_page.no_match_title') }}</div>
-          <p class="mt-2 text-sm text-muted">{{ t('saya.reviews_page.no_match_desc') }}</p>
+          <div class="tenant-display tenant-italic text-2xl text-default">{{ t('site.reviews_page.no_match_title') }}</div>
+          <p class="mt-2 text-sm text-muted">{{ t('site.reviews_page.no_match_desc') }}</p>
           <button
             class="mt-6 rounded-full border border-default px-5 py-2.5 text-sm transition hover:bg-muted"
             @click="activeFilter = 'recent'"
           >
-            {{ t('saya.reviews_page.reset_filter') }}
+            {{ t('site.reviews_page.reset_filter') }}
           </button>
         </div>
 
@@ -140,10 +140,10 @@ const aggregate = reviewsAggregate
 const reviews = reviewsList
 
 const filters = computed(() => [
-  { key: 'recent', label: t('saya.reviews_page.most_recent') },
-  { key: 'highest', label: t('saya.reviews_page.highest_rated') },
-  { key: 'lowest', label: t('saya.reviews_page.lowest_rated') },
-  { key: 'photos', label: t('saya.reviews_page.with_photos') }
+  { key: 'recent', label: t('site.reviews_page.most_recent') },
+  { key: 'highest', label: t('site.reviews_page.highest_rated') },
+  { key: 'lowest', label: t('site.reviews_page.lowest_rated') },
+  { key: 'photos', label: t('site.reviews_page.with_photos') }
 ])
 const activeFilter = ref('recent')
 const reviewMedia = (review: ApiRecord, slot: string) => Array.isArray(review.media)

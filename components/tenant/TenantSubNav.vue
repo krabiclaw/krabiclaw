@@ -37,19 +37,19 @@ const { location } = await usePublicPageData({ lazy: false })
 const { localePath, t } = useI18n()
 
 const SECTION_TABS: Array<{ key: PublicLocationSection, label: string }> = [
-  { key: 'menu', label: 'saya.subnav.menu' },
-  { key: 'products', label: 'saya.footer.products' },
-  { key: 'experiences', label: 'saya.footer.experiences' },
-  { key: 'posts', label: 'saya.subnav.posts' },
-  { key: 'reviews', label: 'saya.subnav.reviews' },
-  { key: 'photos', label: 'saya.subnav.photos' },
-  { key: 'qa', label: 'saya.subnav.qa' },
+  { key: 'menu', label: 'site.subnav.menu' },
+  { key: 'products', label: 'site.footer.products' },
+  { key: 'experiences', label: 'site.footer.experiences' },
+  { key: 'posts', label: 'site.subnav.posts' },
+  { key: 'reviews', label: 'site.subnav.reviews' },
+  { key: 'photos', label: 'site.subnav.photos' },
+  { key: 'qa', label: 'site.subnav.qa' },
 ]
 
 const items = computed(() => [
-  { key: 'overview', label: t('saya.subnav.overview'), href: `/locations/${props.locationSlug}` },
+  { key: 'overview', label: t('site.subnav.overview'), href: `/locations/${props.locationSlug}` },
   ...SECTION_TABS.filter(tab => location.value?.sections[tab.key] === true)
     .map(tab => ({ key: tab.key, label: t(tab.label), href: `/locations/${props.locationSlug}/${tab.key}` })),
-  { key: 'contact', label: t('saya.subnav.visit'), href: `/locations/${props.locationSlug}/contact` },
+  { key: 'contact', label: t('site.subnav.visit'), href: `/locations/${props.locationSlug}/contact` },
 ])
 </script>

@@ -6,7 +6,7 @@ import type { DbClient } from "~/server/db";
 import { uploadImageBuffer, deleteImage } from "~/server/utils/cloudflare-images";
 import { uploadToR2, buildR2Key, deleteFromR2 } from "~/server/utils/cloudflare-r2";
 import { createMediaAsset, getMediaAsset, type MediaAsset } from "~/server/utils/media-asset-manager";
-import { readMp4Metadata } from "~/server/utils/video-metadata";
+import { fastStartMp4, readMp4Metadata } from "~/server/utils/video-metadata";
 import { R2_IMAGE_MIME_TYPES } from "~/server/utils/media-mime";
 
 interface UploadResolvedMediaInputBase {
@@ -106,9 +106,11 @@ export async function uploadResolvedMediaToAssetStore(
   if (earlier) return earlier
   const assetId = creation ? await creationRequestHash({ organization_id: input.organizationId, dedupe_key: creation.dedupeKey, request_hash: creation.requestHash }) : crypto.randomUUID();
   const provider = input.provider ?? (input.kind === "image" && !R2_IMAGE_MIME_TYPES.has(input.contentType) ? "cloudflare_images" : "cloudflare_r2");
-  // An MP4's length and size come from its own header, read before anything is
+  // An MP4 is stored with its header first so a player has its length and size
+  // from the first bytes; both are read from that header before anything is
   // stored, so an unreadable file is refused rather than saved without them.
-  const video = input.kind === "video" && input.contentType === "video/mp4" ? readMp4Metadata(input.buffer) : null;
+  const mp4 = input.kind === "video" && input.contentType === "video/mp4" ? fastStartMp4(input.buffer) : null;
+  const video = mp4 ? readMp4Metadata(mp4) : null;
 
   const r2Key = provider === "cloudflare_r2" ? buildR2Key(input.organizationId, assetId, input.filename) : null;
   const startedAt = Date.now();
@@ -135,7 +137,7 @@ export async function uploadResolvedMediaToAssetStore(
       }
       stage = 'r2_put';
       stageStartedAt = Date.now();
-      publicUrl = await uploadToR2(input.env, r2Key!, input.buffer, input.contentType);
+      publicUrl = await uploadToR2(input.env, r2Key!, mp4 ?? input.buffer, input.contentType);
       timings[stage] = Date.now() - stageStartedAt;
     }
 

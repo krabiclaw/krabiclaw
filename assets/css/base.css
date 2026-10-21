@@ -187,14 +187,12 @@
   );
 }
 
-/* ── Site palette (Tenant themes: Saya and Blawby) ──────── */
+/* ── Site palette (every customer site) ─────────────────── */
 /* A public layout root carries the site's six colors per mode as
    --site-<role>-light/-dark (composables/usePublicSiteBrand.ts). This picks the
    mode, then derives every Nuxt UI token from those colors, so tints, borders
    and inverted bands follow whatever the owner chose. */
-.tenant-theme,
-.saya-theme,
-.blawby-theme {
+.tenant-theme {
   color-scheme: light;
   --site-ground:    var(--site-ground-light);
   --site-surface:   var(--site-surface-light);
@@ -217,7 +215,8 @@
   --ui-bg-accented:      color-mix(in oklab, var(--site-text) 8%, var(--site-ground));
   --ui-bg-inverted:      var(--site-text);
   --ui-text:             var(--site-text);
-  --ui-text-highlighted: var(--site-text);
+  /* Headings take the brand's action color; body copy stays the text color. */
+  --ui-text-highlighted: var(--site-action);
   --ui-text-toned:       color-mix(in oklab, var(--site-text) 50%, var(--site-muted));
   --ui-text-muted:       var(--site-muted);
   --ui-text-dimmed:      color-mix(in oklab, var(--site-muted) 70%, var(--site-ground));
@@ -227,27 +226,6 @@
   --ui-border-accented:  color-mix(in oklab, var(--site-text) 22%, var(--site-ground));
   --ui-border-inverted:  color-mix(in oklab, var(--site-ground) 15%, var(--site-text));
 
-  /* Universal tenant & blawby tonal tokens */
-  --tenant-bg:            var(--site-ground);
-  --tenant-surface:       var(--site-surface);
-  --tenant-ink:           var(--site-text);
-  --tenant-primary:       var(--site-action);
-  --tenant-accent:        var(--site-accent);
-  --tenant-border:        var(--ui-border);
-
-  --blawby-bg:            var(--site-ground);
-  --blawby-surface:       var(--site-surface);
-  --blawby-ink:           var(--site-text);
-  --blawby-primary:       var(--site-action);
-  --blawby-primary-dark:  color-mix(in oklab, var(--site-action) 60%, black);
-  --blawby-primary-100:   color-mix(in oklab, var(--site-action) 6%, var(--site-ground));
-  --blawby-primary-200:   color-mix(in oklab, var(--site-action) 30%, var(--site-ground));
-  --blawby-primary-800:   color-mix(in oklab, var(--site-action) 85%, black);
-  --blawby-accent:        var(--site-accent);
-  --blawby-accent-100:    color-mix(in oklab, var(--site-accent) 10%, var(--site-ground));
-  --blawby-accent-200:    color-mix(in oklab, var(--site-accent) 18%, var(--site-ground));
-  --blawby-accent-strong: color-mix(in oklab, var(--site-accent) 80%, black);
-  --blawby-border:        var(--ui-border);
 
   /* Status colors are fixed, not owner colors, and dark enough to read as
      text on a light ground. */
@@ -259,9 +237,7 @@
   color: var(--ui-text);
 }
 
-.dark .tenant-theme,
-.dark .saya-theme,
-.dark .blawby-theme {
+.dark .tenant-theme {
   color-scheme: dark;
   --site-ground:    var(--site-ground-dark);
   --site-surface:   var(--site-surface-dark);
@@ -276,14 +252,7 @@
   --ui-warning:     #FBBF24;
   --ui-error:       #F87171;
 
-  --tenant-primary:       var(--site-text);
-  --blawby-primary:       var(--site-text);
-  --blawby-primary-dark:  color-mix(in oklab, var(--site-action-light) 60%, black);
-  --blawby-primary-800:   color-mix(in oklab, var(--site-action-light) 85%, black);
-  --blawby-accent-strong: color-mix(in oklab, var(--site-accent) 80%, white);
-  --blawby-primary-100:   color-mix(in oklab, var(--site-surface) 60%, var(--site-ground));
-  --blawby-accent-100:    color-mix(in oklab, var(--site-surface) 45%, var(--site-ground));
-  --blawby-accent-200:    color-mix(in oklab, var(--site-text) 7%, var(--site-surface));
+  --ui-text-highlighted: var(--site-text);
 }
 
 /* ── Platform theme ───────────────────────────────────────── */
@@ -382,7 +351,7 @@
   --kc-footer-bg:         #080A18;
 }
 
-/* Field boundary on any dark surface. Measured 3.44:1 on the Saya dark field
+/* Field boundary on any dark surface. Measured 3.44:1 on the default dark field
    background #09090B, where --ui-border landed at 1.34:1. */
 .dark {
   --kc-field-border: #64646E;

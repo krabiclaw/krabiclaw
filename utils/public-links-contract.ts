@@ -15,7 +15,7 @@ export interface PublicLinksPayload {
     name: string | null
     brand_description: string | null
     media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>
-    template: 'saya' | 'blawby'
+    template: 'tenant'
   }
   page: {
     path: '/links'
@@ -42,7 +42,7 @@ export function isPublicLinksPayload(value: unknown): value is PublicLinksPayloa
     && isNullableString(organization.brand_description)
     && Array.isArray(organization.media)
     && organization.media.every(item => isRecord(item) && typeof item.asset_id === 'string' && typeof item.slot === 'string' && isNullableString(item.public_url) && isNullableString(item.thumbnail_url) && isNullableString(item.kind))
-    && (organization.template === 'saya' || organization.template === 'blawby')
+    && organization.template === 'tenant'
     && page.path === '/links'
     && typeof page.title === 'string'
     && value.items.every(item =>
