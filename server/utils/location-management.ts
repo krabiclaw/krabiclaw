@@ -1,4 +1,6 @@
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { coordinatesFailure, parseMapUrl } from '~/utils/location-map'
+import { parseStayMapSharing, type StayMapSharing } from '~/shared/stay-listing'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from "~/server/utils/organization-events";
 import { HTTPError } from 'nitro'
@@ -9,7 +11,7 @@ import type { CloudflareEnv } from "~/server/utils/auth";
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
-import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { capacityRefusalOf, executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
@@ -54,6 +56,8 @@ export interface CreateLocationInput {
 
 export interface UpdateLocationInput extends Partial<CreateLocationInput> {
   status?: "active" | "inactive" | "sync_error";
+  /** Public map precision for every home at this location; the street address remains private. */
+  stay_map_sharing?: StayMapSharing;
   /** Where the place is on the map, as its owner placed the pin. Both or neither; null clears both. */
   latitude?: number | null;
   longitude?: number | null;
@@ -63,10 +67,13 @@ export interface LocationRecord {
   id: string;
   slug: string;
   title: string;
+  stay_map_sharing: StayMapSharing;
   phone: string | null;
   email: string | null;
   website_url: string | null;
   maps_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
   google_review_url: string | null;
   google_place_id: string | null;
   rating: number | null;
@@ -190,9 +197,9 @@ async function loadLocation(
   locationIdOrSlug: string,
   byIdOnly = false,
 ) {
-  const columns = `id, slug, title, phone, email, website_url, maps_url, google_review_url, google_place_id,
+  const columns = `id, slug, title, phone, email, website_url, maps_url, latitude, longitude, google_review_url, google_place_id,
            rating, review_count, description, short_description, status,
-           address, opening_hours, special_hours, categories, price_level,
+           address, stay_map_sharing, opening_hours, special_hours, categories, price_level,
            timezone, max_capacity, seo_title, seo_description, canonical_url,
            assigned_member_id, assigned_team_id,
            created_at, updated_at`;
@@ -219,6 +226,8 @@ export async function createLocation(
   userId: string,
   options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string } = {},
 ) {
+  try { parseMapUrl(input.maps_url); }
+  catch (cause) { return locationValidationFailure(cause, 'maps_url'); }
   const key = options.idempotencyKey?.trim();
   if (options.idempotencyKey !== undefined && (!key || key.length > 200)) {
     return { status: 400, data: { error: 'idempotency_key must be 1 to 200 characters.', code: 'INVALID_LOCATION_FIELD', field: 'idempotency_key' } };
@@ -423,20 +432,6 @@ export async function createLocation(
   };
 }
 
-/** A pin is a latitude and longitude set together, or both cleared; null when the input names a valid one or none. */
-export function coordinatesFailure(input: Pick<UpdateLocationInput, 'latitude' | 'longitude'>): { error: string; field: 'latitude' | 'longitude' } | null {
-  if ((input.latitude === undefined) !== (input.longitude === undefined) || (input.latitude === null) !== (input.longitude === null)) {
-    return { error: "latitude and longitude are set together.", field: input.latitude === undefined || input.latitude === null ? 'latitude' : 'longitude' };
-  }
-  for (const [field, limit] of [["latitude", 90], ["longitude", 180]] as const) {
-    const value = input[field];
-    if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > limit)) {
-      return { error: `${field} must be a number from -${limit} to ${limit}.`, field };
-    }
-  }
-  return null;
-}
-
 export async function updateLocation(
   db: D1Database,
   organizationId: string,
@@ -461,11 +456,10 @@ export async function updateLocation(
       await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { updated_at: updatedAt });
     }
   };
-  // What the location's card draws: its title, its description and the
-  // locality in its address. Hours, phone and the rest cannot change it.
+  // What the location's card draws, and whether location privacy permits one.
   const cardInputChanged = input.title !== undefined || input.seo_title !== undefined
     || input.seo_description !== undefined || input.short_description !== undefined
-    || input.description !== undefined || input.address !== undefined
+    || input.description !== undefined || input.address !== undefined || input.stay_map_sharing !== undefined
 
   if (Object.keys(input).length === 0) {
     return { status: 400, data: { error: "No update fields provided.", code: 'EMPTY_LOCATION_UPDATE' } };
@@ -476,6 +470,12 @@ export async function updateLocation(
   }
   const submittedAddress = input.address === undefined ? undefined : readSubmittedAddress(input.address);
   if (submittedAddress && !submittedAddress.ok) return submittedAddress;
+  try { parseMapUrl(input.maps_url); }
+  catch (cause) { return locationValidationFailure(cause, 'maps_url'); }
+  if (input.stay_map_sharing !== undefined) {
+    try { parseStayMapSharing(input.stay_map_sharing); }
+    catch (cause) { return locationValidationFailure(cause, 'stay_map_sharing'); }
+  }
   const submittedPhone = input.phone === undefined ? undefined : readSubmittedPhone(input.phone);
   if (submittedPhone && !submittedPhone.ok) return submittedPhone;
 
@@ -554,6 +554,7 @@ export async function updateLocation(
   }
 
   const simpleFields = [
+    "stay_map_sharing",
     "phone",
     "email",
     "description",
@@ -650,7 +651,10 @@ export async function updateLocation(
     // An inactive location is off the site and is not counted; making it
     // active again is refused past the locations Basic includes.
     const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active' });
-    return (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
+    const changed = (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
+    // The saved privacy mode must be visible even if readback or card work fails.
+    if (changed) await purgePublicResourceCacheNow(env, organizationId);
+    return changed;
   };
   const stale = {
     status: 409,
@@ -687,6 +691,7 @@ export async function updateLocation(
 
     if (updated) {
       if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+      await purgePublicResourceCacheNow(env, organizationId);
       await publishHomes(updated.location?.updated_at);
       return { status: 200, data: { success: true, location: updated.location } };
     }
@@ -711,6 +716,7 @@ export async function updateLocation(
   const location = await loadLocation(db, organizationId, locationId);
   if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
   if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+  await purgePublicResourceCacheNow(env, organizationId);
   await publishHomes(location.updated_at);
   return { status: 200, data: { success: true, location } };
 }

@@ -42,9 +42,9 @@
               </span>
               <span aria-hidden="true">·</span>
               <span class="underline">{{ reviewCountLabel }}</span>
-              <span aria-hidden="true">·</span>
+              <span v-if="stayPlaceName" aria-hidden="true">·</span>
             </template>
-            <span class="underline">{{ stayPlaceName }}</span>
+            <span v-if="stayPlaceName" class="underline">{{ stayPlaceName }}</span>
             <ShareButton class="ml-auto" :title="displayTitle" />
           </div>
         </header>
@@ -103,7 +103,7 @@
           <!-- Airbnb's overview under the photos: what kind of place, where, and its size. -->
           <div v-if="isStay" class="pb-6">
             <h2 class="text-xl font-semibold text-default sm:text-2xl">
-              {{ stayPropertyTypeLabel ? `${stayPropertyTypeLabel} in ${stayPlaceName}` : displayTitle }}
+              {{ stayPropertyTypeLabel && stayPlaceName ? `${stayPropertyTypeLabel} in ${stayPlaceName}` : stayPropertyTypeLabel || displayTitle }}
             </h2>
             <p class="mt-1 text-default">{{ staySpecsSummary }}</p>
             <HostedBy class="mt-6 border-t border-default pt-6" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" />
@@ -220,8 +220,9 @@
               <div class="flex items-start gap-4 p-6">
                 <TenantIcon name="map-pin" class="mt-0.5 size-5 shrink-0 text-primary" />
                 <div class="min-w-0">
-                  <p class="font-semibold text-default">{{ location?.title ?? organizationName }}</p>
+                  <p class="font-semibold text-default">{{ locationName }}</p>
                   <p v-if="addressLine" class="mt-1 text-sm text-muted">{{ addressLine }}</p>
+                  <p v-if="isStay && location?.stay_map_sharing && mapEmbedUrl" class="mt-2 text-sm leading-6 text-muted">{{ t(location.public_area?.approximate ? 'stay.general_location_notice' : 'stay.specific_location_notice') }}</p>
                   <p v-if="location?.phone" class="mt-1 text-sm text-muted">{{ formatPhone(location.phone) }}</p>
                   <p v-if="meetingPoint" class="mt-3 whitespace-pre-line text-sm leading-6 text-default">{{ meetingPoint }}</p>
                   <a
@@ -239,7 +240,7 @@
               <iframe
                 v-if="mapEmbedUrl"
                 :src="mapEmbedUrl"
-                :title="location?.title ?? organizationName"
+                :title="locationName"
                 class="h-56 w-full border-t border-default"
                 style="border-width: 1px 0 0"
                 loading="lazy"
@@ -863,7 +864,8 @@ const thingsToKnow = computed(() => [
 
 const addressLine = computed(() => formatPostalAddress(props.location?.address ?? null))
 // A home is named by its town, as Airbnb's "Villa in Ao Nang"; its location's title is the home's own name.
-const stayPlaceName = computed(() => addressPlaceName(props.location?.address ?? null) || props.location?.title || props.organizationName)
+const stayPlaceName = computed(() => props.location?.public_area?.locality || props.location?.public_area?.administrative_area || props.location?.public_area?.label || addressPlaceName(props.location?.address ?? null))
+const locationName = computed(() => props.location?.public_area?.label || props.location?.title || props.organizationName)
 // A map from the coordinates the branch already has; no key, no second source.
 const mapEmbedUrl = computed(() => props.location?.map_embed_url ?? null)
 

@@ -530,6 +530,8 @@
   "stay.guests_maximum": "Tối đa {count} khách",
   "stay.not_reported": "Chưa báo cáo {item}",
   "stay.where_youll_be": "Nơi bạn sẽ ở",
+  "stay.general_location_notice": "Bản đồ này hiển thị khu vực gần đúng. Bạn sẽ nhận được vị trí chính xác và địa chỉ sau khi đặt phòng được xác nhận.",
+  "stay.specific_location_notice": "Bản đồ này hiển thị vị trí cụ thể. Bạn sẽ nhận được địa chỉ sau khi đặt phòng được xác nhận.",
   "stay.error_unavailable": "Một số đêm đã không còn trống. Vui lòng chọn ngày khác.",
   "stay.error_min_nights": "Kỳ lưu trú vào những ngày này tối thiểu {count} đêm.",
   "stay.error_max_nights": "Kỳ lưu trú vào những ngày này tối đa {count} đêm.",
@@ -543,7 +545,7 @@
   "payment.processing_help": "Ngân hàng của bạn vẫn đang xác nhận khoản thanh toán này. Bạn sẽ nhận được email khi hoàn tất.",
   "payment.refunded": "Không thể hoàn tất đặt chỗ này",
   "payment.refunded_help": "Mục bạn thanh toán đã được người khác đặt trước khi thanh toán của bạn hoàn tất, vì vậy khoản thanh toán của bạn đang được hoàn lại toàn bộ.",
-  "stay.confirmed_message": "Kỳ lưu trú của bạn tại {home} đã được đặt và thanh toán.",
+  "stay.confirmed_message": "Kỳ lưu trú của bạn tại {home} đã được xác nhận.",
   "stay.cancellation_policy": "Chính sách hủy",
   "stay.receipt_missing_description": "Thông tin kỳ lưu trú có trong email xác nhận của bạn và trong tài khoản KrabiClaw khi bạn tạo tài khoản bằng email đã dùng để đặt."
 }

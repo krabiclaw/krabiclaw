@@ -530,6 +530,8 @@
   "stay.guests_maximum": "ゲスト最大{count}名",
   "stay.not_reported": "{item}の報告なし",
   "stay.where_youll_be": "宿泊先の場所",
+  "stay.general_location_notice": "この地図はおおよそのエリアを示しています。正確な場所と住所は予約確定後にお知らせします。",
+  "stay.specific_location_notice": "この地図は正確な場所を示しています。住所は予約確定後にお知らせします。",
   "stay.error_unavailable": "一部の日程はすでに予約できません。別の日程を選択してください。",
   "stay.error_min_nights": "この日程の最低宿泊数は{count}泊です。",
   "stay.error_max_nights": "この日程の最大宿泊数は{count}泊です。",
@@ -543,7 +545,7 @@
   "payment.processing_help": "銀行がこのお支払いを確認中です。完了するとメールでお知らせします。",
   "payment.refunded": "この予約を完了できませんでした",
   "payment.refunded_help": "お支払いが完了する前にご予約の枠が埋まったため、お支払いは全額返金されます。",
-  "stay.confirmed_message": "{home}でのご宿泊の予約とお支払いが完了しました。",
+  "stay.confirmed_message": "{home}でのご宿泊が確定しました。",
   "stay.cancellation_policy": "キャンセルポリシー",
   "stay.receipt_missing_description": "ご宿泊の詳細は確認メールに記載されています。予約時のメールアドレスでKrabiClawアカウントを作成すると、アカウントでも確認できます。"
 }

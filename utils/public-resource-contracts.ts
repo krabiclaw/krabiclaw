@@ -3,6 +3,9 @@ import type { RenderedBookingPolicySummary } from '~/server/utils/reservations'
 import type { Collection, Product } from '~/server/types/products'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { SocialImageSource } from '~/utils/social-metadata'
+import type { PublicLocationArea } from '~/types/public-location'
+import type { StayMapSharing } from '~/shared/stay-listing'
+import { isRecord } from '~/utils/api-clients'
 
 export interface PublicShellOrganization {
   name: string | null
@@ -28,6 +31,8 @@ export interface PublicShellLocation {
   title: string
   address?: ApiValue
   city?: ApiValue
+  stay_map_sharing: StayMapSharing | null
+  public_area: PublicLocationArea | null
   social_image?: SocialImageSource | null
   /** The one home this location holds and nothing besides; its page is the home's. */
   home_slug: string | null
@@ -71,6 +76,19 @@ export const isPublicShellPayload = (value: unknown): value is PublicShellPayloa
       && typeof location.id === 'string'
       && typeof location.slug === 'string'
       && typeof location.title === 'string'
+      && (location.stay_map_sharing === null || location.stay_map_sharing === 'general' || location.stay_map_sharing === 'specific')
+      && (location.public_area === null || (isRecord(location.public_area)
+        && nullableString(location.public_area.label)
+        && nullableString(location.public_area.locality)
+        && nullableString(location.public_area.administrative_area)
+        && nullableString(location.public_area.region_code)
+        && typeof location.public_area.approximate === 'boolean'
+        && (location.public_area.center === null || (isRecord(location.public_area.center)
+          && typeof location.public_area.center.latitude === 'number' && Number.isFinite(location.public_area.center.latitude)
+          && typeof location.public_area.center.longitude === 'number' && Number.isFinite(location.public_area.center.longitude)))
+        && (location.public_area.radius_meters === null || typeof location.public_area.radius_meters === 'number')))
+      && (location.stay_map_sharing === null || (location.address === null && location.maps_url === null))
+      && (location.stay_map_sharing !== 'general' || (location.latitude === null && location.longitude === null))
       && (location.home_slug === null || typeof location.home_slug === 'string')
       && sectionFlags(location.sections, PUBLIC_LOCATION_SECTIONS))) return false
   if (!isRecord(value.config)

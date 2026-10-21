@@ -21,6 +21,8 @@ import {
 import { resolvePublicTemplate } from '~/utils/template-registry'
 import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 import { platformHomeSocialCardCopy } from '~/server/utils/platform-home-social-card'
+import { publicLocationProtectedSql } from '~/server/utils/public-location-privacy'
+import { publicLocationIsProtected } from '~/shared/location-sharing'
 
 export function hashSocialCardGenerationInput(value: string): string {
   return bytesToHex(sha256(new TextEncoder().encode(value)))
@@ -63,7 +65,7 @@ export async function listSocialCardOwners(db: DbClient, input: { organizationId
 export type SocialCardRefreshResult =
   | { kind: 'generated'; owner: SocialCardOwner; assetId: string; publicUrl: string; generationKey: string }
   | { kind: 'reused'; owner: SocialCardOwner; assetId: string; publicUrl: string; generationKey: string }
-  | { kind: 'skipped'; owner: SocialCardOwner; reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'images_unavailable' }
+  | { kind: 'skipped'; owner: SocialCardOwner; reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'images_unavailable' | 'private_location' }
   | { kind: 'failed'; owner: SocialCardOwner; error: string }
 
 interface OwnerRecord {
@@ -72,6 +74,7 @@ interface OwnerRecord {
   description: string | null
   label: string | null
   location: string | null
+  is_stay_location?: number
 }
 
 interface OrganizationRecord {
@@ -152,7 +155,8 @@ async function loadOwner(db: DbClient, owner: SocialCardOwner): Promise<OwnerRec
       return await queryFirst<OwnerRecord>(db, `SELECT organization_id,
         COALESCE(NULLIF(trim(seo_title), ''), title) AS title,
         COALESCE(NULLIF(trim(seo_description), ''), NULLIF(trim(short_description), ''), NULLIF(trim(description), '')) AS description,
-        'Location' AS label, COALESCE(address ->> '$.sublocality', address ->> '$.locality') AS location FROM business_locations WHERE id = ? LIMIT 1`, [owner.owner_id]) ?? null
+        'Location' AS label, COALESCE(address ->> '$.sublocality', address ->> '$.locality') AS location,
+        ${publicLocationProtectedSql('bl')} AS is_stay_location FROM business_locations bl WHERE id = ? LIMIT 1`, [owner.owner_id]) ?? null
     case 'product':
       return await queryFirst<OwnerRecord>(db, `SELECT p.organization_id,
         p.name AS title,
@@ -220,7 +224,7 @@ function socialTemplate(organization: OrganizationRecord): SocialTemplate {
   return resolvePublicTemplate({ themeId: organization.theme_id, vertical: organization.vertical }).slug
 }
 
-async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner: SocialCardOwner; actorId?: string | null }, reason: 'no_source' | 'owner_not_found' | 'missing_content') {
+async function clearSocialCard(input: { db: DbClient; env: SocialCardEnv; owner: SocialCardOwner; actorId?: string | null }, reason: 'no_source' | 'owner_not_found' | 'missing_content' | 'private_location') {
   // Unplaced, not deleted: the card may be production's, read from a copy of
   // its rows. social-card-cleanup removes unplaced generated cards.
   const placed = await queryAll<{ organization_id: string; asset_id: string }>(input.db, "SELECT organization_id, asset_id FROM media_placements WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'", [input.owner.owner_type, input.owner.owner_id])
@@ -248,6 +252,7 @@ export async function refreshSocialCard(input: {
   const { db, env, owner } = input
   const ownerRecord = await loadOwner(db, owner)
   if (!ownerRecord) return await clearSocialCard(input, 'owner_not_found')
+  if (owner.owner_type === 'business_location' && publicLocationIsProtected(ownerRecord.is_stay_location)) return await clearSocialCard(input, 'private_location')
   const organization = await loadOrganization(db, ownerRecord.organization_id)
   if (!organization) return await clearSocialCard(input, 'owner_not_found')
   const title = ownerRecord.title?.trim()

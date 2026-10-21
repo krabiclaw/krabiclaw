@@ -6,14 +6,27 @@ import type { UpdateProductInput } from '../../server/types/products.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
-import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
-import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, listStays, readStayCalendar, recordStayPayment, setStayNights, updateStay, type StayAccess } from '../../server/domain/stays.ts'
+import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
+import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, listStays, readStayCalendar, recordStayPayment, setStayNights, updateStay, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
-import { H3 } from 'nitro/h3'
+import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import guestStayRoute from '../../server/api/public/guest-stays/[activityId].get.ts'
+import accountStayRoute from '../../server/api/account/stays/[activityId].get.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
 import { tokenHash } from '../../server/domain/payments/buyer.ts'
+import { createLocation, updateLocation } from '../../server/utils/location-management.ts'
+import { claimGuestThreadInvite, createGuestThreadInvite } from '../../server/domain/guest-threads/invites.ts'
+import publicLocationsRoute from '../../server/api/public/locations.get.ts'
+import publicLocationRoute from '../../server/api/public/locations/[slug].get.ts'
+import publicPageRoute from '../../server/api/public/page.get.ts'
+import { loadPublicShellSource } from '../../server/utils/public-shell.ts'
+import { loadPublicProductApiDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductReviews, type PublicProductLocation } from '../../server/utils/public-products.ts'
+import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
+import { getPublicTenantPageForPath } from '../../server/utils/public-tenant-pages.ts'
+import { putResourceLocalization } from '../../server/utils/localization.ts'
+import { listOrganizationReviews } from '../../server/utils/organization-reviews.ts'
+import { loadPublicSocialMedia } from '../../server/utils/public-social-image.ts'
 
 const ORG = 'org'
 const OWNER = 'owner-user'
@@ -29,7 +42,7 @@ async function boot() {
     name: 'stays-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { constructor(ctx) { this.ctx = ctx } async fetch(request) { if (new URL(request.url).pathname === "/observed") return Response.json(await this.ctx.storage.get("events") ?? []); if (new URL(request.url).pathname === "/failure") { await this.ctx.storage.put("failure", request.method === "PUT"); return new Response(null, { status: 204 }) } const event = await request.json(); await this.ctx.storage.put("events", [...await this.ctx.storage.get("events") ?? [], event]); if (await this.ctx.storage.get("failure")) return new Response("Publication refused", { status: 503 }); return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stays-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stays-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
@@ -581,16 +594,24 @@ test('members see only the homes they look after and change nothing; a home with
 test('a business’s site shows a guest the stay its signed link names, from any browser, and nothing else', { timeout: 120_000 }, async () => {
   const { runtime, db, env: bindings } = await boot()
   try {
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    const address = { regionCode: 'US', addressLines: ['12 Test Road', 'Apartment 4', 'East building'], languageCode: 'en', locality: 'Boulder', sublocality: 'North Boulder', administrativeArea: 'Colorado', postalCode: '80301' }
+    const location = { address, latitude: 40.014984, longitude: -105.270546, maps_url: 'https://maps.google.com/?cid=123456' }
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'site-stay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
-    // The anonymous Better Auth user the site's checkout made the stay for.
+    // A manual, pay-on-arrival stay is confirmed before collecting money. Its
+    // existing guest invite gives the Better Auth guest their own stay.
     const signIn = async () => {
       const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
       return { id: signed.response!.user.id, cookie: signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
     }
     const booker = await signIn()
-    await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(booker.id, stay.id).run()
+    const otherGuest = await signIn()
+    assert(stay.request_id)
+    const invite = await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: stay.request_id, actorUserId: OWNER })
+    const token = new URL(invite.url).pathname.split('/').at(-1)!
+    assert.equal((await claimGuestThreadInvite(db, { token, userId: booker.id })).thread_id, stay.request_id)
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
     const activityId = stay.request_id ?? stay.id
     // The link the confirmation email and the paid return carry, signed with the site's secret.
@@ -602,16 +623,96 @@ test('a business’s site shows a guest the stay its signed link names, from any
       app.get('/api/public/guest-stays/:activityId', guestStayRoute)
       return app.request(Object.assign(new Request(`https://org.proof.example/api/public/guest-stays/${activityId}`, { headers: token ? { authorization: `Bearer ${token}` } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
+    const accountRead = (cookie?: string) => {
+      const app = new H3()
+      app.get('/api/account/stays/:activityId', accountStayRoute)
+      return app.request(Object.assign(new Request(`https://proof.example/api/account/stays/${activityId}`, { headers: cookie ? { cookie } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    }
 
     // No session is sent: the link alone opens the stay, as from the email on another device.
     const own = await read(ORG, link)
     assert.equal(own.status, 200)
-    const body = await own.json() as { organization_id: string; stay: { id: string; guest_email: string; cancellation_policy: string; check_in_date: string; check_out_date: string }; home: { name: string; check_in_time: string; check_out_time: string; image_url: string | null }; cancellation: unknown }
-    assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: body.home, cancellation: body.cancellation },
-      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null }, cancellation: null })
+    assert.equal(own.headers.get('cache-control'), 'private, no-store')
+    const body = await own.json() as GuestStay
+    const { location: guestLocation, ...guestHome } = body.home
+    assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: guestHome, cancellation: body.cancellation },
+      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: null, dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null }, cancellation: null })
+    assert(guestLocation?.maps_url)
+    assert.deepEqual({ address: guestLocation.address, latitude: guestLocation.latitude, longitude: guestLocation.longitude }, { address, latitude: 40.014984, longitude: -105.270546 })
+    assert.equal(new URL(guestLocation.maps_url).origin, 'https://maps.google.com')
+    assert.equal(new URL(guestLocation.maps_url).searchParams.get('q'), '40.014984,-105.270546')
+    assert.equal(new URL(guestLocation.maps_url).searchParams.has('cid'), false)
+    assert.deepEqual({ status: body.stay.status, payment: body.stay.payment_status, paid: body.stay.paid_minor }, { status: 'confirmed', payment: 'unpaid', paid: 0 })
+    const account = await accountRead(booker.cookie)
+    assert.equal(account.status, 200)
+    assert.equal(account.headers.get('cache-control'), 'private, no-store')
+    assert.deepEqual((await account.json() as GuestStay).home.location, guestLocation)
+    assert.equal((await accountRead(otherGuest.cookie)).status, 404)
+    assert.equal((await accountRead()).status, 401)
     assert.equal((await read('another-org', link)).status, 404)
     assert.equal((await read(ORG, otherLink)).status, 404)
     assert.equal((await read(ORG)).status, 401)
+
+    // The mutation response must carry the saved pin on an address-only edit
+    // and on clearing just the address, as the focused editor reads it back.
+    for (const nextAddress of [{ ...address, locality: 'Longmont' }, null, address]) {
+      const edited = await updateLocation(db, ORG, 'cabin-site', { address: nextAddress }, OWNER, env)
+      assert.equal(edited.status, 200)
+      assert('location' in edited.data && edited.data.location)
+      assert.deepEqual({ latitude: edited.data.location.latitude, longitude: edited.data.location.longitude }, { latitude: 40.014984, longitude: -105.270546 })
+      assert.equal(edited.data.location.maps_url, location.maps_url)
+      assert.equal(await db.prepare("SELECT maps_url FROM business_locations WHERE id = 'cabin-site'").first('maps_url'), location.maps_url)
+      const saved = await read(ORG, link)
+      assert.equal(saved.status, 200)
+      const savedLocation = (await saved.json() as GuestStay).home.location
+      assert(savedLocation)
+      assert.deepEqual({ address: savedLocation.address, latitude: savedLocation.latitude, longitude: savedLocation.longitude }, { address: nextAddress, latitude: 40.014984, longitude: -105.270546 })
+    }
+
+    // A broken stored pin fails visibly, rather than exposing a half pin or
+    // replacing invalid coordinates with a guessed destination.
+    for (const [latitude, longitude, field] of [[40.014984, null, 'longitude'], [91, -105.270546, 'latitude']] as const) {
+      await db.prepare("UPDATE business_locations SET latitude = ?, longitude = ? WHERE id = 'cabin-site'").bind(latitude, longitude).run()
+      for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
+        assert.equal(response.status, 500)
+        const refusal = await response.json() as { data: { code: string; field: string } }
+        assert.deepEqual(refusal.data, { code: 'INVALID_STORED_LOCATION', field })
+      }
+      assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+      const restored = await read(ORG, link)
+      assert.equal(restored.status, 200)
+      assert.deepEqual((await restored.json() as GuestStay).home.location, guestLocation)
+    }
+
+    // A confirmed guest sees only facts the location actually has.
+    const cleared = await updateLocation(db, ORG, 'cabin-site', { address: null, latitude: null, longitude: null, maps_url: null }, OWNER, env)
+    assert.equal(cleared.status, 200)
+    assert('location' in cleared.data && cleared.data.location)
+    assert.deepEqual({ latitude: cleared.data.location.latitude, longitude: cleared.data.location.longitude }, { latitude: null, longitude: null })
+    const unset = await read(ORG, link)
+    assert.equal(unset.status, 200)
+    assert.deepEqual((await unset.json() as GuestStay).home.location, { address: null, latitude: null, longitude: null, maps_url: null })
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+
+    // Pending app records are not currently made by checkout, but stored
+    // unconfirmed state must never disclose an exact location through either read.
+    await db.prepare("UPDATE stays SET status = 'pending' WHERE id = ?").bind(stay.id).run()
+    for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
+      assert.equal(response.status, 200)
+      const pending = await response.json() as GuestStay
+      assert.equal(pending.stay.status, 'pending')
+      assert.equal(pending.home.location, null)
+      for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(pending).includes(exact))
+    }
+    await db.prepare("UPDATE stays SET status = 'confirmed' WHERE id = ?").bind(stay.id).run()
+    await cancelStay(db, env, manager, stay.id, { expected_version: stay.version })
+    for (const response of [await read(ORG, link), await accountRead(booker.cookie)]) {
+      assert.equal(response.status, 200)
+      const cancelled = await response.json() as GuestStay
+      assert.equal(cancelled.stay.status, 'cancelled')
+      assert.equal(cancelled.home.location, null)
+      for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(cancelled).includes(exact))
+    }
     // The link lasts as a booking's does: thirty days from when the stay was booked.
     await db.prepare("UPDATE stays SET created_at = ? WHERE id = ?").bind(new Date(Date.now() - 31 * 86_400_000).toISOString(), stay.id).run()
     assert.equal((await read(ORG, link)).status, 410)
@@ -628,11 +729,15 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // The guest's notices are written in the business's source language.
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    const location = { address: { regionCode: 'TH', addressLines: ['56 Test Lane', 'Villa 8', 'Garden entrance'], languageCode: 'th', locality: 'Krabi Town', sublocality: 'Ao Nang', administrativeArea: 'Krabi', postalCode: '81180' }, latitude: 8.0326, longitude: 98.822, maps_url: null }
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
     const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const buyer = signed.response!.user.id
     const cookie = signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     // The checkout's own anonymous guest owns the stay until the paying browser proves the purchase.
-    const checkoutGuest = (await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })).response!.user.id
+    const checkoutSigned = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+    const checkoutGuest = checkoutSigned.response!.user.id
+    const checkoutCookie = checkoutSigned.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     // The stay a captured checkout made, as its conversion leaves it: the hold converted to it, the payment captured for it.
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'checkout:stay-pay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
     await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(checkoutGuest, stay.id).run()
@@ -660,6 +765,7 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     app.use((event) => { event.context.organizationId = ORG })
     app.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
     app.get('/api/public/guest-stays/:activityId', guestStayRoute)
+    app.get('/api/account/stays/:activityId', accountStayRoute)
     const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
     const activityId = stay.request_id ?? stay.id
@@ -679,9 +785,192 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     // (conversion is covered by its own tests); this checks the receipt read shows them.
     const read = await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: `Bearer ${returned.receipt_token}` })
     assert.equal(read.status, 200)
-    const body = await read.json() as { stay: { id: string; paid_minor: number; cancellation_policy: string; guest_email: string }; cancellation: { policy: string; paid_minor: number } | null }
+    const body = await read.json() as GuestStay
     assert.deepEqual({ id: body.stay.id, paid: body.stay.paid_minor, policy: body.stay.cancellation_policy, email: body.stay.guest_email, quote: body.cancellation && { policy: body.cancellation.policy, paid: body.cancellation.paid_minor } },
       { id: stay.id, paid: 45_000, policy: 'moderate', email: 'ana@example.com', quote: { policy: 'moderate', paid: 45_000 } })
+    assert(body.home.location?.maps_url)
+    assert.deepEqual({ address: body.home.location.address, latitude: body.home.location.latitude, longitude: body.home.location.longitude }, { address: location.address, latitude: 8.0326, longitude: 98.822 })
+    assert.equal(new URL(body.home.location.maps_url).searchParams.get('q'), '8.0326,98.822')
+    const account = await call(`/api/account/stays/${activityId}`)
+    assert.equal(account.status, 200)
+    assert.deepEqual((await account.json() as GuestStay).home.location, body.home.location)
+    assert.equal((await call(`/api/account/stays/${activityId}`, {}, { cookie: checkoutCookie })).status, 404)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('home location sharing protects every public projection after localization while ordinary business locations remain public', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    // A mixed catalog owns a private home and an ordinary public branch. The
+    // unpublished home's location remains private even on another product.
+    await db.prepare("UPDATE organization SET vertical = 'restaurant' WHERE id = ?").bind(ORG).run()
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('public-en', ?, 'en', 1, 'published'), ('public-th', ?, 'th', 0, 'published')").bind(ORG, ORG).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('public-growth', 'growth', ?, 'active', 4102444800)").bind(ORG).run()
+    const address = { regionCode: 'TH', addressLines: ['56 Private Lane', 'Villa 8', 'Garden entrance'], languageCode: 'en', locality: 'Krabi Town', sublocality: 'Ao Nang', administrativeArea: 'Krabi', postalCode: '81180' }
+    const location = { address, latitude: 8.0326, longitude: 98.822, maps_url: 'https://maps.google.com/?cid=private-cid', google_place_id: 'private-place-id', google_review_url: 'https://search.google.com/local/writereview?placeid=private-place-id' }
+    const branchAddress = { regionCode: 'US', addressLines: ['123 Public Street'], locality: 'Boulder', administrativeArea: 'Colorado', postalCode: '80301' }
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+    assert.equal((await updateLocation(db, ORG, 'lake-site', { address: branchAddress, latitude: 40.014984, longitude: -105.270546, maps_url: 'https://maps.google.com/?cid=public-cid', google_place_id: 'public-place-id' }, OWNER, env)).status, 200)
+    const beforeInvalidMap = await db.prepare("SELECT maps_url, updated_at FROM business_locations WHERE id = 'cabin-site'").first()
+    const beforeLocationCount = await db.prepare('SELECT count(*) FROM business_locations').first('count(*)')
+    for (const [mapsUrl, error] of [['not a map URL', 'Invalid URL'], ['javascript:alert(1)', 'A map URL must use HTTP or HTTPS']] as const) {
+      const refusal = { status: 400, data: { error, code: 'INVALID_LOCATION_FIELD', field: 'maps_url' } }
+      assert.deepEqual(await updateLocation(db, ORG, 'cabin-site', { maps_url: mapsUrl }, OWNER, env), refusal)
+      assert.deepEqual(await createLocation(env, db, ORG, { title: 'Invalid map location', timezone: 'UTC', maps_url: mapsUrl }, OWNER), refusal)
+      assert.deepEqual(await db.prepare("SELECT maps_url, updated_at FROM business_locations WHERE id = 'cabin-site'").first(), beforeInvalidMap)
+      assert.equal(await db.prepare('SELECT count(*) FROM business_locations').first('count(*)'), beforeLocationCount)
+    }
+    const emptyMap = await updateLocation(db, ORG, 'cabin-site', { maps_url: '' }, OWNER, env)
+    assert.equal(emptyMap.status, 200)
+    assert('location' in emptyMap.data && emptyMap.data.location)
+    assert.equal(emptyMap.data.location.maps_url, '')
+    assert.equal(await db.prepare("SELECT maps_url FROM business_locations WHERE id = 'cabin-site'").first('maps_url'), '')
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', { maps_url: location.maps_url }, OWNER, env)).status, 200)
+    await home(db, env, { name: 'Private cabin', location: 'cabin-site' })
+    const dish = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: { kind: 'dish', name: 'Lunch', variants: [{ name: 'Default', prices: [{ unit_amount: 1500, currency: 'USD' }] }] } })
+    await setProductPublication(db, { env, organizationId: ORG, productId: dish.id, published: true, actor: { actorId: OWNER } })
+    await setProductLocation(db, { env, organizationId: ORG, productId: dish.id, locationId: 'cabin-site', published: true, actor: { actorId: OWNER } })
+    const translatedStreet = '56 ถนนส่วนตัว'
+    await putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'business_location', resourceId: 'cabin-site', locale: 'th', userId: OWNER,
+      values: { title: 'ที่พักส่วนตัว', address: { addressLines: [translatedStreet, 'วิลลา 8'], locality: 'เมืองกระบี่', sublocality: 'อ่าวนาง', administrativeArea: 'กระบี่' } } })
+    await putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: dish.id, locale: 'th', userId: OWNER, values: { name: 'อาหารกลางวัน' } })
+    await createContentDocumentWithBlocks(db, { id: 'public-home', organizationId: ORG, kind: 'page', rowRole: 'root', locale: 'en', title: 'Home', path: '/', status: 'published', visibility: 'listed', metadata: { page_type: 'custom' } },
+      [{ id: 'public-location-grid', type: 'location_grid', data: { location_ids: ['cabin-site', 'lake-site'] } }])
+    await createContentDocumentWithBlocks(db, { id: 'public-home-th', organizationId: ORG, kind: 'page', rowRole: 'representation', rootId: 'public-home', locale: 'th', title: 'หน้าแรก', path: '/' },
+      [{ id: 'public-location-grid-th', type: 'location_grid', data: { location_ids: ['cabin-site'] } }])
+    const reference = 'https://www.google.com/maps/reviews/data=private-review'
+    const flag = 'https://www.google.com/maps/review/report?placeid=private-place-id'
+    const metadata = { author_uri: null, author_photo_uri: null, language_code: 'en', original_text: null, original_language_code: null, flag_content_uri: flag, visit_date: null }
+    for (const [id, locationId] of [['private-review', 'cabin-site'], ['public-review', 'lake-site']] as const) {
+      await db.prepare("INSERT INTO reviews (id, organization_id, location_id, author_name, rating, content, source, status, original_reference, google_review_metadata) VALUES (?, ?, ?, 'Ana', 5, 'A lovely visit', 'google_places', 'approved', ?, ?)")
+        .bind(id, ORG, locationId, reference, JSON.stringify(metadata)).run()
+    }
+    // Existing generated artifacts may still contain an address drawn before
+    // privacy was enabled. Reading must exclude them without depending on a
+    // cleanup having already run; an ordinary branch keeps its generated card.
+    const privateCard = 'https://imagedelivery.example.test/hash/old-private-card/public'
+    const privateHero = 'https://imagedelivery.example.test/hash/private-hero/public'
+    const publicCard = 'https://imagedelivery.example.test/hash/public-card/public'
+    const publicHero = 'https://imagedelivery.example.test/hash/public-hero/public'
+    for (const [assetId, locationId, slot, url] of [
+      ['old-private-card', 'cabin-site', 'social_card', privateCard], ['private-hero', 'cabin-site', 'hero', privateHero],
+      ['public-card', 'lake-site', 'social_card', publicCard], ['public-hero', 'lake-site', 'hero', publicHero],
+    ] as const) {
+      await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, mime_type, width, height, generation_key, status, created_at, updated_at) VALUES (?, ?, 'image', 'cloudflare_images', ?, ?, 'image/png', 1200, 630, ?, 'active', ?, ?)")
+        .bind(assetId, ORG, slot === 'social_card' ? 'generated' : 'uploaded', url, slot === 'social_card' ? `historical-${assetId}` : null, NOW, NOW).run()
+      await db.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at) VALUES (?, ?, 'business_location', ?, ?, ?, 0, 'active', ?, ?)")
+        .bind(`placement-${assetId}`, ORG, locationId, slot, assetId, NOW, NOW).run()
+    }
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'cabin-site' AND slot = 'social_card' AND status = 'active'").first('count(*)'), 1)
+    const retained = await loadPublicSocialMedia(db, ORG, 'business_location', ['cabin-site', 'lake-site'])
+    assert.equal(retained.get('cabin-site')?.social_image?.url, privateHero)
+    assert.equal(retained.get('lake-site')?.social_image?.url, publicCard)
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'cabin-site' AND slot = 'social_card' AND status = 'active'").first('count(*)'), 1)
+
+    const app = new H3()
+    app.use(event => { event.context.organizationId = ORG })
+    app.get('/api/public/locations', publicLocationsRoute)
+    app.get('/api/public/locations/:slug', publicLocationRoute)
+    app.get('/api/public/page', publicPageRoute)
+    app.get('/shell', event => loadPublicShellSource(event, ORG, { locale: getQuery(event).locale as string | undefined }))
+    const read = (path: string) => app.request(Object.assign(new Request(`https://org.localhost${path}`), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const originalVersion = await db.prepare("SELECT updated_at FROM business_locations WHERE id = 'cabin-site'").first<string>('updated_at')
+    assert(originalVersion)
+    const invalid = await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: 'invalid' as 'general' }, OWNER, env)
+    assert.equal(invalid.status, 400)
+    assert.equal(await db.prepare("SELECT updated_at FROM business_locations WHERE id = 'cabin-site'").first('updated_at'), originalVersion)
+
+    for (const mode of ['general', 'specific'] as const) {
+      if (mode === 'specific') {
+        assert.equal((await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: mode, expected_updated_at: originalVersion }, OWNER, env)).status, 200)
+        assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'cabin-site' AND slot = 'social_card'").first('count(*)'), 0)
+        assert.equal(await db.prepare("SELECT status FROM media_assets WHERE id = 'old-private-card'").first('status'), 'active')
+        const stale = await updateLocation(db, ORG, 'cabin-site', { stay_map_sharing: 'general', expected_updated_at: originalVersion }, OWNER, env)
+        assert.deepEqual(stale, { status: 409, data: { error: 'The location changed since it was read. Reload it and try again.', code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' } })
+      }
+      const collection = await loadPublicProductCollection(db, ORG, 'menu', false, 'cabin-site', env)
+      assert.equal(collection?.products[0]?.id, dish.id)
+      const detail = await loadPublicProductDetail(env, db, ORG, 'menu', false, 'cabin-site', dish.slug)
+      const apiDetail = await loadPublicProductApiDetail(env, db, ORG, false, 'cabin-site', dish.slug)
+      const translatedDetail = await loadPublicProductDetail(env, db, ORG, 'menu', false, 'cabin-site', dish.slug, 'th')
+      assert(detail && apiDetail && translatedDetail)
+      const projections: PublicProductLocation[] = [collection!.locations[0]!, detail.location, apiDetail.location, translatedDetail.location]
+      for (const path of ['/api/public/locations', '/api/public/locations/cabin-site', '/shell', '/shell?locale=th', '/api/public/page?page=location&location=cabin-site&datasets=location,reviews', '/api/public/page?page=location&location=cabin-site&datasets=location,reviews&locale=th']) {
+        const response = await read(path)
+        assert.equal(response.status, 200, path)
+        const payload = await response.json() as { locations?: PublicProductLocation[]; location?: PublicProductLocation; shell?: { locations: PublicProductLocation[] } }
+        const selected = payload.location ?? (payload.locations ?? payload.shell?.locations)?.find(item => item.id === 'cabin-site')
+        assert(selected, path)
+        projections.push(selected)
+        for (const exact of [...address.addressLines, translatedStreet, location.maps_url, location.google_place_id, reference, flag, privateCard]) assert(!JSON.stringify(payload).includes(exact), `${path} disclosed ${exact}`)
+        if (path.startsWith('/shell') || path.startsWith('/api/public/page')) assert.equal((selected as PublicProductLocation & { social_image: { url: string } }).social_image.url, privateHero)
+      }
+      for (const projected of projections) {
+        assert.equal(projected.address, null)
+        assert.equal(projected.maps_url, null)
+        assert.equal(projected.stay_map_sharing, mode)
+        assert.equal(projected.public_area?.approximate, mode === 'general')
+        if (mode === 'general') {
+          assert.equal(projected.latitude, null)
+          assert.equal(projected.longitude, null)
+          assert.deepEqual(projected.public_area?.center, { latitude: 8.03, longitude: 98.83 })
+          assert.equal(projected.public_area?.radius_meters, 2000)
+          assert.equal(new URL(projected.map_embed_url!).searchParams.get('q'), '8.03,98.83')
+        } else {
+          assert.deepEqual([projected.latitude, projected.longitude], [location.latitude, location.longitude])
+          assert.equal(new URL(projected.map_embed_url!).searchParams.get('q'), '8.0326,98.822')
+        }
+      }
+      assert.equal(translatedDetail.location.public_area?.locality, 'เมืองกระบี่')
+      const grid = await getPublicTenantPageForPath(env, db, ORG, '/', { locale: 'th' })
+      assert(grid)
+      const items = grid.blocks.find(block => block.type === 'location_grid')?.data.items as Array<{ id: string; city: string; address?: string; public_area: { locality: string } }>
+      assert.equal(items.length, 1)
+      assert.equal(items[0]!.id, 'cabin-site')
+      assert.equal(items[0]!.city, 'เมืองกระบี่')
+      assert.equal(items[0]!.address, undefined)
+      assert(!JSON.stringify(grid).includes(translatedStreet))
+      const reviews = await loadPublicProductReviews(db, detail)
+      assert.equal(reviews.length, 1)
+      assert.equal(reviews[0]!.original_reference, null)
+      assert.equal(reviews[0]!.google_review_metadata?.flag_content_uri, null)
+      const locationReviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
+      assert.equal(locationReviews.length, 1)
+      assert.equal(locationReviews[0]!.original_reference, null)
+    }
+
+    assert.equal((await updateLocation(db, ORG, 'cabin-site', { latitude: null, longitude: null, maps_url: null }, OWNER, env)).status, 200)
+    const missingPin = await read('/api/public/locations/cabin-site')
+    assert.equal(missingPin.status, 200)
+    const withoutPin = (await missingPin.json() as { location: PublicProductLocation }).location
+    assert.equal(withoutPin.stay_map_sharing, 'specific')
+    assert.deepEqual([withoutPin.latitude, withoutPin.longitude, withoutPin.public_area?.center, withoutPin.public_area?.radius_meters], [null, null, null, null])
+    assert.equal(withoutPin.public_area?.approximate, true)
+    assert(!withoutPin.map_embed_url?.includes(address.addressLines[0]!))
+
+    const branch = await read('/api/public/locations/lake-site')
+    assert.equal(branch.status, 200)
+    const publicBranch = (await branch.json() as { location: PublicProductLocation }).location
+    assert.deepEqual(publicBranch.address, branchAddress)
+    assert.deepEqual([publicBranch.latitude, publicBranch.longitude, publicBranch.maps_url, publicBranch.stay_map_sharing], [40.014984, -105.270546, 'https://maps.google.com/?cid=public-cid', null])
+    const branchReviews = await listOrganizationReviews(db, ORG, { locationId: 'lake-site', publishedOnly: true })
+    assert.equal(branchReviews[0]!.original_reference, reference)
+    assert.deepEqual(branchReviews[0]!.google_review_metadata, metadata)
+    assert.equal((await loadPublicSocialMedia(db, ORG, 'business_location', ['lake-site'])).get('lake-site')?.social_image?.url, publicCard)
+    // A lodging organization's location is private before any home is attached.
+    await db.prepare("UPDATE organization SET vertical = 'lodging' WHERE id = ?").bind(ORG).run()
+    const unassigned = await read('/api/public/locations/lake-site')
+    assert.equal(unassigned.status, 200)
+    const privateBranch = (await unassigned.json() as { location: PublicProductLocation }).location
+    assert.equal(privateBranch.address, null)
+    assert.equal(privateBranch.maps_url, null)
+    assert.equal(privateBranch.stay_map_sharing, 'general')
+    assert.deepEqual([privateBranch.latitude, privateBranch.longitude], [null, null])
+    const nowProtected = await loadPublicSocialMedia(db, ORG, 'business_location', ['lake-site'])
+    assert.equal(nowProtected.get('lake-site')?.social_image?.url, publicHero)
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_id = 'lake-site' AND slot = 'social_card' AND status = 'active'").first('count(*)'), 1)
   } finally {
     await runtime.dispose()
   }

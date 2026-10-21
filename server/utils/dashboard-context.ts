@@ -13,6 +13,7 @@ import { parsePostalAddress } from '~/utils/postal-address'
 import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { loadPublicSocialMedia, type PublicSocialMedia } from '~/server/utils/public-social-image'
 import { mediaStillUrl, resolveOwnerPicture } from '~/shared/media-placement-contract'
+import type { StayMapSharing } from '~/shared/stay-listing'
 
 /**
  * The tenant's own configuration, read from the `organization` row.
@@ -79,6 +80,7 @@ export interface DashboardLocationRow {
   id: string
   slug: string
   title: string
+  stay_map_sharing: StayMapSharing
   status: string
   timezone: string | null
   address: string | null
@@ -91,6 +93,7 @@ export interface DashboardLocationContextRow {
   organization_id: string
   slug: string
   title: string
+  stay_map_sharing: StayMapSharing
   address: string | null
   phone: string | null
   email: string | null
@@ -319,7 +322,7 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
   }
 
   const row = await queryFirst<DashboardLocationContextRow>(db, `
-    SELECT bl.id, bl.organization_id, bl.slug, bl.title, bl.address, bl.phone, bl.website_url, bl.maps_url,
+    SELECT bl.id, bl.organization_id, bl.slug, bl.title, bl.address, bl.stay_map_sharing, bl.phone, bl.website_url, bl.maps_url,
            bl.latitude, bl.longitude, bl.opening_hours, bl.categories, bl.rating, bl.review_count, bl.status,
            bl.last_synced_at, bl.description, bl.short_description, bl.special_hours, bl.price_level, bl.email,
            bl.google_place_id, bl.google_review_url, bl.created_at, bl.updated_at, bl.timezone, bl.max_capacity,
@@ -361,7 +364,7 @@ export async function listDashboardLocations(
 ) {
 
   const locations = await queryAll<Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null }>(db, `
-    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address
+    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.stay_map_sharing
     FROM business_locations l
     WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
       ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
