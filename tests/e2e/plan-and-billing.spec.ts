@@ -224,6 +224,8 @@ test.describe('Plan and billing', () => {
       expect(intents[0]).toMatchObject({ organizationId: GROWTH_ID, subscriptionId: billing.stripeSubscriptionId, action: 'upgrade', effectiveTiming: 'immediate' })
       expect(upgradeRequests).toHaveLength(1)
       expect(upgradeRequests[0]).toMatchObject({ plan: 'business', referenceId: GROWTH_ID, customerType: 'organization', subscriptionId: billing.stripeSubscriptionId })
+      // The owner comes back to Plan and billing: the upgrade leaf no longer applies once the plan is Business.
+      expect(upgradeRequests[0]).toMatchObject({ returnUrl: new URL(`${GROWTH}/billing`, baseURL).toString(), successUrl: new URL(`${GROWTH}/billing?success=true&plan=business`, baseURL).toString() })
       // The organization is still on Growth.
       const unchanged = await page.request.get(`/api/billing/status?organizationId=${GROWTH_ID}`)
       expect((await unchanged.json() as { billing: { plan: string } }).billing.plan).toBe('growth')
