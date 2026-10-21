@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:021af284d99e9753216a09b19b6153ce7098c3f9c9d17e4d7c20f24fabe275db",
-  "documentationFingerprint": "sha256:1acd5ea5e054b97ab5966cd38dedad99518fca51761d7a5f7011089f15ef8507",
+  "fingerprint": "sha256:d0bee0ae9d8a64565663b3a6c3fbfb4069d0eeb668423f6b94379d5c97a049ce",
+  "documentationFingerprint": "sha256:2356c73cc0851602010684cce341893c75937ef608f8015f5b6fbe86de0b09c3",
   "tools": [
     {
       "name": "add_organization_language",
@@ -11045,6 +11045,10 @@
             },
             "type": "array"
           },
+          "contains_eu_political_advertising": {
+            "description": "Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.",
+            "type": "boolean"
+          },
           "daily_budget_micros": {
             "description": "Optional daily budget in micros. Defaults to the source campaign budget.",
             "minimum": 1000000,
@@ -11082,7 +11086,8 @@
         "required": [
           "source_campaign_id",
           "new_campaign_name",
-          "target_url"
+          "target_url",
+          "contains_eu_political_advertising"
         ],
         "type": "object"
       },
@@ -16742,6 +16747,10 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "contains_eu_political_advertising": {
+            "description": "Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.",
+            "type": "boolean"
+          },
           "daily_budget_micros": {
             "description": "Daily budget in micros (e.g. 10000000 for 10 units in account currency).",
             "minimum": 1000000,
@@ -16817,7 +16826,8 @@
           "target_url",
           "keywords",
           "headlines",
-          "descriptions"
+          "descriptions",
+          "contains_eu_political_advertising"
         ],
         "type": "object"
       },
@@ -61592,6 +61602,10 @@
                 },
                 "type": "array"
               },
+              "contains_eu_political_advertising": {
+                "description": "Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.",
+                "type": "boolean"
+              },
               "daily_budget_micros": {
                 "description": "Daily budget in micros (e.g. 10000000 for 10 units in account currency).",
                 "minimum": 1000000,
@@ -61666,7 +61680,8 @@
               }
             },
             "required": [
-              "mode"
+              "mode",
+              "contains_eu_political_advertising"
             ],
             "type": "object"
           },

@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import type { McpToolDefinition } from './shared'
 import { organizationTool } from './shared'
 import type { McpExecutorContext } from './execution'
-import { NOT_HANDLED, optionalString, requiredString } from './execution'
+import { NOT_HANDLED, optionalString, requiredBoolean, requiredString } from './execution'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { linkedAccountAccessToken } from '~/server/utils/auth'
 import {
@@ -134,7 +134,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
-    required: ['name', 'daily_budget_micros', 'target_url', 'keywords', 'headlines', 'descriptions'],
+    required: ['name', 'daily_budget_micros', 'target_url', 'keywords', 'headlines', 'descriptions', 'contains_eu_political_advertising'],
     inputSchema: {
       name: {
         type: 'string',
@@ -180,6 +180,10 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
         enum: ['ENABLED', 'PAUSED'],
         description: 'Initial campaign status (defaults to PAUSED).',
       },
+      contains_eu_political_advertising: {
+        type: 'boolean',
+        description: 'Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.',
+      },
     },
     outputSchema: {
       type: 'object',
@@ -200,7 +204,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
-    required: ['source_campaign_id', 'new_campaign_name', 'target_url'],
+    required: ['source_campaign_id', 'new_campaign_name', 'target_url', 'contains_eu_political_advertising'],
     inputSchema: {
       source_campaign_id: {
         type: 'string',
@@ -232,6 +236,10 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
         type: 'string',
         enum: ['ENABLED', 'PAUSED'],
         description: 'Initial status of the cloned campaign (default PAUSED).',
+      },
+      contains_eu_political_advertising: {
+        type: 'boolean',
+        description: 'Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.',
       },
     },
     outputSchema: {
@@ -328,6 +336,7 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
       headlines,
       descriptions,
       status,
+      containsEuPoliticalAdvertising: requiredBoolean(args, 'contains_eu_political_advertising'),
     })
 
     return {
@@ -358,6 +367,7 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
       headlineReplacements,
       additionalKeywords,
       status,
+      containsEuPoliticalAdvertising: requiredBoolean(args, 'contains_eu_political_advertising'),
     })
 
     return {
