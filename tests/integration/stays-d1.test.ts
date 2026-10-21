@@ -474,8 +474,8 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     const intervening = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'living_room' })
     const second = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
     assert.notEqual(first.room.id, second.room.id)
-    const roomA: StayPhotoRoom = { id: first.room.id, type: 'bedroom', photo_ids: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
-    const roomB: StayPhotoRoom = { id: second.room.id, type: 'bedroom', photo_ids: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+    let roomA: StayPhotoRoom = { id: first.room.id, type: 'bedroom', photo_ids: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+    let roomB: StayPhotoRoom = { id: second.room.id, type: 'bedroom', photo_ids: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
     // A bedroom added after a different type still groups with the original
     // bedroom, retaining creation order and identities within their type.
     const grouped = [roomA, roomB, { id: intervening.room.id, type: 'living_room' as const, photo_ids: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }]
@@ -558,9 +558,11 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.equal(finalCount, finalAllocation.beds)
     for (const current of finalAllocation.photo_rooms) {
       await updateStayPhotoRoom(db, env, manager, cabin.id, current.id, { expected_details_version: current.details_version, sleeping_arrangements: null, private_attached_bathroom: null })
-      const expected = current.id === roomA.id ? roomA : roomB
-      expected.details_version = current.details_version + 1
     }
+    // Only the winning allocation and privacy writes advance the occupied
+    // room; the free room advances only when its total-race write wins.
+    roomA = { ...roomA, details_version: 5 + (allocationRace[0]!.status === 'fulfilled' ? 2 : Number(totalRace[0]!.status === 'fulfilled')) }
+    roomB = { ...roomB, details_version: 2 + (allocationRace[1]!.status === 'fulfilled' ? 2 : Number(totalRace[0]!.status === 'fulfilled')) }
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { beds: 3 } } })
     assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [roomA, roomB])
     const beforeRoomAppend = await getProduct(db, ORG, cabin.id)
