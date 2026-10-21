@@ -1,9 +1,26 @@
 
-import type { H3Event } from 'nitro'
-import type { HTTPEvent } from 'nitro/h3'
+import { HTTPError, type H3Event } from 'nitro'
+import { queryFirst, type DbClient } from '~/server/db'
+import { oncePerRequest } from '~/server/utils/request-scope'
+import { getEventContext, type HTTPEvent } from 'nitro/h3'
 import { useRuntimeConfig } from 'nitro/runtime-config'
 import { hostnameOf, isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { isNonIndexableHost } from '~/server/utils/seo-policy'
+
+export const PUBLIC_CACHE_REVISION_SQL = '(SELECT id FROM public_resource_cache_invalidations WHERE organization_id = o.id ORDER BY rowid DESC LIMIT 1)'
+
+/** The committed change ledger owns cache generations; keep the first read for this request's writes too. */
+export function publicCacheRevision(event: H3Event | HTTPEvent, db: DbClient, organizationId: string, committedRevision?: string | null): Promise<string | null> {
+  return oncePerRequest(event, `public-cache-revision:${organizationId}`, async () => {
+    if (committedRevision !== undefined) return committedRevision
+    const row = await queryFirst<{ revision: string | null }>(db, `
+      SELECT ${PUBLIC_CACHE_REVISION_SQL} AS revision
+        FROM organization o WHERE o.id = ?
+    `, [organizationId])
+    if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+    return row.revision
+  })
+}
 
 /**
  * Cached HTML references the `/_nuxt/` asset hashes of the build that rendered
@@ -16,7 +33,7 @@ import { isNonIndexableHost } from '~/server/utils/seo-policy'
  * Private non-production hosts use the same policy as public-html-cache: no
  * shared HTML entry may be read or written for them.
  */
-export function buildHtmlCacheKey(event: H3Event | HTTPEvent): string | null {
+export async function buildHtmlCacheKey(event: H3Event | HTTPEvent): Promise<string | null> {
 
   const request = event.req
   const cfRequest = request
@@ -30,7 +47,12 @@ export function buildHtmlCacheKey(event: H3Event | HTTPEvent): string | null {
   const buildId = useRuntimeConfig().app?.buildId
   if (!buildId) return null
   const path = 'path' in event ? event.path : new URL(request.url).pathname
-  return `html:${host}:${buildId}:${path}`
+  const organizationId = getEventContext(event).organizationId
+  if (typeof organizationId !== 'string' || !organizationId) return null
+  const db = (request.runtime?.cloudflare?.env as { DB?: DbClient } | undefined)?.DB
+  if (!db) throw new Error('DB is not bound; the public cache revision cannot be read')
+  const revision = await publicCacheRevision(event, db, organizationId)
+  return `html:${host}:${buildId}:${encodeURIComponent(revision ?? '')}:${path}`
 }
 
 /**
@@ -38,7 +60,7 @@ export function buildHtmlCacheKey(event: H3Event | HTTPEvent): string | null {
  * Called after any mutating MCP tool call so the next browser load gets
  * fresh SSR HTML with the correct /_nuxt/ asset hashes.
  *
- * KV keys are structured as: html:<host>:<build id>:<pathname>
+ * KV keys are structured as: html:<host>:<build id>:<revision>:<pathname>
  * We list by prefix html:<host>: and delete all matches, so a purge clears the
  * host's entries for every build id.
  */

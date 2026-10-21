@@ -61,7 +61,7 @@ export default definePlugin((nitroApp) => {
     // Check for CSRF tokens or nonce markers in HTML body
     if (/csrf|nonce=|random\/nonce/i.test(body)) return
 
-    const key = buildHtmlCacheKey(event)
+    const key = await buildHtmlCacheKey(event)
     if (!key) return
 
     const kv = (request.runtime?.cloudflare?.env as CloudflareEnvContext | undefined)?.ORGANIZATION_CACHE

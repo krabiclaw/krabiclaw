@@ -9,7 +9,7 @@ import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 // params instead of host + pathname — public resources are looked up by organizationId
 // directly, not by tenant hostname, so no hostname resolution is needed here.
 //
-// Cache key: public~<organizationId>~v14~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
+// Cache key: public~<organizationId>~v14~<revision>~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
 // each field percent-encoded (mirrors composables/usePublicPageRequest.ts's
 // usePublicResourceKey() — cached entries are never preview/draft-authorized,
 // see the preview authorization guard in the shell and page services).
@@ -189,12 +189,13 @@ export function buildPublicPaymentMethodsCacheKey(organizationId: string): strin
   return ['public', encodeKeyField(organizationId), 'v14', 'payment-methods'].join('~')
 }
 
-export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams): string {
+export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams, revision: string | null): string {
   return [
     'public',
     encodeKeyField(organizationId),
     // v14: locations carry explicit privacy projections for protected homes.
     'v14',
+    encodeKeyField(revision),
     params.contract,
     encodeKeyField(params.page),
     encodeKeyField(params.location),

@@ -1,9 +1,9 @@
 // KV-based SSR HTML cache — globally replicated, ~4ms read latency from any edge.
 // Replaces the previous caches.default approach which was per-datacenter only.
 //
-// Cache key: html:<host>[:<preview tenant>]:<build id>:<pathname>
+// Cache key: html:<host>:<build id>:<revision>:<pathname>
 // Stored in ORGANIZATION_CACHE KV namespace with CACHE_TTL_SECONDS TTL.
-// On a hit: D1 tenant lookup and Vue SSR are skipped entirely.
+// Tenant resolution runs first; the committed revision fences cached HTML before Vue SSR.
 // On a miss: falls through to SSR; server/plugins/edge-cache.ts populates KV.
 //
 // NEVER cached:
@@ -38,7 +38,7 @@ export default defineHandler(async (event) => {
   if (requestCookies.includes(`${PREVIEW_COOKIE_NAME}=`)) return
   if (event.path.includes('?')) return
 
-  const key = buildHtmlCacheKey(event)
+  const key = await buildHtmlCacheKey(event)
   if (!key) return
 
   // Access KV directly from the Cloudflare event context

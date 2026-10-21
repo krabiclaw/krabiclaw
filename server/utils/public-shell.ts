@@ -1,3 +1,4 @@
+import { publicCacheRevision } from '~/server/utils/edge-cache'
 import { HTTPError } from 'nitro';
 import { oncePerRequest } from '~/server/utils/request-scope'
 
@@ -47,6 +48,7 @@ export async function loadPublicShellSource(
   const previewAuthorized = await resolvePreviewAuthorization(event, organizationId, previewSecretOf(env))
   const host = (event.req.headers.get('host')) ?? ''
   const useCache = !previewAuthorized && !isNonProductionHost(host)
+  const revision = useCache ? await publicCacheRevision(event, db, organizationId) : null
   const cacheKey = buildPublicResourceCacheKey(organizationId, {
     contract: 'shell',
     page: null,
@@ -54,7 +56,7 @@ export async function loadPublicShellSource(
     datasets: [],
     blogSlug: null,
     locale,
-  })
+  }, revision)
   const cache = env.ORGANIZATION_CACHE
   if (mutateHeaders) {
     setHeader(event, 'cache-control', previewAuthorized
