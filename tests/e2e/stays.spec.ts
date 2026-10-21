@@ -1014,7 +1014,7 @@ test('a host describes a place to stay through its focused editors and previews 
   await specificLocation.click()
   const generalPreview = sharingPanel.locator('iframe[title="General location preview"]')
   await expect(generalPreview).toBeVisible()
-  expect(new URL((await generalPreview.getAttribute('src'))!).searchParams.get('q')).not.toBe('8.0326,98.822')
+  expect(new URL((await generalPreview.getAttribute('src'))!).searchParams.get('q')).toBe('8.03,98.83')
   await expect(sharingPanel.locator('figcaption')).toHaveText('Your listing shows the approximate area. Your exact pin and street address stay private.')
   await specificLocation.click()
   await expect(specificLocation).toBeChecked()
