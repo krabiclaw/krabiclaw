@@ -102,6 +102,17 @@ const addCandidates = computed(() => p.photoAssets.value.filter(photo => !room.v
   const owner = p.photoRooms.value.find(entry => entry.photo_ids.includes(photo.asset_id))
   return { photo_id: photo.asset_id, expected_room_id: owner?.id ?? null, room_name: owner ? stayPhotoRoomName(owner, p.photoRooms.value) : null, url: mediaStillUrl(photo) }
 }))
+watch([addCandidates, () => p.saving.value], ([candidates, saving]) => {
+  if (saving || !adding.value || !addSelected.value.length) return
+  const selected = addSelected.value
+  const candidateIds = new Set(candidates.map(photo => photo.photo_id))
+  if (selected.some(id => !candidateIds.has(id) && !room.value?.photo_ids.includes(id))) p.photoError.value = 'A selected photo is no longer on this listing. Review the remaining selection.'
+  addSelected.value = selected.filter(id => candidateIds.has(id))
+  if (!addSelected.value.length) {
+    if (selected.every(id => room.value?.photo_ids.includes(id))) p.photoError.value = null
+    adding.value = false
+  }
+})
 const confirmDelete = ref(false)
 const deleting = ref(false)
 const savedOrder = computed(() => p.photoAssets.value.map(photo => photo.asset_id))
