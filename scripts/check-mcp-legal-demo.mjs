@@ -304,9 +304,6 @@ async function main() {
     if (productId) {
       allProductIds.push(productId)
 
-      const pubRes = await mcp(headers, 'set_product_publication', { product_id: productId, published: true })
-      expectSuccess(`set_product_publication ${area.name} succeeds`, pubRes)
-
       const productRes = await mcp(headers, 'get_product', { product_id: productId })
       const product = expectSuccess(`get_product ${area.name} succeeds`, productRes)?.product
       const variant = product?.variants?.[0]
@@ -333,6 +330,10 @@ async function main() {
         })
         expectSuccess(`set_media on ${area.name} succeeds`, mediaRes)
       }
+
+      // Published last, once its consultation and picture are in place.
+      const pubRes = await mcp(headers, 'set_product_publication', { product_id: productId, published: true })
+      expectSuccess(`set_product_publication ${area.name} succeeds`, pubRes)
     }
   }
 
