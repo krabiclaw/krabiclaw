@@ -1,4 +1,5 @@
 {
+  "site.product_detail.description": "Mô tả",
   "booking.request_declined": "Yêu cầu đặt chỗ đã bị từ chối",
   "booking.change_review": "Xem thay đổi",
   "booking.change_pending": "Đặt chỗ của bạn giữ nguyên cho đến khi bạn chấp nhận. Liên kết này hết hạn sau 7 ngày.",

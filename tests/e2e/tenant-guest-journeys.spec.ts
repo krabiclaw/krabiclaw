@@ -429,9 +429,12 @@ for (const target of [
       await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
       await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
       await expect(page.getByText(detail, { exact: true })).toBeVisible()
+      const productArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: product.name, level: 1, exact: true }) })
       if (target.kind === 'dish') {
         await expect(page.getByText(description, { exact: true })).toBeVisible()
-        await expect(page.locator('article').getByText('THB\u00a01,350.00', { exact: true }).first()).toBeVisible()
+        await expect(productArticle.getByRole('term')).toHaveText(product.name)
+        await expect(productArticle.getByRole('definition')).toHaveText('THB 2,000.00 THB 1,350.00')
+        await expect(productArticle.getByRole('definition')).toBeVisible()
       }
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 844 })
@@ -439,6 +442,15 @@ for (const target of [
         await expect(handoff).toHaveCount(1)
         await expect(handoff).toHaveText(target.experience ? 'Book now' : 'Order Now')
         await expect(page.getByRole('button', { name: 'Book now', exact: true })).toHaveCount(0)
+        if (target.kind === 'dish') {
+          await expect(productArticle.getByRole('heading', { name: 'Description', level: 2, exact: true })).toBeVisible()
+          await expect(productArticle.getByRole('heading', { name: 'Find us', level: 2, exact: true })).toBeVisible()
+          await expect(productArticle.getByRole('heading', { name: "What you'll do", exact: true })).toHaveCount(0)
+          await expect(productArticle.getByRole('heading', { name: "Where you'll meet", exact: true })).toHaveCount(0)
+          await expect(productArticle.getByText('per person', { exact: true })).toHaveCount(0)
+          // Sibling cards may legitimately show their lowest variant price.
+          await expect(productArticle.locator(':scope > div').first().getByText(/From THB\s+1,350\.00/)).toHaveCount(0)
+        }
       }
       if (target.kind === 'dish') await page.screenshot({ path: testInfo.outputPath('restaurant-dish-public-mobile.png'), fullPage: true, animations: 'disabled' })
       await waitForNuxtHydration(page)

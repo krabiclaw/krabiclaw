@@ -134,7 +134,7 @@
           </div>
 
           <section v-if="(product.description || stayDescriptionDetails.length)" class="border-t border-default pt-8" data-testid="product-description">
-            <h2 v-if="vertical !== 'service'" class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.about_this_place') : t('site.experience_detail.what_youll_do') }}</h2>
+            <h2 v-if="vertical !== 'service'" class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.about_this_place') : product.kind === 'experience' ? t('site.experience_detail.what_youll_do') : t('site.product_detail.description') }}</h2>
             <!-- A long listing opens on its first lines, as Airbnb's does; the rest is one press away. -->
             <div :class="descriptionClamped ? 'max-h-48 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]' : undefined">
               <p v-if="product.description" class="mt-4 text-base leading-relaxed text-muted sm:text-lg" :class="isStay ? 'whitespace-pre-wrap break-words' : 'whitespace-pre-line'" :data-testid="isStay ? 'stay-description-listing-description' : undefined">{{ product.description }}</p>
@@ -231,7 +231,7 @@
           </section>
 
           <section v-if="location" class="mt-10 border-t border-default pt-10">
-            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : t('site.experience_detail.where_youll_meet') }}</h2>
+            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : product.kind === 'dish' || product.kind === 'item' ? t('site.location.find_us') : t('site.experience_detail.where_youll_meet') }}</h2>
             <div class="mt-5 overflow-hidden rounded-xl border border-default bg-elevated">
               <div class="flex items-start gap-4 p-6">
                 <TenantIcon name="map-pin" class="mt-0.5 size-5 shrink-0 text-primary" />
@@ -293,10 +293,10 @@
             <div v-if="priceLabel" class="flex items-center justify-between gap-4">
               <div>
                 <span class="tenant-display text-2xl font-bold tabular-nums text-default">
-                  <span v-if="compareAtLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ isStay ? priceLabel : enquiryOnly || (vertical === 'service' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel }) }}
+                  <span v-if="compareAtLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ isStay || enquiryOnly || (product.kind !== 'experience' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel }) }}
                 </span>
                 <span v-if="isStay" class="text-sm font-normal text-muted"> / night</span>
-                <p v-if="!enquiryOnly && vertical !== 'service' && !isStay" class="mt-1 text-sm text-muted">{{ t('site.experience_detail.per_person') }}</p>
+                <p v-if="!enquiryOnly && product.kind === 'experience'" class="mt-1 text-sm text-muted">{{ t('site.experience_detail.per_person') }}</p>
               </div>
               <div v-if="isStay && averageRating" class="flex items-center gap-1 text-xs font-semibold text-default">
                 <TenantIcon name="star" solid class="size-3.5" />

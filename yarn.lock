@@ -11702,6 +11702,26 @@ __metadata:
   languageName: node
   linkType: hard
 
+"reka-ui@patch:reka-ui@npm%3A2.10.3#~/patches/reka-ui-npm-2.10.3.patch":
+  version: 2.10.3
+  resolution: "reka-ui@patch:reka-ui@npm%3A2.10.3#~/patches/reka-ui-npm-2.10.3.patch::version=2.10.3&hash=192cd0"
+  dependencies:
+    "@floating-ui/dom": "npm:^1.6.13"
+    "@floating-ui/vue": "npm:^1.1.6"
+    "@internationalized/date": "npm:^3.5.0"
+    "@internationalized/number": "npm:^3.5.0"
+    "@tanstack/vue-virtual": "npm:^3.12.0"
+    "@vueuse/core": "npm:^14.1.0"
+    "@vueuse/shared": "npm:^14.1.0"
+    aria-hidden: "npm:^1.2.4"
+    defu: "npm:^6.1.5"
+    ohash: "npm:^2.0.11"
+  peerDependencies:
+    vue: ">= 3.4.0"
+  checksum: 10c0/180fadeee43f98be97f7fdac9d21617dcac3ccca0e6d007bf202b01fc755913ca111a24ec03c02e9e277a6fa4ac58d894600d599c346b5feeffeeea352d6672c
+  languageName: node
+  linkType: hard
+
 "require-directory@npm:^2.1.1":
   version: 2.1.1
   resolution: "require-directory@npm:2.1.1"
