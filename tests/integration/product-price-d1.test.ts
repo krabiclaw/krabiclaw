@@ -9,10 +9,12 @@ import {
   deleteProduct,
   getProduct,
   listCollectionProducts,
+  listCollections,
   listLocationProducts,
   listOrganizationProducts,
   productBookingReadiness,
   reconcileProducts,
+  reorderCollections,
   resolveVariantPrice,
   setCollectionProducts,
   setProductLocation,
@@ -21,6 +23,7 @@ import {
   updateMenu,
 } from '../../server/utils/product-management.ts'
 import { AmbiguousPriceError } from '../../shared/prices.ts'
+import { groupProductsByCollection } from '../../utils/product-presentation.ts'
 import { claimSessionCapacity, listSessions } from '../../server/utils/availability.ts'
 import { loadPublicSiteProductDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
 import { listPublicBookingSessions } from '../../server/utils/public-session-booking.ts'
@@ -308,6 +311,67 @@ test('collections carry grouping and order without copying the product', { timeo
     const soup = await getProduct(db, ORG, a.id)
     assert.equal(soup.collections.length, 3)
     assert.equal(Object.hasOwn(soup, 'featured'), false)
+
+    // Source removals and destination appends are one final-state write.
+    // Existing destination membership keeps its position and row identity.
+    const beforeProducts = (await db.prepare('SELECT * FROM products ORDER BY id').all()).results
+    const beforeLocations = (await db.prepare('SELECT * FROM product_locations ORDER BY product_id, location_id').all()).results
+    const retained = await db.prepare('SELECT * FROM collection_products WHERE collection_id = ? AND product_id = ?').bind(featured.id, a.id).first()
+    await setCollectionProducts(db, { organizationId: ORG, collectionId: starters.id, productIds: [], expectedProductIds: [b.id, a.id], moveTo: { collection_id: featured.id, expected_product_ids: [a.id] }, actor: ACTOR })
+    assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: starters.id })).map(product => product.id), [])
+    assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: featured.id })).map(product => product.id), [a.id, b.id])
+    assert.deepEqual(await db.prepare('SELECT * FROM collection_products WHERE collection_id = ? AND product_id = ?').bind(featured.id, a.id).first(), retained)
+    assert.deepEqual((await db.prepare('SELECT * FROM products ORDER BY id').all()).results, beforeProducts)
+    assert.deepEqual((await db.prepare('SELECT * FROM product_locations ORDER BY product_id, location_id').all()).results, beforeLocations)
+    assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: branch.id })).map(product => product.id), [a.id, b.id])
+
+    // An explicit cross-scope destination is valid; collections never imply a
+    // change to a Product's location offerings.
+    await setCollectionProducts(db, { organizationId: ORG, collectionId: featured.id, productIds: [b.id], expectedProductIds: [a.id, b.id], moveTo: { collection_id: branch.id, expected_product_ids: [a.id, b.id] }, actor: ACTOR })
+    assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: featured.id })).map(product => product.id), [b.id])
+    assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: branch.id })).map(product => product.id), [a.id, b.id])
+    assert.deepEqual((await db.prepare('SELECT * FROM product_locations ORDER BY product_id, location_id').all()).results, beforeLocations)
+
+    const beforeRefusal = (await db.prepare('SELECT * FROM collection_products ORDER BY collection_id, sort_order, product_id').all()).results
+    await assert.rejects(setCollectionProducts(db, { organizationId: ORG, collectionId: featured.id, productIds: [], expectedProductIds: [a.id, b.id], actor: ACTOR }), { statusCode: 409, data: { code: 'COLLECTION_PRODUCTS_CHANGED', field: 'expected_product_ids', collection_id: featured.id } })
+    await assert.rejects(setCollectionProducts(db, { organizationId: ORG, collectionId: featured.id, productIds: [], expectedProductIds: [b.id], moveTo: { collection_id: branch.id, expected_product_ids: [b.id, a.id] }, actor: ACTOR }), { statusCode: 409, data: { code: 'COLLECTION_PRODUCTS_CHANGED', field: 'expected_product_ids', collection_id: branch.id } })
+    assert.deepEqual((await db.prepare('SELECT * FROM collection_products ORDER BY collection_id, sort_order, product_id').all()).results, beforeRefusal)
+
+    await setCollectionProducts(db, { organizationId: ORG, collectionId: starters.id, productIds: [a.id, b.id], expectedProductIds: [], actor: ACTOR })
+    const race = await Promise.allSettled([
+      setCollectionProducts(db, { organizationId: ORG, collectionId: starters.id, productIds: [], expectedProductIds: [a.id, b.id], moveTo: { collection_id: featured.id, expected_product_ids: [b.id] }, actor: ACTOR }),
+      setCollectionProducts(db, { organizationId: ORG, collectionId: featured.id, productIds: [a.id], expectedProductIds: [b.id], actor: ACTOR }),
+    ])
+    assert.equal(race.filter(result => result.status === 'fulfilled').length, 1)
+    for (const result of race) if (result.status === 'rejected') assert.equal(result.reason.data.code, 'COLLECTION_PRODUCTS_CHANGED')
+    assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: starters.id })).map(product => product.id), race[0]!.status === 'fulfilled' ? [] : [a.id, b.id])
+    assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: featured.id })).map(product => product.id), race[0]!.status === 'fulfilled' ? [b.id, a.id] : [a.id])
+
+    const another = await createCollection(db, { organizationId: ORG, actor: ACTOR, collection: { name: 'Desserts' } })
+    const shared = (await listCollections(db, { organizationId: ORG, locationId: null })).map(collection => collection.id)
+    assert(shared.includes(another.id))
+    const firstOrder = [...shared].reverse()
+    const secondOrder = [...shared.slice(1), shared[0]!]
+    const orderRace = await Promise.allSettled([firstOrder, secondOrder].map(collectionIds => reorderCollections(db, { organizationId: ORG, locationId: null, collectionIds, expectedCollectionIds: shared, actor: ACTOR })))
+    assert.equal(orderRace.filter(result => result.status === 'fulfilled').length, 1)
+    for (const result of orderRace) if (result.status === 'rejected') assert.equal(result.reason.data.code, 'COLLECTION_ORDER_CHANGED')
+    assert.deepEqual((await listCollections(db, { organizationId: ORG, locationId: null })).map(collection => collection.id), orderRace[0]!.status === 'fulfilled' ? firstOrder : secondOrder)
+    assert.deepEqual((await listCollections(db, { organizationId: ORG, locationId: 'loc-a' })).map(collection => collection.id), [branch.id])
+    await assert.rejects(reorderCollections(db, { organizationId: ORG, locationId: null, collectionIds: shared, expectedCollectionIds: shared, actor: ACTOR }), { statusCode: 409, data: { code: 'COLLECTION_ORDER_CHANGED', field: 'expected_collection_ids' } })
+
+    // Imported membership positions may tie. A rename must not change their
+    // canonical order or turn the editor's displayed snapshot into a conflict.
+    const tiedIds = [a.id, b.id].sort()
+    await updateProduct(db, { organizationId: ORG, productId: tiedIds[0]!, patch: { name: 'Zucchini' }, actor: ACTOR })
+    await updateProduct(db, { organizationId: ORG, productId: tiedIds[1]!, patch: { name: 'Apple' }, actor: ACTOR })
+    await db.prepare('UPDATE collection_products SET sort_order = 0 WHERE organization_id = ? AND collection_id = ?').bind(ORG, branch.id).run()
+    const tiedRead = await listCollectionProducts(db, { organizationId: ORG, collectionId: branch.id })
+    assert.deepEqual(tiedRead.map(product => product.id), tiedIds)
+    assert.deepEqual(tiedRead.map(product => product.name), ['Zucchini', 'Apple'])
+    const displayed = groupProductsByCollection(await listOrganizationProducts(db, { organizationId: ORG }), await listCollections(db, { organizationId: ORG })).find(collection => collection.id === branch.id)!.products.map(product => product.id)
+    assert.deepEqual(displayed, tiedIds, 'editor snapshots use the same stable tie order as the canonical read')
+    await setCollectionProducts(db, { organizationId: ORG, collectionId: branch.id, productIds: [...tiedIds].reverse(), expectedProductIds: displayed, actor: ACTOR })
+    assert.deepEqual((await listCollectionProducts(db, { organizationId: ORG, collectionId: branch.id })).map(product => product.id), [...tiedIds].reverse())
   } finally { await runtime.dispose() }
 })
 
@@ -455,7 +519,7 @@ test('an organization that withholds a product does not show it, at any location
   } finally { await runtime.dispose() }
 })
 
-test('a minimal price patch preserves sibling variants, prices, options and unrelated fields', { timeout: 120_000 }, async () => {
+test('a minimal price patch preserves sibling variants, prices, options and unrelated fields', { timeout: 120_000 }, async (t) => {
   const { runtime, db } = await boot()
   try {
     const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',
@@ -503,10 +567,18 @@ test('a minimal price patch preserves sibling variants, prices, options and unre
       selections: (await db.prepare('SELECT * FROM product_variant_option_values WHERE product_id = ? ORDER BY product_variant_id').bind(product.id).all()).results,
       siblingPrices: (await db.prepare('SELECT * FROM prices WHERE product_variant_id IN (SELECT id FROM product_variants WHERE product_id = ?) AND id <> ? ORDER BY id').bind(product.id, priceA.id).all()).results,
     }
+    t.mock.timers.enable({ apis: ['Date'], now: Date.parse(previous.updated_at) })
     await updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
+      expected_updated_at: previous.updated_at,
       variants: [{ id: kept.id, prices: [{ id: priceA.id, unit_amount: 21000 }] }],
     } })
     const afterMinimal = await getProduct(db, ORG, product.id)
+    assert.equal(afterMinimal.updated_at, new Date(Date.parse(previous.updated_at) + 1).toISOString(), 'a price edit advances the canonical Product version even in the same millisecond')
+    await assert.rejects(updateProduct(db, { organizationId: ORG, productId: product.id, actor: ACTOR, patch: {
+      expected_updated_at: previous.updated_at, name: 'Stale dish', options: [], variants_mode: 'replace',
+      variants: [{ id: kept.id, prices_mode: 'replace', prices: [{ id: priceA.id, unit_amount: 1 }] }],
+    } }), { statusCode: 409, data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: product.id } })
+    assert.deepEqual(await getProduct(db, ORG, product.id), afterMinimal, 'a stale full catalog edit changes no scalar, option, variant or price')
     assert.equal(afterMinimal.variants.length, 2, 'an unmentioned sibling variant is preserved')
     assert.deepEqual(afterMinimal.variants.find(variant => variant.id === 'var-large'), previous.variants.find(variant => variant.id === 'var-large'))
     assert.deepEqual(afterMinimal.options, previous.options)

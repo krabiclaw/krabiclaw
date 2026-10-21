@@ -1,0 +1,95 @@
+diff --git a/dist/RadioGroup/Radio.cjs b/dist/RadioGroup/Radio.cjs
+index 9754d9a96cccd4c5927ef401df03428b8151753b..101c5dca46344764763fd90ee62e801536e11d04 100644
+--- a/dist/RadioGroup/Radio.cjs
++++ b/dist/RadioGroup/Radio.cjs
+@@ -58,7 +58,6 @@ var Radio_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ (0, vue.
+ 		const { forwardRef, currentElement: triggerElement } = require_shared_useForwardExpose.useForwardExpose();
+ 		const isFormControl = require_shared_useFormControl.useFormControl(triggerElement);
+ 		const scopeIdAttrs = require_shared_useForwardScopeId.useForwardScopeId();
+-		const ariaLabel = (0, vue.computed)(() => props.id && triggerElement.value ? document.querySelector(`[for="${props.id}"]`)?.innerText ?? props.value : void 0);
+ 		function handleClick(event) {
+ 			if (props.disabled) return;
+ 			require_RadioGroup_utils.handleSelect(event, props.value, (ev) => {
+@@ -76,7 +75,6 @@ var Radio_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ (0, vue.
+ 				type: _ctx.as === "button" ? "button" : void 0,
+ 				as: _ctx.as,
+ 				"aria-checked": (0, vue.unref)(checked) ?? false,
+-				"aria-label": ariaLabel.value,
+ 				"as-child": _ctx.asChild,
+ 				disabled: _ctx.disabled ? "" : void 0,
+ 				"data-state": (0, vue.unref)(checked) ? "checked" : "unchecked",
+@@ -95,7 +93,6 @@ var Radio_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ (0, vue.
+ 				"type",
+ 				"as",
+ 				"aria-checked",
+-				"aria-label",
+ 				"as-child",
+ 				"disabled",
+ 				"data-state",
+diff --git a/dist/RadioGroup/Radio.js b/dist/RadioGroup/Radio.js
+index db77cc1568a7897cf8d6cae8b6cea54824a74969..f744f4b5eb8df6004dfc662efc5bb9be71ae0d69 100644
+--- a/dist/RadioGroup/Radio.js
++++ b/dist/RadioGroup/Radio.js
+@@ -4,7 +4,7 @@ import { useForwardScopeId } from "../shared/useForwardScopeId.js";
+ import { Primitive } from "../Primitive/Primitive.js";
+ import { VisuallyHiddenInput_default } from "../VisuallyHidden/VisuallyHiddenInput.js";
+ import { handleSelect } from "./utils.js";
+-import { Fragment, computed, createBlock, createCommentVNode, createElementBlock, createVNode, defineComponent, mergeProps, openBlock, renderSlot, toRefs, unref, withCtx, withModifiers } from "vue";
++import { Fragment, createBlock, createCommentVNode, createElementBlock, createVNode, defineComponent, mergeProps, openBlock, renderSlot, toRefs, unref, withCtx, withModifiers } from "vue";
+ import { useVModel } from "@vueuse/core";
+ 
+ //#region src/RadioGroup/Radio.vue?vue&type=script&setup=true&lang.ts
+@@ -57,7 +57,6 @@ var Radio_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ defineCo
+ 		const { forwardRef, currentElement: triggerElement } = useForwardExpose();
+ 		const isFormControl = useFormControl(triggerElement);
+ 		const scopeIdAttrs = useForwardScopeId();
+-		const ariaLabel = computed(() => props.id && triggerElement.value ? document.querySelector(`[for="${props.id}"]`)?.innerText ?? props.value : void 0);
+ 		function handleClick(event) {
+ 			if (props.disabled) return;
+ 			handleSelect(event, props.value, (ev) => {
+@@ -75,7 +74,6 @@ var Radio_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ defineCo
+ 				type: _ctx.as === "button" ? "button" : void 0,
+ 				as: _ctx.as,
+ 				"aria-checked": unref(checked) ?? false,
+-				"aria-label": ariaLabel.value,
+ 				"as-child": _ctx.asChild,
+ 				disabled: _ctx.disabled ? "" : void 0,
+ 				"data-state": unref(checked) ? "checked" : "unchecked",
+@@ -94,7 +92,6 @@ var Radio_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ defineCo
+ 				"type",
+ 				"as",
+ 				"aria-checked",
+-				"aria-label",
+ 				"as-child",
+ 				"disabled",
+ 				"data-state",
+diff --git a/src/RadioGroup/Radio.vue b/src/RadioGroup/Radio.vue
+index ee2293e824c10c8d08dd53fd3f91b3ae2d474f84..7ea531938c87fa30791ba609b02b98d57be48a0c 100644
+--- a/src/RadioGroup/Radio.vue
++++ b/src/RadioGroup/Radio.vue
+@@ -20,7 +20,7 @@ export interface RadioProps extends PrimitiveProps, FormFieldProps {
+ 
+ <script setup lang="ts">
+ import { useVModel } from '@vueuse/core'
+-import { computed, toRefs } from 'vue'
++import { toRefs } from 'vue'
+ import { Primitive } from '@/Primitive'
+ import { useFormControl, useForwardExpose, useForwardScopeId } from '@/shared'
+ import { VisuallyHiddenInput } from '@/VisuallyHidden'
+@@ -55,8 +55,6 @@ const isFormControl = useFormControl(triggerElement)
+ // `nested-interactive` a11y violation; forward the parent scope id for scoped styles.
+ const scopeIdAttrs = useForwardScopeId()
+ 
+-const ariaLabel = computed(() => props.id && triggerElement.value ? (document.querySelector(`[for="${props.id}"]`) as HTMLLabelElement)?.innerText ?? props.value : undefined)
+-
+ function handleClick(event: MouseEvent) {
+   if (props.disabled)
+     return
+@@ -85,7 +83,6 @@ function handleClick(event: MouseEvent) {
+     :type="as === 'button' ? 'button' : undefined"
+     :as="as"
+     :aria-checked="checked ?? false"
+-    :aria-label="ariaLabel"
+     :as-child="asChild"
+     :disabled="disabled ? '' : undefined"
+     :data-state="checked ? 'checked' : 'unchecked'"

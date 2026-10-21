@@ -1,4 +1,5 @@
 {
+  "site.product_detail.description": "รายละเอียด",
   "booking.request_declined": "คำขอจองถูกปฏิเสธ",
   "booking.change_review": "ตรวจสอบการเปลี่ยนแปลง",
   "booking.change_pending": "การจองของคุณจะไม่เปลี่ยนแปลงจนกว่าคุณจะยอมรับ ลิงก์นี้หมดอายุใน 7 วัน",

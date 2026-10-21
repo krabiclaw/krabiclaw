@@ -230,6 +230,8 @@ export type ProductVariantPatchInput = Omit<Partial<ProductVariantInput>, 'price
 }
 
 export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'variants' | 'stay' | 'details'>> & {
+  /** The Product updated_at from the caller's read; a stale snapshot refuses the entire edit. */
+  expected_updated_at?: string
   /** Stay settings to change. The location a home is at is fixed when it is created. */
   stay?: Partial<Omit<ProductStayConfig, 'location_id' | 'photo_rooms' | 'amenity_answers' | 'accessibility'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
   variants?: ProductVariantPatchInput[]
@@ -273,12 +275,16 @@ export interface UpdateCollectionInput {
 export interface SetCollectionProductsInput {
   collection_id: string
   product_ids: string[]
+  expected_product_ids?: string[]
+  /** Source removals append to this collection, atomically, under both complete ordered snapshots. */
+  move_to?: { collection_id: string; expected_product_ids: string[] }
 }
 
 export interface ReorderCollectionsInput {
   organization_id: string
   location_id?: string | null
   collection_ids: string[]
+  expected_collection_ids?: string[]
 }
 
 export type ReconcileProductInput = CreateProductInput & { product_id?: string }

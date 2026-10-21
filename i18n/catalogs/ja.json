@@ -1,4 +1,5 @@
 {
+  "site.product_detail.description": "説明",
   "booking.request_declined": "予約リクエストは承認されませんでした",
   "booking.change_review": "変更内容を確認",
   "booking.change_pending": "承認するまで予約内容は変更されません。このリンクの有効期限は7日間です。",

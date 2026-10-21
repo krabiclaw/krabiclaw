@@ -504,6 +504,7 @@ export default {
       "meta_description": "Experiences you can book at {organization}."
     },
     "product_detail": {
+      "description": "Description",
       "choose_option": "Choose an option",
       "more_in_category": "More in {category}",
       "meta_description": "{name} — {detail}. Available at {location}.",

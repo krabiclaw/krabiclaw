@@ -138,7 +138,7 @@ test('room migrations preserve authored facts and photo memberships without deri
   }
 })
 
-test('interleaved branch migration ledgers preserve authored rooms and complete missing legal-site data migrations while refusing unknown files or schema', async () => {
+test('interleaved branch migration ledgers preserve location privacy and authored rooms while completing missing legal-site data migrations and refusing unknown files or schema', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-interleaved-transfer-'))
   const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
@@ -200,12 +200,12 @@ test('interleaved branch migration ledgers preserve authored rooms and complete 
         assert.deepEqual(target.pragma('foreign_key_check'), [])
       } finally { target.close() }
     }
-    for (const invalid of ['unknown-migration', 'schema-mismatch'] as const) {
+    for (const invalid of ['unknown-migration', 'room-schema-mismatch', 'location-schema-mismatch'] as const) {
       const sourcePath = join(directory, `${invalid}.sqlite`)
       copyFileSync(join(directory, 'staging-pending.sqlite'), sourcePath)
       const source = new Database(sourcePath)
       if (invalid === 'unknown-migration') source.prepare("INSERT INTO d1_migrations (name) VALUES ('9999_unrecorded_migration.sql')").run()
-      else source.exec('ALTER TABLE product_stay_photo_rooms ADD COLUMN unrecorded_fact TEXT')
+      else source.exec(`ALTER TABLE ${invalid === 'room-schema-mismatch' ? 'product_stay_photo_rooms' : 'business_locations'} ADD COLUMN unrecorded_fact TEXT`)
       source.close()
       const targetPath = join(directory, `${invalid}-refused.sqlite`)
       await assert.rejects(() => transferDatabaseExport(sourcePath, targetPath), /Source schema differs from every recorded migration chain; no rows were copied/)
