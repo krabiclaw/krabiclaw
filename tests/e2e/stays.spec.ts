@@ -1671,6 +1671,20 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await addBedroomPhotos.getByRole('button', { name: 'Select photo 1', exact: true }).click()
   await addBedroomPhotos.getByRole('button', { name: 'Select photo 2', exact: true }).click()
   await expect(addBedroomPhotos.getByRole('button', { name: 'Select photo 2', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  // A concurrent MCP move refuses the stale bulk write without moving its
+  // sibling. The open dialog refreshes its sources and retries the same choice.
+  await page.route(`${baseURL}/api/dashboard/stay-homes/${productId}/photos/move**`, async route => {
+    const concurrentRoomMove = await call('move_stay_photos', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: red.id, expected_room_id: null }] })
+    expect(concurrentRoomMove.error).toBeNull()
+    await route.continue()
+  }, { times: 1 })
+  const refusedRoomMove = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos/move` && response.request().method() === 'PUT')
+  await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
+  expect((await refusedRoomMove).status()).toBe(409)
+  await expect(addBedroomPhotos.getByText('A selected photo moved to another room; reload the photo tour', { exact: true })).toBeVisible()
+  const afterRefusedRoomMove = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterRefusedRoomMove.error).toBeNull()
+  expect(afterRefusedRoomMove.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id], ...bedroomFacts }])
   await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
   await expect(addBedroomPhotos).not.toBeVisible()
   await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)

@@ -93,10 +93,14 @@ const orderDraft = ref<string[] | null>(null)
 const selecting = ref(false)
 const selectedIds = ref<string[]>([])
 const moving = ref(false)
-const moveDraft = ref<Array<{ photo_id: string; expected_room_id: string | null }>>([])
+const movePhotoIds = ref<string[]>([])
+const moveDraft = computed(() => movePhotoIds.value.map(photo_id => ({ photo_id, expected_room_id: p.photoRooms.value.find(room => room.photo_ids.includes(photo_id))?.id ?? null })))
 const adding = ref(false)
 const addSelected = ref<string[]>([])
-const addCandidates = ref<Array<{ photo_id: string; expected_room_id: string | null; room_name: string | null; url: string | null }>>([])
+const addCandidates = computed(() => p.photoAssets.value.filter(photo => !room.value?.photo_ids.includes(photo.asset_id)).map((photo) => {
+  const owner = p.photoRooms.value.find(entry => entry.photo_ids.includes(photo.asset_id))
+  return { photo_id: photo.asset_id, expected_room_id: owner?.id ?? null, room_name: owner ? stayPhotoRoomName(owner, p.photoRooms.value) : null, url: mediaStillUrl(photo) }
+}))
 const confirmDelete = ref(false)
 const deleting = ref(false)
 const savedOrder = computed(() => p.photoAssets.value.map(photo => photo.asset_id))
@@ -175,16 +179,12 @@ async function removePhotos(ids: string[]) {
 }
 
 function openMove(ids: string[]) {
-  moveDraft.value = ids.map(id => ({ photo_id: id, expected_room_id: p.photoRooms.value.find(entry => entry.photo_ids.includes(id))?.id ?? null }))
+  movePhotoIds.value = ids
   moving.value = true
 }
 
 function openAdd() {
   addSelected.value = []
-  addCandidates.value = p.photoAssets.value.filter(photo => !room.value?.photo_ids.includes(photo.asset_id)).map((photo) => {
-    const owner = p.photoRooms.value.find(entry => entry.photo_ids.includes(photo.asset_id))
-    return { photo_id: photo.asset_id, expected_room_id: owner?.id ?? null, room_name: owner ? stayPhotoRoomName(owner, p.photoRooms.value) : null, url: mediaStillUrl(photo) }
-  })
   p.photoError.value = null
   adding.value = true
 }
