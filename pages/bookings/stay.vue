@@ -25,7 +25,7 @@
       </template>
       <template v-if="guestStay.home.location?.maps_url" #actions>
         <TenantButton :href="guestStay.home.location.maps_url" variant="outline" target="_blank" rel="noopener noreferrer">
-          {{ t('saya.experience_detail.open_in_maps') }}
+          {{ t('site.experience_detail.open_in_maps') }}
         </TenantButton>
       </template>
     </BookingConfirmation>
@@ -99,7 +99,7 @@ const receiptRows = computed(() => {
     { label: t('stay.nights'), value: String(nights) },
     { label: t('stay.guests'), value: String(stay.adults + stay.children) },
     { label: t('payment.paid'), value: paymentMoney(stay.paid_minor, stay.currency) },
-    ...(home.location?.address ? [{ label: t('saya.location.address'), value: formatPostalAddress(home.location.address), wide: true }] : []),
+    ...(home.location?.address ? [{ label: t('site.location.address'), value: formatPostalAddress(home.location.address), wide: true }] : []),
   ]
 })
 

@@ -1791,9 +1791,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields.",
+        "read_only_justification": "Overwrites supplied location identity, address, saved coordinates, contact details, hours, timezone, map sharing or SEO fields.",
         "open_world_justification": "Changes public location details and hours that visitors see and use for booking availability.",
-        "destructive_justification": "Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields."
+        "destructive_justification": "Overwrites supplied location identity, address, saved coordinates, contact details, hours, timezone, map sharing or SEO fields."
       }
     },
     "update_media_asset": {

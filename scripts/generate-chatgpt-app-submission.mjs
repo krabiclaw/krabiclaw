@@ -168,7 +168,7 @@ const effects = {
   update_article_category: 'Overwrites the selected category\'s name, description or parent category.',
   update_blog_post: 'Updates supplied fields of an existing website article. Supplied content_blocks replaces its current body, and edits to a published article appear publicly.',
   update_collection: 'Overwrites the selected collection name, description or placement.',
-  update_location: 'Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields.',
+  update_location: 'Overwrites supplied location identity, address, saved coordinates, contact details, hours, timezone, map sharing or SEO fields.',
   block_dates: 'Overwrites the selected location\'s special hours with an added closure for the given days, so guests cannot book them on the public website.',
   open_dates: 'Overwrites the selected location\'s special hours with the given days reopened, so guests can book them on the public website again.',
   update_media_asset: 'Overwrites media metadata such as alt text or category.',

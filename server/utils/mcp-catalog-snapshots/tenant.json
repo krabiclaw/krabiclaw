@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:84403705e259a8c4664f7d2287b9ed7058d9cbab0c4524dcff6015f0329b99a0",
-  "documentationFingerprint": "sha256:d5233e84d3f5a7fc928279850bdb59691065715579fe3a055ea3e1517819cf5b",
+  "fingerprint": "sha256:4360f14344f84685b883f7d6dc376bf37eb8cf6f0db7d054e30d11ee71c2d334",
+  "documentationFingerprint": "sha256:5fbdf4bc38692928cb3debac1df333fb4d685d459ec86667591b0a33d7cfd7b5",
   "tools": [
     {
       "name": "add_organization_language",
@@ -116820,7 +116820,7 @@
     {
       "name": "update_location",
       "title": "Update location",
-      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, and map sharing for its places to stay. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
+      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -116885,9 +116885,27 @@
               "null"
             ]
           },
+          "latitude": {
+            "description": "Saved map latitude. Supply longitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.",
+            "maximum": 90,
+            "minimum": -90,
+            "type": [
+              "number",
+              "null"
+            ]
+          },
           "location_id": {
             "description": "Internal location ID returned by list_locations or get_workspace_context.",
             "type": "string"
+          },
+          "longitude": {
+            "description": "Saved map longitude. Supply latitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.",
+            "maximum": 180,
+            "minimum": -180,
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "max_capacity": {
             "description": "Stored location capacity metadata; does not limit reservation availability. Reservation seats per start time are controlled by update_reservation_policy.slot_capacity. Pass null to clear the metadata.",
