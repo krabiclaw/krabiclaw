@@ -110,7 +110,19 @@ test('room migrations preserve authored facts and photo memberships without deri
     database.prepare("UPDATE product_stay_configs SET amenities = '[\"tv\",\"wireless_internet\",\"smoke_detector\"]' WHERE product_id = 'authored-home'").run()
     database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'authored-home', 'bedroom', 'smoke_detector')").run()
     const priorRoomAmenities = database.prepare('SELECT * FROM product_stay_photo_room_amenities ORDER BY amenity_code').all()
-    database.exec(readFileSync('migrations/0018_stay_amenity_answers.sql', 'utf8'))
+    const amenityMigration = readFileSync('migrations/0018_stay_amenity_answers.sql', 'utf8')
+    // A bad later home must abort the whole conversion, including the valid
+    // earlier home, without removing unknown facts or altering authored rooms.
+    for (const invalid of [[1], [null], ['invented_amenity'], ['tv', 'tv'], ['tv', {}]]) {
+      database.prepare("UPDATE product_stay_configs SET amenities = ? WHERE product_id = 'counts-only-home'").run(JSON.stringify(invalid))
+      const beforeRefusedMigration = database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all()
+      assert.throws(() => database.exec(amenityMigration), /NOT NULL constraint failed: product_stay_configs.amenities/)
+      assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), beforeRefusedMigration)
+      assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_amenities ORDER BY amenity_code').all(), priorRoomAmenities)
+      assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all(), authoredRooms)
+    }
+    database.prepare("UPDATE product_stay_configs SET amenities = '[]' WHERE product_id = 'counts-only-home'").run()
+    database.exec(amenityMigration)
     assert.deepEqual(JSON.parse(database.prepare("SELECT amenities FROM product_stay_configs WHERE product_id = 'authored-home'").get()!.amenities as string), [
       { code: 'tv', available: true }, { code: 'wireless_internet', available: true }, { code: 'smoke_detector', available: true },
     ])
