@@ -336,7 +336,7 @@ test('a failed stay cancellation email retries its recorded content after displa
     name: 'stay-cancellation-delivery-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-cancellation-delivery-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-cancellation-delivery-proof', exportName: 'Hub' } },
   } }] })
   const requests: Array<{ body: { subject: string; text: string; html: string }; idempotencyKey: string | null }> = []
   let reject = true
