@@ -219,10 +219,20 @@ test('native online review uses canonical Products, holds capacity, and releases
       }
     }
     await expect(page.locator('#consultations')).toHaveCount(1)
-    expect(await scheduleArticle.evaluate(article => {
-      const form = document.getElementById('consultations')!
-      return Boolean(article.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING)
-        && article.getBoundingClientRect().bottom <= form.getBoundingClientRect().top
+    expect(authoredSchedule.recipe).toBe('schedule')
+    const heroIndex = authoredSchedule.blocks.findIndex(block => block.type === 'hero')
+    expect(heroIndex).toBeGreaterThanOrEqual(0)
+    const scheduleHero = scheduleBlocks.nth(heroIndex)
+    await expect(scheduleHero.locator('[data-parity-section="page-hero"]')).toHaveCount(1)
+    await expect(scheduleHero.locator('#consultations')).toHaveCount(1)
+    // The schedule's native directory follows its hero band within that
+    // authored block; it is not appended after the whole page document.
+    expect(await scheduleHero.evaluate(block => {
+      const hero = block.querySelector('[data-parity-section="page-hero"]')!
+      const directory = block.querySelector('#consultations')!
+      return hero.parentElement === directory.parentElement
+        && Boolean(hero.compareDocumentPosition(directory) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && hero.getBoundingClientRect().bottom <= directory.getBoundingClientRect().top
     })).toBe(true)
     // /schedule lists each consultation; it is booked on its own page.
     const consultationCard = page.locator('#consultations').getByRole('link').filter({ hasText: products[0]!.name })
