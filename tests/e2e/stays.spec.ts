@@ -613,7 +613,7 @@ test('a host describes a place to stay through its focused editors and previews 
   await arrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   await page.getByRole('tab', { name: 'Your space', exact: true }).click()
   await expect(arrivalPanel).not.toBeVisible()
-  const settingsRead = await call<{ product: { description: string; details: Record<string, unknown>; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
+  const settingsRead = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(settingsRead.error).toBeNull()
   expect(settingsRead.data!.product).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
     ...propertyFacts,
@@ -626,12 +626,22 @@ test('a host describes a place to stay through its focused editors and previews 
   expect(homes.status(), await homes.text()).toBe(200)
   // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
   expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
-    product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
+    product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
     check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
     check_in_instructions: null, photos: [], photo_rooms: [],
     // The editor's listing choices persist through the native home projection too.
     description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
     ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
+    amenity_answers: [{ code: 'dryer', available: true }, { code: 'wireless_internet', available: true }],
+    carbon_monoxide_detector_details: null, smoke_detector_details: null,
+    accessibility: [
+      { feature: 'disabled_parking_spot', available: null, photo_ids: [] },
+      { feature: 'path_to_entrance_lit_at_night', available: null, photo_ids: [] },
+      { feature: 'home_step_free_access', available: null, photo_ids: [] },
+      { feature: 'home_wide_doorway', available: null, photo_ids: [] },
+      { feature: 'pool_hoist', available: null, photo_ids: [] },
+      { feature: 'ceiling_hoist', available: null, photo_ids: [] },
+    ],
     check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
   }])
 
@@ -2189,10 +2199,12 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await accessibilityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${accessibilityPath}`)
   await expect(accessibilityPanel).not.toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
   const accessibilityBack = accessibilityIndex.getByRole('link', { name: 'Back', exact: true })
   await expect(accessibilityBack).toHaveAttribute('href', roomPath)
   await accessibilityBack.click()
   await expect(page).toHaveURL(`${baseURL}${roomPath}`)
+  await page.setViewportSize({ width: 1440, height: 900 })
   await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
   await photoOverview.getByRole('button', { name: 'Add photos, room, or space', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Add a room or space', exact: true }).click()
