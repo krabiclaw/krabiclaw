@@ -1,6 +1,7 @@
 <template>
   <DashboardLeafPanel
     id="product-order-url"
+    :desktop-cancel="!p.isNew.value"
     :title="p.sectionLabels['order-url']"
     lead="Customers continue to this website to order or book. Adding a link replaces the booking action on your website."
     :saving="p.saving.value"

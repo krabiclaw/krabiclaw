@@ -2,6 +2,7 @@
   <!-- One option: what it is called and the values a customer picks between. -->
   <DashboardLeafPanel
     id="product-option"
+    :desktop-cancel="!p.isNew.value"
     :title="option?.name || 'Choice'"
     lead="Name a choice, such as Size, and add what customers can choose, such as Small and Large."
     :saving="p.saving.value"

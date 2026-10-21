@@ -15,6 +15,7 @@
     v-else
     id="product-description"
     :title="p.sectionLabels.description"
+    :desktop-cancel="!p.isNew.value"
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
     :save-label="p.saveLabel.value"

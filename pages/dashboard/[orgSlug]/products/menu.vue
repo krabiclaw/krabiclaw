@@ -1,23 +1,6 @@
 <template>
-  <!--
-    The menu: one location's sections, in the order its guests see them. A menu
-    belongs to a location, and Catalog opens it from that location's card, so
-    the location arrives in the URL and its share preview heads the page — the
-    picture with its name, as its own Location page shows it — rather than a
-    sentence naming it or a switcher. Only a chosen location's sections can be reordered or added
-    to — a single reorderable list is never assembled from several locations.
-    Sections shared by every location are their own list, edited with no
-    location chosen, where every location's menu reads beside them.
-  -->
-  <DashboardIndexPanel id="catalog-menu" title="Menu">
-    <img
-      v-if="chosenLocation?.social_image"
-      :src="chosenLocation.social_image.url"
-      :alt="chosenLocation.title"
-      class="mb-8 aspect-[1200/630] w-full rounded-xl object-cover lg:max-w-xl"
-      data-testid="menu-location-preview"
-    >
-
+  <DashboardIndexPanel id="catalog-menu" :title="chosenLocation ? `${chosenLocation.title} menu` : 'Menu'">
+    <template v-if="chosenLocation?.status !== 'active' && chosenLocation" #right><UBadge label="Inactive location" color="neutral" variant="soft" /></template>
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Menu could not be loaded" :description="loadError" />
     <div v-else class="space-y-10">
       <section v-for="scope in scopes" :key="scope.id ?? 'shared'" :data-testid="`menu-scope-${scope.id ?? 'shared'}`">
@@ -51,8 +34,10 @@ const catalog = useProductCatalog(organizationId, locationId)
 await catalog.load
 const { locations, error: locationsError } = await useOrganizationLocations({ includeInactive: true })
 const { priceLabel } = useCatalogPrice(locationId, locations)
-const unsectioned = computed(() => catalog.products.value.filter(product => product.kind === 'dish'
-  && !product.collections.some(membership => catalog.collections.value.some(collection => collection.id === membership.collection_id))))
+const unsectioned = computed(() => {
+  const visibleSections = new Set(catalog.collections.value.filter(collection => !locationId.value || collection.location_id === null || collection.location_id === locationId.value).map(collection => collection.id))
+  return catalog.products.value.filter(product => product.kind === 'dish' && !product.collections.some(membership => visibleSections.has(membership.collection_id)))
+})
 
 watchEffect(() => {
   if (level.mode.value === 'yield' || !locationId.value || locationsError.value) return
@@ -65,7 +50,11 @@ const loadError = computed(() => {
 })
 
 const chosenLocation = computed(() => locationId.value ? locations.value.find(location => location.id === locationId.value) : undefined)
-const titleOf = (id: string) => locations.value.find(location => location.id === id)?.title ?? id
+const titleOf = (id: string) => {
+  const location = locations.value.find(location => location.id === id)
+  if (!location) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
+  return location.title
+}
 const hasShared = computed(() => catalog.collections.value.some(row => row.location_id === null))
 
 /**
@@ -82,12 +71,11 @@ const scopes = computed(() => {
     ]
   }
   return [
-    ...(hasShared.value || !locations.value.length ? [{ id: null, title: 'Shared by every location', readOnly: false, chooseTo: null }] : []),
+    { id: null, title: 'Shared by every location', readOnly: false, chooseTo: null },
     ...locations.value.map(location => ({
       id: location.id,
-      title: location.title,
+      title: location.status === 'active' ? location.title : `${location.title} (Inactive)`,
       readOnly: true,
-     
       chooseTo: router.resolve({ path: level.path.value, query: { location_id: location.id } }).fullPath,
     })),
   ]

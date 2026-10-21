@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e74eced8aaa2d331c6b0884b7b7de2ee192e792ac0332e6f8649b870671b11db",
-  "documentationFingerprint": "sha256:ba6919f347e43fca4c7a4405299766c1833167702319745a81ec321f47cb4347",
+  "fingerprint": "sha256:d3c203e51fe540852236e86430399955482d5caf5ccc741d36f4f0d383d063a8",
+  "documentationFingerprint": "sha256:25be916c3f751b051d12da97effc076f95b9c4140fb71b3c8ed9e9e6ff05a828",
   "tools": [
     {
       "name": "add_organization_language",
@@ -84125,7 +84125,7 @@
     {
       "name": "reorder_collections",
       "title": "Reorder collections",
-      "description": "Set the display order of product collections for the whole site or one explicit location. Supply every collection ID in that scope exactly once; a partial list is rejected. Returns the ordered collections without changing their products.",
+      "description": "Set the display order of product collections for the whole site or one explicit location. Supply every collection ID in that scope exactly once; a partial list is rejected. Supply expected_collection_ids from the full ordered read to reject a stale edit. A concurrent change refuses the complete reorder. Returns the ordered collections without changing their products.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -84134,7 +84134,15 @@
               "type": "string"
             },
             "minItems": 1,
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
+          },
+          "expected_collection_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
           },
           "location_id": {
             "type": [
@@ -92753,12 +92761,44 @@
     {
       "name": "set_collection_products",
       "title": "Set collection products",
-      "description": "Replace a product collection’s membership and display order when the user wants to change which items it contains. Supply every product ID to retain, in the intended order. Omitted products are removed from this collection but remain in the catalog.",
+      "description": "Set a collection’s complete product membership and order. Supply every product ID to retain. expected_product_ids is the full ordered snapshot being edited; a stale snapshot refuses every change. To move removed products into another explicitly named same-organization collection, also supply move_to with its complete expected_product_ids. A move requires both snapshots, keeps the destination’s current order, and appends source removals in source order without duplicate memberships. Products, location offerings and other collections remain unchanged. Returns the source products; read the catalog to verify both sections.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "collection_id": {
             "type": "string"
+          },
+          "expected_product_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 2000,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "move_to": {
+            "additionalProperties": false,
+            "properties": {
+              "collection_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "expected_product_ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 2000,
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "collection_id",
+              "expected_product_ids"
+            ],
+            "type": "object"
           },
           "organization_id": {
             "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
@@ -92766,10 +92806,12 @@
           },
           "product_ids": {
             "items": {
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 2000,
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           }
         },
         "required": [
@@ -109942,6 +109984,11 @@
             ],
             "type": "string"
           },
+          "expected_updated_at": {
+            "description": "The Product updated_at from the read being edited. A stale value refuses the entire update, including options, variants and prices. Omit only for a deliberate update based on current state.",
+            "minLength": 1,
+            "type": "string"
+          },
           "idempotency_key": {
             "description": "Required with booking setup. Repeat the same key with the same request for an identical retry.",
             "maxLength": 200,
@@ -121466,10 +121513,10 @@
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reconcile_products": "sha256:c79d6fb56dd3348fa86f240df5a03df56a1c61e9149272c92701c498ef026583",
-        "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
-        "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
+        "reorder_collections": "sha256:76c649e913d6bda4e000b36748b4899a2aae89625a0c1c354b2d149998f9528a",
+        "set_collection_products": "sha256:8c3df1adb1002b9c3177788b9de6f3cf14b4ed0be42a9ccad2a576e651848fe0",
         "update_menu": "sha256:a98669973156cf353a911e15ddc542aedbc30a6cbc61653d444092a8bbcf4bbe",
-        "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3"
+        "update_product": "sha256:9acbf3e795c4a4ad0bdf115d317633089543599079ff2e0358dfa4a2e48be3a9"
       }
     },
     {
@@ -121629,7 +121676,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:c007ea9559df74ac50714b2adf181eb57053b53523366adb89d0df9fff291b3b",
-        "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3",
+        "update_product": "sha256:9acbf3e795c4a4ad0bdf115d317633089543599079ff2e0358dfa4a2e48be3a9",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -121649,7 +121696,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
-        "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3",
+        "update_product": "sha256:9acbf3e795c4a4ad0bdf115d317633089543599079ff2e0358dfa4a2e48be3a9",
         "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
@@ -121672,7 +121719,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3"
+        "update_product": "sha256:9acbf3e795c4a4ad0bdf115d317633089543599079ff2e0358dfa4a2e48be3a9"
       }
     }
   ],
@@ -121706,8 +121753,8 @@
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
-        "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
+        "reorder_collections": "sha256:76c649e913d6bda4e000b36748b4899a2aae89625a0c1c354b2d149998f9528a",
+        "set_collection_products": "sha256:8c3df1adb1002b9c3177788b9de6f3cf14b4ed0be42a9ccad2a576e651848fe0",
         "update_menu": "sha256:a98669973156cf353a911e15ddc542aedbc30a6cbc61653d444092a8bbcf4bbe"
       }
     },

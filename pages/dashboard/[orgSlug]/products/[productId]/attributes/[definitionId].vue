@@ -12,6 +12,7 @@
     @save="p.save(level.to.value ?? undefined)"
   >
     <template v-if="definition">
+      <UButton v-if="p.saveError.value" label="Use saved details" color="neutral" variant="outline" :disabled="p.saving.value" class="mb-5" @click="p.revert()" />
       <USwitch
         v-if="definition.value_type === 'boolean'"
         :model-value="p.form.details[definition.key] === true"

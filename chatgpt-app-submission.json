@@ -1431,9 +1431,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Overwrites the order collections are presented in on the selected organization.",
+        "read_only_justification": "Overwrites the complete collection order in the explicit scope. An expected ordered snapshot rejects stale edits.",
         "open_world_justification": "Changes collection display order in the public catalog or location menu.",
-        "destructive_justification": "Overwrites the order collections are presented in on the selected organization."
+        "destructive_justification": "Overwrites the complete collection order in the explicit scope. An expected ordered snapshot rejects stale edits."
       }
     },
     "reorder_media": {
@@ -1563,9 +1563,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Overwrites the complete membership and order of the selected collection; products left out lose their place in it.",
+        "read_only_justification": "Overwrites the selected collection’s complete membership and order. An explicit move atomically appends removed members to the named destination without duplicates; both expected snapshots must match. Product records and location offerings remain unchanged.",
         "open_world_justification": "Replaces the products and their display order in the selected public catalog collection.",
-        "destructive_justification": "Overwrites the complete membership and order of the selected collection; products left out lose their place in it."
+        "destructive_justification": "Overwrites the selected collection’s complete membership and order. An explicit move atomically appends removed members to the named destination without duplicates; both expected snapshots must match. Product records and location offerings remain unchanged."
       }
     },
     "set_consultation_mode": {
@@ -1839,9 +1839,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Updates supplied product fields and preserves omitted variants, prices and options. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly.",
+        "read_only_justification": "Updates supplied product fields and preserves omitted variants, prices and options. An expected Product version rejects the entire stale edit. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly.",
         "open_world_justification": "Changes published product content or prices and can publish configured booking availability to website visitors.",
-        "destructive_justification": "Updates supplied product fields and preserves omitted variants, prices and options. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly."
+        "destructive_justification": "Updates supplied product fields and preserves omitted variants, prices and options. An expected Product version rejects the entire stale edit. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly."
       }
     },
     "update_product_session": {

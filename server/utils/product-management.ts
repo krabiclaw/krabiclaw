@@ -47,6 +47,7 @@ import type {
   ProductVariantInput,
   ProductVariantPatchInput,
   ReconcileProductInput,
+  SetCollectionProductsInput,
   UpdateCollectionInput,
   UpdateProductInput,
 } from '~/server/types/products'
@@ -1503,6 +1504,14 @@ async function planProductUpdate(db: DbClient, input: {
   cacheInvalidations: BatchQuery[]
 }): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct }> {
   const { current, patch, organizationId } = input
+  if (patch.expected_updated_at !== undefined) {
+    if (typeof patch.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(patch.expected_updated_at))) invalid('expected_updated_at must be the Product updated_at value from the latest read')
+    if (patch.expected_updated_at !== current.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'The product changed while you were editing. Nothing was changed; read it again before saving.', data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: current.id } })
+  }
+  const previousUpdate = Date.parse(current.updated_at)
+  const requestedUpdate = Date.parse(input.now)
+  if (!Number.isFinite(previousUpdate) || !Number.isFinite(requestedUpdate)) throw new Error('The Product update timestamp is invalid')
+  const now = new Date(Math.max(requestedUpdate, previousUpdate + 1)).toISOString()
   const productId = current.id
   const variantsMode = patchListMode(patch.variants_mode, patch.variants, 'variants')
   const suppliedVariants = patch.variants ?? []
@@ -1599,7 +1608,7 @@ async function planProductUpdate(db: DbClient, input: {
     { query: 'DELETE FROM product_variants WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptVariants] },
     { query: 'DELETE FROM product_option_values WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptValues] },
     { query: 'DELETE FROM product_options WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptOptions] },
-    ...productWrites(organizationId, planned, input.actor, input.now, 'upsert', {
+    ...productWrites(organizationId, planned, input.actor, now, 'upsert', {
       writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds,
       stayFields: Object.keys(patch.stay ?? {}) as (keyof ProductStayConfig)[],
       // A narrow edit still restates the Product it read, including its details.
@@ -1769,7 +1778,7 @@ export async function updateProduct(db: DbClient, input: {
     if (isUniqueDedupeConflict(error) && await replay()) return
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
       if (await replay()) return
-      throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', product_id: input.productId }, cause: error })
+      throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', ...(input.patch.expected_updated_at !== undefined ? { field: 'expected_updated_at' } : {}), product_id: input.productId }, cause: error })
     }
     if (input.booking) {
       const { bookingConfigurationWriteError } = await import('~/server/utils/availability')
@@ -2097,49 +2106,123 @@ export async function deleteCollection(db: DbClient, input: { organizationId: st
  * the same product can sit third here and first somewhere else without being
  * copied.
  */
-export async function setCollectionProducts(db: DbClient, input: {
-  organizationId: string; collectionId: string; productIds: string[]; actor: Actor
-}): Promise<void> {
-  if (input.productIds.length > PRODUCT_LIMITS.collectionProducts) {
-    invalid(`a collection may hold at most ${PRODUCT_LIMITS.collectionProducts} products`)
+function collectionProductIds(value: unknown, field: string, limit?: number): string[] {
+  if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !id.trim())) invalid(`${field} must contain non-empty IDs`)
+  const ids = (value as string[]).map(id => id.trim())
+  if (limit !== undefined && ids.length > limit) invalid(`${field} may contain at most ${limit} products`)
+  if (new Set(ids).size !== ids.length) invalid(`${field} must be unique`)
+  return ids
+}
+
+function collectionProductsChanged(collectionId: string, cause?: unknown): never {
+  throw new HTTPError({ statusCode: 409, statusMessage: 'The section membership or order changed while you were editing. Nothing was changed; reload the sections and try again.', data: { code: 'COLLECTION_PRODUCTS_CHANGED', field: 'expected_product_ids', collection_id: collectionId }, cause })
+}
+
+/** A mismatch must fail the complete batch, including an empty or deleted collection. */
+function collectionProductsGuard(organizationId: string, collectionId: string, productIds: string[], actor: Actor): BatchQuery {
+  return {
+    query: `INSERT INTO collection_products (organization_id, collection_id, product_id, sort_order, created_by, updated_by)
+      SELECT ?, ?, '__collection_membership_guard__', -1, ?, ?
+      WHERE NOT EXISTS (SELECT 1 FROM collections WHERE organization_id = ? AND id = ?)
+        OR (SELECT json_group_array(product_id) FROM (
+          SELECT product_id FROM collection_products WHERE organization_id = ? AND collection_id = ? ORDER BY sort_order, product_id)) <> ?`,
+    params: [organizationId, collectionId, actor.actorId, actor.actorId, organizationId, collectionId, organizationId, collectionId, JSON.stringify(productIds)],
   }
-  if (new Set(input.productIds).size !== input.productIds.length) invalid('product_ids must be unique')
-  const collection = await queryFirst<{ organization_id: string }>(db, 'SELECT organization_id FROM collections WHERE organization_id = ? AND id = ?', [input.organizationId, input.collectionId])
-  if (!collection) notFound('Collection not found')
-  const products = await queryAll<{ id: string }>(db, 'SELECT id FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify(input.productIds)])
+}
+
+/** The one membership writer, used for a replacement and both sides of a move. */
+function collectionProductsWrites(organizationId: string, collectionId: string, productIds: string[], actor: Actor, now: string): BatchQuery[] {
+  const ids = JSON.stringify(productIds)
+  return [{
+    query: 'DELETE FROM collection_products WHERE organization_id = ? AND collection_id = ? AND product_id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, collectionId, ids],
+  }, {
+    query: `INSERT INTO collection_products (organization_id, collection_id, product_id, sort_order, created_at, updated_at, created_by, updated_by)
+      SELECT ?, ?, value, CAST(key AS INTEGER), ?, ?, ?, ? FROM json_each(?) WHERE 1
+      ON CONFLICT (collection_id, product_id) DO UPDATE SET sort_order = excluded.sort_order, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+        WHERE collection_products.organization_id = excluded.organization_id AND collection_products.sort_order <> excluded.sort_order`,
+    params: [organizationId, collectionId, now, now, actor.actorId, actor.actorId, ids],
+  }]
+}
+
+export async function setCollectionProducts(db: DbClient, input: {
+  organizationId: string; collectionId: string; productIds: string[]; expectedProductIds?: string[]; moveTo?: SetCollectionProductsInput['move_to']; actor: Actor
+}): Promise<void> {
+  const productIds = collectionProductIds(input.productIds, 'product_ids', PRODUCT_LIMITS.collectionProducts)
+  const expected = input.expectedProductIds === undefined ? undefined : collectionProductIds(input.expectedProductIds, 'expected_product_ids', PRODUCT_LIMITS.collectionProducts)
+  const move = input.moveTo
+  if (move !== undefined && (!move || typeof move !== 'object' || Array.isArray(move)
+    || Object.keys(move).some(key => !['collection_id', 'expected_product_ids'].includes(key))
+    || typeof move.collection_id !== 'string' || !move.collection_id.trim())) invalid('move_to must name its destination collection and complete expected_product_ids')
+  if (move && expected === undefined) invalid('A move requires expected_product_ids for the source section')
+  const targetId = move?.collection_id.trim()
+  if (targetId === input.collectionId) invalid('A move must name a different destination collection')
+  const targetExpected = move ? collectionProductIds(move.expected_product_ids, 'move_to.expected_product_ids', PRODUCT_LIMITS.collectionProducts) : undefined
+  const collectionIds = [input.collectionId, ...(targetId ? [targetId] : [])]
+  const collections = await queryAll<{ id: string }>(db, 'SELECT id FROM collections WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify(collectionIds)])
+  if (collections.length !== collectionIds.length) notFound('Collection not found')
+  const members = await queryAll<{ collection_id: string; product_id: string }>(db, `SELECT collection_id, product_id FROM collection_products
+    WHERE organization_id = ? AND collection_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id, sort_order, product_id`, [input.organizationId, JSON.stringify(collectionIds)])
+  const source = members.filter(row => row.collection_id === input.collectionId).map(row => row.product_id)
+  const target = targetId ? members.filter(row => row.collection_id === targetId).map(row => row.product_id) : undefined
+  if (expected && JSON.stringify(expected) !== JSON.stringify(source)) collectionProductsChanged(input.collectionId)
+  if (targetId && JSON.stringify(targetExpected) !== JSON.stringify(target)) collectionProductsChanged(targetId)
+  const removed = source.filter(id => !productIds.includes(id))
+  if (move && (productIds.some(id => !source.includes(id)) || !removed.length)) invalid('A move must remove existing source products and cannot add products to the source')
+  const targetIds = target ? [...target, ...removed.filter(id => !target.includes(id))] : undefined
+  if (targetIds && targetIds.length > PRODUCT_LIMITS.collectionProducts) invalid(`The destination may contain at most ${PRODUCT_LIMITS.collectionProducts} products`)
+  const products = await queryAll<{ id: string }>(db, 'SELECT id FROM products WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify(productIds)])
   const existing = new Set(products.map(product => product.id))
-  const missing = input.productIds.filter(id => !existing.has(id))
+  const missing = productIds.filter(id => !existing.has(id))
   if (missing.length) throw new HTTPError({ statusCode: 400, message: 'Collection contains products outside this organization or missing products', data: { missing_product_ids: missing } })
   const now = new Date().toISOString()
   await executeBatch(db, [
-    { query: 'DELETE FROM collection_products WHERE organization_id = ? AND collection_id = ?', params: [input.organizationId, input.collectionId] },
-    ...input.productIds.map((productId, index): BatchQuery => ({
-      query: `INSERT INTO collection_products (organization_id, collection_id, product_id, sort_order, created_at, updated_at, created_by, updated_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [input.organizationId, input.collectionId, productId, index, now, now, input.actor.actorId, input.actor.actorId],
-    })),
-    publicResourceCacheInvalidationQuery(collection.organization_id, 'collection_membership_changed'),
-  ], { operation: 'Set collection products' })
+    collectionProductsGuard(input.organizationId, input.collectionId, source, input.actor),
+    ...(targetId && target ? [collectionProductsGuard(input.organizationId, targetId, target, input.actor)] : []),
+    ...collectionProductsWrites(input.organizationId, input.collectionId, productIds, input.actor, now),
+    ...(targetId && targetIds ? collectionProductsWrites(input.organizationId, targetId, targetIds, input.actor, now) : []),
+    collectionProductsGuard(input.organizationId, input.collectionId, productIds, input.actor),
+    ...(targetId && targetIds ? [collectionProductsGuard(input.organizationId, targetId, targetIds, input.actor)] : []),
+    publicResourceCacheInvalidationQuery(input.organizationId, 'collection_membership_changed'),
+  ], { operation: 'Set collection products' }).catch((error: unknown) => {
+    if (/collection_products_sort_order_check|FOREIGN KEY constraint failed/.test(error instanceof Error ? error.message : String(error))) collectionProductsChanged(input.collectionId, error)
+    throw error
+  })
 }
 
 export async function reorderCollections(db: DbClient, input: {
-  organizationId: string; locationId?: string | null; collectionIds: string[]; actor: Actor
+  organizationId: string; locationId?: string | null; collectionIds: string[]; expectedCollectionIds?: string[]; actor: Actor
 }): Promise<void> {
+  const collectionIds = collectionProductIds(input.collectionIds, 'collection_ids')
+  const expected = input.expectedCollectionIds === undefined ? undefined : collectionProductIds(input.expectedCollectionIds, 'expected_collection_ids')
   const existing = await listCollections(db, { organizationId: input.organizationId, locationId: input.locationId })
-  const intended = new Set(input.collectionIds)
+  const current = existing.map(collection => collection.id)
+  const changed = (cause?: unknown): never => { throw new HTTPError({ statusCode: 409, statusMessage: 'The section order changed while you were editing. Nothing was changed; reload the menu and try again.', data: { code: 'COLLECTION_ORDER_CHANGED', field: 'expected_collection_ids' }, cause }) }
+  if (expected && JSON.stringify(expected) !== JSON.stringify(current)) changed()
+  const intended = new Set(collectionIds)
   // A partial order would leave the unnamed collections at whatever position
   // they had, which is not an order anyone chose.
   if (intended.size !== existing.length || existing.some(collection => !intended.has(collection.id))) {
     invalid('collection_ids must list every collection in this scope exactly once')
   }
   const now = new Date().toISOString()
+  const scope = input.locationId === undefined ? '' : 'AND location_id IS ?'
   await executeBatch(db, [
-    ...input.collectionIds.map((collectionId, index): BatchQuery => ({
-      query: 'UPDATE collections SET sort_order = ?, updated_at = ?, updated_by = ? WHERE organization_id = ? AND id = ?',
-      params: [index, now, input.actor.actorId, input.organizationId, collectionId],
-    })),
+    {
+      query: `INSERT INTO collections (id, organization_id, name, slug, sort_order, created_by, updated_by)
+        SELECT ?, ?, 'Order changed', 'order-changed', -1, ?, ? WHERE
+          (SELECT json_group_array(id) FROM (SELECT id FROM collections WHERE organization_id = ? ${scope} ORDER BY sort_order, name, id)) <> ?`,
+      params: [crypto.randomUUID(), input.organizationId, input.actor.actorId, input.actor.actorId, input.organizationId, ...(input.locationId === undefined ? [] : [input.locationId]), JSON.stringify(current)],
+    },
+    {
+      query: `UPDATE collections SET sort_order = (SELECT CAST(key AS INTEGER) FROM json_each(?) WHERE value = collections.id), updated_at = ?, updated_by = ?
+        WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))`,
+      params: [JSON.stringify(collectionIds), now, input.actor.actorId, input.organizationId, JSON.stringify(collectionIds)],
+    },
     publicResourceCacheInvalidationQuery(input.organizationId, 'collection_reordered'),
-  ], { operation: 'Reorder collections' })
+  ], { operation: 'Reorder collections' }).catch((error: unknown) => {
+    if (/collections_sort_order_check/.test(error instanceof Error ? error.message : String(error))) changed(error)
+    throw error
+  })
 }
 
 /**
@@ -2320,7 +2403,9 @@ export async function reconcileProducts(db: DbClient, input: {
   const missing = input.deactivateMissing ? await queryAll<{ id: string }>(db, `SELECT id FROM products WHERE organization_id=? AND active=1 AND id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.product_id=products.id AND pub.organization_id=?)`, [input.organizationId, d1JsonArray(touched), input.organizationId]) : []
   const answered = [...touched, ...missing.map(product => product.id)]
   const writes = perProduct.flat()
-  if (missing.length) writes.push({ query: 'UPDATE products SET active=0,updated_at=?,updated_by=? WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))', params: [now, input.actor.actorId, input.organizationId, d1JsonArray(missing.map(product => product.id))] })
+  if (missing.length) writes.push({ query: `UPDATE products SET active=0,
+    updated_at=CASE WHEN julianday(updated_at) IS NULL THEN NULL WHEN updated_at >= ? THEN strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0.001 seconds') ELSE ? END,
+    updated_by=? WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))`, params: [now, now, input.actor.actorId, input.organizationId, d1JsonArray(missing.map(product => product.id))] })
   writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
   try { await executeBatch(db, writes, { operation: 'Reconcile products' }) } catch (error) {

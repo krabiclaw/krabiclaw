@@ -94,16 +94,19 @@ watch([collectionId, () => collection.value !== null], () => seed(collection.val
 const saving = ref(false)
 const errorMessage = ref('')
 
+function fieldPath(field: CollectionLeaf) {
+  return router.resolve({ path: `${collectionPath.value}/${field}`, query: { location_id: (isNew.value ? locationId.value : collection.value?.location_id) ?? undefined } }).fullPath
+}
+
 // A section being created gives only its name; once it exists it also has the
 // description and picture that introduce it on the site.
 const collectionNavigation = computed<EditorNavigationGroup[]>(() => [{
   id: 'collection',
   items: [
-    { id: 'name', label: 'Name', summary: form.name.trim() || 'Not named yet', placeholder: !form.name.trim(), to: `${collectionPath.value}/name` },
+    { id: 'name', label: 'Name', summary: (isNew.value ? form.name : collection.value?.name)?.trim() || 'Not named yet', placeholder: !(isNew.value ? form.name : collection.value?.name)?.trim(), to: fieldPath('name') },
     ...(isNew.value ? [] : [
-      { id: 'description', label: 'Description', summary: collection.value?.description?.trim() || 'Not added', placeholder: !collection.value?.description?.trim(), to: `${collectionPath.value}/description` },
-      { id: 'photo', label: 'Photo', summary: collection.value?.image ? 'Photo added' : 'Not added', placeholder: !collection.value?.image, to: `${collectionPath.value}/photo`,
-        lead: { image: mediaStillUrl(collection.value?.image) ?? undefined, icon: 'i-lucide-image' } },
+      { id: 'description', label: 'Description', summary: collection.value?.description?.trim() || 'Not added', placeholder: !collection.value?.description?.trim(), to: fieldPath('description') },
+      { id: 'photo', label: 'Photo', summary: collection.value?.image ? 'Section photo' : 'No photo', placeholder: !collection.value?.image, to: fieldPath('photo'), image: mediaStillUrl(collection.value?.image) },
     ]),
   ],
 }])
@@ -126,13 +129,12 @@ const isCollectionCreated = (value: unknown): value is { collection: { id: strin
   isRecord(value) && isRecord(value.collection) && typeof value.collection.id === 'string'
 
 async function commit() {
+  if (saving.value) return
   saving.value = true
   errorMessage.value = ''
   let createdId: string | null = null
+  let committed = false
   try {
-    // A collection created in a location's catalog is scoped to that location;
-    // one created in the whole organization's catalog is site-wide. Renaming
-    // one needs no location at all, and a leaf's save sends only its own field.
     const endpoint = `/api/editor/organizations/${organizationId}/collections`
     if (isNew.value) {
       const created = await dashboardApi(endpoint, { method: 'POST', body: { name: form.name.trim(), location_id: locationId.value }, validate: isCollectionCreated })
@@ -140,22 +142,16 @@ async function commit() {
     } else {
       await dashboardApi(`${endpoint}/${collectionId.value}`, { method: 'PATCH', body: level.child.value === 'description' ? { description: form.description.trim() || null } : { name: form.name.trim() }, validate: isRecord })
     }
+    committed = true
+    if (createdId) form.name = ''
+    await catalog.refresh()
+    if (createdId) await navigateTo(router.resolve({ path: collectionPath.value.replace(/\/new$/, `/${createdId}`), query: route.query }).fullPath, { replace: true })
+    else await level.close()
   } catch (error) {
-    errorMessage.value = getErrorMessage(error, 'Failed to save section')
-    return
+    errorMessage.value = `${committed ? 'The section was saved, but its editor could not be updated. ' : ''}${getErrorMessage(error, 'The section could not be saved')}`
   } finally {
     saving.value = false
   }
-  // The write has landed. Everything below only moves the screen onto it, and a
-  // failure here is not a failed save — saying it was would leave the create
-  // screen open over a collection that exists, and the next press would make a
-  // second one with the same name.
-  if (createdId) form.name = ''
-  await catalog.refresh()
-  // The record it became, not the `new` form it was, so Back from a saved
-  // collection goes to the collections and never to an empty Add screen.
-  if (createdId) await navigateTo(router.resolve({ path: collectionPath.value.replace(/\/new$/, `/${createdId}`), query: route.query }).fullPath, { replace: true })
-  else await level.close()
 }
 
 /** A cancelled leaf puts the stored fields back before it closes. */
