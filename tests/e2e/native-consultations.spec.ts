@@ -473,7 +473,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await policyDialog.getByRole('button', { name: `Close ${browserBooking.policy_summary.heading}`, exact: true }).click()
     await page.getByRole('link', { name: `Team member ${self.name}`, exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Team member', exact: true })).toBeVisible()
-    await expect(page.getByRole('radio', { name: `${self.name} Current`, exact: true })).toBeChecked()
+    await expect(page.getByRole('radio', { name: `${host.name} Current`, exact: true })).toBeChecked()
     await expect(page.getByText('Current', { exact: true })).toBeVisible()
     await expect(page.getByText('Add working hours for a team member before moving this booking.', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
