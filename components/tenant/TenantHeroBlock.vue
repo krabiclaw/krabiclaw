@@ -85,8 +85,9 @@
 
   <!-- Every other page opens on the site's action color; a divider closing the hero section cuts the shield from the band beneath -->
   <template v-else>
-    <!-- Its button takes the accent color, which stands out on the action color. -->
-    <section class="relative overflow-hidden bg-[var(--site-action)] text-[var(--site-on-action)] [--site-button-bg:var(--site-accent)] [--site-button-text:var(--site-on-accent)]" data-parity-section="page-hero">
+    <!-- It takes the brand's own action color in both color modes (dark mode lightens
+         that color for text, not for a fill), and its button the accent, which stands out on it. -->
+    <section class="relative overflow-hidden bg-[var(--site-action-light)] text-[var(--site-on-action-light)] [--site-button-bg:var(--site-accent-light)] [--site-button-text:var(--site-on-accent-light)]" data-parity-section="page-hero">
       <div class="tenant-container relative pb-16 pt-20 sm:pb-24 sm:pt-28">
         <div class="mx-auto max-w-4xl text-center">
           <p v-if="eyebrow" class="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--tenant-accent)]">
