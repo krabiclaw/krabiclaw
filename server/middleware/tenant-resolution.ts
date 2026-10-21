@@ -1,3 +1,4 @@
+import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/edge-cache'
 // Tenant resolution middleware: every host, KrabiClaw's own included, resolves
 // to an organization. The organization's template decides whether it renders as
 // the platform (marketing, docs, blog) or as a customer site.
@@ -25,6 +26,7 @@ import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
 
 interface TenantRow {
   id: string;
+  public_cache_revision: string | null;
   theme_id: string | null;
   subdomain: string;
   status: string;
@@ -58,7 +60,8 @@ const TENANT_MEDIA_SELECT_SQL = `(SELECT COALESCE(json_group_array(json_object(
   ORDER BY mp.slot, mp.sort_order, mp.id
 ) ordered)`
 
-const TENANT_SELECT_SQL = `SELECT o.id, o.theme_id, o.subdomain, o.status, o.onboarding_status,
+const TENANT_SELECT_SQL = `SELECT o.id,
+             ${PUBLIC_CACHE_REVISION_SQL} AS public_cache_revision, o.theme_id, o.subdomain, o.status, o.onboarding_status,
              o.name, o.brand_description, ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.vertical,
              (SELECT i.target_id FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'facebook') AS facebook_page_id,
              (SELECT i.target_name FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'instagram') AS instagram_username,
@@ -297,6 +300,7 @@ export default defineHandler(async (event) => {
 
   if (tenant && await authorizeTenant(event, tenant)) {
     try {
+      await publicCacheRevision(event, env.db!, tenant.id, tenant.public_cache_revision)
       setResolvedTenantContext(event, tenant, host, requestedSlug !== null ? hostnameOf(host) : tenant.canonical_domain)
     } catch (error) {
       if (HTTPError.isError(error)) throw error

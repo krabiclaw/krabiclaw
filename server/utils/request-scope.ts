@@ -1,4 +1,5 @@
 import type { H3Event } from 'nitro'
+import { getEventContext, type HTTPEvent } from 'nitro/h3'
 
 const STORE_KEY = '__requestScopedReads'
 
@@ -23,8 +24,8 @@ type Store = Map<string, Promise<unknown>>
  * read is dropped so a retry is not served the failure, and a caller that
  * needs to observe a write it just made must not read through here.
  */
-export function oncePerRequest<T>(event: H3Event, key: string, read: () => Promise<T>): Promise<T> {
-  const context = event.context as Record<string, unknown>
+export function oncePerRequest<T>(event: H3Event | HTTPEvent, key: string, read: () => Promise<T>): Promise<T> {
+  const context = getEventContext(event) as Record<string, unknown>
   let store = context[STORE_KEY] as Store | undefined
   if (!store) {
     store = new Map()
