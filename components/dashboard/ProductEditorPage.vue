@@ -142,7 +142,7 @@ import type { StaySafetySection } from '~/shared/stay-safety'
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
-  'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'arrival-guide', 'property-type', 'rooms', 'amenities', 'cancellation', 'team', 'guest-safety',
+  'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'arrival-guide', 'property-type', 'rooms', 'amenities', 'cancellation', 'team', 'guest-safety', 'location',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
@@ -245,6 +245,9 @@ export interface ProductEditor {
   locationId: ComputedRef<string | null>
   /** The location the scope names, once the organization's locations have loaded. */
   location: ComputedRef<DashboardLocation | null>
+  /** The home's saved location, independent of the catalog's URL scope. */
+  stayLocation: ComputedRef<DashboardLocation | null>
+  stayLocationError: ComputedRef<string | null>
   organizationLocations: ComputedRef<DashboardLocation[]>
   organizationLocationsError: ComputedRef<string | null>
   /** Every collection the organization has, site-wide and per location. */
@@ -317,6 +320,7 @@ import { STAY_SAFETY_DETAIL_KEYS, STAY_SAFETY_SECTIONS, staySafetyLines, staySaf
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
+import { formatPostalAddress } from '~/utils/postal-address'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { ApiClientError } from '~/utils/api-clients'
 import { isStayArrivalGuide } from '~/shared/stay-arrival'
@@ -366,7 +370,8 @@ function sectionPath(section: string) {
 const organizationId = await useDashboardOrganizationId()
 const { refresh: refreshCatalog } = useProductCatalog(organizationId, ref(null))
 const dashboard = useDashboardOrganization()
-const { locations: organizationLocations, error: locationsError } = await useOrganizationLocations()
+const { locations: allOrganizationLocations, error: locationsError, pending: locationsPending } = await useOrganizationLocations({ includeInactive: true })
+const organizationLocations = computed(() => allOrganizationLocations.value.filter(entry => entry.status === 'active'))
 const location = computed(() => organizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
 
 const vertical = dashboard.organization.value?.vertical
@@ -408,6 +413,7 @@ const sectionLabels: Record<SectionKey, string> = {
   'house-manual': 'House manual',
   'house-rules': 'House rules',
   'guest-safety': 'Guest safety',
+  'location': 'Location',
   'checkout-instructions': 'Checkout instructions',
   'arrival-guide': 'Arrival guide',
   'property-type': 'Property type',
@@ -472,6 +478,12 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
   },
 )
 const product = computed(() => loaded.value?.product ?? null)
+const stayLocation = computed(() => allOrganizationLocations.value.find(entry => entry.id === product.value?.stay?.location_id) ?? null)
+const stayLocationError = computed(() => {
+  if (!product.value?.stay) return null
+  if (locationsError.value) return getErrorMessage(locationsError.value, 'The listing’s location could not be loaded')
+  return !locationsPending.value && !stayLocation.value ? 'The listing’s saved location could not be found.' : null
+})
 const published = computed(() => product.value?.publications.some(entry => entry.organization_id === organizationId && entry.published) === true)
 const bookingOffering = computed(() => Boolean(product.value?.booking) || ['stay', 'experience', 'service'].includes(product.value?.kind ?? ''))
 const collections = computed(() => loaded.value?.collections ?? [])
@@ -1106,6 +1118,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             { id: 'guests', label: 'Number of guests', summary: `${product.value.stay!.max_guests} ${product.value.stay!.max_guests === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
             { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
             { id: 'guest-safety', label: 'Guest safety', summary: savedSafety.value.join('\n') || 'Add details', placeholder: !savedSafety.value.length, to: sectionPath('guest-safety') },
+            { id: 'location', label: 'Location', summary: stayLocationError.value || (stayLocation.value ? formatPostalAddress(stayLocation.value.address) || 'Add address' : 'Loading location…'), placeholder: !stayLocation.value?.address, to: sectionPath('location') },
             { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
           ]
         : []),
@@ -1154,7 +1167,7 @@ const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item
 // A service leads with what is changed most: who handles it, what it costs,
 // how it is booked and what its page says. Every other kind keeps the list as written.
 const SERVICE_ROW_ORDER = ['assignment', 'price', 'booking', 'description', 'page', 'locations', 'publication']
-const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'house-rules', 'guest-safety', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
+const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
 function rowRank(id: string) {
   if (form.kind === 'stay') {
     const at = STAY_ROW_ORDER.indexOf(id)
@@ -1872,6 +1885,8 @@ provide(productEditorKey, {
   organizationId,
   locationId,
   location,
+  stayLocation,
+  stayLocationError,
   organizationLocations,
   organizationLocationsError: computed(() => locationsError.value ? getErrorMessage(locationsError.value, 'Locations could not be loaded') : null),
   collections,
