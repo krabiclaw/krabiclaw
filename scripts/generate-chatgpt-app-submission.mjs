@@ -77,7 +77,8 @@ const effects = {
   get_stay: 'Reads one stay with its guest details and the offline payments recorded against it.',
   get_stay_calendar: 'Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it.',
   add_stay_photo_room: 'Adds an explicitly authored room or space to one home’s photo tour and returns its created ID. Leaves bedroom, bed and bathroom counts, amenities, Product photos and library files unchanged.',
-  update_stay_photo_room: 'Changes an authored room’s sleeping arrangements, bedroom private attached bathroom or amenity memberships under its details version. Selected amenities are atomically added to the canonical listing set; unassigning retains listing facts. Invalid allocations, contradictory facts or stale versions refuse the entire edit. Listing totals, photos and library files are unchanged.',
+  update_stay_accessibility: 'Changes one listing accessibility answer under the latest Product updated_at value. Positive accessibility requires image evidence; selected library images join Product photos atomically while preserving existing cover, order and room groups. With no existing photos the first image becomes the cover. False or clearing an answer retains its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; other feature answers and room facts are retained.',
+  update_stay_photo_room: 'Changes room sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer under its version. Positive accessibility needs image evidence; selected library images join Product photos atomically without reordering existing photos. With no existing photos the first image becomes the cover. False or clearing an answer keeps its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; listing totals are retained.',
   remove_stay_photo_room: 'Deletes one authored room and its photo memberships. The photos remain in the Product’s cover/gallery and media library, and appear as Additional photos.',
   move_stay_photos: 'Atomically changes selected Product photos’ room membership, optionally creating their destination room in the same batch. A changed expected source or missing Product photo refuses the whole move; the Product’s global photo order and library assets are retained.',
   create_stay: 'Creates a host-entered stay with caller idempotency, holding its nights atomically; a night another stay holds refuses it. Sends no email and takes no payment.',
@@ -167,7 +168,7 @@ const effects = {
   update_article_category: 'Overwrites the selected category\'s name, description or parent category.',
   update_blog_post: 'Updates supplied fields of an existing website article. Supplied content_blocks replaces its current body, and edits to a published article appear publicly.',
   update_collection: 'Overwrites the selected collection name, description or placement.',
-  update_location: 'Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields.',
+  update_location: 'Overwrites supplied location identity, address, saved coordinates, contact details, hours, timezone, map sharing or SEO fields.',
   block_dates: 'Overwrites the selected location\'s special hours with an added closure for the given days, so guests cannot book them on the public website.',
   open_dates: 'Overwrites the selected location\'s special hours with the given days reopened, so guests can book them on the public website again.',
   update_media_asset: 'Overwrites media metadata such as alt text or category.',
@@ -182,7 +183,8 @@ const effects = {
 
 const openWorldEffects = {
   add_stay_photo_room: 'Adds a room used by the home’s public photo tour; incomplete tours retain the complete ordinary gallery.',
-  update_stay_photo_room: 'Changes room sleeping arrangements, bedroom privacy or amenity memberships shown to guests, adding selected room amenities to the listing when needed, without changing listing totals or contacting providers.',
+  update_stay_accessibility: 'Changes listing accessibility facts shown to guests and appends explicitly selected library evidence images to the listing on Save when needed. Appended photos may create the cover and canonical completion may refresh a derived social card through the configured media provider. False or clearing an answer retains the Product photos. Answers are host-authored and carry no review or approval state.',
+  update_stay_photo_room: 'Changes room facts shown to guests, adding selected amenities or accessibility evidence images to the listing on Save when needed. Appended photos may create the cover and canonical completion may refresh a derived social card through the configured media provider. False or clearing an answer retains the Product photos. Accessibility answers are host-authored and carry no review or approval state.',
   remove_stay_photo_room: 'Changes the home’s public photo-tour grouping, retaining the removed room’s pictures in Additional photos.',
   move_stay_photos: 'Changes the home’s public photo-tour grouping without changing the selected Product photos or making provider requests.',
   set_stay_nights: 'Changes publicly bookable nights and prices on the website and, when connected, the home’s Airbnb listing through Channex.',

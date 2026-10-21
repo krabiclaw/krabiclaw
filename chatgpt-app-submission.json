@@ -1791,9 +1791,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields.",
+        "read_only_justification": "Overwrites supplied location identity, address, saved coordinates, contact details, hours, timezone, map sharing or SEO fields.",
         "open_world_justification": "Changes public location details and hours that visitors see and use for booking availability.",
-        "destructive_justification": "Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields."
+        "destructive_justification": "Overwrites supplied location identity, address, saved coordinates, contact details, hours, timezone, map sharing or SEO fields."
       }
     },
     "update_media_asset": {
@@ -1940,6 +1940,18 @@
         "destructive_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused."
       }
     },
+    "update_stay_accessibility": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes one listing accessibility answer under the latest Product updated_at value. Positive accessibility requires image evidence; selected library images join Product photos atomically while preserving existing cover, order and room groups. With no existing photos the first image becomes the cover. False or clearing an answer retains its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; other feature answers and room facts are retained.",
+        "open_world_justification": "Changes listing accessibility facts shown to guests and appends explicitly selected library evidence images to the listing on Save when needed. Appended photos may create the cover and canonical completion may refresh a derived social card through the configured media provider. False or clearing an answer retains the Product photos. Answers are host-authored and carry no review or approval state.",
+        "destructive_justification": "Changes one listing accessibility answer under the latest Product updated_at value. Positive accessibility requires image evidence; selected library images join Product photos atomically while preserving existing cover, order and room groups. With no existing photos the first image becomes the cover. False or clearing an answer retains its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; other feature answers and room facts are retained."
+      }
+    },
     "update_stay_arrival_guide": {
       "annotations": {
         "readOnlyHint": false,
@@ -1959,9 +1971,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Changes an authored room’s sleeping arrangements, bedroom private attached bathroom or amenity memberships under its details version. Selected amenities are atomically added to the canonical listing set; unassigning retains listing facts. Invalid allocations, contradictory facts or stale versions refuse the entire edit. Listing totals, photos and library files are unchanged.",
-        "open_world_justification": "Changes room sleeping arrangements, bedroom privacy or amenity memberships shown to guests, adding selected room amenities to the listing when needed, without changing listing totals or contacting providers.",
-        "destructive_justification": "Changes an authored room’s sleeping arrangements, bedroom private attached bathroom or amenity memberships under its details version. Selected amenities are atomically added to the canonical listing set; unassigning retains listing facts. Invalid allocations, contradictory facts or stale versions refuse the entire edit. Listing totals, photos and library files are unchanged."
+        "read_only_justification": "Changes room sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer under its version. Positive accessibility needs image evidence; selected library images join Product photos atomically without reordering existing photos. With no existing photos the first image becomes the cover. False or clearing an answer keeps its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; listing totals are retained.",
+        "open_world_justification": "Changes room facts shown to guests, adding selected amenities or accessibility evidence images to the listing on Save when needed. Appended photos may create the cover and canonical completion may refresh a derived social card through the configured media provider. False or clearing an answer retains the Product photos. Accessibility answers are host-authored and carry no review or approval state.",
+        "destructive_justification": "Changes room sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer under its version. Positive accessibility needs image evidence; selected library images join Product photos atomically without reordering existing photos. With no existing photos the first image becomes the cover. False or clearing an answer keeps its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; listing totals are retained."
       }
     },
     "update_team": {

@@ -14,6 +14,8 @@ import { listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../ser
 import { requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
 import { notifyContactSubmitted, notifyFinancialNotification, notifyStayCancelled } from '../../server/utils/notifications.ts'
 import { createProduct, getProduct, updateProduct } from '../../server/utils/product-management.ts'
+import { buildPublicResourceCacheKey } from '../../server/utils/public-resource-cache.ts'
+import { PUBLIC_CACHE_REVISION_SQL } from '../../server/utils/edge-cache.ts'
 import { cancelStay, createStay, getStay } from '../../server/domain/stays.ts'
 import { organizationAdapter } from '../../server/utils/member-access.ts'
 import { createCanonicalNotification } from '../../server/utils/notification-center.ts'
@@ -400,7 +402,12 @@ test('a failed stay cancellation email retries its recorded content after displa
     assert.equal((await getDeliveryById(db, deliveryId))!.status, 'failed')
     assert.match((await getDeliveryById(db, deliveryId))!.error!, /Cancellation delivery rejected/u)
 
+    assert(env.ORGANIZATION_CACHE)
+    const revision = await db.prepare(`SELECT ${PUBLIC_CACHE_REVISION_SQL} AS revision FROM organization o WHERE o.id = ?`).bind(access.organizationId).first<string | null>('revision')
+    const cachedPageKey = buildPublicResourceCacheKey(access.organizationId, { contract: 'page', page: 'stays', location: null, datasets: ['products'], blogSlug: null, locale: 'en' }, revision)
+    await env.ORGANIZATION_CACHE.put(cachedPageKey, JSON.stringify({ product: home }))
     await updateProduct(db, { env, organizationId: access.organizationId, productId: home.id, actor: { actorId: access.actorId }, patch: { name: 'Renamed Cabin' } })
+    assert.equal(await env.ORGANIZATION_CACHE.get(cachedPageKey), null)
     await (await organizationAdapter(env)).updateOrganization(access.organizationId, { name: 'Renamed Retreat' })
     assert.equal((await getProduct(db, access.organizationId, home.id)).name, 'Renamed Cabin')
     assert.equal(await db.prepare('SELECT name FROM organization WHERE id = ?').bind(access.organizationId).first('name'), 'Renamed Retreat')

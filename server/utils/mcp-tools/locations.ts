@@ -81,7 +81,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_location',
-      description: 'Update a location\'s own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, and map sharing for its places to stay. Renaming changes the location\'s slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.',
+      description: 'Update a location\'s own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming changes the location\'s slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -93,6 +93,8 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         status: { type: 'string', enum: ['published', 'draft', 'active', 'inactive'], description: 'published/active keeps the location on the website; draft/inactive takes the location off the website and frees its plan slot.' },
         stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'Public map precision for every place to stay at this location. General shows the area; specific shows its precise pin. Both keep the street address private until a confirmed booking. Omit to keep the saved choice.' },
         address: postalAddressSchema,
+        latitude: { ...locationObject.properties.latitude, description: 'Saved map latitude. Supply longitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.' },
+        longitude: { ...locationObject.properties.longitude, description: 'Saved map longitude. Supply latitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.' },
         phone: { type: 'string', description: `Public phone number shown to guests on the website and in booking/reservation confirmation emails. ${PHONE_FORMAT}` },
         email: { type: ['string', 'null'], description: 'Public email shown to guests on the website and in booking/reservation confirmation emails. Pass null to clear it.' },
         timezone: { type: 'string', description: 'IANA time zone identifier for this location, e.g. Asia/Bangkok. Used to interpret opening hours and booking slots.' },

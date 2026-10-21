@@ -12,7 +12,8 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { isStayAmenity, parseStayMapSharing, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { validateProductDetails, validateStayAlarmDetails } from '~/shared/product-details'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -26,12 +27,13 @@ import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import { toE164 } from '~/utils/phone'
-import { arrangeProductPhotos, readProductPhotos, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
+import { arrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { isStayPhotoRoomType, isStaySleepingArrangements, MAX_STAY_BEDS_PER_TYPE, type StayPhotoRoom, type StayPhotoRoomType } from '~/shared/stay-photos'
+import { isStayHomeAccessibility, isStayRoomAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 
 /**
@@ -138,6 +140,8 @@ export interface StayDetail extends Stay {
 
 export interface StayHome {
   product_id: string
+  /** The Product version used when saving listing accessibility. */
+  product_updated_at: string
   name: string
   location_id: string
   timezone: string
@@ -170,6 +174,9 @@ export interface StayHome {
   beds: number | null
   bathrooms: number | null
   amenities: StayAmenity[]
+  amenity_answers: StayAmenityAnswer[]
+  smoke_detector_details: string | null
+  carbon_monoxide_detector_details: string | null
   cancellation_policy: StayCancellationPolicy | null
   long_term_cancellation_policy: StayLongTermCancellationPolicy | null
   /**
@@ -198,6 +205,7 @@ export interface StayHome {
    */
   photos: StayPhoto[]
   photo_rooms: StayPhotoRoom[]
+  accessibility: StayHomeAccessibility[]
 }
 
 /** A home's address as a home is added with it: street, city, state, ISO country and postal code. */
@@ -343,7 +351,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
+    SELECT p.id AS product_id, p.updated_at AS product_updated_at, p.name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
            c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
@@ -365,16 +373,20 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
      WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1
      ORDER BY v.sort_order, v.id`, [organizationId, ...(productId ? [productId] : [])])
   const productIds = rows.map(row => String(row.product_id))
-  const [photos, photoRooms] = await Promise.all([
+  const [photos, photoRooms, accessibility] = await Promise.all([
     readProductPhotos(db, { organizationId, productIds }),
     readStayPhotoRooms(db, organizationId, productIds),
+    readStayHomeAccessibility(db, organizationId, productIds),
   ])
   return rows.map((row) => {
+    const amenityAnswers = parseStayAmenityAnswers(JSON.parse(String(row.amenities)))
+    const details = validateProductDetails('stay', JSON.parse(String(row.details_json)))
+    validateStayAlarmDetails(details, amenityAnswers)
     if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
     const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
     const base = selectPrice(own, { currency: row.default_currency, location_id: String(row.location_id) })
     return {
-      product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
+      product_id: String(row.product_id), product_updated_at: String(row.product_updated_at), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       description: String(row.description), published: Number(row.published) === 1,
@@ -385,7 +397,9 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       total_floors: nullableNumber(row.total_floors), listing_floor: nullableNumber(row.listing_floor), year_built: nullableNumber(row.year_built),
       property_size: nullableNumber(row.property_size), property_size_unit: nullableText(row.property_size_unit) as StayPropertySizeUnit | null,
       bedrooms: nullableNumber(row.bedrooms), beds: nullableNumber(row.beds), bathrooms: nullableNumber(row.bathrooms),
-      amenities: JSON.parse(String(row.amenities)) as StayAmenity[],
+      amenities: amenityAnswers.filter(answer => answer.available).map(answer => answer.code), amenity_answers: amenityAnswers,
+      smoke_detector_details: typeof details.smoke_detector_details === 'string' ? details.smoke_detector_details : null,
+      carbon_monoxide_detector_details: typeof details.carbon_monoxide_detector_details === 'string' ? details.carbon_monoxide_detector_details : null,
       cancellation_policy: nullableText(row.cancellation_policy) as StayCancellationPolicy | null,
       long_term_cancellation_policy: nullableText(row.long_term_cancellation_policy) as StayLongTermCancellationPolicy | null,
       check_in_method: nullableText(row.check_in_method) as StayCheckInMethod | null,
@@ -401,6 +415,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       },
       photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
       photo_rooms: photoRooms.get(String(row.product_id)) ?? [],
+      accessibility: accessibility.get(String(row.product_id))!,
     }
   })
 }
@@ -524,12 +539,12 @@ function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewSta
 }
 
 /** What the home is and offers: product stay settings, checked by the product writer. */
-const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
+const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'amenity_answers', 'cancellation_policy', 'long_term_cancellation_policy'] as const
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude', 'stay_map_sharing'] as const
 const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
-  'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
+  'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
 
 /** The arrival guide fields a request names, checked; each problem names its field. */
 function arrivalPatch(body: Record<string, unknown>): Record<string, string | null> {
@@ -633,7 +648,10 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     }
     stay[key] = value as string | null
   }
-  const patch: UpdateProductInput = {}
+  const alarmDetails = Object.fromEntries(Object.values(STAY_ALARM_DETAIL_KEYS).filter(key => Object.hasOwn(body, key)).map(key => [key, body[key]]))
+  const patch: UpdateProductInput = Object.keys(alarmDetails).length
+    ? { details_mode: 'merge', details: alarmDetails as NonNullable<UpdateProductInput['details']> }
+    : {}
   const renamed = name(false)
   if (renamed !== null) patch.name = renamed
   if ('description' in body) patch.description = (body.description as string).trim()
@@ -959,22 +977,40 @@ export async function createStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
   return { home: updated, room }
 }
 
+/** Listing-level answers belong to the Product; no authored room is created or inferred. */
+export async function updateStayHomeAccessibility(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, body: unknown): Promise<{ home: StayHome }> {
+  const home = await managedHome(db, access, productId)
+  if (!isRecord(body)) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Provide the accessibility answer to change', 'accessibility')
+  const unknown = Object.keys(body).find(key => !['expected_updated_at', 'accessibility'].includes(key))
+  if (unknown) fail(422, 'INVALID_STAY_ACCESSIBILITY', `${unknown} cannot be changed here`, unknown)
+  if (typeof body.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(body.expected_updated_at))) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Provide the Product updated_at value from the latest read', 'expected_updated_at')
+  if (!isStayHomeAccessibility(body.accessibility)) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Choose a listing accessibility feature and true, false or null. A true answer needs unique photo IDs; false or null needs an empty photo list.', 'accessibility')
+  if (body.expected_updated_at !== home.product_updated_at) fail(409, 'STAY_ACCESSIBILITY_CHANGED', 'The listing changed while you were editing. Reload the accessibility information and try again.', 'expected_updated_at')
+  await updateProduct(db, {
+    organizationId: access.organizationId, productId, patch: {}, actor: { actorId: access.actorId }, env,
+    stayAccessibilityUpdate: { expectedUpdatedAt: body.expected_updated_at, accessibility: body.accessibility },
+  })
+  return { home: await readStayHome(db, access, productId) }
+}
+
 /** Room bed quantities allocate the declared listing inventory; they never replace its total. */
 export async function updateStayPhotoRoom(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, roomId: string, body: unknown): Promise<{ home: StayHome; room: StayPhotoRoom }> {
   const home = await managedHome(db, access, productId)
   const current = home.photo_rooms.find(room => room.id === roomId)
   if (!current) fail(404, 'PHOTO_ROOM_NOT_FOUND', 'That room is not on this home', 'room_id')
   if (!isRecord(body)) fail(422, 'INVALID_ROOM_DETAILS', 'Provide the room details to change', 'room')
-  const unknown = Object.keys(body).find(key => !['expected_details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities'].includes(key))
+  const unknown = Object.keys(body).find(key => !['expected_details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities', 'accessibility'].includes(key))
   if (unknown) fail(422, 'INVALID_ROOM_DETAILS', `${unknown} cannot be changed here`, unknown)
   if (!Number.isInteger(body.expected_details_version) || (body.expected_details_version as number) < 1) fail(422, 'INVALID_ROOM_DETAILS', 'Provide the room details_version from the latest read', 'expected_details_version')
   const sleeping = Object.hasOwn(body, 'sleeping_arrangements')
   const privacy = Object.hasOwn(body, 'private_attached_bathroom')
   const amenities = Object.hasOwn(body, 'amenities')
-  if (!sleeping && !privacy && !amenities) fail(422, 'INVALID_ROOM_DETAILS', 'Provide sleeping arrangements, private bathroom information or room amenities', 'room')
+  const accessibility = Object.hasOwn(body, 'accessibility')
+  if (!sleeping && !privacy && !amenities && !accessibility) fail(422, 'INVALID_ROOM_DETAILS', 'Provide room details to change', 'room')
   if (sleeping && !isStaySleepingArrangements(body.sleeping_arrangements)) fail(422, 'INVALID_ROOM_DETAILS', `Sleeping arrangements must be null or a list of unique bed types with whole counts from 1 to ${MAX_STAY_BEDS_PER_TYPE}`, 'sleeping_arrangements')
   if (privacy && (current.type !== 'bedroom' || (body.private_attached_bathroom !== null && typeof body.private_attached_bathroom !== 'boolean'))) fail(422, 'INVALID_ROOM_DETAILS', 'Only a bedroom can state whether it has a private attached bathroom, as true, false or null', 'private_attached_bathroom')
   if (amenities && (!Array.isArray(body.amenities) || !body.amenities.every(isStayAmenity) || new Set(body.amenities).size !== body.amenities.length)) fail(422, 'INVALID_ROOM_DETAILS', 'Room amenities must list amenity codes from the catalog, each once', 'amenities')
+  if (accessibility && (current.type !== 'bedroom' || !isStayRoomAccessibility(body.accessibility))) fail(422, 'INVALID_ROOM_DETAILS', 'Choose a bedroom accessibility feature and true, false or null. A true answer needs unique photo IDs; false or null needs an empty photo list.', 'accessibility')
   if (current.details_version !== body.expected_details_version) fail(409, 'ROOM_DETAILS_CHANGED', 'The room details changed while you were editing. Reload the room and try again.', 'expected_details_version')
   await updateProduct(db, {
     organizationId: access.organizationId, productId, patch: {}, actor: { actorId: access.actorId }, env,
@@ -983,6 +1019,7 @@ export async function updateStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
       ...(sleeping ? { sleeping_arrangements: body.sleeping_arrangements as StayPhotoRoom['sleeping_arrangements'] } : {}),
       ...(privacy ? { private_attached_bathroom: body.private_attached_bathroom as boolean | null } : {}),
       ...(amenities ? { amenities: body.amenities as StayAmenity[] } : {}),
+      ...(accessibility ? { accessibility: body.accessibility as StayRoomAccessibility } : {}),
     },
   })
   const updated = await readStayHome(db, access, productId)

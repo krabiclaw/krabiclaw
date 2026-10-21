@@ -313,9 +313,91 @@ export const STAY_AMENITIES = {
   cleaning_before_checkout: { icon: 'i-lucide-sparkles', label: 'Cleaning available during stay', description: "Cleaning services available during the stay.", symbol: 'sparkles' },
   long_term_stays_allowed: { icon: 'i-lucide-calendar-days', label: 'Long term stays allowed', description: "The option to book an extended stay.", symbol: 'calendar' },
   luggage_dropoff_allowed: { icon: 'i-lucide-luggage', label: 'Luggage dropoff allowed', description: "A place to leave luggage before check-in or after checkout.", symbol: 'suitcase' },
+  bay_view: { icon: 'i-lucide-waves', label: 'Bay view', symbol: 'water.waves' },
+  beach_view: { icon: 'i-lucide-waves', label: 'Beach view', symbol: 'water.waves' },
+  canal_view: { icon: 'i-lucide-waves', label: 'Canal view', symbol: 'water.waves' },
+  city_view: { icon: 'i-lucide-building-2', label: 'City skyline view', symbol: 'building.2' },
+  courtyard_view: { icon: 'i-lucide-fence', label: 'Courtyard view', symbol: 'square' },
+  desert_view: { icon: 'i-lucide-sun', label: 'Desert view', symbol: 'sun.max' },
+  garden_view: { icon: 'i-lucide-flower-2', label: 'Garden view', symbol: 'leaf' },
+  golf_view: { icon: 'i-lucide-flag', label: 'Golf course view', symbol: 'flag' },
+  harbor_view: { icon: 'i-lucide-ship', label: 'Harbor view', symbol: 'ferry' },
+  lake_view: { icon: 'i-lucide-waves', label: 'Lake view', symbol: 'water.waves' },
+  marina_view: { icon: 'i-lucide-ship', label: 'Marina view', symbol: 'ferry' },
+  mountain_view: { icon: 'i-lucide-mountain', label: 'Mountain view', symbol: 'mountain.2' },
+  ocean_view: { icon: 'i-lucide-waves', label: 'Ocean view', symbol: 'water.waves' },
+  park_view: { icon: 'i-lucide-trees', label: 'Park view', symbol: 'tree' },
+  pool_view: { icon: 'i-lucide-waves-ladder', label: 'Pool view', symbol: 'figure.pool.swim' },
+  resort_view: { icon: 'i-lucide-building', label: 'Resort view', symbol: 'building.2' },
+  river_view: { icon: 'i-lucide-waves', label: 'River view', symbol: 'water.waves' },
+  sea_view: { icon: 'i-lucide-waves', label: 'Sea view', symbol: 'water.waves' },
+  valley_view: { icon: 'i-lucide-mountain', label: 'Valley view', symbol: 'mountain.2' },
+  vineyard_view: { icon: 'i-lucide-grape', label: 'Vineyard view', symbol: 'leaf' },
+  landmark_view: { icon: 'i-lucide-landmark', label: 'Landmark view', symbol: 'building.columns' },
 } as const satisfies Record<string, { icon: string; label: string; description?: string; symbol: string }>
 
 export type StayAmenity = keyof typeof STAY_AMENITIES
+
+export const STAY_ALARM_AMENITIES = ['carbon_monoxide_detector', 'smoke_detector'] as const satisfies readonly StayAmenity[]
+export const STAY_ALARM_DETAIL_KEYS = { carbon_monoxide_detector: 'carbon_monoxide_detector_details', smoke_detector: 'smoke_detector_details' } as const
+export const STAY_ALARM_DETAILS = {
+  carbon_monoxide_detector: { detailsKey: STAY_ALARM_DETAIL_KEYS.carbon_monoxide_detector, name: STAY_AMENITIES.carbon_monoxide_detector.label, description: 'Share where each carbon monoxide alarm is located.' },
+  smoke_detector: { detailsKey: STAY_ALARM_DETAIL_KEYS.smoke_detector, name: STAY_AMENITIES.smoke_detector.label, description: 'Share where each smoke alarm is located.' },
+} as const
+/** A missing record is unknown; false is an explicit report of absence. */
+export interface StayAmenityAnswer { code: StayAmenity; available: boolean }
+export interface StayAmenityAnswerPatch { code: StayAmenity; available: boolean | null }
+
+export function isStayAmenityCodes(value: unknown): value is StayAmenity[] {
+  return Array.isArray(value) && value.every(isStayAmenity) && new Set(value).size === value.length
+}
+
+function isAmenityAnswers(value: unknown, nullable: boolean): boolean {
+  if (!Array.isArray(value)) return false
+  const codes = new Set<StayAmenity>()
+  return value.every(answer => {
+    if (typeof answer !== 'object' || answer === null || Array.isArray(answer)
+      || Object.keys(answer).some(key => key !== 'code' && key !== 'available')
+      || !isStayAmenity(answer.code) || codes.has(answer.code)
+      || (typeof answer.available !== 'boolean' && !(nullable && answer.available === null))) return false
+    codes.add(answer.code)
+    return true
+  })
+}
+
+export function isStayAmenityAnswers(value: unknown): value is StayAmenityAnswer[] { return isAmenityAnswers(value, false) }
+export function isStayAmenityAnswerPatches(value: unknown): value is StayAmenityAnswerPatch[] { return isAmenityAnswers(value, true) }
+
+/** Stored records have one format after the forward data migration. */
+export function parseStayAmenityAnswers(value: unknown): StayAmenityAnswer[] {
+  if (!isStayAmenityAnswers(value)) throw new TypeError('Stay amenity answers must be unique catalog codes with boolean available values')
+  return stayCodes(STAY_AMENITIES).flatMap(code => value.filter(answer => answer.code === code).map(answer => ({ ...answer })))
+}
+
+export function stayAmenityAvailability(answers: readonly StayAmenityAnswer[], code: StayAmenity): boolean | null {
+  return answers.find(answer => answer.code === code)?.available ?? null
+}
+
+/** Positive-list edits affect positive reports; sparse answers explicitly set or clear a fact. */
+export function planStayAmenityAnswers(current: readonly StayAmenityAnswer[], patch: { amenities?: unknown; amenity_answers?: unknown }): StayAmenityAnswer[] {
+  const answers = new Map(parseStayAmenityAnswers(current).map(answer => [answer.code, answer.available]))
+  let positive: StayAmenity[] | undefined
+  if (Object.hasOwn(patch, 'amenities')) {
+    if (!isStayAmenityCodes(patch.amenities)) throw new TypeError('stay.amenities must list amenity codes from the catalog, each once')
+    positive = patch.amenities
+    for (const [code, available] of answers) if (available && !positive.includes(code)) answers.delete(code)
+    for (const code of positive) answers.set(code, true)
+  }
+  if (Object.hasOwn(patch, 'amenity_answers')) {
+    if (!isStayAmenityAnswerPatches(patch.amenity_answers)) throw new TypeError('stay.amenity_answers must list unique catalog codes with true, false or null answers')
+    for (const answer of patch.amenity_answers) {
+      if (positive && positive.includes(answer.code) !== (answer.available === true)) throw new TypeError(`stay.amenities contradicts the explicit answer for ${answer.code}`)
+      if (answer.available === null) answers.delete(answer.code)
+      else answers.set(answer.code, answer.available)
+    }
+  }
+  return stayCodes(STAY_AMENITIES).flatMap(code => answers.has(code) ? [{ code, available: answers.get(code)! }] : [])
+}
 
 /** Airbnb's amenity groups in the editor's order; an amenity can sit in several groups. */
 export const STAY_AMENITY_GROUPS = {
@@ -332,6 +414,7 @@ export const STAY_AMENITY_GROUPS = {
   outdoor: { icon: 'i-lucide-trees', label: 'Outdoor', amenities: ['garden_or_backyard', 'bbq_area', 'beach_essentials', 'bicycle', 'boat_slip', 'fire_pit', 'hammock', 'kayak', 'alfresco_dining', 'outdoor_seating', 'outdoor_kitchen', 'patio_or_belcony', 'sun_loungers'] },
   facilities: { icon: 'i-lucide-square-parking', label: 'Parking and facilities', amenities: ['free_parking', 'street_parking', 'paid_parking_on_premises', 'paid_parking', 'free_parking_off_premises', 'elevator', 'ev_charger', 'hockey_rink', 'gym', 'jacuzzi', 'pool', 'private_living_room', 'sauna', 'single_level_home', 'ebike_charger', 'solar_power', 'recycling', 'composting', 'doorman', 'gated_community'] },
   services: { icon: 'i-lucide-concierge-bell', label: 'Services', amenities: ['breakfast', 'cleaning_before_checkout', 'long_term_stays_allowed', 'luggage_dropoff_allowed'] },
+  scenic_views: { icon: 'i-lucide-mountain', label: 'Scenic views', amenities: ['bay_view', 'beach_view', 'canal_view', 'city_view', 'courtyard_view', 'desert_view', 'garden_view', 'golf_view', 'harbor_view', 'lake_view', 'marina_view', 'mountain_view', 'ocean_view', 'park_view', 'pool_view', 'resort_view', 'river_view', 'sea_view', 'valley_view', 'vineyard_view', 'landmark_view'] },
 } as const satisfies Record<string, { icon: string; label: string; amenities: readonly StayAmenity[] }>
 export type StayAmenityGroup = keyof typeof STAY_AMENITY_GROUPS
 

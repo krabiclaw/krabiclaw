@@ -120,11 +120,52 @@ export default {
     "safety_property": "Safety & property",
     "guests_maximum": "1 guest maximum | {count} guests maximum",
     "not_reported": "{item} not reported",
+    "not_installed": "{item} not installed",
     "where_youll_be": "Where you'll be",
+    "neighborhood_description": "Neighborhood description",
+    "getting_around": "Getting around",
     "photo_tour": "Photo tour",
     "additional_photos": "Additional photos",
     "back_to_photo_tour": "Back to photo tour",
     "open_room_photo": "Open {room}, photo {number}",
+    "open_accessibility_photo": "View {feature}, photo {number}",
+    "accessibility_features": {
+      "step_free_access": {
+        "label": "Step-free access",
+        "description": "The bedroom is on the ground floor or reached by a lift or ramp. The route from the guest entrance to the bedroom has no steps or thresholds higher than 5 cm (2 in)."
+      },
+      "wide_doorway": {
+        "label": "Entrance wider than 32 inches",
+        "description": "The bedroom entrance is at least 32 inches wide when the door is open."
+      }
+    },
+    "accessibility_title": "Accessibility features",
+    "home_accessibility_features": {
+      "disabled_parking_spot": {
+        "label": "Disabled parking spot",
+        "description": "A private parking space is at least 11 ft (3.35 m) wide, or a designated public accessible parking space has signs identifying it."
+      },
+      "path_to_entrance_lit_at_night": {
+        "label": "Path to entrance lit at night",
+        "description": "The path to the guest entrance is well lit at night."
+      },
+      "home_step_free_access": {
+        "label": "Step-free access",
+        "description": "The entire route from the arrival or parking area to the guest entrance has no steps or obstacles 5 cm (2 in) or higher, including shared paths, hallways and lifts."
+      },
+      "home_wide_doorway": {
+        "label": "Entrance wider than 32 inches",
+        "description": "The guest entrance is at least 32 in (81 cm) wide with the door fully open."
+      },
+      "pool_hoist": {
+        "label": "Pool or hot tub hoist",
+        "description": "A purpose-built hoist transfers a person into and out of the pool or hot tub."
+      },
+      "ceiling_hoist": {
+        "label": "Ceiling or mobile hoist",
+        "description": "A purpose-built ceiling-mounted or freestanding hoist transfers a person into and out of a wheelchair."
+      }
+    },
     "where_youll_sleep": "Where you'll sleep",
     "room_details": "Room details",
     "no_sleeping_arrangements": "No sleeping arrangements",

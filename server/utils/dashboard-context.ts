@@ -84,6 +84,8 @@ export interface DashboardLocationRow {
   status: string
   timezone: string | null
   address: string | null
+  latitude: number | null
+  longitude: number | null
   media: PublicSocialMedia['media']
   social_image: PublicSocialMedia['social_image']
 }
@@ -364,7 +366,7 @@ export async function listDashboardLocations(
 ) {
 
   const locations = await queryAll<Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null }>(db, `
-    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.stay_map_sharing
+    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.stay_map_sharing, l.latitude, l.longitude
     FROM business_locations l
     WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
       ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
