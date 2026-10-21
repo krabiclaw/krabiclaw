@@ -25,6 +25,7 @@ import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
+import { toE164 } from '~/utils/phone'
 import { arrangeProductPhotos, readProductPhotos, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
@@ -809,8 +810,8 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
  * show the same pictures. Only managers change them; each change is checked
  * against the photos the caller's change was based on, and returns the home.
  */
-async function arrangeHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, home: StayHome, to: string[]): Promise<StayHome> {
-  await arrangeProductPhotos(db, { organizationId: access.organizationId, env, principal, productId: home.product_id, from: home.photos.map(photo => photo.id), to })
+async function arrangeHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, home: StayHome, to: string[], roomAssignment?: { assetId: string; roomId: string }): Promise<StayHome> {
+  await arrangeProductPhotos(db, { organizationId: access.organizationId, env, principal, productId: home.product_id, from: home.photos.map(photo => photo.id), to, roomAssignment })
   await purgePublicResourceCacheNow(env, access.organizationId)
   const updated = await readStayHome(db, access, home.product_id)
   await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
@@ -833,8 +834,11 @@ export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestI
   const home = await managedHome(db, access, productId)
   if (!(input instanceof File) && isRecord(input)) {
     if (typeof input.asset_id !== 'string' || !input.asset_id.trim()) fail(422, 'PHOTO_REQUIRED', 'Choose the library photo by its asset_id', 'asset_id')
-    const unknown = Object.keys(input).find(key => key !== 'asset_id')
+    const unknown = Object.keys(input).find(key => key !== 'asset_id' && key !== 'room_id')
     if (unknown) fail(422, 'INVALID_PHOTO_FIELD', `${unknown} cannot be changed here`, unknown)
+    if ('room_id' in input && (typeof input.room_id !== 'string' || !input.room_id.trim())) fail(422, 'INVALID_PHOTO_ROOM', 'Choose a room by its room_id', 'room_id')
+    const roomId = input.room_id as string | undefined
+    if (roomId && !home.photo_rooms.some(room => room.id === roomId)) fail(404, 'PHOTO_ROOM_NOT_FOUND', 'That room is not on this home', 'room_id')
     const asset = await getMediaAsset(db, input.asset_id, access.organizationId)
     if (!asset || asset.status !== 'active') fail(404, 'PHOTO_NOT_FOUND', 'That photo is not in this organization\'s media library', 'asset_id')
     if (asset.kind !== 'image') fail(415, 'UNSUPPORTED_PHOTO_TYPE', 'Choose an image from the media library', 'asset_id')
@@ -842,7 +846,7 @@ export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestI
     // Read the home on the server for every append. The complete arrangement
     // guards against another write between this read and its atomic commit.
     // A library asset was not created here and is never removed on failure.
-    return await arrangeHomePhotos(db, env, access, principal, home, [...home.photos.map(photo => photo.id), asset.id])
+    return await arrangeHomePhotos(db, env, access, principal, home, [...home.photos.map(photo => photo.id), asset.id], roomId ? { assetId: asset.id, roomId } : undefined)
   }
   const file = input
   if (!(file instanceof File)) fail(422, 'PHOTO_REQUIRED', 'Send the photo as the multipart field image', 'image')
@@ -1258,10 +1262,13 @@ function stayFields(input: Record<string, unknown>, home: StayHome): StayFields 
   if (!guestName) fail(422, 'INVALID_STAY_FIELD', 'guest_name is required', 'guest_name')
   const email = optionalText(input.guest_email, 'guest_email', 254)
   if (email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(422, 'INVALID_STAY_FIELD', 'guest_email must be an email address', 'guest_email')
+  const enteredPhone = optionalText(input.guest_phone, 'guest_phone', 40)
+  const phone = enteredPhone === null ? null : toE164(enteredPhone)
+  if (enteredPhone !== null && !phone) fail(422, 'INVALID_STAY_FIELD', 'guest_phone must be an international number with its country calling code, such as +66812345678', 'guest_phone')
   return {
     check_in_date: checkIn, check_out_date: checkOut, arrival_time: arrival, adults, children, infants, guest_name: guestName,
     guest_surname: optionalText(input.guest_surname, 'guest_surname', 200), guest_email: email,
-    guest_phone: optionalText(input.guest_phone, 'guest_phone', 40), total_minor: amount(input.total_minor, 'total_minor'),
+    guest_phone: phone, total_minor: amount(input.total_minor, 'total_minor'),
     notes: optionalText(input.notes, 'notes', 2000),
   }
 }

@@ -135,8 +135,8 @@ export function composeProductSeoDescription(
   }
   const subject = productSubjectLine(input.product)
   const describedKey = priceLabel
-    ? 'saya.product_detail.meta_description_priced'
-    : 'saya.product_detail.meta_description'
+    ? 'site.product_detail.meta_description_priced'
+    : 'site.product_detail.meta_description'
   const detailBudget = DESCRIPTION_MAX_LENGTH - translate(describedKey, { ...named, detail: '' }).length
   // Under a word's worth of budget the frame alone already fills the tag; adding
   // an ellipsis-only fragment would just be noise.
@@ -149,8 +149,8 @@ export function composeProductSeoDescription(
   const key = detail
     ? describedKey
     : priceLabel
-      ? 'saya.product_detail.meta_description_undescribed_priced'
-      : 'saya.product_detail.meta_description_undescribed'
+      ? 'site.product_detail.meta_description_undescribed_priced'
+      : 'site.product_detail.meta_description_undescribed'
   const composed = truncateForSeo(translate(key, { ...named, detail }), DESCRIPTION_MAX_LENGTH)
   if (!composed) throw new Error('Product SEO description composed to an empty string')
   return composed

@@ -82,7 +82,7 @@
             variant="soft"
             block
             class="h-12 justify-center rounded-xl text-base font-medium"
-            :to="`tel:${booking.contactPhone.replace(/\s/g, '')}`"
+            :to="`tel:${booking.contactPhone}`"
           />
         </div>
 

@@ -1,5 +1,5 @@
 <template>
-  <UModal v-model:open="openModel" fullscreen :title="overviewModel ? t('stay.photo_tour') : title || t('saya.photos.gallery_title')" :ui="{ content: overviewModel ? 'bg-white text-gray-950 divide-y-0' : 'bg-black text-white divide-y-0' }">
+  <UModal v-model:open="openModel" fullscreen :title="overviewModel ? t('stay.photo_tour') : title || t('site.photos.gallery_title')" :ui="{ content: overviewModel ? 'bg-white text-gray-950 divide-y-0' : 'bg-black text-white divide-y-0' }">
     <template #content>
       <div class="relative h-dvh w-full overflow-hidden" @keydown="onKeydown">
         <header class="absolute inset-x-0 top-0 z-30 flex h-20 items-center gap-3 px-4 sm:px-8" :class="overviewModel ? 'border-b border-gray-200 bg-white' : 'bg-linear-to-b from-black/70 to-transparent'">
@@ -12,7 +12,7 @@
             <button type="button" class="grid size-10 place-items-center rounded-full bg-black/40 disabled:opacity-30" :aria-label="t('social_posts.previous_media')" :disabled="currentIndex === 0" @click="navigate(currentIndex - 1)"><UIcon name="i-lucide-chevron-up" class="size-5" /></button>
             <button type="button" class="grid size-10 place-items-center rounded-full bg-black/40 disabled:opacity-30" :aria-label="t('social_posts.next_media')" :disabled="currentIndex === items.length - 1" @click="navigate(currentIndex + 1)"><UIcon name="i-lucide-chevron-down" class="size-5" /></button>
           </template>
-          <button type="button" class="grid size-10 shrink-0 place-items-center rounded-full" :class="overviewModel ? 'hover:bg-gray-100' : 'bg-black/30 backdrop-blur-md'" :aria-label="t('saya.photos.close_gallery')" @click="openModel = false"><UIcon name="i-lucide-x" class="size-5" /></button>
+          <button type="button" class="grid size-10 shrink-0 place-items-center rounded-full" :class="overviewModel ? 'hover:bg-gray-100' : 'bg-black/30 backdrop-blur-md'" :aria-label="t('site.photos.close_gallery')" @click="openModel = false"><UIcon name="i-lucide-x" class="size-5" /></button>
         </header>
 
         <div v-if="overviewModel" class="h-full overflow-y-auto overscroll-contain pt-20" data-photo-tour>

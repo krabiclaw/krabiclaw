@@ -4,7 +4,7 @@ import type { D1Database } from '@cloudflare/workers-types'
 import { normalizeGoogleReview, type GoogleReview } from '~/shared/google-review'
 import { executeBatch } from '~/server/db'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
-import { parsePhone } from '~/utils/phone'
+import { toE164 } from '~/utils/phone'
 
 const PLACES_BASE = 'https://places.googleapis.com/v1/places'
 
@@ -66,7 +66,7 @@ function normalizeDetail(place: RawPlace): PlaceDetails {
     mapsUrl: place.googleMapsUri ?? null,
     // A location stores E.164. Google's national format carries no country, so
     // the international form is the one that says which number this is.
-    phone: parsePhone(place.internationalPhoneNumber ?? '').e164 ?? null,
+    phone: place.internationalPhoneNumber ? toE164(place.internationalPhoneNumber) : null,
     websiteUrl: place.websiteUri ?? null,
     rating: place.rating ?? null,
     ratingCount: place.userRatingCount ?? null,

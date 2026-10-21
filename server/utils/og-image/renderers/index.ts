@@ -2,8 +2,7 @@ import type { SocialTemplate } from '~/utils/social-metadata'
 import type { SatoriNode } from '../satori-node.ts'
 import type { RenderInputs } from './shared.ts'
 import { renderPlatformCard } from './platform.ts'
-import { renderSayaCard } from './saya.ts'
-import { renderBlawbyCard } from './blawby.ts'
+import { renderTenantCard } from './tenant.ts'
 
 export type OgImageRenderer = (_payload: RenderInputs) => SatoriNode
 
@@ -13,8 +12,7 @@ export type OgImageRenderer = (_payload: RenderInputs) => SatoriNode
  */
 export const ogImageRenderers: Record<SocialTemplate, OgImageRenderer> = {
   platform: renderPlatformCard,
-  saya: renderSayaCard,
-  blawby: renderBlawbyCard,
+  tenant: renderTenantCard,
 }
 
 export function resolveOgImageRenderer(template: string): OgImageRenderer {

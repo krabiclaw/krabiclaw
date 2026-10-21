@@ -85,7 +85,7 @@ const items = computed(() => blockRecords(props.block.data.items).map((item) => 
   }
 }).filter(item => item.id && item.title))
 
-const heading = computed(() => blockText(props.block.data.title) || homeCopy.value.locationGroupLine(items.value.length) || t('saya.home.locations_heading'))
+const heading = computed(() => blockText(props.block.data.title) || homeCopy.value.locationGroupLine(items.value.length) || t('site.home.locations_heading'))
 const kicker = computed(() => blockText(props.block.data.description) || homeCopy.value.findUsKicker)
 const visitLocationCta = computed(() => homeCopy.value.visitLocationCta)
 

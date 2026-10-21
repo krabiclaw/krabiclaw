@@ -1,4 +1,4 @@
-import { paginationInputSchema, pageInfoObject, organizationTool, type McpToolDefinition } from './shared'
+import { paginationInputSchema, pageInfoObject, organizationTool, PHONE_FORMAT, type McpToolDefinition } from './shared'
 import { reassignBookingProvider } from '~/server/domain/provider-reassignment'
 import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { HTTPError } from 'nitro'
@@ -55,7 +55,7 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     inputSchema: { assigned_member_id: {type: 'string'}, location_id: { type: ['string', 'null'] }, product_id: { type: 'string' }, status: { type: 'string', enum: ['pending', 'confirmed', 'completed', 'cancelled'] }, from: { type: 'string', description: 'Inclusive session start instant.' }, to: { type: 'string', description: 'Exclusive session start instant.' }, ...paginationInputSchema },
   }),
   organizationTool({ name: 'create_table_reservation', domain: 'bookings', minimumRole: 'admin', description: 'Reserve a table for a named guest at a location’s local date and time under its saved reservation policy. Required deposits return financial_action_required and a dashboard URL before confirmation.',
-    inputSchema: { location_id: { type: 'string' }, date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, time: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }, party_size: { type: 'integer', minimum: 1, maximum: 99 }, guest_name: { type: 'string', minLength: 1 }, guest_email: { type: 'string' }, guest_phone: { type: 'string', description: 'International phone number with calling code.' }, locale: { type: 'string', description: 'Guest confirmation language code; defaults to the website language.' }, notes: { type: 'string', maxLength: 1000 }, idempotency_key: key, source: { type: 'string', minLength: 1 }, external_reference: { type: 'string' }, guest_acknowledgement: { type: 'boolean', description: 'Explicit choice to email the guest; owner alerts, inbox and audit are always recorded.' } },
+    inputSchema: { location_id: { type: 'string' }, date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' }, time: { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }, party_size: { type: 'integer', minimum: 1, maximum: 99 }, guest_name: { type: 'string', minLength: 1 }, guest_email: { type: 'string' }, guest_phone: { type: 'string', description: PHONE_FORMAT }, locale: { type: 'string', description: 'Guest confirmation language code; defaults to the website language.' }, notes: { type: 'string', maxLength: 1000 }, idempotency_key: key, source: { type: 'string', minLength: 1 }, external_reference: { type: 'string' }, guest_acknowledgement: { type: 'boolean', description: 'Explicit choice to email the guest; owner alerts, inbox and audit are always recorded.' } },
     required: ['location_id', 'date', 'time', 'party_size', 'guest_name', 'guest_email', 'guest_phone', 'idempotency_key', 'source', 'guest_acknowledgement'],
     outputSchema: { type: 'object', properties: { success: { const: true }, request_id: text, operational_reservation_id: text, status: { type: 'string' }, replayed: { type: 'boolean' }, http_status: { type: 'integer' } }, required: ['success', 'request_id', 'operational_reservation_id', 'status', 'http_status'] },
   }),
@@ -63,7 +63,7 @@ export const BOOKINGS_TOOLS: McpToolDefinition[] = [
     inputSchema: {
       product_slug: { type: 'string' }, session_id: { type: 'string' }, variant_id: { type: 'string' },
       party_size: { type: 'integer', minimum: 1, maximum: 99 }, guest_name: { type: 'string', minLength: 1 },
-      guest_email: { type: 'string' }, guest_phone: { type: 'string', description: 'Optional guest phone in international format.' }, notes: { type: 'string', maxLength: 1000 },
+      guest_email: { type: 'string' }, guest_phone: { type: 'string', description: `Optional. ${PHONE_FORMAT}` }, notes: { type: 'string', maxLength: 1000 },
       locale: { type: 'string', description: 'Guest confirmation language code; defaults to the website language.' },
       idempotency_key: key, source: { type: 'string', minLength: 1, maxLength: 100, description: 'Explicit provenance, such as operator or external scheduler.' },
       external_reference: { type: 'string', maxLength: 200 },

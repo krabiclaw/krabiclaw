@@ -1,5 +1,8 @@
 export default {
-  "reservations": { "deposit_label": "Reservation deposit", "confirmed": "Reservation confirmed" },
+  "reservations": {
+    "deposit_label": "Reservation deposit",
+    "confirmed": "Reservation confirmed"
+  },
   "payment": {
     "title": "Confirm and pay",
     "unavailable": "This payment is not available.",
@@ -35,16 +38,16 @@ export default {
     "refunded_help": "What you paid for was taken before your payment completed, so your payment is being refunded in full."
   },
   "site_pages": {
-      "home": "Home",
-      "about": "About",
-      "contact": "Contact",
-      "services": "Services",
-      "pricing": "Pricing",
-      "donate": "Donate",
-      "schedule": "Schedule",
-      "privacy": "Privacy Policy",
-      "terms": "Terms of Service",
-      "third_party_notices": "Third-Party Notices"
+    "home": "Home",
+    "about": "About",
+    "contact": "Contact",
+    "services": "Services",
+    "pricing": "Pricing",
+    "donate": "Donate",
+    "schedule": "Schedule",
+    "privacy": "Privacy Policy",
+    "terms": "Terms of Service",
+    "third_party_notices": "Third-Party Notices"
   },
   "booking_policy": {
     "cancellation_until_start": "Cancel free before the start time.",
@@ -222,14 +225,13 @@ export default {
     "choose_location": "Choose a location",
     "online": "Online",
     "phone_country": "Phone country",
-    "international": "International",
+    "phone_country_code": "Country code",
+    "search_phone_countries": "Search countries",
+    "phone_required": "Enter a phone number.",
     "invalid_phone": "Enter a valid number and choose its country, or include the international calling code.",
     "choose_consultation": "Choose your consultation",
     "service": "Service",
-    "service_details": "Full service details →",
     "no_services": "No consultation services are currently published.",
-    "service_unavailable": "Online booking is unavailable for this service.",
-    "contact_schedule": "Contact us to schedule.",
     "timezone": "Time zone",
     "search_timezones": "Search time zones",
     "request_appointment": "Request appointment",
@@ -273,20 +275,6 @@ export default {
     "switch_to_light_mode": "Switch to light mode",
     "terms": "Terms"
   },
-  "blawby": {
-    "navigation": {
-      "main": "Main navigation",
-      "toggle": "Toggle navigation"
-    },
-    "footer": {
-      "label": "Footer",
-      "document": "Document",
-      "services": "Services",
-      "support": "Support",
-      "company": "Company",
-      "legal": "Legal"
-    }
-  },
   "social_posts": {
     "title": "Updates",
     "meta_description": "Stories, news, and updates from {organization}.",
@@ -311,7 +299,7 @@ export default {
     "load_more": "Show more updates",
     "load_failed": "More updates could not be loaded. Try again."
   },
-  "saya": {
+  "site": {
     "hero": {
       "established": "EST. {year}",
       "view_menu": "View Menu"
@@ -409,10 +397,9 @@ export default {
       "reservations": "Reservations",
       "experiences": "Experiences",
       "contact": "Contact",
-      "open_navigation": "Open navigation",
-      "close_navigation": "Close navigation",
       "nav_aria": "Primary navigation",
-      "mobile_nav_aria": "Mobile navigation"
+      "mobile_nav_aria": "Mobile navigation",
+      "toggle_navigation": "Toggle navigation"
     },
     "footer": {
       "locations_error": "We could not load locations right now. Please try again in a moment.",
@@ -433,7 +420,11 @@ export default {
       "qa": "Q&A",
       "all_locations": "All Locations",
       "contact_us": "Contact Us",
-      "temporarily_closed": "Temporarily closed"
+      "temporarily_closed": "Temporarily closed",
+      "label": "Footer",
+      "document": "Document",
+      "services": "Services",
+      "legal": "Legal"
     },
     "posts": {
       "read_guide": "Read guide",
@@ -508,7 +499,7 @@ export default {
       "empty_title": "No reviews yet.",
       "empty_desc": "Be the first to share your experience with us.",
       "view_all": "View All Reviews",
-      "anonymous": "Anonymous",
+      "anonymous": "Anonymous"
     },
     "subnav": {
       "overview": "Overview",

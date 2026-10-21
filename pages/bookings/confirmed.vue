@@ -20,7 +20,7 @@
       :guest-email="confirmation.guestEmail"
     >
       <template #title>
-        {{ confirmation.status === 'cancelled' ? t('saya.experience_cancel.cancelled_title') : copy.thankYouLabel(confirmation.guestName) }}
+        {{ confirmation.status === 'cancelled' ? t('site.experience_cancel.cancelled_title') : copy.thankYouLabel(confirmation.guestName) }}
       </template>
       <template #subtitle>
         {{ receiptDescription }}
@@ -30,11 +30,11 @@
           <TenantIcon name="share" class="mr-1.5 size-4" />
           {{ t(justCopied ? 'social_posts.link_copied' : 'social_posts.share') }}
         </TenantButton>
-        <TenantButton v-if="confirmation.contactPhone" :href="`tel:${confirmation.contactPhone.replace(/\s/g, '')}`" variant="outline">
-          {{ copy.callUsLabel(confirmation.contactPhone) }}
+        <TenantButton v-if="confirmation.contactPhone" :href="`tel:${confirmation.contactPhone}`" variant="outline">
+          {{ copy.callUsLabel(formatPhone(confirmation.contactPhone)) }}
         </TenantButton>
         <TenantButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
-          {{ t('saya.experience_cancel.title') }}
+          {{ t('site.experience_cancel.title') }}
         </TenantButton>
       </template>
     </BookingConfirmation>
@@ -50,6 +50,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import { loadBookingConfirmation, type BookingConfirmation as BookingConfirmationData } from '~/composables/useBookingHandoff'
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
 import { formatTimestamp } from '~/utils/timezone'
@@ -74,20 +75,20 @@ const presentation = computed(() => confirmation.value?.productKind ? presentati
 // booking names one, otherwise the site's.
 const browseHref = computed(() => {
   if (!presentation.value) return localePath('/')
-  if (!confirmation.value?.locationId && (template.slug === 'blawby' || confirmation.value?.productKind === 'service')) return localePath('/schedule')
+  if (!confirmation.value?.locationId && (isLegalPractice(organization.vertical) || confirmation.value?.productKind === 'service')) return localePath('/schedule')
   const locationSlug = confirmation.value?.locationSlug
   return localePath(locationSlug
     ? `/locations/${locationSlug}/${presentation.value.locationCollectionSegment}`
     : presentation.value.collectionPath)
 })
 const browseLabel = computed(() => confirmation.value?.productKind === 'experience'
-  ? t('saya.header.experiences')
-  : !confirmation.value?.locationId && (template.slug === 'blawby' || confirmation.value?.productKind === 'service')
+  ? t('site.header.experiences')
+  : !confirmation.value?.locationId && (isLegalPractice(organization.vertical) || confirmation.value?.productKind === 'service')
     ? t('site_pages.schedule')
     : copy.value.reservationExploreLabel)
-const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'saya.experience_cancel.cancelled_title' : confirmation.value?.status === 'pending' ? 'booking.request_received' : 'booking.confirmed'))
+const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'site.experience_cancel.cancelled_title' : confirmation.value?.status === 'pending' ? 'booking.request_received' : 'booking.confirmed'))
 const receiptDescription = computed(() => confirmation.value?.status === 'cancelled'
-  ? t('saya.experience_cancel.cancelled_desc', { date: readableDate.value })
+  ? t('site.experience_cancel.cancelled_desc', { date: readableDate.value })
   : t(confirmation.value?.status === 'pending' ? 'booking.pending_message' : 'booking.confirmed_message'))
 
 onMounted(async () => {

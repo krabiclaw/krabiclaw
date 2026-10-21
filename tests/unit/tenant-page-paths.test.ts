@@ -6,7 +6,7 @@ import {
   mergeClaimedRoutes,
 } from '../../build/claimed-public-routes.ts'
 import { isClaimedPublicPath, templateAllowsPageDocumentAt } from '../../shared/tenant-page-paths.ts'
-import { publicTemplateRegistry } from '../../utils/template-registry.ts'
+import { PLATFORM_TEMPLATE, resolvePublicTemplate } from '../../utils/template-registry.ts'
 import { isTrackablePath } from '../../utils/pageview-path.ts'
 
 // The invariant: a path is writable when the site's template renders a tenant
@@ -67,40 +67,42 @@ const CLAIMS = mergeClaimedRoutes(
   [],
 )
 
-function allows(slug: 'saya' | 'blawby' | 'platform', path: string) {
-  return templateAllowsPageDocumentAt(publicTemplateRegistry[slug], CLAIMS, path)
+// A venue (restaurant, experience or stay) site, a legal practice's, and KrabiClaw's own.
+function allows(site: 'venue' | 'legal' | 'platform', path: string) {
+  const template = site === 'platform' ? PLATFORM_TEMPLATE : resolvePublicTemplate({ vertical: site === 'legal' ? 'service' : 'restaurant' })
+  return templateAllowsPageDocumentAt(template, CLAIMS, path)
 }
 
-test('/blog is a page document on blawby and never one on saya', () => {
-  // The saya route asks for blog articles and renders the article index; a document
+test('/blog is a page document on a legal practice and never one on a venue', () => {
+  // The venue route asks for blog articles and renders the article index; a document
   // stored there would never be shown, so it may not be created.
-  assert.equal(allows('blawby', '/blog'), true)
-  assert.equal(allows('saya', '/blog'), false)
+  assert.equal(allows('legal', '/blog'), true)
+  assert.equal(allows('venue', '/blog'), false)
 })
 
-test('saya owns /reservations, which no tenant could author before', () => {
-  assert.equal(allows('saya', '/reservations'), true)
+test('a venue owns /reservations, which no tenant could author before', () => {
+  assert.equal(allows('venue', '/reservations'), true)
 })
 
 test('a claimed route the template does not map is refused', () => {
-  assert.equal(allows('saya', '/menu'), false)
-  assert.equal(allows('blawby', '/menu'), false)
-  assert.equal(allows('saya', '/docs/anything/deeper'), false)
+  assert.equal(allows('venue', '/menu'), false)
+  assert.equal(allows('legal', '/menu'), false)
+  assert.equal(allows('venue', '/docs/anything/deeper'), false)
 })
 
 test('an unclaimed path is writable through the catch-all', () => {
-  assert.equal(allows('saya', '/our-story'), true)
-  assert.equal(allows('blawby', '/services/family'), true)
+  assert.equal(allows('venue', '/our-story'), true)
+  assert.equal(allows('legal', '/services/family'), true)
 })
 
 test('a [param] route claims one segment, not the subtree below it', () => {
-  assert.equal(allows('saya', '/blog/hello'), false)
-  assert.equal(allows('saya', '/blog/2026/hello'), true)
+  assert.equal(allows('venue', '/blog/hello'), false)
+  assert.equal(allows('venue', '/blog/2026/hello'), true)
 })
 
 test('a constrained param claims only what it matches', () => {
-  assert.equal(allows('saya', '/th/about'), false)
-  assert.equal(allows('saya', '/fr/about'), true)
+  assert.equal(allows('venue', '/th/about'), false)
+  assert.equal(allows('venue', '/fr/about'), true)
 })
 
 test('the platform owns its marketing pages and excludes private auth routes from pageviews', () => {
@@ -122,9 +124,9 @@ test('the platform owns its marketing pages and excludes private auth routes fro
 })
 
 test('claimed route matching follows case-insensitive literals and constraints', () => {
-  assert.equal(allows('saya', '/Blog'), false)
-  assert.equal(allows('saya', '/TH/About'), false)
-  assert.equal(allows('saya', '/FR/About'), true)
+  assert.equal(allows('venue', '/Blog'), false)
+  assert.equal(allows('venue', '/TH/About'), false)
+  assert.equal(allows('venue', '/FR/About'), true)
 })
 
 test('Nitro single-segment wildcards claim concrete paths, without claiming descendants', () => {

@@ -4,7 +4,7 @@
       v-for="tier in tiers"
       :key="`${tier.title}-${tier.amount}`"
       class="relative rounded-2xl p-8 shadow-lg"
-      :class="tier.featured ? 'bg-[var(--tenant-primary-dark,var(--blawby-primary-dark,#1e293b))] text-white' : 'bg-elevated text-highlighted border border-default'"
+      :class="tier.featured ? 'bg-[var(--tenant-primary-dark,var(--tenant-primary-dark,#1e293b))] text-white' : 'bg-elevated text-highlighted border border-default'"
     >
       <div v-if="tier.featured" class="absolute -top-4 left-1/2 -translate-x-1/2">
         <span class="inline-flex items-center rounded-full bg-primary px-4 py-1 text-sm font-medium text-on-primary">

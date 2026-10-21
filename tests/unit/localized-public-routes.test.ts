@@ -44,7 +44,7 @@ test('localized projection clears untranslated localizable fields', () => {
 })
 
 test('professional-service blog paths use the canonical /blog route', () => {
-  assert.equal(tenantBlogPostPath({ vertical: 'service' }, 'thai-law'), '/blog/thai-law')
+  assert.equal(tenantBlogPostPath('thai-law'), '/blog/thai-law')
 })
 
 test('platform catalog validation rejects placeholder drift', () => {
