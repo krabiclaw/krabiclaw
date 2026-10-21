@@ -65,6 +65,13 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
         .sort((left, right) => left.order - right.order))
     }
 
+    const pageErrors: string[] = []
+    page.on('pageerror', error => pageErrors.push(error.message))
+    await page.goto(`${catalog}/menu?location_id=missing-location`)
+    await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
+    await expect(page.getByTestId('menu-scope-shared')).toHaveCount(0)
+    expect(pageErrors).toEqual([])
+
     expect((await page.goto(`${catalog}/menu?location_id=loc-demo`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     await expect(page.locator('#dashboard-panel-catalog-menu').getByRole('link', { name: source.name })).toHaveAttribute('href', `${catalog}/menu/${source.id}`)
