@@ -33,6 +33,10 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     const [located, unassigned] = products as [Product, Product]
     const binding = await page.request.put(`${editor}/products/${located.id}/locations/loc-demo`, { data: { active: true, published: false } })
     expect(binding.status(), await binding.text()).toBe(200)
+    const locationsRead = await page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true' } })
+    expect(locationsRead.status(), await locationsRead.text()).toBe(200)
+    const location = (await locationsRead.json() as { locations: Array<{ id: string; title: string; slug: string }> }).locations.find(location => location.id === 'loc-demo')
+    expect(location).toBeDefined()
     for (const [label, locationId] of [['Spring specials', null], ['House favourites', null], ['Evening menu', 'loc-demo']] as const) {
       const response = await page.request.post(`${editor}/collections`, { data: { name: `${label} ${run}`, location_id: locationId } })
       expect(response.status(), await response.text()).toBe(201)
@@ -197,7 +201,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await panel.getByTestId('product-move-open').click()
     const dialog = page.getByRole('dialog', { name: 'Move item', exact: true })
     await dialog.getByText(target.name, { exact: true }).click()
-    await expect(dialog.getByRole('radio', { name: target.name, exact: true })).toBeChecked()
+    await expect(dialog.getByRole('radio', { name: `${target.name} ${location!.title}`, exact: true })).toBeChecked()
     const concurrentTarget = await page.request.put(`${editor}/collections/${target.id}/products`, { data: { product_ids: [], expected_product_ids: [unassigned.id] } })
     expect(concurrentTarget.status(), await concurrentTarget.text()).toBe(200)
     const moveWrites: string[] = []
@@ -213,7 +217,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     expect(staleMoveResponse.request().postDataJSON()).toEqual({ product_ids: [unassigned.id], expected_product_ids: [located.id, unassigned.id], move_to: { collection_id: target.id, expected_product_ids: [unassigned.id] } })
     expect(await readMemberships()).toEqual([[{ id: located.id, order: 0 }, { id: unassigned.id, order: 1 }], []])
     await expect(dialog).toContainText('The section membership or order changed while you were editing.')
-    await expect(dialog.getByRole('radio', { name: target.name, exact: true })).toBeChecked()
+    await expect(dialog.getByRole('radio', { name: `${target.name} ${location!.title}`, exact: true })).toBeChecked()
     await dialog.getByRole('button', { name: 'Use current items', exact: true }).click()
     await expect(dialog).toBeHidden()
     await panel.getByTestId('list-editor-toggle').click()
@@ -247,7 +251,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await memberships.getByRole('button', { name: 'Add to section', exact: true }).click()
     const addMembership = page.getByRole('dialog', { name: 'Add to section', exact: true })
     await addMembership.getByText(sharedTarget.name, { exact: true }).click()
-    await expect(addMembership.getByRole('radio', { name: sharedTarget.name, exact: true })).toBeChecked()
+    await expect(addMembership.getByRole('radio', { name: `${sharedTarget.name} Shared by every location`, exact: true })).toBeChecked()
     const membershipAdded = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/collections/${sharedTarget.id}/products` && response.request().method() === 'PUT')
     await addMembership.getByRole('button', { name: 'Add', exact: true }).click()
     const membershipAddedResponse = await membershipAdded
@@ -273,10 +277,6 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
 
     // An unscoped View requires the owner to choose a saved location, even
     // when this dish is assigned to only one. The preview reads saved content.
-    const locationsRead = await page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true' } })
-    expect(locationsRead.status(), await locationsRead.text()).toBe(200)
-    const location = (await locationsRead.json() as { locations: Array<{ id: string; title: string; slug: string }> }).locations.find(location => location.id === 'loc-demo')
-    expect(location).toBeDefined()
     const view = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
     await expect(view).toHaveAttribute('href', `${catalog}/${located.id}/collections?editMode=preview&previewViewport=desktop`)
     await view.click()
