@@ -2541,8 +2541,8 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect(afterLibraryRoomAppend.error).toBeNull()
     expect(afterLibraryRoomAppend.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts }])
     expect([afterLibraryRoomAppend.data!.product.image!.asset_id, ...afterLibraryRoomAppend.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, green.id, blue.id])
-    expect(pageErrors).toEqual([])
   }
+  expect(pageErrors).toEqual([])
 })
 }
 
