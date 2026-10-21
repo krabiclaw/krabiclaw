@@ -435,9 +435,10 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
 
 /**
  * Copy a recognized v7 or current export through the canonical migration chain.
- * The source's D1 ledger determines the exact migration prefix, so data-only
- * migrations are not skipped. A v7 source's integration connections become
- * `organization_integrations` rows, including during the final delta after a
+ * The source's D1 ledger determines the exact applied files and their order,
+ * so interleaved branch histories retain pending data-only migrations. A v7
+ * source's integration connections become `organization_integrations` rows,
+ * including during the final delta after a
  * binding repoint.
  * @param {string} sourcePath
  * @param {string} targetPath
@@ -468,14 +469,19 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     let sourceDirectory = MIGRATIONS_DIRECTORY
     let sourceFiles = files
     assert(ledger.length > 0, 'Source migration ledger is missing')
+    const applied = new Set(ledger)
+    assert(applied.size === ledger.length, 'Source migration ledger contains duplicate filenames')
+    assert(ledger[0] === '0000_baseline.sql', 'Source migration ledger must start with 0000_baseline.sql')
     let recognized = false
     for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
-      if (ledger.length > candidates.length || !ledger.every((name, index) => name === candidates[index])) continue
+      if (!ledger.every(name => candidates.includes(name))) continue
       const expected = new Database(':memory:')
-      expected.exec(candidates.slice(0, ledger.length).map(name => readFileSync(resolve(directory, name), 'utf8')).join('\n'))
-      const matches = sameSchema(source, expected)
-      expected.close()
+      let matches
+      try {
+        expected.exec(ledger.map(name => readFileSync(resolve(directory, name), 'utf8')).join('\n'))
+        matches = sameSchema(source, expected)
+      } finally { expected.close() }
       if (!matches) continue
       sourceDirectory = directory
       sourceFiles = candidates
@@ -483,8 +489,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       break
     }
     assert(recognized, 'Source schema differs from every recorded migration chain; no rows were copied')
-    const appliedCount = ledger.length
-    stage.exec(sourceFiles.slice(0, appliedCount).map(name => readFileSync(resolve(sourceDirectory, name), 'utf8')).join('\n'))
+    stage.exec(ledger.map(name => readFileSync(resolve(sourceDirectory, name), 'utf8')).join('\n'))
     stage.pragma('foreign_keys = OFF')
     const sourceTables = tableNames(source)
     const baseTables = tableNames(stage)
@@ -501,7 +506,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       for (const row of rows) insert.run(...targetColumns.map(name => row[name]))
       assert(digest(rows, targetColumns) === digest(stage.prepare(`SELECT * FROM ${qi(table)}`).all(), targetColumns), `${table}: copy differs`)
     }
-    for (const name of sourceFiles.slice(appliedCount)) stage.exec(readFileSync(resolve(sourceDirectory, name), 'utf8'))
+    for (const name of sourceFiles.filter(name => !applied.has(name))) stage.exec(readFileSync(resolve(sourceDirectory, name), 'utf8'))
 
     const fromV7 = columns(stage, 'organization').includes('integrations_json')
     const integrations = fromV7 ? integrationRows(stage) : []

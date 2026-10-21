@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:c9b26b9b50963bac84a43aa4ffcea97796ffe81fd3287116951dce0f77f04d36",
-  "documentationFingerprint": "sha256:3101309bc9a5983e694ca088c0c7d476d6abe4566748c601fe501c7d4ef59922",
+  "fingerprint": "sha256:63afd8741e7db435097abdc69f812e16cebe33d8e1ce2b910b04b5f94c1a14a5",
+  "documentationFingerprint": "sha256:0ba71bd632fe2290a3dc1ff3e72cce249699fed7fde640ea8c83719226994477",
   "tools": [
     {
       "name": "add_organization_language",
@@ -121674,7 +121674,7 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
@@ -121779,7 +121779,7 @@
       "slug": "what-you-can-edit-through-chatgpt",
       "contentHash": "sha256:6b1c5205427d0e9f78516a5fa1f2af3a556033059a0801405c3cc9fc076fe2af",
       "toolContracts": {
-        "create_location": "sha256:4429629ed87d336328d275ab17d4cb36caae241d3cc1ede22985d0a11979f23f",
+        "create_location": "sha256:76191e793ce66aae9289cf1e505b47bd44a04320d4b29660f173959391e9c5b0",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
