@@ -104,10 +104,7 @@ watch([addCandidates, () => p.saving.value], ([candidates, saving]) => {
   const candidateIds = new Set(candidates.map(photo => photo.photo_id))
   if (selected.some(id => !candidateIds.has(id) && !room.value?.photo_ids.includes(id))) p.photoError.value = 'A selected photo is no longer on this listing. Review the remaining selection.'
   addSelected.value = selected.filter(id => candidateIds.has(id))
-  if (!addSelected.value.length) {
-    if (selected.every(id => room.value?.photo_ids.includes(id))) p.photoError.value = null
-    adding.value = false
-  }
+  if (!addSelected.value.length) adding.value = false
 })
 const confirmDelete = ref(false)
 const deleting = ref(false)
