@@ -11,8 +11,8 @@
   >
     <template #right>
       <div class="flex items-center gap-1">
-        <UButton v-if="sessionProduct && scope !== 'online'" label="Add availability" icon="i-lucide-plus" :to="canCreate ? addAvailabilityTo : undefined" :disabled="!canCreate || Boolean(level.child.value)" />
-        <UButton v-else-if="sessionProduct?.booking?.held_online" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
+        <UButton v-if="sessionProduct && !providerHours" label="Add availability" icon="i-lucide-plus" :to="canCreate ? addAvailabilityTo : undefined" :disabled="!canCreate || Boolean(level.child.value)" />
+        <UButton v-else-if="providerHours && sessionProduct?.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
         <UButton
           v-if="!personalScope && !sessionProduct && chosenLocation && !selecting && view === 'month'"
           label="Select dates"
@@ -257,6 +257,7 @@ export const calendarSessionsKey = Symbol('calendar-sessions') as InjectionKey<{
   error: ComputedRef<unknown>
   addTo: (date: string) => { path: string; query: LocationQueryRaw }
   canCreate: ComputedRef<boolean>
+  providerHours: ComputedRef<boolean>
   refresh: (date: string) => Promise<void>
 }>
 </script>
@@ -366,6 +367,7 @@ const scopeError = computed(() => {
   return physicalLocation.value ? '' : 'This location is not assigned to the offering.'
 })
 const canCreate = computed(() => Boolean(sessionProduct.value?.booking && !scopeError.value && (physicalLocation.value ? physicalLocation.value.status === 'active' : scope.value !== 'online' && productLocations.value.some(location => location.status === 'active'))))
+const providerHours = computed(() => Boolean(sessionProduct.value?.booking?.held_online && (scope.value === 'online' || !scope.value && !productLocations.value.some(location => location.status === 'active'))))
 function addTo(date?: string) {
   return { path: `/dashboard/${route.params.orgSlug}/calendar/sessions/new`, query: { product_id: sessionProduct.value?.id, locationId: physicalLocation.value?.id, date, month: monthKey.value, view: view.value === 'month' ? undefined : view.value } }
 }
@@ -644,7 +646,7 @@ if (organizationId) provide(calendarSessionsKey, {
   product: sessionProduct, organizationId, locations: productLocations, allLocations: computed(() => props.sessionLocations ?? []),
   locationId: computed(() => physicalLocation.value?.id ?? null), scope, location: physicalLocation,
   itemsOn, status: computed(() => month.value.status), error: computed(() => month.value.status === 'error' ? month.value.cause : null),
-  addTo, canCreate,
+  addTo, canCreate, providerHours,
   refresh: async (date) => {
     const next = parseDate(date)
     view.value = 'month'

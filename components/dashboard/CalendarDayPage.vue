@@ -5,7 +5,7 @@
   -->
   <DashboardIndexPanel :id="personalScope ? 'account-calendar-day' : 'calendar-day'" :title="title" column="leaf">
     <template v-if="sessionProduct" #right>
-      <UButton v-if="calendarSessions?.scope.value !== 'online'" label="Add availability" icon="i-lucide-plus" :to="calendarSessions?.canCreate.value ? calendarSessions.addTo(day) : undefined" :disabled="!calendarSessions?.canCreate.value" />
+      <UButton v-if="!calendarSessions?.providerHours.value" label="Add availability" icon="i-lucide-plus" :to="calendarSessions?.canCreate.value ? calendarSessions.addTo(day) : undefined" :disabled="!calendarSessions?.canCreate.value" />
       <UButton v-else-if="sessionProduct.booking?.held_online" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
     </template>
     <div class="space-y-6">
