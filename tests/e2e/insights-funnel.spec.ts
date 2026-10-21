@@ -46,7 +46,8 @@ for (const business of businesses) {
       const row = funnel.getByTestId(`insights-funnel-${step}`)
       await expect(row.getByText(business.words[index]!, { exact: true })).toBeVisible()
       // A step with nothing recorded reads "—"; otherwise its count and its rate from the step before.
-      await expect(row).toContainText(expected[step] ? new RegExp(`\\s${count(expected[step])} · [\\d.,]+%$`) : /\s—$/)
+      const label = business.words[index]!.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      await expect(row).toHaveText(new RegExp(expected[step] ? `^${label}\\s*${count(expected[step])} · [\\d.,]+%$` : `^${label}\\s*—$`))
     }
     await expect(funnel.getByTestId('insights-funnel-confirmed').getByText(business.words[3], { exact: true })).toBeVisible()
 
