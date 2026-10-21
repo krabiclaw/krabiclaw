@@ -13,22 +13,24 @@ import { isValidTimezone } from '~/utils/timezone'
 export interface GoogleAdsCustomer {
   customerId: string
   formattedCustomerId: string
-  /** Null when Google would not describe the account; `error` says why. */
+  /** Null when Google would not describe the account; `error` or `notEnabled` says why. */
   descriptiveName: string | null
   currencyCode?: string
   timeZone?: string
   isManager?: boolean
+  /** Google reports the account cancelled or not yet set up (`CUSTOMER_NOT_ENABLED`); it cannot be connected. */
+  notEnabled?: true
   error?: string
 }
 
-/** Google's own message for a failed Ads request, kept short enough to show. */
-function googleAdsErrorMessage(status: number, body: string): string {
-  if (!body.trimStart().startsWith('{')) return `${status}: ${body.slice(0, 200)}`
+/** Google's own code and message for a failed Ads request, kept short enough to show. */
+function googleAdsError(status: number, body: string): { code?: string; message: string } {
+  if (!body.trimStart().startsWith('{')) return { message: `${status}: ${body.slice(0, 200)}` }
   const parsed = JSON.parse(body) as { error?: { message?: string; details?: Array<{ errors?: Array<{ message?: string; errorCode?: Record<string, string> }> }> } }
   const detail = parsed.error?.details?.[0]?.errors?.[0]
   const code = detail?.errorCode ? Object.values(detail.errorCode)[0] : undefined
   const message = detail?.message ?? parsed.error?.message ?? body.slice(0, 200)
-  return code ? `${code}: ${message}` : `${status}: ${message}`
+  return { code, message: code ? `${code}: ${message}` : `${status}: ${message}` }
 }
 
 /** Formats a 10-digit customer ID as XXX-XXX-XXXX */
@@ -66,8 +68,8 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
   }
 
   // 2. Each customer's own details. Google answers per account, and an account
-  // it will not describe (a token without access, a deactivated sub-account) is
-  // listed with Google's reason, never with a made-up name.
+  // it will not describe is listed with Google's reason, never with a made-up
+  // name; a cancelled or never-enabled account is marked as such.
   const customers: GoogleAdsCustomer[] = []
   for (const resourceName of resourceNames) {
     const customerId = resourceName.replace(/^customers\//, '')
@@ -80,7 +82,10 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
       }),
     })
     if (!searchResponse.ok) {
-      customers.push({ customerId, formattedCustomerId, descriptiveName: null, error: googleAdsErrorMessage(searchResponse.status, await searchResponse.text()) })
+      const failure = googleAdsError(searchResponse.status, await searchResponse.text())
+      customers.push(failure.code === 'CUSTOMER_NOT_ENABLED'
+        ? { customerId, formattedCustomerId, descriptiveName: null, notEnabled: true }
+        : { customerId, formattedCustomerId, descriptiveName: null, error: failure.message })
       continue
     }
     const searchData = (await searchResponse.json()) as {

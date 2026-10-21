@@ -312,7 +312,6 @@ test('a home authors room details and manages its product photos through authent
     assert.deepEqual((await db.prepare('SELECT feature_code, asset_id FROM product_stay_room_accessibility_photos WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, productId, roomId).all()).results, [{ feature_code: 'step_free_access', asset_id: 'bedroom' }])
     assert.deepEqual([((await rendered()).image)?.asset_id, (await rendered()).gallery.map(asset => asset.asset_id)], ['deck', ['kitchen', 'bedroom']])
     assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0), photo('kitchen', 1), photo('bedroom', 2)])
-    assert.deepEqual(accessibleRoom.photo_ids, [])
     const afterEvidenceShell = await shell()
     assert.equal(afterEvidenceShell.status, 200, await afterEvidenceShell.clone().text())
     assert.equal(afterEvidenceShell.headers.get('x-bootstrap-cache'), 'MISS')

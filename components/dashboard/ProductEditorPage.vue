@@ -1203,8 +1203,8 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             },
             {
               id: 'accessibility', label: 'Accessibility features',
-              summary: product.value.stay!.accessibility.filter(answer => answer.available === true).map(answer => STAY_HOME_ACCESSIBILITY_FEATURES[answer.feature].label).join(', ') || 'Add details',
-              placeholder: !product.value.stay!.accessibility.some(answer => answer.available === true),
+              summary: product.value.stay!.accessibility.filter(answer => answer.available !== null).map(answer => `${STAY_HOME_ACCESSIBILITY_FEATURES[answer.feature].label}${answer.available === false ? ': Not available' : ''}`).join(', ') || 'Add details',
+              placeholder: !product.value.stay!.accessibility.some(answer => answer.available !== null),
               to: sectionPath('accessibility'),
             },
             {
