@@ -18,7 +18,6 @@ import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } f
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
-import { CAPACITY_GUARD_STATEMENTS, executeWithinCapacity } from '~/server/utils/billing'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import {
   assertNoConflictingPrices,
@@ -1010,6 +1009,10 @@ async function planProduct(
     prices: (declaredVariants[index]?.prices ?? []).map((price, priceIndex) =>
       normalizePriceInput(price, defaultCurrency, `variants[${index}].prices[${priceIndex}]`)),
   }))
+  const stay = await planStayConfig(db, organizationId, kind, input.stay)
+  if (input.details?.no_property_parking === true && stay?.amenities.some(code => code === 'free_parking' || code === 'paid_parking_on_premises')) {
+    invalid('Remove on-property parking amenities or change “No parking on the property” before saving.')
+  }
 
   return {
     id: context.existingId ?? crypto.randomUUID(),
@@ -1029,7 +1032,7 @@ async function planProduct(
     kind,
     details: validateProductDetails(kind, input.details ?? {}),
     source: input.source ?? 'manual',
-    stay: await planStayConfig(db, organizationId, kind, input.stay),
+    stay,
   }
 }
 
@@ -1229,12 +1232,6 @@ export async function publishStayProducts(env: CloudflareEnv, products: readonly
  * unique key, so a lost response or a concurrent duplicate never makes a
  * second product. The same key with a different request conflicts.
  */
-
-// Catalog writes run within the plan's capacity: a home is a rental unit, and
-// an offering at a location that held only homes makes it an operating
-// location the plan pays for (see executeWithinCapacity).
-const MAX_CATALOG_STATEMENTS = MAX_D1_BATCH_STATEMENTS - CAPACITY_GUARD_STATEMENTS
-
 export async function createProduct(db: DbClient, input: {
   organizationId: string
   product: CreateProductInput
@@ -1298,9 +1295,9 @@ export async function createProduct(db: DbClient, input: {
     organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.created', entityType: 'product', entityId: planned.id,
     ...(dedupeKey ? { metadata: { request_hash: requestHash, page_id: page?.variantId ?? null }, dedupeKey } : {}),
   }))
-  if (writes.length > MAX_CATALOG_STATEMENTS) invalid('This offering has too many schedule entries for one atomic write')
+  if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering has too many schedule entries for one atomic write')
   try {
-    await executeWithinCapacity(env, db, input.organizationId, writes, { operation: 'Create product', action: 'add it' })
+    await executeBatch(db, writes, { operation: 'Create product' })
   } catch (error) {
     if (isUniqueDedupeConflict(error)) {
       const concurrent = await replay()
@@ -1470,8 +1467,8 @@ export async function createProductsBatch(db: DbClient, input: {
   if (replay) return complete(replay)
   const { ids, queries } = await planProductCreateWrites(db, { ...input, now: new Date().toISOString() })
   queries.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.created', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: ids, product_count: ids.length } }))
-  if (queries.length > MAX_CATALOG_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
-  try { await executeWithinCapacity(input.env, db, input.organizationId, queries, { operation: 'Create products', action: 'add them' }) } catch (error) {
+  if (queries.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
+  try { await executeBatch(db, queries, { operation: 'Create products' }) } catch (error) {
     if (isUniqueDedupeConflict(error)) {
       const concurrent = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
       if (concurrent) return complete(concurrent)
@@ -1756,7 +1753,7 @@ export async function updateProduct(db: DbClient, input: {
     writes.push({ query: `INSERT INTO product_publications(organization_id,product_id,published,created_at,updated_at,created_by,updated_by) VALUES(?,?,1,?,?,?,?) ON CONFLICT(product_id,organization_id) DO UPDATE SET published=1,updated_at=excluded.updated_at,updated_by=excluded.updated_by`, params: [input.organizationId, input.productId, now, now, input.actor.actorId, input.actor.actorId] })
   }
   if (dedupeKey) writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'product', entityId: input.productId, dedupeKey, metadata: { request_hash: requestHash } }))
-  if (writes.length > MAX_CATALOG_STATEMENTS) invalid('This offering exceeds one atomic update')
+  if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering exceeds one atomic update')
 
   // A variant anything was ever booked on is not removed by an edit. Stopping
   // the sale of an option is `active`, not deletion.
@@ -1768,7 +1765,7 @@ export async function updateProduct(db: DbClient, input: {
   // A booking taken between the check above and this batch makes the variant
   // delete raise, and D1 rolls the whole batch back: the product is exactly as
   // it was, and the merchant is told why rather than reading a constraint name.
-  await executeWithinCapacity(env, db, input.organizationId, writes, { operation: 'Update product', action: 'turn it on' }).catch(async (error: unknown) => {
+  await executeBatch(db, writes, { operation: 'Update product' }).catch(async (error: unknown) => {
     if (isUniqueDedupeConflict(error) && await replay()) return
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
       if (await replay()) return
@@ -1816,8 +1813,7 @@ export async function deleteProduct(db: DbClient, input: {
   }
   const pages = await Promise.all(bound.map(page => prepareTenantPageDelete(db, page.id, { scope: { organizationId: input.organizationId }, expectedUpdatedAt: page.updated_at })))
   const invalidations = await productCacheInvalidations(db, input.organizationId, input.productId, 'product_deleted')
-  // Deleting the last home at a location leaves an operating location the plan pays for.
-  await executeWithinCapacity(input.env, db, input.organizationId, [
+  await executeBatch(db, [
     { query: `UPDATE products SET updated_at=NULL WHERE organization_id=? AND id=? AND (EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND product_id=?)
       OR EXISTS(SELECT 1 FROM stays WHERE organization_id=? AND product_id=?)
       OR EXISTS(SELECT 1 FROM channel_threads WHERE organization_id=? AND product_id=?)
@@ -1827,7 +1823,7 @@ export async function deleteProduct(db: DbClient, input: {
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
-  ], { operation: 'Delete product', action: 'delete it, or take its location off your site first' }).catch(error => {
+  ], { operation: 'Delete product' }).catch(error => {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')
     throw error
   })
@@ -1969,7 +1965,7 @@ export async function setProductLocation(db: DbClient, input: {
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup at this location before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: product.id, location_id: input.locationId, missing: readiness.missing } })
   }
   const now = new Date().toISOString()
-  await executeWithinCapacity(input.env, db, input.organizationId, [{
+  await executeBatch(db, [{
     query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
             VALUES (?, ?, ?, COALESCE(?, 1), COALESCE(?, 1), ?, ?, ?, ?)
             ON CONFLICT (product_id, location_id) DO UPDATE SET active = COALESCE(?, product_locations.active), published = COALESCE(?, product_locations.published),
@@ -1980,7 +1976,7 @@ export async function setProductLocation(db: DbClient, input: {
     query: `UPDATE product_locations SET published=CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id=? AND id=? AND updated_at=?) ${readiness?.allocation ? `AND (${readiness.allocation.query})` : ''} THEN published ELSE NULL END
       WHERE organization_id=? AND product_id=? AND location_id=?`,
     params: [input.organizationId, input.productId, expectedProductUpdatedAt, ...(readiness?.allocation?.params ?? []), input.organizationId, input.productId, input.locationId],
-  }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_location_changed')], { operation: 'Set product location', action: 'offer it there' }).catch(error => {
+  }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_location_changed')], { operation: 'Set product location' }).catch(error => {
     if (/NOT NULL constraint failed: product_locations\.published/.test(error instanceof Error ? error.message : String(error))) throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed before location publication. Review it and retry.', data: { code: 'PRODUCT_LOCATION_PUBLICATION_CONFLICT', product_id: input.productId, location_id: input.locationId }, cause: error })
     throw error
   })
@@ -2326,8 +2322,8 @@ export async function reconcileProducts(db: DbClient, input: {
   const writes = perProduct.flat()
   if (missing.length) writes.push({ query: 'UPDATE products SET active=0,updated_at=?,updated_by=? WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))', params: [now, input.actor.actorId, input.organizationId, d1JsonArray(missing.map(product => product.id))] })
   writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered } }))
-  if (writes.length > MAX_CATALOG_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
-  try { await executeWithinCapacity(input.env, db, input.organizationId, writes, { operation: 'Reconcile products', action: 'save the catalog' }) } catch (error) {
+  if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
+  try { await executeBatch(db, writes, { operation: 'Reconcile products' }) } catch (error) {
     const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
     if (stale || isUniqueDedupeConflict(error)) {
       const concurrent = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
@@ -2410,8 +2406,8 @@ export async function updateMenu(db: DbClient, input: {
     SELECT ?,value,?,1,1,?,?,?,? FROM json_each(?) WHERE true ON CONFLICT(product_id,location_id) DO UPDATE SET active=1,published=1,updated_at=excluded.updated_at,updated_by=excluded.updated_by`, params: [organizationId, locationId, now, now, actor.actorId, actor.actorId, d1JsonArray(ids)] },
     { query: `UPDATE product_publications SET published=1,updated_at=?,updated_by=? WHERE organization_id=? AND product_id IN (SELECT value FROM json_each(?))`, params: [now, actor.actorId, organizationId, d1JsonArray(ids)] },
     organizationEventQuery({ organizationId, locationId, actorId: actor.actorId, eventType: 'product.updated', entityType: 'menu', entityId: locationId, dedupeKey, metadata: { request_hash: requestHash, product_count: ids.length, section_count: sections.length } }))
-  if (writes.length > MAX_CATALOG_STATEMENTS) invalid('This menu exceeds one atomic update; submit its sections in separate updates')
-  try { await executeWithinCapacity(input.env, db, organizationId, writes, { operation: 'Update public menu', action: 'publish the menu' }) } catch (error) {
+  if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This menu exceeds one atomic update; submit its sections in separate updates')
+  try { await executeBatch(db, writes, { operation: 'Update public menu' }) } catch (error) {
     const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
     if (stale || isUniqueDedupeConflict(error)) {
       const completed = await readCreationRecord(db, dedupeKey)

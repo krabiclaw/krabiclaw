@@ -254,16 +254,16 @@ behavior.
 
 ## Pricing copy
 
-Use Stripe and Metronome's exact pricing terms, phrasing and breakdown wherever
-they apply. This governs public pages, SEO metadata, LLM-readable content,
+Use Stripe's exact pricing terms, phrasing and breakdown wherever they apply. This governs public pages, SEO metadata, LLM-readable content,
 customer-facing billing and documentation. Do not replace their wording with
 technical jargon or invent a different pricing tone. Add plain wording only for
 KrabiClaw's own subscription and fee.
 
-Read the current primary [Stripe pricing](https://stripe.com/pricing) and
-[Metronome pricing](https://metronome.com/pricing) before changing pricing copy.
-Preserve the actual amounts, charge basis, currency, billing interval and
-conditions. Public pages and their Markdown, SEO and LLM projections use the
+Read the current primary [Stripe pricing](https://stripe.com/pricing) before
+changing pricing copy. Preserve the actual amounts, charge basis, currency,
+billing interval and conditions. Every plan charge is on the business's one
+Stripe subscription; additional locations and fees are metered and billed at
+the end of each period (`docs/payments/payments.md`). Public pages and their Markdown, SEO and LLM projections use the
 same canonical published pricing content.
 
 ## Vertical focus and domain boundaries
@@ -301,6 +301,10 @@ Use the repository's documented setup, fixtures, authentication, and local
 runtime paths rather than recreating their individual steps manually.
 
 ## Marketing execution
+
+For feature launches, blogs and social distribution, read
+`.agents/skills/krabiclaw-publishing/SKILL.md` before publishing. It covers
+content selection, writer handoffs, SEO research plans, and authorized distribution.
 
 For KrabiClaw marketing videos, use `.agents/skills/krabiclaw-marketing/SKILL.md`.
 Product facts and voice remain in `docs/marketing/product-profile.md`.

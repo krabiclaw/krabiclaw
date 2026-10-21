@@ -15,7 +15,7 @@
       >
         <span class="block font-semibold text-default">{{ dayLabel(session) }}</span>
         <span class="mt-0.5 block text-sm text-muted">
-          {{ timeLabel(session) }}<template v-if="showRemaining && session.remaining !== null"> · {{ t('saya.experience_detail.left', { count: session.remaining }) }}</template>
+          {{ timeLabel(session) }}<template v-if="showRemaining && session.remaining !== null"> · {{ t('site.experience_detail.left', { count: session.remaining }) }}</template>
         </span>
       </label>
     </li>

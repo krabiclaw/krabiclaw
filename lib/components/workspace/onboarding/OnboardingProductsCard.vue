@@ -49,7 +49,7 @@
 import { useOnboardingState } from '~/composables/useOnboardingFlow'
 
 /**
- * A categorised thing a guest buys or books: a dish on Saya's menu, an
+ * A categorised thing a guest buys or books: a dish on a restaurant's menu, an
  * experience on its experiences page. Both are rows in `products`, so this is
  * one step whose words change rather than two steps.
  *
@@ -58,7 +58,7 @@ import { useOnboardingState } from '~/composables/useOnboardingFlow'
  * added without one and renders with no price element on the public site — a
  * zero or placeholder amount would be a price the owner never set.
  *
- * Professional services are not here. On the Blawby template a practice area is
+ * Professional services are not here. On a legal practice's site a practice area is
  * page content — NCLS has a /services page with blocks and zero product rows —
  * so that vertical skips this step rather than being asked to price a thing it
  * does not sell this way.

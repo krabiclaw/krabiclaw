@@ -7,17 +7,15 @@ interface SubscriptionCheckoutInput {
   plan: string
   currentPlan: string
   subscriptionId?: string | null
-  annual?: boolean
-  /** Locations the subscription is billed for: its Stripe quantity, carried through every plan change. */
-  locations: number
   previousPriceId?: string | null
   newPriceId?: string | null
   onAction?: (_action: StripeGa4IntentAction) => void
+  /** Where Stripe and Better Auth send the owner back: the page that shows the plan, not the leaf that changed it. */
+  returnPath: string
 }
 
-function checkoutReturnUrls(plan: string): { successUrl: string; cancelUrl: string; returnUrl: string } {
-  const current = new URL(window.location.href)
-  for (const key of ['success', 'canceled', 'plan']) current.searchParams.delete(key)
+function checkoutReturnUrls(plan: string, returnPath: string): { successUrl: string; cancelUrl: string; returnUrl: string } {
+  const current = new URL(returnPath, window.location.origin)
 
   const success = new URL(current)
   success.searchParams.set('success', 'true')
@@ -39,7 +37,7 @@ export function useSubscriptionCheckout() {
     const plan = normalizedPlan === STARTER_PLAN_ID
       ? STARTER_PLAN_ID
       : assertNewSalePlan(normalizedPlan)
-    const { successUrl, cancelUrl, returnUrl } = checkoutReturnUrls(plan)
+    const { successUrl, cancelUrl, returnUrl } = checkoutReturnUrls(plan, input.returnPath)
     const action = classifyStripePlanChange(input.currentPlan, plan, Boolean(input.subscriptionId))
     if (!action) throw new Error('The selected plan is already active')
     input.onAction?.(action)
@@ -87,8 +85,6 @@ export function useSubscriptionCheckout() {
 
     const response = await authClient.subscription.upgrade({
       plan,
-      annual: input.annual ?? false,
-      seats: input.locations,
       referenceId: input.organizationId,
       ...(input.subscriptionId ? { subscriptionId: input.subscriptionId } : {}),
       customerType: 'organization',

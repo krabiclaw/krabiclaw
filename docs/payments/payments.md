@@ -4,7 +4,63 @@ Payments extends canonical Products, variant-owned Prices, Sessions and Bookings
 It does not introduce a consultation table, shipping engine, customer subscription,
 FX conversion or replacement for Better Auth platform subscriptions.
 
+## Billing on Stripe
+
+One Stripe subscription per business carries every charge (#1503). Better
+Auth Stripe owns it; `server/utils/better-auth-stripe.ts` configures each plan
+from the catalog, and `server/utils/stripe-catalog.ts` validates the catalog.
+
+| Line | Stripe price |
+| --- | --- |
+| Plan (Growth $49 / Business $149) | flat monthly, quantity 1 |
+| Locations (Growth, Business) | metered, meter `krabiclaw_locations`, formula `last`, graduated: 2 included, then $49 per additional location per month |
+| Payments fee (Business) | metered, meter `krabiclaw_captured_volume`, formula `sum`, 0.014 cents per captured USD cent (1.4% of payment volume) |
+| Stripe fees (Business) | metered, meter `krabiclaw_stripe_cost`, formula `sum`, 1 cent per cost cent (at cost) |
+| Managed ads (Business) | metered, meter `krabiclaw_ad_spend`, formula `sum`, 0.1 cent per ad-spend cent (10% of monthly ad spend) |
+| SEO and marketing strategy | flat $2,000/month item, added and removed by the service |
+
+The meters and prices, and Stripe's own phrasing for them, are defined once in
+`BILLING_METERS` (`shared/billing-model.ts`). The metered prices are each
+plan's Better Auth `lineItems`, so Checkout adds them, and Growth → Business is
+one `subscription.upgrade` call with no `seats`: Better Auth swaps the plan
+price and adds Business's metered items, which carry no quantity. A downgrade
+scheduled for the period end removes them. Only the current Growth and
+Business offers are sold; `seats` other than 1 is refused.
+
+**Billing at period end.** Usage is billed on the subscription's own invoice
+at the end of each monthly period. Adding a location or a fee in the middle of
+a period never charges then; there is no in-period preview or confirmation for
+it. Only locations are billed by count: every active business location,
+including the location a home is at. A home is a product at its location and
+is not billed. The `last` meter bills the last count reported in the period,
+so `reportBillingUsage` (`server/utils/billing.ts`) reports the active
+locations after every write that can change them (`executeWithinCapacity` for
+creating or reactivating a location, and location deletion) and on each
+`customer.subscription.created`/`updated` event, which starts every period and
+every plan change with its count. Basic has no subscription, includes 2
+locations and refuses a third.
+
+Captured volume, Stripe's attributable costs (a correction is a negative
+value) and managed ad spend are queued in `payment_usage_events` and delivered
+by `deliverPaymentsUsage` (`server/domain/payments/usage.ts`) as Stripe meter
+events on the business's own customer, timestamped when they are sent so they
+land in the open period. Each event's identifier and idempotency key derive
+from its source, so a repeat after a lost answer is the same event. Stripe's
+4xx refusal (other than rate limiting) is kept with its reason and not
+retried. `get_payments_usage` and Payments → Plan read the fee rates from the
+subscription's own metered prices.
+
+The catalog goes to each Stripe account with `scripts/seed-stripe.mjs`
+(`docs/operations/stripe-catalog.md`): it plans and creates the meters
+(`create_meter`), the metered prices on them and the flat plan prices, and
+retires the graduated plan prices for new sales. Subscriptions already on a
+retired price keep it until they change plan.
+
 ## October 6 release qualification
+
+Payments fees were then billed by a Metronome contract per business; #1503
+replaced it with the Stripe meters above. This and the other dated sections
+below record what was verified at the time.
 
 Provider configuration is installed on staging and production. Native Stripe
 reads verify platform `acct_1SXZfREm0pkzLQDb` in the matching test/live modes,
@@ -157,8 +213,8 @@ Provider references for future operator maintenance (reviewed October 7, 2026):
 - [Stripe Express bank-change verification recovery](https://support.stripe.com/express/questions/how-do-i-update-my-payout-account-details-if-i-dont-have-my-previous-bank-or-card-details)
 - [Stripe Express wrong-bank payout troubleshooting](https://support.stripe.com/express/questions/my-payout-was-sent-to-the-wrong-bank-account)
 
-Amounts and KrabiClaw-specific rules come from the native financial and Metronome
-billing contracts below. Recheck both the provider guidance and the actual
+Amounts and KrabiClaw-specific rules come from the native financial contract
+and the Stripe billing above. Recheck both the provider guidance and the actual
 application actions before changing these articles; preserve their stable paths.
 
 ## Activity and payment details
@@ -214,10 +270,8 @@ acknowledgements; current purchase ownership authorizes a return-proof replay.
 Booking conversion completes before notification delivery. Delivery and realtime
 publication failures remain visible and retryable through the canonical path.
 
-Better Auth Stripe still owns subscriptions. Its documented `onEvent` hook adds
-Metronome Payments invoice status alerts after the canonical customer, contract,
-platform and external-invoice validation. Native paid state is authoritative;
-an open invoice alone does not imply failure. There is no scheduled
+Better Auth Stripe still owns subscriptions, and the fees are invoiced on them;
+Stripe's own invoice emails carry their status. There is no scheduled
 reconciliation: the connected-account webhook owns capture, refund, dispute and
 payout state, and Stripe's own redelivery is the retry. Nothing here issues or
 collects an invoice.
@@ -434,7 +488,7 @@ holds with that business. Each business keeps its charges, receipts, refunds and
 disputes, and no connected account or business billing is touched. Deleting a
 business does not touch buyers' Customers.
 
-## Metronome operating billing
+## Operating billing
 
 ### Managed ads
 
@@ -443,7 +497,7 @@ campaigns (budgets, creative direction, conversion rate) with a weekly
 meeting, for 10% of its ad spend. Connecting a Google Ads account costs
 nothing and feeds Insights → Google Ads; the fee follows the business's
 agreement, recorded in `organization_services` (`managed_ads`, who agreed,
-when, which terms) from Payments → Plan → Services. Reporting days follow the
+when, which terms) from Plan and billing. Reporting days follow the
 connected Google Ads account's actual timezone, including daylight saving time;
 the day ends at its next local midnight. The daily
 `marketing:ad-spend-daily` task reads, for each business whose agreement was on
@@ -451,17 +505,16 @@ as the billed day closed (agreed before its end, not ended by it) and whose
 account is connected, Google's cost for the day two calendar days back in that
 account's timezone (a day Google has
 finished counting), and queues it as an `ad_spend` usage event
-(`google_ads:<customer>:<date>`, USD cents) delivered through the same Metronome
-path as captured volume, as `payments_ad_spend`.
-The usage event's source timestamp is the final millisecond of that actual
-reporting day. Missing or invalid provider timezone stops activation/capture;
-there is no UTC default. Agreement eligibility compares the same actual day
-boundary with the recorded consent and connection instants.
-Metronome prices it at the ad-spend rate on the Payments rate card:
-`validatePaymentsRateCard` accepts that third flat rate, and the plan screen and
-`get_payments_usage` show it as `ad_spend_rate_percent`. A Google Ads account
-in a currency other than USD, or a day whose spend changed after it was queued,
-fails the task for that business rather than being converted or overwritten.
+(`google_ads:<customer>:<date>`, USD cents) that the outbox reports to the
+`krabiclaw_ad_spend` meter. The usage event's source timestamp is the final
+millisecond of that actual reporting day. Missing or invalid provider timezone
+stops activation/capture; there is no UTC default. Agreement eligibility
+compares the same actual day boundary with the recorded consent and connection
+instants. The Business subscription's ad-spend price bills it at the end of the
+period, and the plan screen and `get_payments_usage` show it as
+`ad_spend_rate_percent`. A Google Ads account in a currency other than USD, or
+a day whose spend changed after it was queued, fails the task for that
+business rather than being converted or overwritten.
 
 **SEO and marketing strategy** is Julia's service: she leads the SEO strategy,
 hand-writes ranking blog posts, meets weekly and is on chat with the business,
@@ -473,88 +526,68 @@ prorations; ending it removes the item. The item's presence is the state
 (`server/utils/strategy-service.ts`); nothing is stored in the application.
 
 Both services are described once, in `SERVICES` (`shared/billing-model.ts`):
-the pricing page's add-ons and its `/pricing.md`, Payments → Plan → Services,
+the pricing page's add-ons and its `/pricing.md`, Plan and billing,
 and the Insights and Today Google Ads cards all read that copy and price. Today
 shows a connected account's last 7 complete days (spend, clicks, conversions)
 and links to Insights → Google Ads; nothing there starts a service.
 
-Activation verifies the live operating-usage contract, its current 10% ad-spend
-rate and collection configuration, the operating Customer's default payment
-method, and the connected Google Ads account's USD currency before recording
-consent. A missing or invalid prerequisite leaves no agreement. Setup uses the
-existing Plan and payment-method flows; connecting Ads and reading Insights
-remain free. An active agreement must be ended before disconnecting Ads,
-removing the billing default card, or ending the usage contract. Plan changes
-do not themselves end that usage contract. Ending the service remains available
-when a provider cannot be read, and preserves its previously billable days.
-The connection and usage contract remain until the intersecting managed days
-have actual daily spend receipts, including zero spend, in the existing usage
-outbox. The daily task revisits unrecorded days after Google's two-day reporting
-delay and sends pending events through the existing delivery operation, even
-after Ads is disconnected. `delivery_at` is written only after native ingest
-acceptance; failed reads or deliveries remain failures to resolve.
+Activation verifies that the plan subscription carries the 10% ad-spend price,
+that the subscription or its customer has a default payment method, and the
+connected Google Ads account's USD currency before recording consent. A missing
+or invalid prerequisite leaves no agreement. Setup is Upgrade to Business and
+Manage billing (Stripe's portal, where the card is kept) in Plan and billing;
+connecting Ads and reading Insights remain free. An active agreement must be
+ended before disconnecting Ads. Stripe's portal manages the card, so KrabiClaw
+does not guard its removal. Ending the service remains available when a provider cannot be
+read, and preserves its previously billable days. The connection remains until
+the intersecting managed days have actual daily spend receipts, including zero
+spend, in the usage outbox. The daily task revisits unrecorded days after
+Google's two-day reporting delay and sends pending events through the existing
+delivery operation, even after Ads is disconnected. `delivery_at` is written
+only after Stripe accepts the meter event; failed reads or deliveries remain
+failures to resolve.
 
-KrabiClaw Payments: **1.4% of payment volume, plus Stripe fees.** Billed after
-use. KrabiClaw Payments fees aren't returned after a refund or dispute. The
-subscription is billed separately. Public pricing follows the Stripe and
-Metronome wording standard in `AGENTS.md`.
+### Payments fees
 
-The seller-scoped buyer/connected account and the tenant's operating Stripe Customer
-are different identities. Metronome collection requires the latter Customer's
-invoice_settings.default_payment_method; a subscription-only default is insufficient.
-Provisioning verifies native rate-card units/rates, SUM pricing_amount filters,
-collection Customer, platform account and native contract uniqueness before use.
+KrabiClaw Payments: **1.4% of payment volume, plus Stripe fees.** Billed at the
+end of each period on the Business subscription. KrabiClaw Payments fees aren't
+returned after a refund or dispute. Public pricing follows the Stripe wording
+standard in `AGENTS.md`.
 
-Metronome owns the effective captured-volume rate. The selected commercial rate
-is 0.014 per USD cent (1.4%); attributable Stripe-cost events rate at 1 per cost
-cent. The 1.337% in October 1–2 sandbox evidence was an internal test rate;
-those dated historical proofs retain it and do not describe the approved price.
-Refunds/disputes do not reverse captured-volume usage.
-Integer minor units are explicit. Acceptance and billing use US/USD; incompatible
-currency usage remains visibly undelivered rather than being converted or billed.
+The seller-scoped buyer/connected account and the tenant's operating Stripe
+Customer are different identities; meter events name the operating Customer,
+whose subscription carries the fee prices. Accepting online payments requires
+that subscription to carry them (`payments.billing` in the setup handoff).
+Refunds and disputes do not reverse captured-volume usage. Integer minor units
+are explicit; usage in another currency is billed at its recorded USD billing
+basis, and one without it remains visibly undelivered rather than being
+converted on the fly.
 
 Actual fees come from native platform all_fees itemized reports, including tax.
 Connected balance_transaction.fee alone is insufficient. Itemization can lag 96+
 hours; a daily task requests the report covering the last 35 days for late
 corrections, and Stripe's `reporting.report_run.succeeded` event on the platform
-webhook ingests it and bills the usage. Unattributed items remain durable and are
-never charged to a tenant.
-
-Native invoice/grace/collection defaults govern billing. Late closed-period positive
-costs roll to the current period as explicit adjustments. Negative closed/final
-credits remain visible until an owner settles an issued native Stripe credit note
-against the correct operating Customer/currency/exact amount. They are never lost
-through a zero-floor metric. Post-cancellation/tenant-deletion servicing preserves
-native mapping and delivery. The 34-day Metronome dedupe window is guarded: stale
-or ambiguous attempted delivery requires acceptance reconciliation before retry.
+webhook ingests it and bills the usage. A revised cost is billed as the
+difference, negative when Stripe lowered it. Unattributed items remain durable
+and are never charged to a tenant. A business deleted before its late costs
+arrive has no customer left to bill; those events stay in the outbox with that
+reason.
 
 Primary contracts: [Stripe fees reports](https://docs.stripe.com/reports/all-fees),
-[Metronome ingest](https://docs.metronome.com/api-reference/usage/ingest-events),
-[rate cards](https://docs.metronome.com/api-reference/rate-cards/get-rates),
-[customer billing configurations](https://docs.metronome.com/api-reference/customers/fetch-billing-provider-configurations-for-a-customer).
+[usage-based billing with meters](https://docs.stripe.com/billing/subscriptions/usage-based),
+[recording usage](https://docs.stripe.com/billing/subscriptions/usage-based/recording-usage-api),
+[meter aggregation formulas](https://docs.stripe.com/api/billing/meter/create).
 
 ## Setup and verification limits
 
 Use the safe blank `.env.example` entries. Required provider setup: intended sandbox
 test key, dedicated thin Connect and connected snapshot Payments secrets, synchronous
-parent or dedicated seller payment-method configuration, Metronome test workspace/API key/USD rate card,
-and HTTPS platform return origin. Keep the subscription secret separate. Complete
+parent or dedicated seller payment-method configuration, the account's billing
+meters and metered prices (`yarn stripe:catalog:plan`), and HTTPS platform return origin. Keep the subscription secret separate. Complete
 merchant-hosted onboarding and Radar before claiming native card readiness.
 No Payments deployment, live webhook change or production activation is part of
 this draft. The existing Sandbox-to-Stripe TEST grant was completed on October 2;
 its dated evidence is in `requirements-verification-2026-10-02.md`.
-
-Read-only native verification on October 4 found that actual Metronome USAGE
-invoice `7a30b370-ea2e-5fd7-b432-77f925eeb7ee` collected through Stripe invoice
-`in_1UMNvzRBlJkGOR4xdrITU49a`: test mode, USD 751 cents total and paid, no balance
-credit. This differs from the scheduled synthetic invoice and earlier credit
-exercise. Existing native partial capture, refund and dispute objects also remain
-readable. The current canonical contract, rate-card and invoice readers passed
-against these native objects. The intended Stripe integration's native "Leave
-invoices as drafts" setting is off; that global setting is managed in Metronome
-and is not returned by the contract API. These reads verify historical provider
-outcomes and the current reader boundary; they do not qualify new acceptance or
-create an application billing mapping.
 
 Actual fee itemization requires live Stripe data and is unavailable in test mode.
 Reconciliation reports that limitation explicitly. Current enabled acceptance,

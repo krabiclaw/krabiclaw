@@ -12,9 +12,9 @@ import en from '../../i18n/locales/en.ts'
 
 // The real English messages, interpolated the way vue-i18n interpolates them,
 // so the composed length and wording are measured against what ships.
-const messages = en.saya.product_detail as Record<string, string>
+const messages = en.site.product_detail as Record<string, string>
 const translate = (key: string, named: Record<string, string>) => {
-  const message = messages[key.replace('saya.product_detail.', '')]
+  const message = messages[key.replace('site.product_detail.', '')]
   if (!message) throw new Error(`Missing test message: ${key}`)
   return message.replace(/\{(\w+)\}/g, (_match, name: string) => named[name] ?? '')
 }

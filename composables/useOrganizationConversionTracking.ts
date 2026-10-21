@@ -1,4 +1,4 @@
-import type { PublicConsultationSettings } from '~/types/blawby'
+import type { PublicConsultationSettings } from '~/types/public-site'
 import { projectConversionToGa4 } from '~/utils/ga4-projection'
 import { pageEventIdFor, whenLeaving } from '~/utils/pageview-tracking-runtime.client'
 import type { ConversionValue, OrganizationConversionEventName } from '~/utils/organization-conversion-events'

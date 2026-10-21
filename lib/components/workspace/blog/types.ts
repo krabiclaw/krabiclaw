@@ -24,7 +24,7 @@ export interface BlogPost {
     document: { id: string; updated_at: string }
     blocks: BlogEditorBlock[]
   } | null
-  editor_template?: 'saya' | 'blawby' | 'platform'
+  editor_template?: 'tenant' | 'platform'
   /** The site's light palette; null on the platform template. */
   editor_colors?: import('~/shared/site-palette').SitePaletteColors | null
   created_at?: string | null

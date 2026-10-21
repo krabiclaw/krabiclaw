@@ -1,5 +1,5 @@
 import { STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { organizationTool, type McpToolDefinition } from './shared'
+import { organizationTool, PHONE_FORMAT, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, requiredString, type McpExecutorContext } from './execution'
 import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
 import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
@@ -84,7 +84,7 @@ const guestFields = {
   check_in_date: day, check_out_date: { ...day, description: 'The morning the guest leaves; the stay holds the nights before it.' }, arrival_time: time,
   adults: { type: 'integer', minimum: 1, maximum: 99 }, children: { type: 'integer', minimum: 0, maximum: 99 }, infants: { type: 'integer', minimum: 0, maximum: 99 },
   guest_name: { type: 'string', minLength: 1, maxLength: 200 }, guest_surname: { type: ['string', 'null'], maxLength: 200 }, guest_email: { type: ['string', 'null'] },
-  guest_phone: { type: ['string', 'null'], description: 'International phone number with calling code.' }, total_minor: minor, notes: { type: ['string', 'null'], maxLength: 2000 },
+  guest_phone: { type: ['string', 'null'], description: PHONE_FORMAT }, total_minor: minor, notes: { type: ['string', 'null'], maxLength: 2000 },
 }
 
 export const STAYS_TOOLS: McpToolDefinition[] = [

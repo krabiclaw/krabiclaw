@@ -1,6 +1,7 @@
 import { getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
 import { canRetryGuestReservationRefund } from '~/server/domain/payments/visit-refund'
 import { paidOnline } from '~/server/domain/payments'
+import { loadOwnerPictures } from '~/server/notifications/hero'
 import { queryFirst } from '~/server/db'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { hashReservationCancelToken, readBearerToken } from '~/server/utils/reservation-cancel-token'
@@ -85,6 +86,10 @@ export default defineHandler(async (event) => {
     }
   }
 
+  // The receipt leads with what was booked, pictured as its page pictures it: the offering's own photo, or the place's.
+  const [ownerType, ownerId] = record.product_id ? ['product', record.product_id] as const : ['business_location', record.location_id] as const
+  const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
+
   return jsonResponse({
     success: true,
     booking: {
@@ -105,6 +110,7 @@ export default defineHandler(async (event) => {
       location_slug: location?.slug ?? null,
       policy_summary: policy ? renderBookingPolicySummary(policy, locale, productKind) : null,
       paid: await paidOnline(db, organizationId, record.kind, record.id),
+      image_url: picture?.imageUrl ?? null,
     },
   }, { headers: { 'cache-control': 'private, no-store' } })
 })

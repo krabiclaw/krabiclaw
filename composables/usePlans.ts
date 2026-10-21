@@ -55,6 +55,12 @@ export const usePlans = async () => {
     return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
   }
 
+  /** A recurring charge in Stripe's pricing phrasing: "$49/mo", "$2,000/mo". The catalog sells in USD only. */
+  function formatRecurring(cents: number, currency: string, interval: 'month' | 'year' | string = 'month'): string {
+    if (currency.toUpperCase() !== 'USD') throw new Error(`Plan prices are sold in USD, not ${currency}`)
+    return `${formatPrice(cents)}/${interval === 'year' ? 'yr' : 'mo'}`
+  }
+
   /**
    * What this plan charges for the requested interval, as Stripe returned it —
    * or null when Stripe returned no such price.
@@ -73,5 +79,5 @@ export const usePlans = async () => {
     return cents === null ? null : formatPrice(cents)
   }
 
-  return { plans, monthlyPrice, annualPrice, formatPrice, displayPrice, status, error }
+  return { plans, monthlyPrice, annualPrice, formatPrice, formatRecurring, displayPrice, status, error }
 }

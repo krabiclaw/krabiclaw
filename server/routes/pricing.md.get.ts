@@ -4,7 +4,7 @@ import { useRuntimeConfig } from 'nitro/runtime-config'
 import { cloudflareEnv, textResponse } from '~/server/utils/api-response'
 import { getCachedPlans, type EnvWithOrganizationCache, type Plan } from '~/server/utils/billing-plans'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
-import { additionalLocationPrice, additionalRentalUnitPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, SERVICES } from '~/shared/billing-model'
+import { additionalLocationPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, PAYMENTS_FEE, SERVICES } from '~/shared/billing-model'
 
 export function renderPlansMarkdown(plans: Plan[]): string {
   const lines: string[] = [
@@ -16,19 +16,17 @@ export function renderPlansMarkdown(plans: Plan[]): string {
 
   for (const plan of plans) {
     const monthlyPrice = plan.prices.find(p => p.interval === 'month')
-    const annualPrice = plan.prices.find(p => p.interval === 'year')
     const priceLabel = monthlyPrice
       ? `$${monthlyPrice.amount / 100}/month`
       : 'Free ($0/month)'
 
     lines.push(`## ${plan.name}`)
-    lines.push(`- **Price**: ${priceLabel}${annualPrice ? ` ($${annualPrice.amount / 100}/year)` : ''}`)
-    lines.push(`- **Locations**: ${INCLUDED_LOCATIONS} included${monthlyPrice
-      ? `, then ${additionalLocationPrice('month')}${annualPrice ? ` (${additionalLocationPrice('year')})` : ''}`
-      : ''}`)
+    lines.push(`- **Price**: ${priceLabel}`)
+    lines.push(`- **Locations**: ${INCLUDED_LOCATIONS} included${monthlyPrice ? `, then ${additionalLocationPrice()}` : ''}`)
     if (plan.id === BUSINESS_PLAN_ID) {
-      lines.push(`- **Rental units**: ${INCLUDED_RENTAL_UNITS} included, then ${additionalRentalUnitPrice()}. A rental unit is one independently bookable home, counted once however many channels list it; a location with only rental units is not billed as a location.`)
+      lines.push(`- **Payments fees**: ${PAYMENTS_FEE}.`)
     }
+    if (monthlyPrice) lines.push('- **Billing**: Additional locations and fees are billed on your subscription invoice at the end of each month.')
     lines.push(`- **Tagline**: ${plan.tagline}`)
 
     if (plan.limits) {
@@ -49,7 +47,7 @@ export function renderPlansMarkdown(plans: Plan[]): string {
   }
 
   lines.push('## Add-ons')
-  lines.push('Services from KrabiClaw\'s own people, added to a paid plan from Payments → Plan → Services.')
+  lines.push('Services from KrabiClaw\'s own people, added to a paid plan from Plan and billing.')
   for (const service of [SERVICES.managed_ads, SERVICES.strategy]) {
     lines.push(`- **${service.name}**: ${service.price}. ${service.description} ${service.billing}`)
   }

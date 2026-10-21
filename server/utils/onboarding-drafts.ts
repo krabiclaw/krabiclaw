@@ -6,7 +6,7 @@ import { creationRequestHash } from '~/server/utils/organization-events'
 import { isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
 import { ALL_VERTICALS } from '~/utils/vertical-copy'
-import { getPhoneCountry, parsePhone } from '~/utils/phone'
+import { getPhoneCountry, toE164 } from '~/utils/phone'
 import type { PlaceDetails, PlaceReview } from '~/server/utils/google-places'
 import type { CurrencyCode } from '~/shared/currencies'
 import type { PriceInput } from '~/shared/prices'
@@ -60,7 +60,7 @@ export function onboardingDraftWriteGuard(draft: Pick<SavedOnboardingDraft, 'id'
 }
 
 export interface DraftBrandInput {
-  /** A starter palette id; the site wears its template's colors until one is chosen. */
+  /** A starter palette id; the site wears the default colors until one is chosen. */
   paletteStarter: string | null
   fontPreset: string | null
   /** How the uploaded logo is shown: original, square or circle. */
@@ -530,10 +530,10 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
   const timezone = answer(raw, 'timezone', previous?.timezone ?? place?.timezone)
   if (timezone && !isValidTimezone(timezone)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a valid IANA timezone' })
   const phone = answer(raw, 'phone', previous?.phone ?? place?.phone ?? null)
-  const parsedPhone = phone ? parsePhone(phone, { defaultCountry: getPhoneCountry(country)?.code }) : null
-  if (phone && !parsedPhone?.valid) throw new HTTPError({ statusCode: 400, statusMessage: 'Enter a valid phone number' })
+  const phoneE164 = phone ? toE164(phone) : null
+  if (phone && !phoneE164) throw new HTTPError({ statusCode: 400, statusMessage: 'Enter a valid phone number with its country calling code' })
   const details: DraftDetailsInput = {
-    name, sourceLocale, country, currency: currency as CurrencyCode | null, timezone, phone: parsedPhone?.e164 ?? null,
+    name, sourceLocale, country, currency: currency as CurrencyCode | null, timezone, phone: phoneE164,
     streetAddress: answer(raw, 'streetAddress', previous?.streetAddress), addressLine2: answer(raw, 'addressLine2', previous?.addressLine2),
     city: answer(raw, 'city', previous?.city), region: answer(raw, 'region', previous?.region), postalCode: answer(raw, 'postalCode', previous?.postalCode),
     websiteUrl: answer(raw, 'websiteUrl', previous?.websiteUrl ?? place?.websiteUrl ?? null),

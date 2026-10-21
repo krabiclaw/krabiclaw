@@ -1,8 +1,8 @@
 import { HTTPError } from 'nitro'
+import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { creationDedupeKey, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { billingCapacity, capacityRefusalError, rentalUnitLimit } from '~/server/utils/billing'
+import { organizationEventQuery } from '~/server/utils/organization-events'
 import { coordinatesFailure, createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
@@ -24,6 +24,7 @@ import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
+import { toE164 } from '~/utils/phone'
 import { arrangeProductPhotos, readProductPhotos, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
@@ -763,27 +764,17 @@ export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db
 
 /**
  * Add a place to stay: a new location of this organization and an unpublished
- * stay at it, priced per night in the organization's currency. On the current
- * Business offer the home is a rental unit and its location is not billed: the
- * location is made inactive and made active once it holds the home, so a home
- * refused past the plan's units leaves no billed location behind, and the same
- * key completes it later. On every other plan the location is billed when it is
- * made. A home added by hand and one imported from a channel are made here, the
- * same way. The key replays every write.
+ * stay at it, priced per night in the organization's currency. The location
+ * is billed like any other; the home is a product there and is not billed. A
+ * home added by hand and one imported from a channel are made here, the same
+ * way. The key replays every write.
  */
 export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string): Promise<StayHome> {
   requireManager(access)
-  // The units are checked before the location exists, so a refused home leaves
-  // no empty location behind; a replay of a home already begun goes on.
-  const capacity = await billingCapacity(env, db, access.organizationId)
-  if (capacity.rentalUnits && capacity.rentalUnits.used >= capacity.rentalUnits.covered
-    && !await readCreationRecord(db, creationDedupeKey('location', access.organizationId, idempotencyKey))) {
-    throw capacityRefusalError(rentalUnitLimit(capacity, 'add the home'))
-  }
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),
-  }, access.actorId, { idempotencyKey, holdsHome: capacity.billsRentalUnits })
+  }, access.actorId, { idempotencyKey })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
   if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')
@@ -798,10 +789,6 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
       stay: { location_id: locationId, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null },
     },
   })
-  if (capacity.billsRentalUnits) {
-    const activated = await updateLocation(db as D1Database, access.organizationId, locationId, { status: 'active' }, access.actorId, env)
-    if (activated.status !== 200) locationFailure(activated)
-  }
   return await readStayHome(db, access, product.id)
 }
 
@@ -1111,10 +1098,13 @@ function stayFields(input: Record<string, unknown>, home: StayHome): StayFields 
   if (!guestName) fail(422, 'INVALID_STAY_FIELD', 'guest_name is required', 'guest_name')
   const email = optionalText(input.guest_email, 'guest_email', 254)
   if (email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail(422, 'INVALID_STAY_FIELD', 'guest_email must be an email address', 'guest_email')
+  const enteredPhone = optionalText(input.guest_phone, 'guest_phone', 40)
+  const phone = enteredPhone === null ? null : toE164(enteredPhone)
+  if (enteredPhone !== null && !phone) fail(422, 'INVALID_STAY_FIELD', 'guest_phone must be an international number with its country calling code, such as +66812345678', 'guest_phone')
   return {
     check_in_date: checkIn, check_out_date: checkOut, arrival_time: arrival, adults, children, infants, guest_name: guestName,
     guest_surname: optionalText(input.guest_surname, 'guest_surname', 200), guest_email: email,
-    guest_phone: optionalText(input.guest_phone, 'guest_phone', 40), total_minor: amount(input.total_minor, 'total_minor'),
+    guest_phone: phone, total_minor: amount(input.total_minor, 'total_minor'),
     notes: optionalText(input.notes, 'notes', 2000),
   }
 }
@@ -1306,25 +1296,28 @@ export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
   stay: StayDetail
-  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string }
+  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string; image_url: string | null }
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
 }
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
-  const owned = await queryFirst<{ id: string; organization_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; paid_online: number }>(db, `
-    SELECT s.id, s.organization_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time,
+  const owned = await queryFirst<{ id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; paid_online: number }>(db, `
+    SELECT s.id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'stay' AND subject_id = s.id AND captured_amount > 0) AS paid_online
       FROM stays s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
       JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       JOIN organization o ON o.id = s.organization_id
      WHERE COALESCE(s.request_id, s.id) = ? AND s.user_id = ? AND s.owner = 'app'`, [activityId, buyerUserId])
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
-  const stay = await getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id)
+  const [stay, pictures] = await Promise.all([
+    getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id),
+    loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id]),
+  ])
   const cancellation = owned.status !== 'cancelled' && owned.paid_online === 1
     ? (await guestStayCancellation(db, owned.organization_id, owned.id, buyerUserId, new Date().toISOString())).quote : null
-  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time }, cancellation }
+  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time, image_url: pictures.get(owned.product_id)?.imageUrl ?? null }, cancellation }
 }
 
 /**

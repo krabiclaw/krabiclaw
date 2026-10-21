@@ -1,6 +1,6 @@
 import { requestInsertQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
-import { organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/template-registry'
 import { executeBatch, queryFirst } from '~/server/db'
 import { cleanString, cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { notifyContactSubmitted, raiseSettledFailures } from '~/server/utils/notifications'
@@ -64,7 +64,7 @@ export default defineHandler(async (event) => {
   const sourceLocale = await getPersistedSourceLocale(db, organizationId)
   const locale = body.locale === undefined ? sourceLocale.locale : assertExactCanonicalLocale(body.locale)
   const language = await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
-  const requiresConsent = organizationSupportsBlawbyTemplate({ themeId: organization.theme_id, vertical: organization.vertical })
+  const requiresConsent = isLegalPracticeSite({ themeId: organization.theme_id, vertical: organization.vertical })
   const consentAcknowledged = body.consent === true
   if (requiresConsent && !consentAcknowledged) {
     return jsonResponse({ error: 'Please acknowledge the contact and privacy notice.' }, { status: 400 })

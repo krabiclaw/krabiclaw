@@ -7,15 +7,17 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { ADDITIONAL_RENTAL_UNIT_PRICE, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, SERVICE_PRICES, additionalRentalUnitPrice, planPriceTiers } from '../../shared/billing-model.ts'
+import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_LOCATIONS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalLocationPrice } from '../../shared/billing-model.ts'
 
-export const CATALOG_PLAN_SCHEMA_VERSION = 13
+export const CATALOG_PLAN_SCHEMA_VERSION = 14
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
 export const CATALOG_APPLY_JOURNAL_KIND = 'stripe-catalog-apply-journal'
 export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
-export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, 'rental_units', 'site_language', 'strategy'])
+export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, ...BILLING_METER_KEYS, 'site_language', 'strategy'])
 export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
+// Products no longer sold that carry a family rather than a plan: rental units are not billed.
+export const RETIRED_PRODUCT_FAMILIES = Object.freeze(['rental_units'])
 export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
 export const STRIPE_CATALOG_REQUEST_TIMEOUT_MS = 10_000
 const SUPPORTED_OPERATION_TYPES = new Set([
@@ -23,6 +25,7 @@ const SUPPORTED_OPERATION_TYPES = new Set([
   'clear_product_default_price',
   'upload_product_image',
   'create_product',
+  'create_meter',
   'create_price',
   'deactivate_price',
   'update_product',
@@ -48,13 +51,12 @@ export const PLAN_DEFINITIONS = Object.freeze([
     description: 'Your website, your domain — manage supported content through your dashboard and ChatGPT.',
     planId: 'growth',
     amountCents: PAID_PLAN_PRICES.growth.monthly,
-    annualAmountCents: PAID_PLAN_PRICES.growth.annual,
-    perLocation: true,
     highlighted: true,
     badge: 'Most Popular',
     imagePath: 'scripts/assets/stripe/growth.jpg',
     features: [
       'Business websites for restaurants, experiences and law firms',
+      `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`,
       'Your own domain (yourbusiness.com)',
       'Update supported content, menus and photos through ChatGPT',
       'Bookings, consultation requests and ticketed experiences',
@@ -68,35 +70,32 @@ export const PLAN_DEFINITIONS = Object.freeze([
     description: 'Everything in Growth, plus online payments, direct stay booking and Google Ads campaigns run from your dashboard and ChatGPT.',
     planId: 'business',
     amountCents: PAID_PLAN_PRICES.business.monthly,
-    perLocation: true,
     highlighted: false,
     features: [
       'Everything in Growth',
-      `2 rental units included, then ${additionalRentalUnitPrice()}`,
-      'Locations with only rental units are not billed as locations',
       'Direct stay booking with online payment',
       'The KrabiClaw iOS app at no extra cost for your whole team',
       'Online payments for paid bookings and one-time orders',
       'Buyer receipts and purchase history',
       'Refund, dispute and payout management',
-      '1.4% of payment volume, plus Stripe fees.',
+      `${PAYMENTS_FEE}.`,
       'Create, clone, pause and budget Google Ads search campaigns',
       'One launch across Google Ads, Instagram, Facebook, Discord and your site',
       'Ad spend, clicks, impressions and conversions in your analytics',
       '10% of monthly ad spend for campaigns we manage.',
     ],
   },
-  {
-    // Each rental unit beyond the ones Business includes, added to a Business subscription as its own item.
-    name: 'Additional rental unit',
-    description: `Each independently bookable home beyond the 2 included with Business: ${additionalRentalUnitPrice()}.`,
-    planId: 'rental_units',
-    productFamily: 'rental_units',
-    amountCents: ADDITIONAL_RENTAL_UNIT_PRICE,
-    unitLabel: 'rental unit',
+  // What a plan subscription bills by its Stripe meter, each a product of its own family.
+  ...BILLING_METER_KEYS.map(key => ({
+    name: BILLING_METERS[key].name,
+    description: BILLING_METERS[key].description,
+    planId: key,
+    productFamily: key,
+    unitLabel: BILLING_METERS[key].unitLabel,
+    meter: BILLING_METERS[key],
     highlighted: false,
     features: [],
-  },
+  })),
   {
     name: 'Site Language',
     description: 'One manually localized language for one Growth site.',
@@ -198,6 +197,9 @@ function normalizePrice(price) {
     type: price.type ?? null,
     currency: price.currency ?? null,
     unit_amount: price.unit_amount ?? null,
+    // The SDK reads a decimal amount as a Decimal and a webhook as a string with
+    // trailing zeros; either is compared as the number it is.
+    unit_amount_decimal: price.unit_amount_decimal === null || price.unit_amount_decimal === undefined ? null : String(Number(String(price.unit_amount_decimal))),
     billing_scheme: price.billing_scheme ?? null,
     tiers_mode: price.tiers_mode ?? null,
     // In the create shape: the last bound is 'inf', and a charge Stripe reports
@@ -215,6 +217,7 @@ function normalizePrice(price) {
       ? {
           interval: price.recurring.interval ?? null,
           interval_count: price.recurring.interval_count ?? null,
+          ...(price.recurring.usage_type === 'metered' ? { usage_type: 'metered', meter: price.recurring.meter ?? null } : {}),
         }
       : null,
   }
@@ -234,11 +237,24 @@ async function listAll(list, params) {
   return rows
 }
 
+function normalizeMeter(meter) {
+  return {
+    id: String(meter.id),
+    status: meter.status ?? null,
+    display_name: meter.display_name ?? null,
+    event_name: meter.event_name ?? null,
+    formula: meter.default_aggregation?.formula ?? null,
+    customer_payload_key: meter.customer_mapping?.event_payload_key ?? null,
+    value_payload_key: meter.value_settings?.event_payload_key ?? null,
+  }
+}
+
 export async function readCatalogSnapshot(readAdapter, { accountMode = 'unknown' } = {}) {
-  const [account, activeProducts, inactiveProducts] = await Promise.all([
+  const [account, activeProducts, inactiveProducts, meters] = await Promise.all([
     readAdapter.account.retrieve(),
     listAll(readAdapter.products.list.bind(readAdapter.products), { active: true, limit: 100 }),
     listAll(readAdapter.products.list.bind(readAdapter.products), { active: false, limit: 100 }),
+    listAll(readAdapter.meters.list.bind(readAdapter.meters), { limit: 100 }),
   ])
   const accountId = typeof account?.id === 'string' ? account.id.trim() : ''
   if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) {
@@ -280,7 +296,7 @@ export async function readCatalogSnapshot(readAdapter, { accountMode = 'unknown'
     }
   }
   subscriptions.sort((a, b) => a.id.localeCompare(b.id))
-  return { accountId, accountMode, products, pricesByProduct, subscriptions }
+  return { accountId, accountMode, products, pricesByProduct, subscriptions, meters: meters.map(normalizeMeter).sort((a, b) => a.id.localeCompare(b.id)) }
 }
 
 function normalizeSubscription(subscription) {
@@ -364,7 +380,8 @@ function productPatch(
     marketing_features: definition.features.map(name => ({ name })),
     metadata,
     default_price: priceRef,
-    ...(definition.perLocation ? { unit_label: 'location' } : definition.unitLabel ? { unit_label: definition.unitLabel } : {}),
+    // A plan is billed once, so it has no unit; a metered price names what it counts.
+    unit_label: definition.unitLabel ?? '',
   }
   if (imageRef) patch.images = [imageRef]
   return patch
@@ -384,32 +401,60 @@ function canonicalProductState(product) {
   }
 }
 
-function desiredCanonicalProductState(definition, priceRef, annualPriceRef, imageSha256, existingMetadata, existingUnitLabel = null) {
+function desiredCanonicalProductState(definition, priceRef, annualPriceRef, imageSha256, existingMetadata) {
   return canonicalProductState({
     name: definition.name,
     description: definition.description,
     marketing_features: definition.features.map(name => ({ name })),
     metadata: canonicalProductMetadata(definition, priceRef, annualPriceRef, imageSha256, existingMetadata),
     default_price: priceRef,
-    unit_label: definition.perLocation ? 'location' : definition.unitLabel ?? existingUnitLabel,
+    unit_label: definition.unitLabel ?? null,
   })
 }
 
 function existingProductNeedsUpdate(existing, definition, priceRef, annualPriceRef, imageSha256) {
   return stableJson(canonicalProductState(existing))
-    !== stableJson(desiredCanonicalProductState(definition, priceRef, annualPriceRef, imageSha256, existing.metadata, existing.unit_label ?? null))
+    !== stableJson(desiredCanonicalProductState(definition, priceRef, annualPriceRef, imageSha256, existing.metadata))
 }
 
 /**
- * The exact price an offered definition sells at one interval. Paid plans are
- * graduated per location (`planPriceTiers`); Site Language is a flat unit price.
+ * The exact price an offered definition sells at one interval. A plan, a
+ * service and Site Language are flat unit prices; a metered definition is the
+ * monthly price on its meter (`meter` is its id, or the reference to the meter
+ * this plan creates): graduated tiers after an included count, or a decimal
+ * amount per reported cent.
  */
-export function desiredPriceParams(definition, interval) {
+export function desiredPriceParams(definition, interval, meter) {
+  if (definition.meter) {
+    const recurring = { interval: 'month', interval_count: 1, usage_type: 'metered', meter }
+    return definition.meter.tiers
+      ? { currency: 'usd', recurring, billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: definition.meter.tiers.map(tier => ({ ...tier })) }
+      : { currency: 'usd', recurring, billing_scheme: 'per_unit', unit_amount_decimal: definition.meter.unitAmountDecimal }
+  }
   const amount = interval === 'year' ? definition.annualAmountCents : definition.amountCents
-  const base = { currency: 'usd', recurring: { interval, interval_count: 1 } }
-  return definition.perLocation
-    ? { ...base, billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: planPriceTiers(amount, interval) }
-    : { ...base, billing_scheme: 'per_unit', unit_amount: amount }
+  return { currency: 'usd', recurring: { interval, interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: amount }
+}
+
+/** The meter a metered definition reports to, as Stripe creates it. */
+function desiredMeterParams(definition) {
+  return {
+    display_name: definition.name,
+    event_name: definition.meter.eventName,
+    default_aggregation: { formula: definition.meter.formula },
+    customer_mapping: { type: 'by_id', event_payload_key: 'stripe_customer_id' },
+    value_settings: { event_payload_key: 'value' },
+  }
+}
+
+/** The active meter with this definition's event name, which must aggregate the way the definition bills. */
+function canonicalMeter(snapshot, definition) {
+  const matching = (snapshot.meters ?? []).filter(meter => meter.status === 'active' && meter.event_name === definition.meter.eventName)
+  if (matching.length > 1) throw new Error(`Stripe has ${matching.length} active meters for ${definition.meter.eventName}.`)
+  const meter = matching[0] ?? null
+  if (meter && (meter.formula !== definition.meter.formula || meter.customer_payload_key !== 'stripe_customer_id' || meter.value_payload_key !== 'value')) {
+    throw new Error(`Stripe meter ${meter.id} for ${definition.meter.eventName} must aggregate with ${definition.meter.formula} on stripe_customer_id and value; deactivate it before planning.`)
+  }
+  return meter
 }
 
 function isRecurringBasePrice(price, seatPriceId) {
@@ -423,8 +468,9 @@ function isRecurringBasePrice(price, seatPriceId) {
  * it has to be created. A price at another amount or scheme is not canonical:
  * it is archived for new sales while existing subscriptions retain it.
  */
-function resolveCanonicalPrice(product, prices, definition, interval, seatPriceId) {
-  const desired = desiredPriceParams(definition, interval)
+function resolveCanonicalPrice(product, prices, definition, interval, seatPriceId, meter) {
+  if (definition.meter && typeof meter !== 'string') return null
+  const desired = desiredPriceParams(definition, interval, meter)
   const candidates = prices.filter(price => isRecurringBasePrice(price, seatPriceId) && matchesPriceParams(price, desired))
   if (candidates.length === 0) return null
   const intervalLabel = interval === 'year' ? 'annual' : interval
@@ -470,7 +516,7 @@ function productCatalogId(product) {
   const family = typeof product?.metadata?.product_family === 'string'
     ? product.metadata.product_family.trim().toLowerCase()
     : ''
-  if (family === 'site_language' || family === 'rental_units') return family
+  if (family === 'site_language' || BILLING_METER_KEYS.includes(family)) return family
   // A service product is named by its `service` key; the family only groups them.
   if (family === 'services') return typeof product?.metadata?.service === 'string' ? product.metadata.service.trim() : ''
   return ''
@@ -483,6 +529,8 @@ function retiredCatalogFamily(product) {
     ? product.metadata.addon_type.trim().toLowerCase()
     : ''
   if (RETIRED_ADDON_TYPES.includes(addonType)) return `addon:${addonType}`
+  const family = typeof product?.metadata?.product_family === 'string' ? product.metadata.product_family.trim().toLowerCase() : ''
+  if (RETIRED_PRODUCT_FAMILIES.includes(family)) return `family:${family}`
   return null
 }
 
@@ -574,7 +622,15 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
   // Keep offered-product creation/reconciliation ahead of every destructive
   // operation. The operator can therefore revalidate the canonical Growth
   // product, prices, and image before retiring duplicates or old products.
+  const meterRefs = {}
+  if (planningScope !== 'retirement-only') for (const definition of PLAN_DEFINITIONS.filter(candidate => candidate.meter)) {
+    const meter = canonicalMeter(snapshot, definition)
+    meterRefs[definition.planId] = meter ? meter.id : { ref: { kind: 'meter', planId: definition.planId } }
+    if (!meter) canonicalOperations.push({ type: 'create_meter', planId: definition.planId, params: desiredMeterParams(definition) })
+  }
+
   if (planningScope !== 'retirement-only') for (const definition of PLAN_DEFINITIONS) {
+    const meterRef = meterRefs[definition.planId]
     const products = productsByPlan.get(definition.planId) ?? []
     const canonicalProductId = canonicalIds[definition.planId]
     const existing = canonicalProductId
@@ -594,7 +650,7 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
       ? [...(snapshot.pricesByProduct[existing.id] ?? [])].sort((a, b) => a.id.localeCompare(b.id))
       : []
     const seatPriceId = existing?.metadata?.seat_price_id?.trim()
-    const canonical = existing ? resolveCanonicalPrice(existing, prices, definition, 'month', seatPriceId) : null
+    const canonical = existing ? resolveCanonicalPrice(existing, prices, definition, 'month', seatPriceId, meterRef) : null
     const annual = existing && definition.annualAmountCents ? resolveCanonicalPrice(existing, prices, definition, 'year', seatPriceId) : null
     const priceRef = canonical
       ? canonical.id
@@ -629,7 +685,7 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
         type: 'create_price',
         planId: definition.planId,
         product: productRef,
-        params: desiredPriceParams(definition, 'month'),
+        params: desiredPriceParams(definition, 'month', meterRef),
       })
     }
 
@@ -782,6 +838,7 @@ function resolveReference(value, context) {
   if (value.ref?.kind === 'product') return context.products[value.ref.planId]?.id ?? context.products[value.ref.planId]
   if (value.ref?.kind === 'price') return context.prices[value.ref.planId]?.id ?? context.prices[value.ref.planId]
   if (value.ref?.kind === 'file') return context.files[value.ref.planId]
+  if (value.ref?.kind === 'meter') return context.meters[value.ref.planId]?.id ?? context.meters[value.ref.planId]
   return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, resolveReference(nested, context)]))
 }
 
@@ -942,10 +999,13 @@ function mutationEvidence(result, fallback = {}) {
 }
 
 function contextFromJournal(journal) {
-  const context = { products: {}, prices: {}, files: {} }
+  const context = { products: {}, prices: {}, files: {}, meters: {} }
   for (const entry of journal.operations) {
     if (entry.status !== 'applied') continue
     const evidence = entry.evidence ?? {}
+    if (entry.type === 'create_meter' && entry.identity.planId && evidence.id) {
+      context.meters[entry.identity.planId] = { id: evidence.id }
+    }
     if (entry.type === 'create_product' && entry.identity.planId && evidence.id) {
       context.products[entry.identity.planId] = { id: evidence.id }
     }
@@ -991,6 +1051,10 @@ function matchesProductPatch(product, patch) {
       for (const [metadataKey, metadataValue] of Object.entries(expected ?? {})) {
         if (String(actual[metadataKey] ?? '') !== String(metadataValue ?? '')) return false
       }
+      continue
+    }
+    if (key === 'unit_label') {
+      if ((product.unit_label ?? '') !== (expected ?? '')) return false
       continue
     }
     if (key === 'marketing_features') {
@@ -1039,6 +1103,7 @@ function operationAlreadyApplied(snapshot, operation, context, entry) {
         )
     return Boolean(product && product.active !== false && matchesProductPatch(product, operation.params))
   }
+  if (operation.type === 'create_meter') return Boolean(appliedMeter(snapshot, operation))
   if (operation.type === 'create_price') {
     const productId = resolveProductId(operation, context)
     if (!productId) return false
@@ -1046,7 +1111,7 @@ function operationAlreadyApplied(snapshot, operation, context, entry) {
     const candidates = (snapshot.pricesByProduct[productId] ?? [])
       .filter(price => price.active !== false)
       .filter(price => knownId ? price.id === knownId : true)
-    return candidates.some(price => matchesPriceParams(price, { ...operation.params, product: productId }))
+    return candidates.some(price => matchesPriceParams(price, { ...resolveReference(operation.params, context), product: productId }))
   }
   if (operation.type === 'update_product') {
     const productId = resolveProductId(operation, context)
@@ -1059,7 +1124,16 @@ function operationAlreadyApplied(snapshot, operation, context, entry) {
   return operation.type === 'upload_product_image' && entry.status === 'applied' && Boolean(entry.evidence?.url)
 }
 
+function appliedMeter(snapshot, operation) {
+  return (snapshot.meters ?? []).find(meter => meter.status === 'active' && meter.event_name === operation.params.event_name
+    && meter.formula === operation.params.default_aggregation.formula) ?? null
+}
+
 function inferredAppliedEvidence(snapshot, operation, context, entry) {
+  if (operation.type === 'create_meter') {
+    const meter = appliedMeter(snapshot, operation)
+    return meter ? { id: meter.id } : {}
+  }
   if (operation.type === 'archive_product') return { id: operation.productId }
   if (operation.type === 'clear_product_default_price') {
     return { id: operation.productId, defaultPriceId: operation.defaultPriceId }
@@ -1082,7 +1156,7 @@ function inferredAppliedEvidence(snapshot, operation, context, entry) {
     const prices = productId ? snapshot.pricesByProduct[productId] ?? [] : []
     const price = prices
       .filter(candidate => candidate.active !== false)
-      .find(candidate => (knownId ? candidate.id === knownId : true) && matchesPriceParams(candidate, { ...operation.params, product: productId }))
+      .find(candidate => (knownId ? candidate.id === knownId : true) && matchesPriceParams(candidate, { ...resolveReference(operation.params, context), product: productId }))
     return price?.id ? { id: price.id, product: productId } : {}
   }
   if (operation.type === 'update_product') {
@@ -1147,9 +1221,15 @@ function assertOperationPrecondition(snapshot, plan, operation, context, entry) 
     if (duplicate) throw new Error(`Provider precondition failed: active canonical product ${duplicate.id} does not match the signed create operation.`)
     return { alreadyApplied: false }
   }
+  if (operation.type === 'create_meter') {
+    const duplicate = (snapshot.meters ?? []).find(meter => meter.status === 'active' && meter.event_name === operation.params.event_name)
+    if (duplicate) throw new Error(`Provider precondition failed: active meter ${duplicate.id} does not match the signed create operation.`)
+    return { alreadyApplied: false }
+  }
   if (operation.type === 'create_price') {
     const productId = resolveProductId(operation, context)
     if (!productId) throw new Error(`Unable to resolve product for ${operation.planId} price creation.`)
+    if (operation.params.recurring?.meter && typeof resolveReference(operation.params, context).recurring.meter !== 'string') throw new Error(`Unable to resolve meter for ${operation.planId} price creation.`)
     assertSignedProductPrecondition(snapshot, plan, productId, operation.catalogProductId ?? operation.planId)
     return { alreadyApplied: false }
   }
@@ -1283,10 +1363,16 @@ export async function applyCatalogPlan({
       context.products[operation.planId] = { id: result.id }
       return mutationEvidence(result)
     }
+    if (operation.type === 'create_meter') {
+      const result = await mutationAdapter.meters.create(operation.params, requestOptions)
+      if (!result?.id) throw new Error(`Stripe meter creation for ${operation.planId} did not return an ID.`)
+      context.meters[operation.planId] = { id: result.id }
+      return mutationEvidence(result)
+    }
     if (operation.type === 'create_price') {
       const product = resolveProductId(operation, context)
       if (!product) throw new Error(`Unable to resolve product for ${operation.planId} price creation.`)
-      const result = await mutationAdapter.prices.create({ ...operation.params, product }, requestOptions)
+      const result = await mutationAdapter.prices.create({ ...resolveReference(operation.params, context), product }, requestOptions)
       if (!result?.id) throw new Error(`Stripe price creation for ${operation.planId} did not return an ID.`)
       context.prices[operation.planId] = { id: result.id }
       return mutationEvidence(result, { product })
@@ -1320,6 +1406,7 @@ export async function applyCatalogPlan({
         entry.evidence = mutationEvidence(null, inferredAppliedEvidence(snapshot, operation, context, entry))
         if (operation.type === 'create_product' && entry.evidence.id) context.products[operation.planId] = { id: entry.evidence.id }
         if (operation.type === 'create_price' && entry.evidence.id) context.prices[operation.planId] = { id: entry.evidence.id }
+        if (operation.type === 'create_meter' && entry.evidence.id) context.meters[operation.planId] = { id: entry.evidence.id }
         persistApplyJournal(journalPath, journal)
         continue
       }

@@ -4,7 +4,8 @@ import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { blawbyTestExtraHeaders } from './test-env'
 import type { Product } from '../../server/types/products'
-import type { BlawbyDocumentPayload } from '../../utils/blawby-document-contract'
+import type { PublicTenantPage } from '../../server/utils/public-tenant-pages'
+import type { PublicShellPayload } from '../../utils/public-resource-contracts'
 
 test.use({ timezoneId: 'America/New_York' })
 
@@ -193,20 +194,14 @@ test('native online review uses canonical Products, holds capacity, and releases
     }))).flat()
     expect(storedGallery).toHaveLength(8)
     expect(publishedService.media.filter((media: { slot: string }) => ['cover', 'gallery'].includes(media.slot)).map((media: { asset_id: string }) => media.asset_id)).toEqual(storedGallery.map(media => media.id))
-    const invalidService = await page.goto('/schedule?service_id=missing-consultation')
-    expect(invalidService?.status()).toBe(404)
-    await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
-    await expect(page.getByRole('combobox', { name: 'Service', exact: true })).toHaveCount(0)
-    const scheduleSource = await request.get('/api/public/blawby/document?recipe=schedule', { headers })
+    const scheduleSource = await request.get('/api/public/pages?path=/schedule', { headers })
     expect(scheduleSource.status(), await scheduleSource.text()).toBe(200)
-    const scheduleDocument: BlawbyDocumentPayload = await scheduleSource.json()
-    expect(scheduleDocument.route.page).toBeTruthy()
-    const authoredSchedule = scheduleDocument.route.page!
+    const authoredSchedule: PublicTenantPage = (await scheduleSource.json()).page
     expect(authoredSchedule.blocks.length).toBeGreaterThan(0)
     await openTenantPage(page, new URL('/schedule', baseURL).href, {})
     const scheduleArticle = page.locator('[data-tenant-page]')
     await expect(scheduleArticle).toHaveCount(1)
-    const scheduleBlocks = scheduleArticle.locator(':scope > [data-block-type]')
+    const scheduleBlocks = scheduleArticle.locator('.tenant-page-block')
     expect(await scheduleBlocks.evaluateAll(elements => elements.map(element => element.getAttribute('data-block-type')))).toEqual(authoredSchedule.blocks.map(block => block.type))
     for (const [index, block] of authoredSchedule.blocks.entries()) {
       if (block.type === 'hero' && typeof block.data.title === 'string') {
@@ -228,17 +223,20 @@ test('native online review uses canonical Products, holds capacity, and releases
       return Boolean(article.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING)
         && article.getBoundingClientRect().bottom <= form.getBoundingClientRect().top
     })).toBe(true)
-    const serviceSelector = page.getByRole('combobox', { name: 'Service', exact: true })
-    await expect(serviceSelector).toContainText(products[0]!.name)
-    const chevronInset = await serviceSelector.evaluate(element => element.getBoundingClientRect().right - element.querySelector('[data-slot="trailingIcon"]')!.getBoundingClientRect().right)
-    expect(chevronInset).toBeGreaterThanOrEqual(10)
-    await serviceSelector.focus()
-    await page.keyboard.press('Enter')
-    await expect(page.getByRole('option', { name: products[0]!.name, exact: true })).toBeVisible()
-    await page.keyboard.press('Escape')
-    await expect(serviceSelector).toBeFocused()
-    await expect(page.getByRole('heading', { name: products[0]!.name, exact: true })).toBeVisible()
-    await expect(page.getByText('Free', { exact: true }).filter({ visible: true })).toBeVisible()
+    // /schedule lists each consultation; it is booked on its own page.
+    const consultationCard = page.locator('#consultations').getByRole('link').filter({ hasText: products[0]!.name })
+    await expect(consultationCard).toHaveCount(1)
+    await expect(consultationCard).toHaveAttribute('href', service.path)
+    await expect(page.locator('#consultations').getByRole('combobox')).toHaveCount(0)
+    await expect(page.locator('a[href*="/experiences/"]')).toHaveCount(0)
+    expect(products[0]!.image).toBeNull()
+    await expect(page.locator('section[aria-label="Choose your consultation"] img')).toHaveCount(0)
+    const providerRoute=`**/api/public/products/${products[0]!.slug}/provider*`
+    await page.route(providerRoute,route=>route.fulfill({status:503,json:{statusCode:503,message:'Provider lookup unavailable'}}))
+    await consultationCard.click()
+    await expect(page).toHaveURL(new RegExp(`${service.path}$`))
+    await expect(page.getByRole('heading', { name: products[0]!.name, exact: true, level: 1 })).toBeVisible()
+    await expect(page.getByText('Free', { exact: true }).filter({ visible: true }).first()).toBeVisible()
     await expect(page.getByText('Staff review', { exact: true }).first()).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Upcoming availability', exact: true })).toBeVisible()
     const pageTimezone = page.getByRole('button', { name: 'Time zone', exact: true })
@@ -267,16 +265,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await zoneSearch.press('ArrowDown')
     await zoneSearch.press('Enter')
     await expect(pageTimezone).toContainText('(America/New_York)')
-    await expect(page.locator('a[href*="/experiences/"]')).toHaveCount(0)
-    expect(products[0]!.image).toBeNull()
-    await expect(page.locator('section[aria-label="Choose your consultation"] img')).toHaveCount(0)
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.setViewportSize({ width: 1280, height: 720 })
-    const providerRoute=`**/api/public/products/${products[0]!.slug}/provider*`
-    await page.route(providerRoute,route=>route.fulfill({status:503,json:{statusCode:503,message:'Provider lookup unavailable'}}))
-    await page.getByRole('link', { name: 'Full service details →', exact: true }).click()
-    await expect(page).toHaveURL(new RegExp(`${service.path}$`))
-    await expect(page.getByRole('heading', { name: products[0]!.name, exact: true, level: 1 })).toBeVisible()
     const providerSection=page.locator('section[aria-label="Meet your host"]')
     await waitForNuxtHydration(page)
     const failedProvider=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
@@ -478,11 +466,14 @@ test('native online review uses canonical Products, holds capacity, and releases
     for (const mode of ['external_url', 'native_disabled', 'native'] as const) {
       const switchMode = await page.request.put(`${editor}/consultation`, { data: { mode } })
       expect(switchMode.status(), await switchMode.text()).toBe(200)
-      const publicDocument = await request.get('/api/public/blawby/document?recipe=schedule', { headers })
+      const publicDocument = await request.get('/api/public/pages?path=/schedule', { headers })
+      const publicShell = await request.get('/api/public/shell', { headers })
+      expect(publicShell.status(), await publicShell.text()).toBe(200)
+      const modeShell: PublicShellPayload = await publicShell.json()
       expect(publicDocument.status(), await publicDocument.text()).toBe(200)
-      const modeDocument: BlawbyDocumentPayload = await publicDocument.json()
-      expect(modeDocument.shell.consultation.mode).toBe(mode)
-      expect(modeDocument.route.page!.blocks).toEqual(authoredSchedule.blocks)
+      const modeDocument: PublicTenantPage = (await publicDocument.json()).page
+      expect(modeShell.consultation!.mode).toBe(mode)
+      expect(modeDocument.blocks).toEqual(authoredSchedule.blocks)
       await page.goto(service.path)
       await expect(page.locator('[data-media-gallery]')).toHaveCount(1)
       await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
@@ -491,9 +482,9 @@ test('native online review uses canonical Products, holds capacity, and releases
       await expect(page.locator('#consultations')).toHaveCount(mode === 'native' ? 1 : 0)
       expect(await scheduleBlocks.evaluateAll(elements => elements.map(element => element.getAttribute('data-block-type')))).toEqual(authoredSchedule.blocks.map(block => block.type))
       if (mode === 'external_url') {
-        const externalAction = page.locator('main > div').getByRole('link', { name: modeDocument.shell.consultation.cta_label, exact: true })
+        const externalAction = page.locator('main > div').getByRole('link', { name: modeShell.consultation!.cta_label, exact: true })
         await expect(externalAction).toHaveCount(1)
-        await expect(externalAction).toHaveAttribute('href', modeDocument.shell.consultation.external_url!)
+        await expect(externalAction).toHaveAttribute('href', modeShell.consultation!.external_url!)
       } else if (mode === 'native_disabled') {
         const contactAction = page.locator('main > div').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)
@@ -541,7 +532,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(paid.status(), await paid.text()).toBe(200)
     const blocked = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { online_payment_required: true } })
     expect(blocked.status(), await blocked.text()).toBe(503)
-    expect(await blocked.json()).toMatchObject({ data: { code: 'financial_action_required', dashboard_url: '/dashboard/north-carolina-legal-services/payments', missing: ['payments.entitlement', 'payments.configuration', 'payments.billing', 'payments.account'] } })
+    expect(await blocked.json()).toMatchObject({ data: { code: 'financial_action_required', dashboard_url: '/dashboard/north-carolina-legal-services/payments', missing: ['payments.entitlement', 'payments.configuration', 'payments.account'] } })
     expect(await readConfig()).toMatchObject({ online_payment_required: false })
     const instantPolicy = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, confirmation_mode: 'instant', online_payment_required: false } })
     expect(instantPolicy.status(), await instantPolicy.text()).toBe(200)

@@ -186,6 +186,9 @@ const CTA_FIELDS = {
   // declared, so it could be written and never translated or validated.
   secondary_label: text('Second button label', { section: 'second_button', pairedWith: 'secondary_url' }),
   secondary_url: link('Second button URL', { section: 'second_button', pairedWith: 'secondary_label' }),
+  // The prompt's picture behind its words, and an optional cut-out beside them.
+  media: { kind: 'media', label: 'Background image', translatable: false, section: 'image', slot: 'media' },
+  featured: { kind: 'media', label: 'Featured image', translatable: false, section: 'image', slot: 'featured' },
 } as const
 
 const GRID_ITEM_FIELDS = {
@@ -269,13 +272,11 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     },
   }, { accessibility: 'required', seo: 'structured' }),
 
+  // After a hero, a divider closes the hero section with the shield; elsewhere it is a plain break.
   divider: blockDefinitionWithMetadata('divider', 'Divider', 'i-lucide-minus', 'A break between sections.', ALL_RECIPES, {},
     { accessibility: 'inherited', seo: 'none' }),
 
-  cta: blockDefinitionWithMetadata('cta', 'Call to action', 'i-lucide-mouse-pointer-click', 'A prompt with one button.', ALL_RECIPES, {
-    ...CTA_FIELDS,
-    media: { kind: 'media', label: 'Background image', translatable: false, section: 'image', slot: 'media' },
-  }),
+  cta: blockDefinitionWithMetadata('cta', 'Call to action', 'i-lucide-mouse-pointer-click', 'A prompt with one button.', ALL_RECIPES, CTA_FIELDS),
   contact_cta: blockDefinitionWithMetadata('contact_cta', 'Contact prompt', 'i-lucide-phone', 'A prompt to get in touch.', ALL_RECIPES, CTA_FIELDS),
   // A booking prompt says what it costs and what the visitor is agreeing to.
   // Both were stored and read as `priceLine` and `notice`, which no list

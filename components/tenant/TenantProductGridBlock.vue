@@ -46,9 +46,9 @@ const allFeatured = computed(() => items.value.length > 0 && items.value.every(i
 const featured = computed(() => ({
   items: items.value,
   kicker: blockText(props.block.data.description)
-    || (allExperiences.value ? homeCopy.value.experiencesPageTitle : presentation.value?.locationCollectionSegment === 'menu' ? t('saya.footer.menu') : t('saya.footer.products')),
+    || (allExperiences.value ? homeCopy.value.experiencesPageTitle : presentation.value?.locationCollectionSegment === 'menu' ? t('site.footer.menu') : t('site.footer.products')),
   heading: blockText(props.block.data.title)
-    || (allFeatured.value ? t('saya.posts.featured') : allExperiences.value ? t('saya.experiences.collection_title', { organization: brandName }) : presentation.value?.locationCollectionSegment === 'menu' ? t('saya.footer.menu') : t('saya.products.collection_title', { organization: brandName })),
+    || (allFeatured.value ? t('site.posts.featured') : allExperiences.value ? t('site.experiences.collection_title', { organization: brandName }) : presentation.value?.locationCollectionSegment === 'menu' ? t('site.footer.menu') : t('site.products.collection_title', { organization: brandName })),
   linkTarget: allExperiences.value ? '/experiences' : presentation.value?.collectionPath ?? null,
 }))
 </script>

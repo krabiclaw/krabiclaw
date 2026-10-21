@@ -5,7 +5,7 @@ export interface ArticleNav {
   /** The collection's top-level categories; each holds its subcategories. */
   categories: PublishedArticleCategory[]
   indexLabel: string
-  search: { surface: 'blog' | 'docs' | 'tenant_blog'; variant: 'platform' | 'saya' | 'blawby' } | null
+  search: { surface: 'blog' | 'docs' | 'tenant_blog'; variant: 'platform' | 'tenant' } | null
 }
 
 /**
@@ -31,10 +31,10 @@ export async function useArticleNav() {
 
   return computed<ArticleNav>(() => ({
     categories: categoryTree.value,
-    indexLabel: collection.value === 'docs' ? t('saya.footer.docs') : t('saya.footer.blog'),
+    indexLabel: collection.value === 'docs' ? t('site.footer.docs') : t('site.footer.blog'),
     // KrabiClaw searches its own blog and docs; a site searches its articles, in English only.
     search: template.slug === 'platform'
       ? { surface: collection.value, variant: 'platform' }
-      : publicLocale.value === 'en' ? { surface: 'tenant_blog', variant: template.slug } : null,
+      : publicLocale.value === 'en' ? { surface: 'tenant_blog', variant: 'tenant' } : null,
   }))
 }

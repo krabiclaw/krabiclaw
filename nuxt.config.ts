@@ -110,7 +110,7 @@ export default defineNuxtConfig({
         },
       ],
       link: [
-        // Every Saya hero/content image is served from Cloudflare Images
+        // Every tenant hero/content image is served from Cloudflare Images
         // (imagedelivery.net) — a third-party origin the browser otherwise
         // doesn't discover until it parses the <img> tag deep in <body>,
         // paying DNS+TCP+TLS setup serially after that. Preconnecting lets
@@ -170,8 +170,8 @@ export default defineNuxtConfig({
       ],
     },
     customCollections: [
-      pickIcons('simple-icons', ['airbnb', 'claude', 'facebook', 'google', 'googlemaps', 'instagram', 'modelcontextprotocol', 'openai', 'whatsapp']),
-      pickIcons('logos', ['discord-icon', 'facebook', 'google-ads', 'google-analytics', 'google-calendar', 'google-icon', 'google-maps', 'google-search-console', 'whatsapp-icon']),
+      pickIcons('simple-icons', ['afterpay', 'airbnb', 'claude', 'facebook', 'google', 'googlemaps', 'instagram', 'klarna', 'modelcontextprotocol', 'openai', 'whatsapp']),
+      pickIcons('logos', ['amex', 'apple-pay', 'discord-icon', 'discover', 'facebook', 'google-ads', 'google-analytics', 'google-calendar', 'google-icon', 'google-maps', 'google-pay', 'google-search-console', 'mastercard', 'visa', 'whatsapp-icon']),
       pickIcons('skill-icons', ['instagram']),
       customIconData.krabi,
     ],

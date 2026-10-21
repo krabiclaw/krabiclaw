@@ -41,6 +41,8 @@ export interface BookingConfirmation {
   locationSlug?: string | null
   /** What the guest paid on the site, net of refunds; null when nothing was paid online. */
   paid?: { amount: number; currency: string } | null
+  /** The booked offering's photo, or its place's. */
+  imageUrl?: string | null
 }
 
 const STORAGE_KEY = 'kc:booking-confirmation'
@@ -87,7 +89,7 @@ export async function loadBookingConfirmation(
     kind: BookingConfirmation['type']; status: 'pending' | 'confirmed' | 'cancelled'; name: string; email: string
     starts_at: string; timezone: string; guests: string; location_id: string | null; product_id: string | null; product_kind: ProductKind | null; product_name: string | null
     location_name: string | null; location_slug: string | null
-    locale: string; policy_summary: ApiRecord | null; paid: { amount: number; currency: string } | null
+    locale: string; policy_summary: ApiRecord | null; paid: { amount: number; currency: string } | null; image_url: string | null
   } }>(`/api/public/booking-requests/${encodeURIComponent(requestId)}`, {
     query: { locale: language.locale },
     headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
@@ -115,6 +117,7 @@ export async function loadBookingConfirmation(
     locationName: booking.location_name,
     locationSlug: booking.location_slug,
     paid: booking.paid,
+    imageUrl: typeof booking.image_url === 'string' ? booking.image_url : null,
     locationAddress: sameLocation && sameLocale ? matchingHandoff?.locationAddress : null,
     title: booking.product_name ?? (sameLocale ? matchingHandoff?.title : undefined),
     policySummary: sameLocale && sameLocation && sameProduct && matchingHandoff?.policySummary ? matchingHandoff.policySummary : booking.policy_summary,

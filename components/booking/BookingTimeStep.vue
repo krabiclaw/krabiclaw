@@ -11,17 +11,17 @@
           type="button"
           class="flex size-9 items-center justify-center rounded-full border border-default text-default disabled:opacity-30"
           :disabled="guests <= guestsMin"
-          :aria-label="t('saya.experience_detail.fewer_guests')"
+          :aria-label="t('site.experience_detail.fewer_guests')"
           @click="$emit('update:guests', Math.max(guestsMin, guests - 1))"
         >
           <svg class="size-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15" /></svg>
         </button>
-        <span class="saya-display min-w-8 text-center text-2xl">{{ showMinimumAtLimit && guests >= guestsMax ? `${guestsMax}+` : guests }}</span>
+        <span class="tenant-display min-w-8 text-center text-2xl">{{ showMinimumAtLimit && guests >= guestsMax ? `${guestsMax}+` : guests }}</span>
         <button
           type="button"
           class="flex size-9 items-center justify-center rounded-full border border-default text-default disabled:opacity-30"
           :disabled="guests >= guestsMax"
-          :aria-label="t('saya.experience_detail.more_guests')"
+          :aria-label="t('site.experience_detail.more_guests')"
           @click="$emit('update:guests', Math.min(guestsMax, guests + 1))"
         >
           <svg class="size-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
@@ -31,12 +31,12 @@
 
     <!-- Month bar + calendar toggle -->
     <div class="flex shrink-0 items-center justify-between gap-4 border-b border-default px-1 py-3">
-      <span class="saya-display text-lg">{{ monthLabel }}</span>
+      <span class="tenant-display text-lg">{{ monthLabel }}</span>
       <button
         type="button"
         class="flex size-9 items-center justify-center rounded-full border border-default text-default transition-colors"
         :class="calOpen ? 'bg-inverted text-inverted border-inverted' : ''"
-        :aria-label="calOpen ? t('saya.experience_detail.show_list') : t('saya.experience_detail.show_calendar')"
+        :aria-label="calOpen ? t('site.experience_detail.show_list') : t('site.experience_detail.show_calendar')"
         @click="calOpen = !calOpen"
       >
         <svg class="size-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor"><rect x="3" y="5" width="18" height="16" rx="2"/><path stroke-linecap="round" d="M8 3v4M16 3v4M3 10h18"/></svg>
@@ -73,9 +73,9 @@
 
     <!-- Day-grouped scrollable slot list -->
     <div v-else ref="scrollRef" class="min-h-0 flex-1 overflow-y-auto px-1 py-2">
-      <p v-if="dates.length > 0 && days.length === 0" class="py-6 text-sm text-muted">{{ t('saya.experience_detail.no_availability', { count: dates.length }) }}</p>
+      <p v-if="dates.length > 0 && days.length === 0" class="py-6 text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: dates.length }) }}</p>
       <section v-for="day in days" :key="day.key" :ref="(el) => setDayRef(el, day.key)" class="pt-4 first:pt-0">
-        <h3 class="saya-display mb-3 text-lg">{{ day.label }}</h3>
+        <h3 class="tenant-display mb-3 text-lg">{{ day.label }}</h3>
         <!-- Airbnb's times: a grid of pills, the chosen one filled. -->
         <div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
           <button
@@ -103,7 +103,7 @@
     <div class="flex shrink-0 items-center justify-between gap-4 border-t border-default px-1 py-4">
       <div class="min-w-0">
         <template v-if="modelValue">
-          <div class="saya-display saya-italic truncate text-lg">{{ selectedSummary }}</div>
+          <div class="tenant-display tenant-italic truncate text-lg">{{ selectedSummary }}</div>
           <div v-if="showPartySize" class="mt-0.5 text-xs text-muted">{{ showMinimumAtLimit && guests >= guestsMax ? `${guestsMax}+` : guests }} {{ guests === 1 ? resolvedGuestSingular : resolvedGuestPlural }}</div>
         </template>
         <div v-else class="text-sm text-muted">{{ resolvedChooseSeatingLabel }}</div>
@@ -164,11 +164,11 @@ const props = withDefaults(defineProps<{
   guestsHint: '',
 })
 const { locale, t } = useI18n()
-const resolvedGuestsLabel = computed(() => props.guestsLabel || t('saya.experience_detail.party_size'))
-const resolvedGuestSingular = computed(() => props.guestSingular || t('saya.experience_detail.guest'))
-const resolvedGuestPlural = computed(() => props.guestPlural || t('saya.experience_detail.guests'))
-const resolvedContinueLabel = computed(() => props.continueLabel || t('saya.experience_detail.continue'))
-const resolvedChooseSeatingLabel = computed(() => props.chooseSeatingLabel || t('saya.experience_detail.choose_time'))
+const resolvedGuestsLabel = computed(() => props.guestsLabel || t('site.experience_detail.party_size'))
+const resolvedGuestSingular = computed(() => props.guestSingular || t('site.experience_detail.guest'))
+const resolvedGuestPlural = computed(() => props.guestPlural || t('site.experience_detail.guests'))
+const resolvedContinueLabel = computed(() => props.continueLabel || t('site.experience_detail.continue'))
+const resolvedChooseSeatingLabel = computed(() => props.chooseSeatingLabel || t('site.experience_detail.choose_time'))
 
 const emit = defineEmits<{
   'update:modelValue': [value: TimeSlotSelection]
@@ -187,8 +187,8 @@ const referenceDate = computed(() => props.referenceDate ?? props.dates[0]?.date
 
 function dayLabelFor(dateStr: string): string {
   const formatted = formatCalendarDate(dateStr, locale.value, { day: 'numeric', month: 'long' })
-  if (dateStr === referenceDate.value) return t('saya.experience_detail.today_date', { date: formatted })
-  if (referenceDate.value && dateStr === addLocalDays(referenceDate.value, 1)) return t('saya.experience_detail.tomorrow_date', { date: formatted })
+  if (dateStr === referenceDate.value) return t('site.experience_detail.today_date', { date: formatted })
+  if (referenceDate.value && dateStr === addLocalDays(referenceDate.value, 1)) return t('site.experience_detail.tomorrow_date', { date: formatted })
   return formatCalendarDate(dateStr, locale.value, { weekday: 'long', day: 'numeric', month: 'long' })
 }
 
@@ -201,14 +201,14 @@ const days = computed(() => {
       const scarce = !isClosedOrFull && !tooSmall && s.remaining !== null && s.remaining <= 3 && s.capacity !== null && s.capacity > 1
       const disabled = isClosedOrFull || tooSmall
       const availabilityLabel = s.is_closed
-        ? t('saya.location.closed')
+        ? t('site.location.closed')
         : s.is_full
-          ? t('saya.experience_detail.sold_out')
+          ? t('site.experience_detail.sold_out')
           : tooSmall
-            ? t('saya.experience_detail.only_left', { count: s.remaining })
+            ? t('site.experience_detail.only_left', { count: s.remaining })
             : scarce
-              ? t('saya.experience_detail.left', { count: s.remaining })
-              : t('saya.experience_detail.available')
+              ? t('site.experience_detail.left', { count: s.remaining })
+              : t('site.experience_detail.available')
       return { session_id: s.session_id, time_slot: s.time_slot, disabled, isClosedOrFull, scarce, availabilityLabel }
     })
     return { key: d.date, label: dayLabelFor(d.date), slots }

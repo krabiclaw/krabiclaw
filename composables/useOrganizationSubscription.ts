@@ -1,5 +1,5 @@
 import { authClient } from '~/lib/auth-client'
-import { BUSINESS_PLAN_ID, isKnownBillingPlan } from '~/shared/billing-model'
+import { isKnownBillingPlan } from '~/shared/billing-model'
 
 function checkoutReturnUrls(): { successUrl: string; cancelUrl: string; returnUrl: string } {
   const current = new URL(window.location.href)
@@ -15,19 +15,12 @@ function checkoutReturnUrls(): { successUrl: string; cancelUrl: string; returnUr
 async function organizationSubscriptionId(
   dashboardApi: ReturnType<typeof useDashboardApi>,
   organizationId: string,
-): Promise<{ id?: string; status?: string; plan: string; annual: boolean; locations: { used: number; covered: number }; businessLocations: number }> {
+): Promise<{ id?: string; status?: string; plan: string }> {
   // A business on Starter has no subscription row, so the id and status are
   // absent from the response rather than present and empty.
   type BillingStatusResponse = {
     success: true
-    billing: {
-      stripeSubscriptionId?: string
-      subscriptionStatus?: string
-      billingInterval?: 'month' | 'year'
-      plan: string
-      locations: { used: number; covered: number }
-      businessUsage: { locations: number; rentalUnits: number }
-    }
+    billing: { stripeSubscriptionId?: string; subscriptionStatus?: string; plan: string }
   }
   const response = await dashboardApi<BillingStatusResponse>('/api/billing/status', {
     query: { organizationId },
@@ -38,40 +31,27 @@ async function organizationSubscriptionId(
         && billing !== null
         && (!('stripeSubscriptionId' in billing) || billing.stripeSubscriptionId === undefined || typeof billing.stripeSubscriptionId === 'string')
         && (!('subscriptionStatus' in billing) || billing.subscriptionStatus === undefined || typeof billing.subscriptionStatus === 'string')
-        && (!('billingInterval' in billing) || billing.billingInterval === undefined || billing.billingInterval === 'month' || billing.billingInterval === 'year')
         && 'plan' in billing
         && isKnownBillingPlan(billing.plan)
-        && 'locations' in billing
-        && isLocationCount(billing.locations)
-        && 'businessUsage' in billing && typeof billing.businessUsage === 'object' && billing.businessUsage !== null
-        && 'locations' in billing.businessUsage && Number.isSafeInteger(billing.businessUsage.locations)
     },
   })
-  return {
-    id: response.billing.stripeSubscriptionId,
-    status: response.billing.subscriptionStatus,
-    plan: response.billing.plan,
-    annual: response.billing.billingInterval === 'year',
-    locations: response.billing.locations,
-    businessLocations: response.billing.businessUsage.locations,
-  }
-}
-
-export function isLocationCount(value: unknown): value is { used: number; covered: number } {
-  return typeof value === 'object' && value !== null
-    && 'used' in value && Number.isSafeInteger(value.used)
-    && 'covered' in value && Number.isSafeInteger(value.covered)
+  return { id: response.billing.stripeSubscriptionId, status: response.billing.subscriptionStatus, plan: response.billing.plan }
 }
 
 export const useOrganizationSubscription = () => {
   const dashboard = useDashboardOrganization()
   const dashboardApi = useDashboardApi()
-  const route = useRoute()
   const { trackSubscriptionUpgrade, trackSubscriptionDowngrade } = useAnalytics()
   const { startSubscriptionCheckout } = useSubscriptionCheckout()
 
   // Stripe's hosted portal: card, invoices, receipts, cancelling. The plugin
   // exposes nothing else for those, so nothing here draws them.
+  function organizationSlug() {
+    const slug = dashboard.organization.value?.slug
+    if (!slug) throw new Error('Organization context is unavailable')
+    return slug
+  }
+
   async function openBillingPortal() {
     const organizationId = dashboard.organization.value?.id
     if (!organizationId) throw new Error('Organization context is unavailable')
@@ -96,21 +76,16 @@ export const useOrganizationSubscription = () => {
       await openBillingPortal()
       return
     }
-    // Business bills locations and rental units on two items, which Stripe's
-    // portal cannot confirm: an existing subscription moves to it on the
-    // Business leaf, from Stripe's invoice preview.
-    if (plan === BUSINESS_PLAN_ID && subscription.id) {
-      await navigateTo(`/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/payments/business`)
-      return
-    }
     const currentPlan = subscription.plan
+    // Better Auth swaps the plan price and adds or removes the plans' metered
+    // items in one change; what they bill is charged at the end of the period.
     await startSubscriptionCheckout({
       organizationId,
       plan,
       currentPlan,
       subscriptionId: subscription.id,
-      // Business bills only the locations that are not only homes; its rental units are set at Checkout from the homes themselves.
-      locations: plan === BUSINESS_PLAN_ID ? Math.max(1, subscription.businessLocations) : Math.max(subscription.locations.used, subscription.locations.covered),
+      // The leaf that started the change may no longer apply once it is made, so the owner returns to the plan.
+      returnPath: `/dashboard/${encodeURIComponent(organizationSlug())}/billing`,
       onAction: action => {
         if (action === 'upgrade') trackSubscriptionUpgrade(plan, organizationId)
         if (action === 'downgrade' && plan !== 'free') trackSubscriptionDowngrade(plan, organizationId)
@@ -118,35 +93,5 @@ export const useOrganizationSubscription = () => {
     })
   }
 
-  // The subscription's quantity is the locations it covers. Better Auth's
-  // upgrade on the same plan sends it to Stripe's confirmation page, which shows
-  // what changes on the bill before anything does.
-  async function setPlanLocations(organizationId: string, locations: number) {
-    const subscription = await organizationSubscriptionId(dashboardApi, organizationId)
-    if (!subscription.id) throw new Error('Choose a plan before adding locations to it')
-    if (subscription.plan === BUSINESS_PLAN_ID) throw new Error('Business locations change on the Business plan leaf')
-    if (subscription.status === 'past_due') {
-      await openBillingPortal()
-      return
-    }
-    const { returnUrl } = checkoutReturnUrls()
-    const response = await authClient.subscription.upgrade({
-      plan: subscription.plan,
-      annual: subscription.annual,
-      seats: locations,
-      referenceId: organizationId,
-      subscriptionId: subscription.id,
-      customerType: 'organization',
-      returnUrl,
-      successUrl: returnUrl,
-      cancelUrl: returnUrl,
-      disableRedirect: true,
-    })
-    if (response.error) throw new Error(response.error.message ?? 'Your plan’s locations could not be changed')
-    const confirmUrl = response.data && 'url' in response.data ? response.data.url : null
-    if (!confirmUrl) throw new Error('Missing Stripe confirmation URL')
-    await navigateTo(confirmUrl, { external: true })
-  }
-
-  return { startOrganizationCheckout, setPlanLocations, openBillingPortal }
+  return { startOrganizationCheckout, openBillingPortal }
 }

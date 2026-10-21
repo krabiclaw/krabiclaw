@@ -26,9 +26,9 @@ export type NewSalePlanId = typeof NEW_SALE_PAID_PLAN_IDS[number]
 export type KnownRecurringPlanId = typeof KNOWN_RECURRING_PLAN_IDS[number]
 export type BillingPlanId = StarterPlanId | KnownRecurringPlanId
 
-/** Fixed USD recurring offers. An absent annual amount authorizes no annual offer. */
-export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number; annual?: number }>> = Object.freeze({
-  [GROWTH_PLAN_ID]: Object.freeze({ monthly: 4900, annual: 58800 }),
+/** Fixed USD monthly offers: each plan is one flat price at quantity 1. */
+export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number }>> = Object.freeze({
+  [GROWTH_PLAN_ID]: Object.freeze({ monthly: 4900 }),
   [BUSINESS_PLAN_ID]: Object.freeze({ monthly: 14900 }),
 })
 
@@ -37,20 +37,108 @@ export const SERVICE_PRICES = Object.freeze({
   strategy: Object.freeze({ monthly: 200000 }),
 })
 
-/** Managed ads' share of the connected account's spend: the flat `payments_ad_spend` rate on the Payments rate card. */
+/** Locations every plan's price includes. */
+export const INCLUDED_LOCATIONS = 2
+
+/** USD cents for each location beyond the included ones, per month. */
+export const ADDITIONAL_LOCATION_PRICE = 4900
+
+/** Business's Payments fee: a share of the payment volume it captures. */
+export const PAYMENTS_FEE_RATE = 0.014
+
+/** Managed ads' share of the connected Google Ads account's spend. */
 export const AD_SPEND_RATE = 0.1
+
+/** A rate as the percent Stripe writes it: 0.014 → "1.4". */
+export function ratePercent(rate: number): string {
+  return String(Math.round(rate * 1e6) / 1e4)
+}
+
+/** Stripe's phrasing for the per-unit charge after an included allowance: "$49 per additional location per month". */
+export function additionalLocationPrice(): string {
+  return `$${ADDITIONAL_LOCATION_PRICE / 100} per additional location per month`
+}
+
+/** The fee as the pricing page and the plan screen state it. */
+export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volume, plus Stripe fees`
+
+/** What Business adds to Growth, each with its one line: what an upgrade gains and a change to Growth ends. */
+export const BUSINESS_ADDITIONS = Object.freeze([
+  { id: 'payments', label: 'Online payments and direct stay booking', summary: PAYMENTS_FEE },
+  { id: 'google-ads', label: 'Google Ads campaigns', summary: 'Create, clone and budget search campaigns; results in Insights' },
+  { id: 'ios', label: 'The iOS app', summary: 'For your whole team' },
+  { id: 'messaging', label: 'Guest messaging and arrival guides', summary: 'Scheduled check-in and checkout messages' },
+] as const)
+
+/**
+ * What a plan subscription bills beside its flat price, each a Stripe meter
+ * and the monthly metered price that bills it at the end of the period:
+ *
+ * - locations report the active locations (`last`), billed in graduated
+ *   tiers after the included ones;
+ * - captured volume, Stripe cost and ad spend report USD cents as they occur
+ *   (`sum`), billed at a flat rate per cent.
+ *
+ * `plans` names the plans whose subscription carries the price.
+ */
+export const BILLING_METERS = Object.freeze({
+  locations: Object.freeze({
+    name: 'Additional location',
+    eventName: 'krabiclaw_locations',
+    formula: 'last',
+    unitLabel: 'location',
+    plans: [GROWTH_PLAN_ID, BUSINESS_PLAN_ID],
+    tiers: [{ up_to: INCLUDED_LOCATIONS, unit_amount: 0 }, { up_to: 'inf', unit_amount: ADDITIONAL_LOCATION_PRICE }],
+    description: `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}.`,
+  }),
+  captured_volume: Object.freeze({
+    name: 'Payments fee',
+    eventName: 'krabiclaw_captured_volume',
+    formula: 'sum',
+    unitLabel: 'cent',
+    plans: [BUSINESS_PLAN_ID],
+    unitAmountDecimal: String(PAYMENTS_FEE_RATE),
+    description: `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volume.`,
+  }),
+  stripe_cost: Object.freeze({
+    name: 'Stripe fees',
+    eventName: 'krabiclaw_stripe_cost',
+    formula: 'sum',
+    unitLabel: 'cent',
+    plans: [BUSINESS_PLAN_ID],
+    unitAmountDecimal: '1',
+    description: 'Stripe fees on your payments, at cost.',
+  }),
+  ad_spend: Object.freeze({
+    name: 'Managed ads',
+    eventName: 'krabiclaw_ad_spend',
+    formula: 'sum',
+    unitLabel: 'cent',
+    plans: [BUSINESS_PLAN_ID],
+    unitAmountDecimal: String(AD_SPEND_RATE),
+    description: `${ratePercent(AD_SPEND_RATE)}% of monthly ad spend for campaigns we manage.`,
+  }),
+} as const)
+
+export type BillingMeterKey = keyof typeof BILLING_METERS
+export const BILLING_METER_KEYS = Object.freeze(Object.keys(BILLING_METERS) as BillingMeterKey[])
+
+/** The metered prices a plan's subscription carries, in catalog order. */
+export function planMeters(planId: string): BillingMeterKey[] {
+  return BILLING_METER_KEYS.filter(key => (BILLING_METERS[key].plans as readonly string[]).includes(planId))
+}
 
 /**
  * The services as they are offered everywhere — the pricing page and its
  * Markdown, the plan screen, Insights and Today — each turned on and off only
- * in Payments → Plan → Services.
+ * in Plan and billing.
  */
 export const SERVICES = Object.freeze({
   managed_ads: Object.freeze({
     name: 'Managed ads',
     description: 'Chris hand-manages the campaigns in your connected Google Ads account — budgets, creative direction and conversion rate — and meets with you weekly.',
-    price: `${AD_SPEND_RATE * 100}% of monthly ad spend`,
-    billing: 'Billed with your KrabiClaw usage fees. Connecting Google Ads and reading its results in Insights is free.',
+    price: `${ratePercent(AD_SPEND_RATE)}% of monthly ad spend`,
+    billing: 'Billed at the end of each month on your Business subscription. Connecting Google Ads and reading its results in Insights is free.',
   }),
   strategy: Object.freeze({
     name: 'SEO and marketing strategy',
@@ -59,80 +147,6 @@ export const SERVICES = Object.freeze({
     billing: 'Added to your plan subscription and billed monthly by Stripe, prorated from the day you agree.',
   }),
 })
-
-/** Locations every plan's price includes. */
-export const INCLUDED_LOCATIONS = 2
-
-/** USD cents for each location beyond the included ones, per billing interval. */
-export const ADDITIONAL_LOCATION_PRICES = Object.freeze({ monthly: 4900, annual: 58800 })
-
-/** Stripe's phrasing for the per-unit charge after an included allowance: "$49 per additional location per month". */
-export function additionalLocationPrice(interval: 'month' | 'year' = 'month'): string {
-  const cents = interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly
-  return `$${cents / 100} per additional location per ${interval}`
-}
-
-/**
- * A paid plan's Stripe price is graduated: its subscription quantity is the
- * number of locations it covers, the first tier is the plan amount for the
- * included locations, and each further unit is one additional location.
- */
-export function planPriceTiers(amount: number, interval: 'month' | 'year'): Array<{ up_to: number | 'inf'; flat_amount?: number; unit_amount?: number }> {
-  // Each tier sets only the charge it makes, so the invoice reads "Growth" and
-  // "1 location × Growth" with no $0.00 lines beside them.
-  return [
-    { up_to: INCLUDED_LOCATIONS, flat_amount: amount },
-    { up_to: 'inf', unit_amount: interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly },
-  ]
-}
-
-/**
- * Locations an organization may have: the included ones on Basic, and on a
- * paid plan the quantity its subscription is billed for. Quantities below the
- * included count are charged the same flat tier, so they cover it too.
- */
-export function coveredLocations(plan: string, quantity: number | null | undefined): number {
-  if (!isKnownRecurringPlan(plan)) return INCLUDED_LOCATIONS
-  if (!Number.isSafeInteger(quantity) || (quantity as number) < 1) throw new Error(`Subscription location quantity ${String(quantity)} is invalid`)
-  return Math.max(INCLUDED_LOCATIONS, quantity as number)
-}
-
-/**
- * Rental units the current Business offer includes. A rental unit is one
- * independently bookable home; on that offer, a location that holds only homes
- * is billed by its units and not as a location.
- */
-export const INCLUDED_RENTAL_UNITS = 2
-
-/** USD cents for each rental unit beyond the included ones, per month. Business has no annual offer. */
-export const ADDITIONAL_RENTAL_UNIT_PRICE = 1900
-
-/** Stripe's phrasing for the per-unit charge after the included allowance: "$19 per additional rental unit per month". */
-export function additionalRentalUnitPrice(): string {
-  return `$${ADDITIONAL_RENTAL_UNIT_PRICE / 100} per additional rental unit per month`
-}
-
-/**
- * The rental units a Business subscription on the current offer covers: the
- * included ones plus the quantity of its additional-unit item, which it has
- * only when it pays for more.
- */
-export function coveredRentalUnits(additional: number | null | undefined): number {
-  const quantity = additional ?? 0
-  if (!Number.isSafeInteger(quantity) || quantity < 0) throw new Error(`Subscription rental unit quantity ${String(additional)} is invalid`)
-  return INCLUDED_RENTAL_UNITS + quantity
-}
-
-/**
- * The current Business offer's monthly subscription amount in USD cents for
- * the locations and rental units it covers, before taxes and Payments fees:
- * 149 + 49 × max(0, locations − 2) + 19 × max(0, units − 2) dollars.
- */
-export function businessMonthlyAmount(locations: number, rentalUnits: number): number {
-  return PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly
-    + ADDITIONAL_LOCATION_PRICES.monthly * Math.max(0, locations - INCLUDED_LOCATIONS)
-    + ADDITIONAL_RENTAL_UNIT_PRICE * Math.max(0, rentalUnits - INCLUDED_RENTAL_UNITS)
-}
 
 /**
  * A serializable view for consumers that need to render or test the policy

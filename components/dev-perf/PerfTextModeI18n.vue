@@ -6,7 +6,7 @@
       <code>$t()</code> lookup, to isolate the cost of engaging the i18n
       runtime/locale message resolution during SSR.
     </p>
-    <p>{{ t('saya.header.menu') }} (locale: {{ locale }})</p>
+    <p>{{ t('site.header.menu') }} (locale: {{ locale }})</p>
   </section>
 </template>
 
