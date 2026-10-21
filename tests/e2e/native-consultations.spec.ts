@@ -323,7 +323,7 @@ test('native online review uses canonical Products, holds capacity, and releases
       await expect(image).toHaveAttribute('alt', gallery[index].alt_text ?? '')
       await expect(image).toBeInViewport()
       await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0), { timeout: 30_000 }).toBe(true)
-      if (index < gallery.length - 1) await lightbox.getByRole('button', { name: 'Next media', exact: true }).click()
+      if (index < gallery.length - 1) await lightbox.getByRole('button', { name: 'Next photo or video', exact: true }).click()
     }
     await lightbox.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
     const placement = await page.locator('#consultations, [data-tenant-page]').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top))
