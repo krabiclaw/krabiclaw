@@ -9,7 +9,7 @@ import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { buildDeleteOwnerPlacementsQuery, readMediaPlacements } from '~/server/utils/media-asset-manager'
-import { readStayPhotoRooms } from '~/server/utils/media-placement'
+import { isStayBedAllocationConflict, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
@@ -1607,6 +1607,7 @@ async function planProductUpdate(db: DbClient, input: {
       // A narrow edit still restates the Product it read, including its details.
       expectedUpdatedAt: current.updated_at,
     }),
+    ...(planned.kind === 'stay' && patch.stay && Object.hasOwn(patch.stay, 'beds') ? [stayBedAllocationGuardQuery(organizationId, productId)] : []),
     ...(guardPublication ? [{
       query: `UPDATE products SET updated_at=CASE WHEN NOT EXISTS (SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1) ${readiness?.allocation ? `OR (${readiness.allocation.query})` : ''} THEN updated_at ELSE NULL END WHERE organization_id=? AND id=?`,
       params: [organizationId, productId, ...(readiness?.allocation?.params ?? []), organizationId, productId],
@@ -1769,6 +1770,7 @@ export async function updateProduct(db: DbClient, input: {
   // it was, and the merchant is told why rather than reading a constraint name.
   await executeBatch(db, writes, { operation: 'Update product' }).catch(async (error: unknown) => {
     if (isUniqueDedupeConflict(error) && await replay()) return
+    if (isStayBedAllocationConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'The listing bed total must cover its assigned room beds. Reduce the room quantities before reducing or clearing the total.', data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'stay.beds', product_id: input.productId }, cause: error })
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
       if (await replay()) return
       throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', product_id: input.productId }, cause: error })
@@ -2326,6 +2328,7 @@ export async function reconcileProducts(db: DbClient, input: {
   writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
   try { await executeBatch(db, writes, { operation: 'Reconcile products' }) } catch (error) {
+    if (isStayBedAllocationConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Every listing bed total must cover its assigned room beds. Reduce room quantities before reducing or clearing a total.', data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'stay.beds' }, cause: error })
     const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
     if (stale || isUniqueDedupeConflict(error)) {
       const concurrent = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
@@ -2410,6 +2413,7 @@ export async function updateMenu(db: DbClient, input: {
     organizationEventQuery({ organizationId, locationId, actorId: actor.actorId, eventType: 'product.updated', entityType: 'menu', entityId: locationId, dedupeKey, metadata: { request_hash: requestHash, product_count: ids.length, section_count: sections.length } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This menu exceeds one atomic update; submit its sections in separate updates')
   try { await executeBatch(db, writes, { operation: 'Update public menu' }) } catch (error) {
+    if (isStayBedAllocationConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'The listing bed total must cover its assigned room beds.', data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'stay.beds' }, cause: error })
     const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
     if (stale || isUniqueDedupeConflict(error)) {
       const completed = await readCreationRecord(db, dedupeKey)

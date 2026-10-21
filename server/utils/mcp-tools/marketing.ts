@@ -1,7 +1,7 @@
 import type { McpToolDefinition } from './shared'
 import { organizationTool } from './shared'
 import type { McpExecutorContext } from './execution'
-import { NOT_HANDLED, optionalString, requiredString } from './execution'
+import { NOT_HANDLED, optionalString, requiredBoolean, requiredString } from './execution'
 import { resolveGoogleAdsCredentials } from './google-ads'
 import {
   cloneGoogleAdsCampaign,
@@ -89,8 +89,12 @@ export const MARKETING_TOOLS: McpToolDefinition[] = [
             enum: ['ENABLED', 'PAUSED'],
             description: 'Initial campaign status (defaults to PAUSED).',
           },
+          contains_eu_political_advertising: {
+            type: 'boolean',
+            description: 'Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.',
+          },
         },
-        required: ['mode'],
+        required: ['mode', 'contains_eu_political_advertising'],
       },
       social_post: {
         type: 'object',
@@ -199,6 +203,7 @@ export async function handleMarketingTools(ctx: McpExecutorContext): Promise<unk
       const mode = String(googleAdsInput.mode)
       const campaignName = (googleAdsInput.new_campaign_name as string) || `${campaignTitle} - Search`
       const status = (googleAdsInput.status as 'ENABLED' | 'PAUSED') ?? 'PAUSED'
+      const containsEuPoliticalAdvertising = requiredBoolean(googleAdsInput, 'contains_eu_political_advertising')
 
       if (mode === 'clone') {
         const sourceCampaignId = String(googleAdsInput.source_campaign_id)
@@ -211,6 +216,7 @@ export async function handleMarketingTools(ctx: McpExecutorContext): Promise<unk
           headlineReplacements: googleAdsInput.headline_replacements as Record<string, string> | undefined,
           additionalKeywords: googleAdsInput.additional_keywords as string[] | undefined,
           status,
+          containsEuPoliticalAdvertising,
         })
         adsResult = {
           status: res.status,
@@ -242,6 +248,7 @@ export async function handleMarketingTools(ctx: McpExecutorContext): Promise<unk
           headlines,
           descriptions,
           status,
+          containsEuPoliticalAdvertising,
         })
         adsResult = {
           status: res.status,

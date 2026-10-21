@@ -277,6 +277,7 @@ export interface ProductEditor {
   photoAssets: ComputedRef<Product['gallery']>
   photoRooms: ComputedRef<StayPhotoRoom[]>
   createStayPhotoRoom: (type: StayPhotoRoomType) => Promise<StayPhotoRoom | null>
+  updateStayPhotoRoom: (roomId: string, patch: Pick<StayPhotoRoom, 'details_version'> & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom'>>) => Promise<boolean>
   deleteStayPhotoRoom: (roomId: string) => Promise<boolean>
   moveStayPhotos: (photos: Array<{ photo_id: string; expected_room_id: string | null }>, target: { room_id: string | null } | { new_room_type: StayPhotoRoomType }) => Promise<boolean>
   addStayPhoto: (assetId: string, roomId?: string) => Promise<boolean>
@@ -1835,6 +1836,13 @@ async function deleteStayPhotoRoom(roomId: string) {
   return await changeStayPhotos(async () => await dashboardApi(`${stayRoomsUrl()}/${encodeURIComponent(roomId)}`, { method: 'DELETE', validate: isStayPhotoMutation }))
 }
 
+async function updateStayPhotoRoom(roomId: string, patch: Pick<StayPhotoRoom, 'details_version'> & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom'>>) {
+  const { details_version, ...details } = patch
+  return await changeStayPhotos(async () => await dashboardApi(`${stayRoomsUrl()}/${encodeURIComponent(roomId)}`, {
+    method: 'PATCH', body: { expected_details_version: details_version, ...details }, validate: isStayPhotoMutation,
+  }))
+}
+
 async function moveStayPhotos(photos: Array<{ photo_id: string; expected_room_id: string | null }>, target: { room_id: string | null } | { new_room_type: StayPhotoRoomType }) {
   return await changeStayPhotos(async () => await dashboardApi(`${stayPhotoUrl()}/move`, { method: 'PUT', body: { ...target, photos }, validate: isStayPhotoMutation }))
 }
@@ -1945,6 +1953,7 @@ provide(productEditorKey, {
   photoAssets,
   photoRooms,
   createStayPhotoRoom,
+  updateStayPhotoRoom,
   deleteStayPhotoRoom,
   moveStayPhotos,
   addStayPhoto,

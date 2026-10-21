@@ -574,6 +574,14 @@ export function requiredString(source: Record<string, unknown>, key: string) {
   return value.trim();
 }
 
+export function requiredBoolean(source: Record<string, unknown>, key: string) {
+  const value = source[key];
+  if (typeof value !== "boolean") {
+    throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`);
+  }
+  return value;
+}
+
 export function optionalString(source: Record<string, unknown>, key: string) {
   const value = source[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
