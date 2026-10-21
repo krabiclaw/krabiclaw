@@ -61,7 +61,11 @@ export const STAY_PRESENTATION: ProductPresentation = {
 export function catalogNavigation(vertical: string | null | undefined, sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
   const order: ProductSurface[] = ['menu', 'products', 'stays', 'experiences']
   return order.filter(surface => sections?.[surface] === true)
-    .map(surface => ({ surface, path: presentationForSurface(vertical, surface).collectionPath, labelKey: `site.footer.${surface}` }))
+    .map((surface) => {
+      // Named by where it is listed: a legal practice's services are Services, not Products.
+      const path = presentationForSurface(vertical, surface).collectionPath
+      return { surface, path, labelKey: `site.footer.${path.slice(1)}` }
+    })
 }
 
 /** Where a location's items on one surface are listed. Homes have no branch index; they are listed site-wide. */
