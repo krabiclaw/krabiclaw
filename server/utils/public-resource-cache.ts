@@ -9,7 +9,7 @@ import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 // params instead of host + pathname — public resources are looked up by organizationId
 // directly, not by tenant hostname, so no hostname resolution is needed here.
 //
-// Cache key: public~<organizationId>~v14~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
+// Cache key: public~<organizationId>~v15~<revision>~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
 // each field percent-encoded (mirrors composables/usePublicPageRequest.ts's
 // usePublicResourceKey() — cached entries are never preview/draft-authorized,
 // see the preview authorization guard in the shell and page services).
@@ -183,33 +183,19 @@ export interface PublicResourceCacheParams {
 const encodeKeyField = (value: string | null | undefined): string =>
   encodeURIComponent(value ?? '').replace(/~/g, '%7E')
 
-export function buildPublicBlawbyDocumentCacheKey(
-  organizationId: string,
-  recipe: string,
-  slug?: string | null,
-  locale?: string,
-): string {
-  return [
-    'public',
-    encodeKeyField(organizationId),
-    'v14',
-    'blawby-document',
-    encodeKeyField(recipe),
-    encodeKeyField(slug),
-    encodeKeyField(locale),
-  ].join('~')
-}
 
 /** The site's accepted payment methods, under the site's prefix so its purge clears them. */
 export function buildPublicPaymentMethodsCacheKey(organizationId: string): string {
-  return ['public', encodeKeyField(organizationId), 'v14', 'payment-methods'].join('~')
+  return ['public', encodeKeyField(organizationId), 'v15', 'payment-methods'].join('~')
 }
 
-export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams): string {
+export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams, revision: string | null): string {
   return [
     'public',
     encodeKeyField(organizationId),
-    'v14',
+    // v15: public products carry authored room photo tours.
+    'v15',
+    encodeKeyField(revision),
     params.contract,
     encodeKeyField(params.page),
     encodeKeyField(params.location),

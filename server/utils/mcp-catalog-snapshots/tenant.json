@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:aa8ead20cb7f92864eab059bcc5d45c149f27672272bba259794b37169374d4b",
-  "documentationFingerprint": "sha256:c9f68793052b7a0b9b31da037ea67629c7a90fa855438cd0b81cdfef051154c2",
+  "fingerprint": "sha256:de40f7663803e33c657a65b7d259ad97735c6a4fe4155bdb1f281ac8d019b064",
+  "documentationFingerprint": "sha256:5fda6f709a7cbec2002702f22596707ad1e642cf381232020719d6cd689d8c7b",
   "tools": [
     {
       "name": "add_organization_language",
@@ -1144,7 +1144,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -2995,7 +2994,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -6933,7 +6931,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -11384,7 +11381,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -12693,7 +12689,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -16894,6 +16889,7 @@
             "type": "string"
           },
           "phone": {
+            "description": "International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "special_hours": {
@@ -18325,7 +18321,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -22542,7 +22537,7 @@
                 ]
               },
               "title": {
-                "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+                "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
                 "type": "string"
               }
             },
@@ -24715,7 +24710,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "Optional guest phone in international format.",
+            "description": "Optional. International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "idempotency_key": {
@@ -25191,7 +25186,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -28736,7 +28730,7 @@
             ]
           },
           "title": {
-            "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -28849,7 +28843,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -32484,7 +32477,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "International phone number with calling code.",
+            "description": "International number with its country calling code, e.g. +66812345678.",
             "type": [
               "string",
               "null"
@@ -32980,7 +32973,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "International phone number with calling code.",
+            "description": "International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "idempotency_key": {
@@ -33584,7 +33577,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -38364,7 +38356,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -46502,13 +46493,23 @@
                 ]
               },
               "button_casing": {
+                "description": "Button text casing: uppercase or none (natural case). Absent when the site uses the Default.",
                 "enum": [
                   "uppercase",
                   "none"
                 ],
                 "type": "string"
               },
+              "button_color": {
+                "description": "Button fill: action (the palette's action color) or accent (the palette's accent color). Absent when the site uses the Default.",
+                "enum": [
+                  "action",
+                  "accent"
+                ],
+                "type": "string"
+              },
               "button_shape": {
+                "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners). Absent when the site uses the Default.",
                 "enum": [
                   "pill",
                   "rounded",
@@ -46566,7 +46567,8 @@
                   "montserrat",
                   "lora",
                   "playfair-display",
-                  "cormorant-garamond"
+                  "cormorant-garamond",
+                  "marcellus"
                 ],
                 "type": "string"
               },
@@ -46577,6 +46579,7 @@
                 ]
               },
               "heading_casing": {
+                "description": "Display heading casing: uppercase or none (natural case). Absent when the site uses the Default.",
                 "enum": [
                   "uppercase",
                   "none"
@@ -46632,7 +46635,7 @@
                 "type": "string"
               },
               "palette": {
-                "description": "The colors the site renders, light and dark: its own, or its template's. Null on the platform template.",
+                "description": "The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw's own site.",
                 "properties": {
                   "dark": {
                     "additionalProperties": false,
@@ -46703,7 +46706,7 @@
               "palette_source": {
                 "enum": [
                   "custom",
-                  "template",
+                  "default",
                   null
                 ],
                 "type": [
@@ -51040,7 +51043,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -55315,7 +55317,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -60739,6 +60740,7 @@
                 "type": "string"
               },
               "phone": {
+                "description": "International number with its country calling code, e.g. +66812345678.",
                 "type": "string"
               },
               "postal_code": {
@@ -67823,7 +67825,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -72031,7 +72032,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -76123,7 +76123,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -84296,7 +84295,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -87993,7 +87991,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -88337,7 +88334,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -90139,7 +90135,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -95170,7 +95165,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -95503,7 +95497,6 @@
                             "enum": [
                               "media",
                               "gallery",
-                              "background",
                               "featured",
                               "decoration",
                               "parallax_sky",
@@ -95744,6 +95737,7 @@
                 "type": "string"
               },
               "phone": {
+                "description": "International number with its country calling code, e.g. +66812345678.",
                 "type": "string"
               },
               "postal_code": {
@@ -95867,6 +95861,7 @@
                 "type": "string"
               },
               "phone": {
+                "description": "International number with its country calling code, e.g. +66812345678.",
                 "type": "string"
               },
               "postal_code": {
@@ -96668,6 +96663,7 @@
                     "enum": [
                       "logo",
                       "logo_dark",
+                      "favicon",
                       "social_share",
                       "announcement"
                     ],
@@ -96802,7 +96798,6 @@
                       {
                         "enum": [
                           "media",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -97207,7 +97202,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -103055,7 +103049,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -104377,7 +104370,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -108535,7 +108527,7 @@
             "type": "string"
           },
           "phone": {
-            "description": "Public phone number shown to guests on the website and in booking/reservation confirmation emails.",
+            "description": "Public phone number shown to guests on the website and in booking/reservation confirmation emails. International number with its country calling code, e.g. +66812345678.",
             "type": "string"
           },
           "short_description": {
@@ -111801,6 +111793,14 @@
             ],
             "type": "string"
           },
+          "button_color": {
+            "description": "Button fill: action (the palette's action color) or accent (the palette's accent color).",
+            "enum": [
+              "action",
+              "accent"
+            ],
+            "type": "string"
+          },
           "button_shape": {
             "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners).",
             "enum": [
@@ -111844,7 +111844,7 @@
             "type": "string"
           },
           "font_preset": {
-            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
+            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter), marcellus (Marcellus with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
             "enum": [
               "default",
               "mali",
@@ -111858,7 +111858,8 @@
               "montserrat",
               "lora",
               "playfair-display",
-              "cormorant-garamond"
+              "cormorant-garamond",
+              "marcellus"
             ],
             "type": "string"
           },
@@ -111879,7 +111880,7 @@
           },
           "palette": {
             "additionalProperties": false,
-            "description": "Saya and Blawby website colors, each with a light and a dark value. Roles: ground (The page background.) surface (Cards, the header and footer, dialogs and fields.) text (Body copy and headings.) muted (Captions, details and supporting copy.) action (Buttons, links and selected states.) accent (Emphasis, decoration and highlighted buttons.) Start from a starter (coastal, forest, terracotta, ink, blossom, saffron, slate, midnight) and/or name only the roles to change; colors are #RRGGBB or a plain description such as \"forest green\". Borders and tints are derived. null returns to the template's colors. The result reports any text or button pair below WCAG AA contrast.",
+            "description": "Website colors, each with a light and a dark value. Roles: ground (The page background.) surface (Cards, the header and footer, dialogs and fields.) text (Body copy and headings.) muted (Captions, details and supporting copy.) action (Buttons, links and selected states.) accent (Emphasis, decoration and highlighted buttons.) Start from a starter (coastal, forest, terracotta, ink, blossom, saffron, slate, midnight) and/or name only the roles to change; colors are #RRGGBB or a plain description such as \"forest green\". Borders and tints are derived. null returns to the default colors. The result reports any text or button pair below WCAG AA contrast.",
             "properties": {
               "dark": {
                 "additionalProperties": false,
@@ -116356,7 +116357,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -119906,7 +119906,7 @@
             ]
           },
           "title": {
-            "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -120021,7 +120021,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -123661,7 +123660,7 @@
             "type": "string"
           },
           "guest_phone": {
-            "description": "International phone number with calling code.",
+            "description": "International number with its country calling code, e.g. +66812345678.",
             "type": [
               "string",
               "null"
@@ -125155,7 +125154,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:7c81688d2db6aa3a987c1c4d24db052d505fff7e2258d6c7f080b68a9be5fecf",
+        "create_product": "sha256:8e496bb4137b6dec40f2d48706d0f78177a6fa021bda67bc429eadd8a3dd40b8",
         "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
@@ -125210,14 +125209,14 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:7c81688d2db6aa3a987c1c4d24db052d505fff7e2258d6c7f080b68a9be5fecf",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
+        "create_product": "sha256:8e496bb4137b6dec40f2d48706d0f78177a6fa021bda67bc429eadd8a3dd40b8",
         "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871"
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b"
       }
     },
     {
@@ -125253,15 +125252,15 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and get_organization_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
-        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
+        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -125273,14 +125272,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0"
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f"
       }
     },
     {
@@ -125292,20 +125291,20 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:7c81688d2db6aa3a987c1c4d24db052d505fff7e2258d6c7f080b68a9be5fecf",
+        "create_product": "sha256:8e496bb4137b6dec40f2d48706d0f78177a6fa021bda67bc429eadd8a3dd40b8",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
-        "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
+        "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
-        "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
+        "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
         "update_menu": "sha256:e9cf2b6b003db772a0d034aa10b867089cab71b86b833e3234fef4760de92d12",
-        "update_organization_settings": "sha256:b5488027b9a151e5759c0cf78e9010b60ff1d07ba783525d50e30cc233f2ef94",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -125339,15 +125338,15 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, get_organization_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_product": "sha256:9d38dbb14c16921d5290e044c091e1f7467f2ae29e402ecfc8741772e9945d52",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -125376,9 +125375,9 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:1aa095e046466e5231a1c6e06a28af5b90c19ad5afe3d229cc14e2560cf15d6c",
+      "contentHash": "sha256:6b1c5205427d0e9f78516a5fa1f2af3a556033059a0801405c3cc9fc076fe2af",
       "toolContracts": {
-        "create_location": "sha256:4429629ed87d336328d275ab17d4cb36caae241d3cc1ede22985d0a11979f23f",
+        "create_location": "sha256:76191e793ce66aae9289cf1e505b47bd44a04320d4b29660f173959391e9c5b0",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
@@ -125388,7 +125387,7 @@
         "list_stays": "sha256:5b9e594406177ab852bc7e715f13167cc4f72a0b1a2f5a7e78de728aa95188ea",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
+        "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
@@ -125414,7 +125413,7 @@
       "toolContracts": {
         "cancel_product_booking": "sha256:09fbbd2f3d89627aa78eb5b60d27b5e949edc7b8304b610422045cf5a89671a1",
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
-        "create_product_booking": "sha256:8aa4d7188344f54de6be6fa3574f5d3736a8d9dc6f9736c9831d927aec10e36d",
+        "create_product_booking": "sha256:a05bb23c5fca92ad866321dd97cab8364ef398b0c4c46240d8457965c7727494",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_member_scheduling": "sha256:fe4a81a1b928b2e8ea93577b47cbbdb67be60a83586b5d57dec9524322bbd6fd",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
@@ -125433,13 +125432,13 @@
       "slug": "add-photos-and-video",
       "contentHash": "sha256:12d4c163d18a26ef149addaaf3ee345df1a5db52168d3c611513a27dfcbded2c",
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "delete_media_asset": "sha256:7cd7618939616504dc9e0ec08771cc009b09671c40b69c23485dfb172b18ec2e",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
-        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
+        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
+        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_media_asset": "sha256:25902033f7e73a819b6c9660c6a2e70b4ab3dfb972a49b594f1c3a34d8a1a8f7"
       }
     },
@@ -125447,12 +125446,12 @@
       "slug": "publish-a-post",
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
-        "create_blog_post": "sha256:eadc0eba432b4e9844c9c8ed23327aafee2fdfc4b3c306b36c9d235a4a109cfe",
+        "create_blog_post": "sha256:04ebcf9dff460dd7c58bee894fff23a76431073dc3e2deb1ac1be33be6d37150",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
-        "publish_blog_post": "sha256:8b9880534e39b242f4c5c498b6a3a8297ddf07080007e51ce633d3286db0c5c7",
+        "publish_blog_post": "sha256:844a8eb04331dba2c4b7e738b192222e3f68e0b3d24ca3555dd7c7b7a5c17440",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
         "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"
@@ -125463,7 +125462,7 @@
       "contentHash": "sha256:ef918a59f51075aabf427c0d67ecce375c65deb59579f716f759a2368dd3a988",
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
-        "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
+        "create_table_reservation": "sha256:9c27873124240d1f214c93c3e7ba73db383038fd555d7b93da570781ca2a4a18",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",

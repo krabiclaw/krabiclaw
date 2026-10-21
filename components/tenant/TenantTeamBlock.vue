@@ -1,5 +1,5 @@
 <template>
-  <section v-if="people.length" :class="isBlawby ? 'bg-[var(--blawby-accent-200)] pb-16' : 'pb-16'" data-parity-section="team">
+  <section v-if="people.length" class="pb-16" data-parity-section="team">
     <div class="tenant-container">
       <ul class="space-y-12 divide-y divide-default" role="list">
         <li v-for="person in people" :key="`${person.first_name}-${person.last_name}`" class="flex flex-col gap-10 pt-12 sm:flex-row items-center">
@@ -10,9 +10,6 @@
             <div v-if="person.bio" class="mt-4 text-base leading-7 text-default">
               <div class="flex items-start gap-3">{{ person.bio }}</div>
             </div>
-            <TenantButton v-if="person.url" :to="person.url" class="mt-6">
-              Request a Consultation
-            </TenantButton>
           </div>
         </li>
       </ul>
@@ -26,8 +23,6 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockTextOrNull, blockRecords } from '~/utils/tenant-page-block-data'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const { organization } = useTenantOrganization()
-const isBlawby = computed(() => organization.template?.slug === 'blawby' || organization.vertical === 'service')
 
 function itemMedia(index: number) {
   return props.block.media.filter(asset => asset.slot === `items.${index}.image`)
@@ -38,7 +33,6 @@ const people = computed(() => blockRecords(props.block.data.items).map((item, in
   last_name: blockText(item.last_name),
   title: blockTextOrNull(item.title),
   bio: blockTextOrNull(item.bio),
-  url: blockTextOrNull(item.url),
   media: itemMedia(index),
 })).filter(person => person.first_name || person.last_name))
 </script>

@@ -8,10 +8,12 @@ import {
   AsYouType,
   getCountries,
   getCountryCallingCode,
+  getExampleNumber,
   parsePhoneNumberFromString,
   validatePhoneNumberLength,
   type CountryCode,
 } from 'libphonenumber-js/min'
+import mobileExamples from 'libphonenumber-js/mobile/examples'
 
 export type { CountryCode }
 
@@ -56,13 +58,18 @@ export function getPhoneCountry(code: string | null | undefined): PhoneCountry |
   return listPhoneCountries().find(country => country.code === code) ?? null
 }
 
+/** A mobile number of `country` in its national format, e.g. "081 234 5678", for a field's placeholder. */
+export function examplePhone(country: CountryCode): string | null {
+  return getExampleNumber(country, mobileExamples)?.formatNational() ?? null
+}
+
 /**
  * Format partial national input as the owner types it, e.g. "0812345678" with
  * country TH becomes "081 234 5678". Trunk prefixes ("0" in TH/GB/AU) and a
  * leading "+" (international input) are both understood, so the result always
  * round-trips through `parsePhone(result, { defaultCountry })`.
  */
-export function formatPhoneAsTyped(input: string, country: CountryCode): string {
+export function formatPhoneAsTyped(input: string, country?: CountryCode): string {
   return new AsYouType(country).input(input)
 }
 
@@ -130,9 +137,20 @@ export function parsePhone(input: string, opts?: { defaultCountry?: CountryCode 
   }
 }
 
-/** True when `input` parses to a valid E.164 phone number. */
-export function isValidE164(input: string): boolean {
-  return parsePhone(input).valid
+/**
+ * The one rule for a stored phone number: international input with its calling
+ * code that names a real number, as E.164; anything else is `null` and the
+ * caller refuses it. A national number has no country of its own here — the
+ * entry field (components/PhoneInput.vue) is what resolves one.
+ */
+export function toE164(input: string): string | null {
+  const result = parsePhone(input)
+  return result.valid ? result.e164 : null
+}
+
+/** A stored number as people read it, e.g. "+66 81 234 5678"; text that is not one is shown as it was stored. */
+export function formatPhone(value: string): string {
+  return parsePhoneNumberFromString(value)?.formatInternational() ?? value
 }
 
 /**

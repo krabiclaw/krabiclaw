@@ -1,16 +1,26 @@
 import type { LayoutKey } from 'nuxt/app'
-export type PublicTemplateSlug = 'saya' | 'blawby' | 'platform'
+
+/**
+ * Which renderer a site runs: KrabiClaw's own marketing site, or a customer
+ * site. Every customer site — restaurant, experience, lodging or legal
+ * practice — draws the same blocks with the same components; its look is its
+ * own settings (palette, fonts, site recipe), and its vertical decides only
+ * which built-in routes it has.
+ */
+export type PublicTemplateSlug = 'tenant' | 'platform'
+
+/** KrabiClaw's own site is the one organization on this theme id. Every other id is a customer site. */
+export const PLATFORM_THEME_ID = 'krabiclaw-theme-v1'
+/** The theme id provisioning gives a customer site. */
+export const TENANT_THEME_ID = 'tenant-theme-v1'
 
 export interface PublicTemplateDefinition {
   slug: PublicTemplateSlug
   themeId: string
   layout: LayoutKey
-  verticals: string[]
   serviceRoutes: {
     offeringsIndex: string | null
     offeringDetailPrefix: string | null
-    articleIndex: string | null
-    articleDetailPrefix: string
   }
   sitemap: {
     exactPaths: string[]
@@ -18,22 +28,18 @@ export interface PublicTemplateDefinition {
   }
   nonIndexableExactPaths: string[]
   /**
-   * Where this template renders a tenant page document.
+   * Where this site renders a tenant page document.
    *
    * One declaration, read by the renderer that loads the document and by the
-   * writer that decides whether a page may exist there. They used to be six
-   * separate lists and they disagreed: /services was reserved against routes
-   * deleted two commits earlier, /order and /reservations were reserved against
-   * routes that do read a document, and /blog differs per template.
+   * writer that decides whether a page may exist there.
    *
-   * `recipes` names the pages a template guarantees: the lookup a route loader
+   * `recipes` names the pages a site guarantees: the lookup a route loader
    * performs, and the set whose deletion the writer refuses. `paths` are the
    * documents a route still binds by path alone — only needed where a route
    * file claims the path, because a claimed path is one the catch-all cannot
    * reach. `prefixes` are subtrees served as documents. `catchAll` says whether
-   * pages/[...tenantPath].vue renders unclaimed paths for this template; every
-   * template sets it, KrabiClaw's own included, because KrabiClaw is a site row
-   * like any other (#903).
+   * pages/[...tenantPath].vue renders unclaimed paths; every site sets it,
+   * KrabiClaw's own included, because KrabiClaw is a site row like any other (#903).
    */
   pageDocuments: {
     recipes: Record<string, string> & { home: string }
@@ -46,168 +52,151 @@ export interface PublicTemplateDefinition {
   }
 }
 
-export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDefinition> = {
-  saya: {
-    slug: 'saya',
-    themeId: 'saya-theme-v1',
-    layout: 'tenant',
-    verticals: ['restaurant', 'experience', 'lodging'],
-    serviceRoutes: {
-      offeringsIndex: null,
-      offeringDetailPrefix: null,
-      articleIndex: '/blog',
-      articleDetailPrefix: '/blog',
-    },
-    sitemap: {
-      exactPaths: ['/', '/menu', '/products', '/experiences', '/stays', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
-      dynamicPrefixes: ['/blog/', '/docs/', '/experiences/', '/stays/', '/locations/', '/posts/'],
-    },
-    nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed', '/reservations/cancel', '/reservations/confirmed'],
-    // Saya reads a document on the routes that request the 'content' dataset.
-    // Location overview routes render their location data with an optional
-    // authored page overlay. Catalog and other location routes own their data.
-    pageDocuments: {
-      recipes: { home: '/', about: '/about', contact: '/contact', reservations: '/reservations' },
-      optionalLocalizedPaths: ['/contact', '/reservations'],
-      paths: [],
-      patterns: ['/locations/:slug()'],
-      prefixes: [],
-      catchAll: true,
-    },
+type TenantRoutes = Omit<PublicTemplateDefinition, 'slug' | 'themeId' | 'layout'>
+
+/** A legal practice's built-in routes: practice areas, consultations, fees, giving and its notices. */
+const LEGAL_PRACTICE_ROUTES: TenantRoutes = {
+  serviceRoutes: {
+    offeringsIndex: '/services',
+    offeringDetailPrefix: '/services',
   },
-  blawby: {
-    slug: 'blawby',
-    themeId: 'blawby-theme-v1',
-    layout: 'tenant',
-    verticals: ['service'],
-    serviceRoutes: {
-      offeringsIndex: '/services',
-      offeringDetailPrefix: '/services',
-      articleIndex: '/blog',
-      articleDetailPrefix: '/blog',
-    },
-    sitemap: {
-      exactPaths: ['/', '/about', '/services', '/experiences', '/pricing', '/donate', '/schedule', '/contact', '/blog', '/docs', '/posts', '/third-party-notices'],
-      dynamicPrefixes: ['/services/', '/experiences/', '/blog/', '/docs/', '/posts/'],
-    },
-    nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed'],
-    // The Blawby route loader looks a recipe up here. 'links', 'confirmation',
-    // 'article' and 'page' are absent because they hold no document of their
-    // own: the first two render from shell data, an article is a blog post, and
-    // 'page' names its own path through the catch-all.
-    pageDocuments: {
-      recipes: {
-        home: '/', services: '/services', about: '/about', pricing: '/pricing', contact: '/contact',
-        schedule: '/schedule', blog: '/blog', donate: '/donate',
-        privacy: '/policies/privacy', terms: '/policies/terms',
-        'third-party-notices': '/third-party-notices',
-      },
-      optionalLocalizedPaths: [],
-      paths: [],
-      prefixes: ['/services/'],
-      catchAll: true,
-    },
+  sitemap: {
+    exactPaths: ['/', '/about', '/services', '/experiences', '/pricing', '/donate', '/schedule', '/contact', '/blog', '/docs', '/posts', '/third-party-notices'],
+    dynamicPrefixes: ['/services/', '/experiences/', '/blog/', '/docs/', '/posts/'],
   },
-  // KrabiClaw's own site: the marketing pages, documentation and blog. It is an
-  // ordinary site row rendered by the platform layout; the platform host resolves
-  // to whichever site owns the apex domain (see server/middleware/tenant-resolution.ts).
-  platform: {
-    slug: 'platform',
-    themeId: 'krabiclaw-theme-v1',
-    layout: 'platform',
-    verticals: ['service'],
-    serviceRoutes: {
-      offeringsIndex: null,
-      offeringDetailPrefix: null,
-      articleIndex: '/blog',
-      articleDetailPrefix: '/blog',
+  nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed'],
+  // 'links', 'confirmation', 'article' and 'page' are absent because they hold
+  // no document of their own: the first two render from shell data, an article
+  // is a blog post, and 'page' names its own path through the catch-all.
+  pageDocuments: {
+    recipes: {
+      home: '/', services: '/services', about: '/about', pricing: '/pricing', contact: '/contact',
+      schedule: '/schedule', blog: '/blog', donate: '/donate',
+      privacy: '/policies/privacy', terms: '/policies/terms',
+      'third-party-notices': '/third-party-notices',
     },
-    sitemap: {
-      // The editorial marketing routes are not listed here: they are published
-      // page documents now, and the platform sitemap reads them from
-      // content_documents (see server/plugins/sitemap.ts). What remains is the
-      // set of code-owned platform routes that hold no document.
-      exactPaths: ['/blog', '/docs', '/help', '/posts', '/signup', '/templates', '/templates/blawby', '/templates/saya'],
-      dynamicPrefixes: ['/blog/', '/docs/', '/posts/'],
-    },
-    nonIndexableExactPaths: ['/login', '/forgot-password', '/reset-password', '/accept-invitation'],
-    // KrabiClaw's own marketing pages are ordinary page documents on the
-    // platform site, read by the same loader every customer site uses (#903).
-    // The routes that are not editorial — /blog, /docs, /help, /templates —
-    // are absent on purpose: they render their own data, and a document stored
-    // at one of them would never be shown.
-    pageDocuments: {
-      recipes: { home: '/', about: '/about', pricing: '/pricing' },
-      optionalLocalizedPaths: [],
-      // Only a path a route file still claims needs naming here. /experiences is
-      // the Saya catalog's route on a customer host and KrabiClaw's own page on
-      // this one. Everything else KrabiClaw publishes is an unclaimed path the
-      // catch-all serves, the same as any tenant's.
-      paths: ['/experiences', '/products'],
-      prefixes: [],
-      catchAll: true,
-    },
+    optionalLocalizedPaths: [],
+    paths: [],
+    prefixes: ['/services/'],
+    catchAll: true,
   },
 }
 
-export const PLATFORM_TEMPLATE = publicTemplateRegistry.platform
+/** A restaurant's, experience's or place to stay's built-in routes: menu, catalog, stays, locations and reservations. */
+const VENUE_ROUTES: TenantRoutes = {
+  serviceRoutes: {
+    offeringsIndex: null,
+    offeringDetailPrefix: null,
+  },
+  sitemap: {
+    exactPaths: ['/', '/menu', '/products', '/experiences', '/stays', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
+    dynamicPrefixes: ['/blog/', '/docs/', '/experiences/', '/stays/', '/locations/', '/posts/'],
+  },
+  nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed', '/reservations/cancel', '/reservations/confirmed'],
+  // A venue reads a document on the routes that request the 'content' dataset.
+  // Location overview routes render their location data with an optional
+  // authored page overlay. Catalog and other location routes own their data.
+  pageDocuments: {
+    recipes: { home: '/', about: '/about', contact: '/contact', reservations: '/reservations' },
+    optionalLocalizedPaths: ['/contact', '/reservations'],
+    paths: [],
+    patterns: ['/locations/:slug()'],
+    prefixes: [],
+    catchAll: true,
+  },
+}
 
-export function isPlatformTemplate(input: { themeId?: string | null; vertical?: string | null }): boolean {
-  return resolvePublicTemplate(input).slug === 'platform'
+/** Is this a legal practice? The `service` vertical is canonically legal services. */
+export function isLegalPractice(vertical: string | null | undefined): boolean {
+  return String(vertical ?? '').trim().toLowerCase() === 'service'
+}
+
+/**
+ * Is this site a legal practice's? A security gate as well as a rendering
+ * decision — the consultation, compliance and consent paths read it — so it
+ * names KrabiClaw's own site out explicitly: that site is also `service`.
+ */
+export function isLegalPracticeSite(input: { themeId?: string | null; vertical?: string | null }): boolean {
+  return String(input.themeId ?? '').trim().toLowerCase() !== PLATFORM_THEME_ID && isLegalPractice(input.vertical)
+}
+
+function tenantTemplate(vertical: string): PublicTemplateDefinition {
+  return { slug: 'tenant', themeId: TENANT_THEME_ID, layout: 'tenant', ...(isLegalPractice(vertical) ? LEGAL_PRACTICE_ROUTES : VENUE_ROUTES) }
+}
+
+// KrabiClaw's own site: the marketing pages, documentation and blog. It is an
+// ordinary site row rendered by the platform layout; the platform host resolves
+// to whichever site owns the apex domain (see server/middleware/tenant-resolution.ts).
+export const PLATFORM_TEMPLATE: PublicTemplateDefinition = {
+  slug: 'platform',
+  themeId: PLATFORM_THEME_ID,
+  layout: 'platform',
+  serviceRoutes: {
+    offeringsIndex: null,
+    offeringDetailPrefix: null,
+  },
+  sitemap: {
+    // The editorial marketing routes are not listed here: they are published
+    // page documents now, and the platform sitemap reads them from
+    // content_documents (see server/plugins/sitemap.ts). What remains is the
+    // set of code-owned platform routes that hold no document.
+    exactPaths: ['/blog', '/docs', '/help', '/posts', '/signup', '/templates', '/templates/blawby', '/templates/saya'],
+    dynamicPrefixes: ['/blog/', '/docs/', '/posts/'],
+  },
+  nonIndexableExactPaths: ['/login', '/forgot-password', '/reset-password', '/accept-invitation'],
+  // KrabiClaw's own marketing pages are ordinary page documents on the
+  // platform site, read by the same loader every customer site uses (#903).
+  // The routes that are not editorial — /blog, /docs, /help, /templates —
+  // are absent on purpose: they render their own data, and a document stored
+  // at one of them would never be shown.
+  pageDocuments: {
+    recipes: { home: '/', about: '/about', pricing: '/pricing' },
+    optionalLocalizedPaths: [],
+    // Only a path a route file still claims needs naming here. /experiences is
+    // the catalog's route on a customer host and KrabiClaw's own page on
+    // this one. Everything else KrabiClaw publishes is an unclaimed path the
+    // catch-all serves, the same as any tenant's.
+    paths: ['/experiences', '/products'],
+    prefixes: [],
+    catchAll: true,
+  },
+}
+
+/** Every route table a site can have: KrabiClaw's, a legal practice's and a venue's. */
+export const PUBLIC_TEMPLATES: readonly PublicTemplateDefinition[] = [PLATFORM_TEMPLATE, tenantTemplate('service'), tenantTemplate('restaurant')]
+
+/** Is this KrabiClaw's own site? Its theme id alone says. */
+export function isPlatformTemplate(input: { themeId?: string | null }): boolean {
+  return String(input.themeId ?? '').trim().toLowerCase() === PLATFORM_THEME_ID
 }
 
 export const TENANT_NON_INDEXABLE_EXACT_PATHS = new Set(
-  Object.values(publicTemplateRegistry).filter(template => template.slug !== 'platform').flatMap(template => template.nonIndexableExactPaths),
+  PUBLIC_TEMPLATES.filter(template => template.slug !== 'platform').flatMap(template => template.nonIndexableExactPaths),
 )
 
+/**
+ * The renderer and routes for a site. KrabiClaw's own site is selected only by
+ * its theme id; any other site is a customer site, and needs its vertical.
+ */
 export function resolvePublicTemplate(input: {
   themeId?: string | null
   vertical?: string | null
 }): PublicTemplateDefinition {
   const themeId = String(input.themeId ?? '').trim().toLowerCase()
+  if (themeId === PLATFORM_THEME_ID) return PLATFORM_TEMPLATE
   const vertical = String(input.vertical ?? '').trim().toLowerCase()
-
-  if (!themeId && !vertical) {
-    throw new Error('resolvePublicTemplate() requires a themeId or vertical selector.')
-  }
-
-  // KrabiClaw's own template is only ever selected by its theme id; a vertical
-  // alone always names a customer template.
-  const definitions = Object.values(publicTemplateRegistry).filter(definition => themeId || definition.slug !== 'platform')
-  const match = definitions.find((definition) =>
-    (!themeId || definition.themeId.toLowerCase() === themeId) &&
-    (!vertical || definition.verticals.includes(vertical)),
-  )
-
-  if (!match) {
-    throw new Error(`resolvePublicTemplate() found no compatible template for themeId="${themeId}" vertical="${vertical}".`)
-  }
-  return match
-}
-
-// The public Blawby API routes are a security gate, not just a rendering-path
-// decision, so they require both a supported vertical and the exact theme id.
-export function organizationSupportsBlawbyTemplate(input: {
-  vertical?: string | null
-  themeId?: string | null
-}): boolean {
-  const vertical = String(input.vertical ?? '').toLowerCase()
-  const themeId = String(input.themeId ?? '').toLowerCase()
-  return publicTemplateRegistry.blawby.verticals.includes(vertical) && themeId === publicTemplateRegistry.blawby.themeId
+  if (!vertical) throw new Error('resolvePublicTemplate() requires the vertical of a customer site.')
+  return tenantTemplate(vertical)
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // Public marketing metadata — /templates index + /templates/[slug]
 // ─────────────────────────────────────────────────────────────────────────
 //
-// Kept separate from publicTemplateRegistry above: that record is
-// routing/rendering dispatch for *tenant* sites (which layout, which content
-// model, which sitemap paths a live site running this template gets).
-// publicTemplateMarketing is copy/positioning for the *platform marketing*
-// pages that sell the template itself — a different audience (prospective
-// customers browsing krabiclaw.com/templates) reading a different shape of
-// data, but keyed by the same canonical slug so there is exactly one
-// template identity to keep in sync.
+// Saya and Blawby are the names KrabiClaw sells its two starting recipes
+// under at krabiclaw.com/templates — a restaurant or experience site, and a
+// law firm site. They are marketing names only: a customer site built from
+// either renders with the same components as every other.
 
 export interface TemplateMarketingFeature {
   label: string
@@ -215,7 +204,8 @@ export interface TemplateMarketingFeature {
 }
 
 export type TemplateMarketingStatus = 'available' | 'coming_soon'
-export type MarketedTemplateSlug = Exclude<PublicTemplateSlug, 'platform'>
+/** The website recipes KrabiClaw markets at /templates: one for venues, one for law firms. */
+export type MarketedTemplateSlug = 'saya' | 'blawby'
 
 export interface TemplateMarketingMetadata {
   slug: MarketedTemplateSlug

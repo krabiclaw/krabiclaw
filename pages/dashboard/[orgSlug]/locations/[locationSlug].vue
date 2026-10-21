@@ -28,7 +28,7 @@
           Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Business include {{ INCLUDED_LOCATIONS }},
           then {{ additionalLocationPrice() }}.
         </p>
-        <UButton label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" />
+        <UButton label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/billing/upgrade`" />
       </div>
       <template v-else>
         <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />
@@ -50,6 +50,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { resolveCmsCapabilities, type ProductFeature } from '~/config/cms-registry'
 import { resolvePublicTemplate } from '~/utils/template-registry'
@@ -203,7 +204,7 @@ const cards = computed<HubCard[]>(() => {
   if (!resource) return []
   const loc = resource.location.location
   const counts = resource.counts
-  const contact = [loc.phone, loc.email].filter((value): value is string => Boolean(value?.trim())).join(' · ')
+  const contact = [loc.phone && formatPhone(loc.phone), loc.email].filter((value): value is string => Boolean(value?.trim())).join(' · ')
   const policy = resource.reservationConfig
   return [
     { id: 'photos', title: 'Photos', description: countSummary(counts.photos, 'photo', 'Add photos'), to: `${locationPath.value}/photos`, image: locationImage.value || undefined, visible: hasFeature('photos') },

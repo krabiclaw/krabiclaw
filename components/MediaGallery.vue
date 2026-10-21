@@ -122,7 +122,7 @@
           @click="openAllPhotos"
         >
           <TenantIcon name="squares-2x2" class="size-3.5" />
-          {{ t('saya.photos.show_all', { count: items.length }) }}
+          {{ t('site.photos.show_all', { count: items.length }) }}
         </button>
       </div>
 
@@ -185,13 +185,13 @@
           @click="openAllPhotos"
         >
           <TenantIcon name="squares-2x2" class="size-3.5" />
-          {{ t('saya.photos.show_all', { count: items.length }) }}
+          {{ t('site.photos.show_all', { count: items.length }) }}
         </button>
       </div>
     </div>
 
     <button v-if="items.length === 1 && photoGroups.length" type="button" class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm" @click="openAllPhotos">
-      <TenantIcon name="squares-2x2" class="size-3.5" />{{ t('saya.photos.show_all', { count: items.length }) }}
+      <TenantIcon name="squares-2x2" class="size-3.5" />{{ t('site.photos.show_all', { count: items.length }) }}
     </button>
     <MediaLightbox v-model:open="lightboxOpen" v-model:index="lightboxIndex" v-model:overview="lightboxOverview" :items="items" :title="title" :photo-groups="photoGroups">
       <template v-if="$slots.caption" #caption="slotProps">

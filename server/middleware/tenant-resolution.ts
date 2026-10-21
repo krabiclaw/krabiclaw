@@ -1,3 +1,4 @@
+import { PUBLIC_CACHE_REVISION_SQL, publicCacheRevision } from '~/server/utils/edge-cache'
 // Tenant resolution middleware: every host, KrabiClaw's own included, resolves
 // to an organization. The organization's template decides whether it renders as
 // the platform (marketing, docs, blog) or as a customer site.
@@ -18,12 +19,14 @@ import { previewSecretOf, resolvePreviewAuthorization } from "../utils/preview-t
 import { PLATFORM_TEMPLATE, resolvePublicTemplate } from "~/utils/template-registry";
 import { organizationSocialMediaFromJson } from '~/server/utils/public-social-image'
 import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
-import { isPaletteTemplate, parseSitePalette, resolveSitePalette } from '~/shared/site-palette'
+import { parseSitePalette, resolveSitePalette } from '~/shared/site-palette'
+import { parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation, type SiteLogo } from '~/shared/media-placement-contract'
 import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
 
 interface TenantRow {
   id: string;
+  public_cache_revision: string | null;
   theme_id: string | null;
   subdomain: string;
   status: string;
@@ -42,6 +45,7 @@ interface TenantRow {
   palette: string | null;
   button_shape: string | null;
   button_casing: string | null;
+  button_color: string | null;
   heading_casing: string | null;
 }
 
@@ -56,7 +60,8 @@ const TENANT_MEDIA_SELECT_SQL = `(SELECT COALESCE(json_group_array(json_object(
   ORDER BY mp.slot, mp.sort_order, mp.id
 ) ordered)`
 
-const TENANT_SELECT_SQL = `SELECT o.id, o.theme_id, o.subdomain, o.status, o.onboarding_status,
+const TENANT_SELECT_SQL = `SELECT o.id,
+             ${PUBLIC_CACHE_REVISION_SQL} AS public_cache_revision, o.theme_id, o.subdomain, o.status, o.onboarding_status,
              o.name, o.brand_description, ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.vertical,
              (SELECT i.target_id FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'facebook') AS facebook_page_id,
              (SELECT i.target_name FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'instagram') AS instagram_username,
@@ -67,6 +72,7 @@ const TENANT_SELECT_SQL = `SELECT o.id, o.theme_id, o.subdomain, o.status, o.onb
              o.settings_json ->> '$.config.palette' AS palette,
              o.settings_json ->> '$.config.button_shape' AS button_shape,
              o.settings_json ->> '$.config.button_casing' AS button_casing,
+             o.settings_json ->> '$.config.button_color' AS button_color,
              o.settings_json ->> '$.config.heading_casing' AS heading_casing`
 
 // KrabiClaw's own tenant is the one active organization running the platform
@@ -206,16 +212,10 @@ function setResolvedTenantContext(
   const isPlatform = templateSlug === 'platform'
   const logos = siteLogos(tenant.media_json)
   const fontPreset = resolveOrganizationFontPreset(tenant.font_preset_type === null ? undefined : tenant.font_preset)
-  const palette = isPaletteTemplate(templateSlug)
-    ? resolveSitePalette(templateSlug, tenant.palette === null ? undefined : parseSitePalette(JSON.parse(tenant.palette)))
+  const palette = !isPlatform
+    ? resolveSitePalette(tenant.palette === null ? undefined : parseSitePalette(JSON.parse(tenant.palette)))
     : null
-  const recipe = (tenant.button_shape || tenant.button_casing || tenant.heading_casing)
-    ? {
-        ...(tenant.button_shape === 'pill' || tenant.button_shape === 'rounded' || tenant.button_shape === 'sharp' ? { buttonShape: tenant.button_shape } : {}),
-        ...(tenant.button_casing === 'uppercase' || tenant.button_casing === 'none' ? { buttonCasing: tenant.button_casing } : {}),
-        ...(tenant.heading_casing === 'uppercase' || tenant.heading_casing === 'none' ? { headingCasing: tenant.heading_casing } : {}),
-      }
-    : undefined
+  const recipe = parseSiteRecipe(tenant)
 
   event.context.organizationId = tenant.id
   event.context.themeId = metadata.themeId
@@ -300,6 +300,7 @@ export default defineHandler(async (event) => {
 
   if (tenant && await authorizeTenant(event, tenant)) {
     try {
+      await publicCacheRevision(event, env.db!, tenant.id, tenant.public_cache_revision)
       setResolvedTenantContext(event, tenant, host, requestedSlug !== null ? hostnameOf(host) : tenant.canonical_domain)
     } catch (error) {
       if (HTTPError.isError(error)) throw error

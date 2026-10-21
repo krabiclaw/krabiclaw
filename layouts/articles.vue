@@ -43,7 +43,7 @@ const { organization } = useTenantOrganization()
 const { template } = organization
 const nav = await useArticleNav()
 provide(articleNavKey, nav)
-const searchLabel = computed(() => t('saya.search.dialog_title', { surface: nav.value.indexLabel }))
+const searchLabel = computed(() => t('site.search.dialog_title', { surface: nav.value.indexLabel }))
 
 // The sidebar shows exactly where the template's header stops collapsing:
 // KrabiClaw's header at `nav` (1080px), the tenant templates' at `lg`.

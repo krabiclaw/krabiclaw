@@ -46,7 +46,7 @@ async function listPublishedTenantSitemapPages(db: DbClient, organizationId: str
  * each category page that lists at least one of them. KrabiClaw's site and
  * every customer's read the same queries.
  */
-async function listSitemapArticleEntries(db: DbClient, organizationId: string, template: Parameters<typeof tenantBlogPostPath>[0]): Promise<SitemapEntry[]> {
+async function listSitemapArticleEntries(db: DbClient, organizationId: string): Promise<SitemapEntry[]> {
   const articles = await queryAll<{ slug: string | null; collection: string | null; updated_at: string | null }>(db, `
     SELECT slug, (metadata_json ->> '$.collection') AS collection, updated_at
       FROM content_documents
@@ -57,7 +57,7 @@ async function listSitemapArticleEntries(db: DbClient, organizationId: string, t
     if (!article.slug) continue
     if (!isArticleCollection(article.collection)) throw new Error(`Article ${article.slug} has no valid collection`)
     entries.push({ loc: ARTICLE_COLLECTIONS[article.collection].pathPrefix })
-    entries.push({ loc: tenantBlogPostPath(template, article.slug, article.collection), lastmod: article.updated_at ?? undefined })
+    entries.push({ loc: tenantBlogPostPath(article.slug, article.collection), lastmod: article.updated_at ?? undefined })
   }
   const categories = await queryAll<{ slug: string; collection: string; lastmod: string | null }>(db, `
     SELECT c.slug, c.collection, MAX(root.updated_at) AS lastmod
@@ -128,7 +128,7 @@ export default definePlugin((nitroApp) => {
         entries.push({ loc: page.path, lastmod: page.lastmod ?? undefined })
       }
 
-      entries.push(...await listSitemapArticleEntries(db, platformOrganizationId, { themeId: event.context.themeId as string | null | undefined }))
+      entries.push(...await listSitemapArticleEntries(db, platformOrganizationId))
 
       entries.push(...await socialPostEntries(db, platformOrganizationId))
       ctx.urls.length = 0
@@ -270,7 +270,7 @@ export default definePlugin((nitroApp) => {
          ORDER BY pl.location_id, p.name, p.id`,
         [organizationId, publicProductIds],
       ),
-      listSitemapArticleEntries(db, organizationId, template),
+      listSitemapArticleEntries(db, organizationId),
       listPublishedTenantSitemapPages(db, organizationId),
       Promise.all(PUBLIC_CONTENT_SECTIONS.map(async section => [section, await queryAll<PublicContentSectionRow>(db, PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])] as const))
         .then(entries => new Map(entries)).then(rows => publicContentSectionRows(section => rows.get(section)!)),

@@ -1,3 +1,4 @@
+import { putPublicResourceCache } from '../../server/utils/public-resource-cache.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
@@ -39,7 +40,7 @@ test('a home orders, describes and removes its product photos, and refuses what 
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
-      VALUES (?, 'Org', 'org', 'org', '{}', 'saya-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
+      VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('source-en', ?, 'en', 1, 'published')").bind(ORG).run()
     for (const [id, role] of [['owner', 'owner'], ['helper', 'member']] as const) {
       await db.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)').bind(id, id, `${id}@proof.example`).run()
@@ -96,7 +97,7 @@ test('a home orders, describes and removes its product photos, and refuses what 
     assert.equal(cachedShell.status, 200, await cachedShell.clone().text())
     assert.equal(cachedShell.headers.get('x-bootstrap-cache'), 'HIT')
     assert.equal((await cachedShell.json() as { locations: Array<{ id: string; stay_map_sharing: string }> }).locations.find(location => location.id === locationId)?.stay_map_sharing, 'general')
-    const changedPrivacy = await call(owner, 'PATCH', `/${productId}`, { stay_map_sharing: 'specific' })
+    const changedPrivacy = await call(owner, 'PATCH', `/${productId}`, { stay_map_sharing: 'specific', latitude: 8.0326, longitude: 98.822 })
     assert.equal(changedPrivacy.status, 200, JSON.stringify(changedPrivacy.body))
     assert.equal(await db.prepare('SELECT stay_map_sharing FROM business_locations WHERE id = ? AND organization_id = ?').bind(locationId, ORG).first('stay_map_sharing'), 'specific')
     const changedShell = await shell()
@@ -106,10 +107,26 @@ test('a home orders, describes and removes its product photos, and refuses what 
     const recachedShell = await shell()
     assert.equal(recachedShell.status, 200, await recachedShell.clone().text())
     assert.equal(recachedShell.headers.get('x-bootstrap-cache'), 'HIT')
+    const staleBody = await recachedShell.clone().text()
     const publicLocation = (await recachedShell.json() as { locations: Array<{ id: string; stay_map_sharing: string; address: unknown }> }).locations.find(location => location.id === locationId)
     assert(publicLocation)
     assert.equal(publicLocation.stay_map_sharing, 'specific')
     assert.equal(publicLocation.address, null)
+
+    // A pre-commit read may finish its KV write after the purge. Its old
+    // generation must remain unreachable to a later public request.
+    const oldKeys = await env.ORGANIZATION_CACHE!.list({ prefix: `public~${ORG}~` })
+    assert.equal(oldKeys.keys.length, 1)
+    const hidden = await call(owner, 'PATCH', `/${productId}`, { stay_map_sharing: 'general' })
+    assert.equal(hidden.status, 200, JSON.stringify(hidden.body))
+    assert.equal(await db.prepare('SELECT stay_map_sharing FROM business_locations WHERE id = ?').bind(locationId).first('stay_map_sharing'), 'general')
+    await putPublicResourceCache(env.ORGANIZATION_CACHE!, oldKeys.keys[0]!.name, staleBody)
+    const fencedShell = await shell()
+    assert.equal(fencedShell.status, 200, await fencedShell.clone().text())
+    assert.equal(fencedShell.headers.get('x-bootstrap-cache'), 'MISS')
+    const fencedLocation = (await fencedShell.json() as { locations: Array<{ id: string; stay_map_sharing: string; address: unknown; latitude: number | null; longitude: number | null; public_area: { center: unknown } }> }).locations.find(location => location.id === locationId)
+    assert(fencedLocation)
+    assert.deepEqual([fencedLocation.stay_map_sharing, fencedLocation.address, fencedLocation.latitude, fencedLocation.longitude, fencedLocation.public_area.center], ['general', null, null, null, { latitude: 8.03, longitude: 98.83 }])
 
     const now = '2026-10-15T00:00:00.000Z'
     for (const id of ['deck', 'kitchen', 'bedroom']) {

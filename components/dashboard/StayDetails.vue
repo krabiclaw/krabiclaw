@@ -35,7 +35,7 @@
       <section v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" class="mt-8">
         <h2 class="text-xl font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
         <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
-        <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('saya.experience_detail.open_in_maps')" />
+        <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('site.experience_detail.open_in_maps')" />
       </section>
 
       <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
@@ -105,6 +105,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import type { GuestStay, StayDetail, StayPaymentMethod } from '~/server/domain/stays'
@@ -194,7 +195,7 @@ const rows = computed(() => {
     { label: 'Total', value: money(value.total_minor) },
     ...(value.owner === 'app' ? [{ label: 'Paid', value: money(value.paid_minor) }] : []),
     ...(value.arrival_time ? [{ label: 'Arriving', value: value.arrival_time }] : []),
-    ...(value.guest_phone ? [{ label: 'Phone', value: value.guest_phone }] : []),
+    ...(value.guest_phone ? [{ label: 'Phone', value: formatPhone(value.guest_phone) }] : []),
     ...(value.guest_email ? [{ label: 'Email', value: value.guest_email }] : []),
     ...(value.channel_booking_id ? [{ label: `${channelName.value} confirmation`, value: value.channel_booking_id }] : []),
     ...(value.notes ? [{ label: 'Notes', value: value.notes }] : []),

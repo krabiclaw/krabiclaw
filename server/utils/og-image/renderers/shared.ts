@@ -23,7 +23,7 @@ export interface RenderInputs extends SocialCardRenderPayload {
 
 /**
  * Shared 1200×630 card layout used by every template renderer. Templates differ only in
- * palette/accent (see renderers/platform.ts, saya.ts, blawby.ts) — the structure itself
+ * accent (see renderers/platform.ts and tenant.ts) — the structure itself
  * (background photo + legibility overlay, label pill, title, description, brand footer)
  * is the one shape every generated OG image follows, matching ADR 0010's template-driven
  * (not per-page) rendering approach.

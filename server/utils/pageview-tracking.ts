@@ -9,7 +9,7 @@ import { parseSiteProductPath } from '~/utils/product-presentation'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { findPublishedProductAtRoute, getOrganizationVertical, parseProductRouteSegments, resolveLocalizedPublicRoute } from '~/server/utils/localization'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { publicTemplateRegistry, resolvePublicTemplate } from '~/utils/template-registry'
+import { PUBLIC_TEMPLATES, resolvePublicTemplate } from '~/utils/template-registry'
 import type { PublicTemplateDefinition } from '~/utils/template-registry'
 import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
@@ -185,9 +185,9 @@ export function isKnownTenantPublicPath(
   pathname: string,
   templateInput?: Parameters<typeof resolvePublicTemplate>[0],
 ): boolean {
-  const templates: PublicTemplateDefinition[] = templateInput
+  const templates: readonly PublicTemplateDefinition[] = templateInput
     ? [resolvePublicTemplate(templateInput)]
-    : Object.values(publicTemplateRegistry)
+    : PUBLIC_TEMPLATES
   return templates.some(template =>
     template.sitemap.exactPaths.includes(pathname)
     || template.nonIndexableExactPaths.includes(pathname)

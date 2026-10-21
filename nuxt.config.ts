@@ -110,7 +110,7 @@ export default defineNuxtConfig({
         },
       ],
       link: [
-        // Every Saya hero/content image is served from Cloudflare Images
+        // Every tenant hero/content image is served from Cloudflare Images
         // (imagedelivery.net) — a third-party origin the browser otherwise
         // doesn't discover until it parses the <img> tag deep in <body>,
         // paying DNS+TCP+TLS setup serially after that. Preconnecting lets

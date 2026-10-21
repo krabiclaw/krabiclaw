@@ -41,7 +41,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
-      VALUES (?, 'Org', 'org', 'org', '{}', 'saya-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
+      VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
     for (const [id, role] of [[OWNER, 'owner'], [CLEANER, 'member'], [OUTSIDER, 'member']] as const) {
       await db.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)').bind(id, id, `${id}@example.test`).run()
@@ -58,19 +58,19 @@ test('a stay opens its guest conversation in the one inbox', async () => {
 
     // A host stay with a guest email opens a thread the host opened, waiting on the guest.
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(6), adults: 2,
-      guest_name: 'Ana', guest_surname: 'Silva', guest_email: 'ana@example.test', guest_phone: '+15551230000', total_minor: 45_000 })
+      guest_name: 'Ana', guest_surname: 'Silva', guest_email: 'ana@example.test', guest_phone: '+61491570150', total_minor: 45_000 })
     assert.ok(ana.request_id)
     const anaThread = await thread(ana.request_id)
     assert.deepEqual({ ...anaThread, payload_json: JSON.parse(anaThread!.payload_json) }, {
       kind: 'stay', location_id: 'cabin-site', conversation_state: 'waiting_on_guest',
-      payload_json: { guest: { name: 'Ana Silva', email: 'ana@example.test', phone: '+15551230000' } },
+      payload_json: { guest: { name: 'Ana Silva', email: 'ana@example.test', phone: '+61491570150' } },
     })
     assert.deepEqual(await opening(ana.request_id), { actor_kind: 'member', actor_user_id: OWNER, channel: 'system' })
 
     // A guest reachable by phone alone has a thread too; until they join it through an invite a reply has nowhere to go and says so.
-    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Dee', guest_phone: '+15557770000', total_minor: 15_000 })
+    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 15_000 })
     assert.ok(dee.request_id)
-    assert.deepEqual(JSON.parse((await thread(dee.request_id))!.payload_json).guest, { name: 'Dee', email: null, phone: '+15557770000' })
+    assert.deepEqual(JSON.parse((await thread(dee.request_id))!.payload_json).guest, { name: 'Dee', email: null, phone: '+61491570151' })
     assert.deepEqual(await executeGuestThreadOperation(db, { threadId: dee.request_id, organizationId: ORG, action: 'reply', body: 'Hi', actorUserId: OWNER, idempotencyKey: 'dee-reply', env }),
       { ok: false, status: 409, reason: 'guest_invite_required', code: 'GUEST_INVITE_REQUIRED', field: 'request_id', message: 'This guest has no email on file. Invite them to the conversation first.' })
 
@@ -81,21 +81,21 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.ok(boWithEmail.request_id)
     assert.equal((await thread(boWithEmail.request_id))?.kind, 'stay')
     // A further edit does not open a second one, and the thread takes the stay's current guest.
-    const boAgain = await updateStay(db, env, manager, bo.id, { expected_version: boWithEmail.version, guest_surname: 'Lee', guest_phone: '+15559990000' })
+    const boAgain = await updateStay(db, env, manager, bo.id, { expected_version: boWithEmail.version, guest_surname: 'Lee', guest_phone: '+61491570153' })
     assert.equal(boAgain.request_id, boWithEmail.request_id)
-    assert.deepEqual(JSON.parse((await thread(boAgain.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: 'bo@example.test', phone: '+15559990000' })
+    assert.deepEqual(JSON.parse((await thread(boAgain.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: 'bo@example.test', phone: '+61491570153' })
     // Clearing one contact is reflected exactly; clearing the last is refused before either row changes.
     const boByEmail = await updateStay(db, env, manager, bo.id, { expected_version: boAgain.version, guest_phone: null })
     assert.deepEqual(JSON.parse((await thread(boByEmail.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: 'bo@example.test', phone: null })
-    const boByPhone = await updateStay(db, env, manager, bo.id, { expected_version: boByEmail.version, guest_email: null, guest_phone: '+15559990000' })
-    assert.deepEqual(JSON.parse((await thread(boByPhone.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: null, phone: '+15559990000' })
+    const boByPhone = await updateStay(db, env, manager, bo.id, { expected_version: boByEmail.version, guest_email: null, guest_phone: '+61491570153' })
+    assert.deepEqual(JSON.parse((await thread(boByPhone.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: null, phone: '+61491570153' })
     await assert.rejects(updateStay(db, env, manager, bo.id, { expected_version: boByPhone.version, guest_phone: null }), {
       status: 422, data: { code: 'STAY_THREAD_CONTACT_REQUIRED', fields: ['guest_email', 'guest_phone'] },
     })
     assert.deepEqual(await db.prepare('SELECT guest_email, guest_phone, request_id, version FROM stays WHERE id = ?').bind(bo.id).first(), {
-      guest_email: null, guest_phone: '+15559990000', request_id: boByPhone.request_id, version: boByPhone.version,
+      guest_email: null, guest_phone: '+61491570153', request_id: boByPhone.request_id, version: boByPhone.version,
     })
-    assert.deepEqual(JSON.parse((await thread(boByPhone.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: null, phone: '+15559990000' })
+    assert.deepEqual(JSON.parse((await thread(boByPhone.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: null, phone: '+61491570153' })
     // Two edits race on one version, one bringing an address and one not. Whichever is saved, the
     // thread follows the stay as saved: none when no address was saved, never the losing edit's.
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(14), check_out_date: day(16), adults: 1, guest_name: 'Cy', total_minor: 30_000 })
@@ -138,9 +138,9 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.equal((await getGuestThreadDetail(db, ana.request_id, ORG))?.mailbox, 'past')
 
     // A guest's WhatsApp number finds their stay's thread; a cancelled stay's thread is not found.
-    assert.deepEqual(await findSubmissionByPhone(db, '+15551230000'), { submissionType: 'stay', submissionId: ana.request_id, organizationId: ORG })
+    assert.deepEqual(await findSubmissionByPhone(db, '+61491570150'), { submissionType: 'stay', submissionId: ana.request_id, organizationId: ORG })
     await db.prepare("UPDATE stays SET status = 'cancelled', cancelled_at = '2026-10-15T00:00:00.000Z' WHERE id = ?").bind(ana.id).run()
-    assert.equal(await findSubmissionByPhone(db, '+15551230000'), undefined)
+    assert.equal(await findSubmissionByPhone(db, '+61491570150'), undefined)
 
   } finally {
     await runtime.dispose()
