@@ -35,7 +35,7 @@
       <section v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" class="mt-8">
         <h2 class="text-xl font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
         <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
-        <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('saya.experience_detail.open_in_maps')" />
+        <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('site.experience_detail.open_in_maps')" />
       </section>
 
       <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
