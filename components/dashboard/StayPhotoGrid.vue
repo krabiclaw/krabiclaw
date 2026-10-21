@@ -181,10 +181,10 @@ async function addExisting() {
 async function addRoomPhoto(asset: { asset_id: string } | null) {
   if (!asset || !room.value) return
   const roomId = room.value.id
-  if (p.photoAssets.value.some(photo => photo.asset_id === asset.asset_id) || await p.addStayPhoto(asset.asset_id)) {
+  if (p.photoAssets.value.some(photo => photo.asset_id === asset.asset_id)) {
     const owner = p.photoRooms.value.find(entry => entry.photo_ids.includes(asset.asset_id))
     if (await p.moveStayPhotos([{ photo_id: asset.asset_id, expected_room_id: owner?.id ?? null }], { room_id: roomId })) adding.value = false
-  }
+  } else if (await p.addStayPhoto(asset.asset_id, roomId)) adding.value = false
 }
 
 async function deleteRoom() {

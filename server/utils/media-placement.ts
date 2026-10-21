@@ -460,7 +460,11 @@ export async function arrangeProductPhotos(db: DbClient, input: {
   productId: string
   from: readonly string[]
   to: readonly string[]
+  roomAssignment?: { assetId: string; roomId: string }
 }): Promise<void> {
+  if (input.roomAssignment && !input.to.includes(input.roomAssignment.assetId)) {
+    throw new HTTPError({ statusCode: 422, statusMessage: 'A room photo must be in the saved Product photos' })
+  }
   const cover: MediaPlacementKey = { owner_type: 'product', owner_id: input.productId, slot: 'image' }
   const gallery: MediaPlacementKey = { ...cover, slot: 'gallery' }
   await authorizePlacementWrite(db, { ...input, placement: cover })
@@ -505,6 +509,10 @@ export async function arrangeProductPhotos(db: DbClient, input: {
       },
       ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: cover, media: media.slice(0, 1), now }),
       ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: gallery, media: media.slice(1), now }),
+      ...(input.roomAssignment ? [{
+        query: 'INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES (?, ?, ?, ?)',
+        params: [input.organizationId, input.productId, input.roomAssignment.assetId, input.roomAssignment.roomId],
+      }] : []),
       pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.productId),
       publicResourceCacheInvalidationQuery(input.organizationId, 'product-photos-arrange'),
     ], { operation: 'Arrange product photos' })
