@@ -7,6 +7,15 @@
  * described here maps one to one onto its Airbnb listing.
  */
 
+/** Public map precision for the homes at a location; neither mode shares their street address. */
+export const STAY_MAP_SHARING_MODES = ['general', 'specific'] as const
+export type StayMapSharing = typeof STAY_MAP_SHARING_MODES[number]
+
+export function parseStayMapSharing(value: unknown): StayMapSharing {
+  if (typeof value !== 'string' || !STAY_MAP_SHARING_MODES.includes(value as StayMapSharing)) throw new TypeError('stay_map_sharing must be general or specific')
+  return value as StayMapSharing
+}
+
 /** The privacy of the accommodation offered, independently of its building type. */
 export const STAY_LISTING_TYPES = {
   entire_place: { label: 'Entire place', description: 'Guests have the whole property to themselves.', schemaType: 'EntirePlace' },

@@ -23,6 +23,7 @@
       <UButton
         icon="i-lucide-x" :aria-label="`Close ${title}`"
         color="neutral" variant="ghost" size="sm" square
+        :disabled="saving || removing"
         data-testid="list-item-dismiss" :class="ui.close({ class: 'start-4 end-auto sm:start-6' })"
       />
     </template>

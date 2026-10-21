@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e74eced8aaa2d331c6b0884b7b7de2ee192e792ac0332e6f8649b870671b11db",
-  "documentationFingerprint": "sha256:ba6919f347e43fca4c7a4405299766c1833167702319745a81ec321f47cb4347",
+  "fingerprint": "sha256:de40f7663803e33c657a65b7d259ad97735c6a4fe4155bdb1f281ac8d019b064",
+  "documentationFingerprint": "sha256:5fda6f709a7cbec2002702f22596707ad1e642cf381232020719d6cd689d8c7b",
   "tools": [
     {
       "name": "add_organization_language",
@@ -104,6 +104,941 @@
         }
       ],
       "domain": "locales",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "add_stay_photo_room",
+      "title": "Add stay photo room",
+      "description": "Add an authored room or space to a home’s photo tour. Does not change bedrooms, beds, bathrooms or amenities. Returns the created room’s authoritative ID and the updated home.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "product_id": {
+            "description": "The place to stay: a product of kind stay, from list_products.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "enum": [
+              "art_studio",
+              "backyard",
+              "balcony",
+              "bedroom",
+              "bowling_alley",
+              "childrens_playroom",
+              "courtyard",
+              "darkroom",
+              "deck",
+              "dining_area",
+              "event_room",
+              "exterior",
+              "front_yard",
+              "full_bathroom",
+              "full_kitchen",
+              "game_room",
+              "garage",
+              "garden",
+              "gym",
+              "half_bathroom",
+              "hot_tub",
+              "kitchenette",
+              "laundry_area",
+              "library",
+              "living_room",
+              "movie_theater",
+              "music_studio",
+              "office",
+              "patio",
+              "photography_studio",
+              "pool",
+              "porch",
+              "rooftop",
+              "sunroom",
+              "terrace",
+              "theme_room",
+              "wine_cellar",
+              "woodshop",
+              "workshop",
+              "workspace"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "type"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "home": {
+            "properties": {
+              "address": {
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
+                "properties": {
+                  "address": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "ac",
+                    "dryer",
+                    "essentials",
+                    "heating",
+                    "hot_water",
+                    "kitchen",
+                    "tv",
+                    "washer",
+                    "wireless_internet",
+                    "bathtub",
+                    "bidet",
+                    "body_soap",
+                    "cleaning_products",
+                    "conditioner",
+                    "hair_dryer",
+                    "alfresco_shower",
+                    "shampoo",
+                    "shower_gel",
+                    "bed_linens",
+                    "wardrobe_or_closet",
+                    "clothes_drying_rack",
+                    "extra_pillows_and_blankets",
+                    "hangers",
+                    "iron",
+                    "mosquito_net",
+                    "room_darkening_shades",
+                    "safe",
+                    "arcade_machine",
+                    "batting_cage",
+                    "books",
+                    "bowling_alley",
+                    "climbing_wall",
+                    "ethernet_connection",
+                    "exercise_equipment",
+                    "game_console",
+                    "laser_tag",
+                    "life_size_games",
+                    "mini_golf",
+                    "home_theater",
+                    "piano",
+                    "ping_pong_table",
+                    "pool_table",
+                    "record_player",
+                    "skate_ramp",
+                    "sound_system",
+                    "theme_room",
+                    "baby_bath",
+                    "baby_monitor",
+                    "childrens_bike",
+                    "playroom",
+                    "stair_gates",
+                    "babysitter_recommendations",
+                    "board_games",
+                    "changing_table",
+                    "childrens_books_and_toys",
+                    "childrens_dinnerware",
+                    "crib",
+                    "fireplace_guards",
+                    "high_chair",
+                    "playground",
+                    "outlet_covers",
+                    "pack_n_play_travel_crib",
+                    "table_corner_guards",
+                    "window_guards",
+                    "ceiling_fan",
+                    "fireplace",
+                    "portable_fans",
+                    "carbon_monoxide_detector",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "smoke_detector",
+                    "laptop_friendly_workspace",
+                    "pocket_wifi",
+                    "baking_sheet",
+                    "barbeque_utensils",
+                    "bread_maker",
+                    "blender",
+                    "coffee",
+                    "coffee_maker",
+                    "cooking_basics",
+                    "dining_table",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "freezer",
+                    "hot_water_kettle",
+                    "kitchenette",
+                    "microwave",
+                    "mini_fridge",
+                    "oven",
+                    "refrigerator",
+                    "rice_maker",
+                    "stove",
+                    "toaster",
+                    "trash_compacter",
+                    "wine_glasses",
+                    "beach_access",
+                    "lake_access",
+                    "laundromat_nearby",
+                    "private_entrance",
+                    "resort_access",
+                    "ski_in_ski_out",
+                    "waterfront",
+                    "garden_or_backyard",
+                    "bbq_area",
+                    "beach_essentials",
+                    "bicycle",
+                    "boat_slip",
+                    "fire_pit",
+                    "hammock",
+                    "kayak",
+                    "alfresco_dining",
+                    "outdoor_seating",
+                    "outdoor_kitchen",
+                    "patio_or_belcony",
+                    "sun_loungers",
+                    "free_parking",
+                    "street_parking",
+                    "paid_parking_on_premises",
+                    "paid_parking",
+                    "free_parking_off_premises",
+                    "elevator",
+                    "ev_charger",
+                    "hockey_rink",
+                    "gym",
+                    "jacuzzi",
+                    "pool",
+                    "private_living_room",
+                    "sauna",
+                    "single_level_home",
+                    "ebike_charger",
+                    "solar_power",
+                    "recycling",
+                    "composting",
+                    "doorman",
+                    "gated_community",
+                    "breakfast",
+                    "cleaning_before_checkout",
+                    "long_term_stays_allowed",
+                    "luggage_dropoff_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "base_price_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "channel": {
+                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "channex"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "importing",
+                      "connected",
+                      "disconnected"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "check_in_instructions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_method": {
+                "description": "How guests get in.",
+                "enum": [
+                  "smart_lock",
+                  "keypad",
+                  "lockbox",
+                  "building_staff",
+                  "in_person",
+                  "other",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "check_out_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "checkout_instructions": {
+                "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "details": {
+                      "description": "Required for additional.",
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task": {
+                      "enum": [
+                        "gather_towels",
+                        "throw_trash",
+                        "turn_off",
+                        "lock_up",
+                        "return_keys",
+                        "additional"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "details"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "currency": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "description": {
+                "description": "The listing description; empty when none is written.",
+                "type": "string"
+              },
+              "directions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "house_manual": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "listing_floor": {
+                "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "listing_type": {
+                "description": "Whether guests book the entire place, a private room or a shared room. Null when not said.",
+                "enum": [
+                  "entire_place",
+                  "private_room",
+                  "shared_room",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "max_guests": {
+                "type": "integer"
+              },
+              "min_nights": {
+                "type": "integer"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "photo_rooms": {
+                "description": "Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "type": {
+                      "enum": [
+                        "art_studio",
+                        "backyard",
+                        "balcony",
+                        "bedroom",
+                        "bowling_alley",
+                        "childrens_playroom",
+                        "courtyard",
+                        "darkroom",
+                        "deck",
+                        "dining_area",
+                        "event_room",
+                        "exterior",
+                        "front_yard",
+                        "full_bathroom",
+                        "full_kitchen",
+                        "game_room",
+                        "garage",
+                        "garden",
+                        "gym",
+                        "half_bathroom",
+                        "hot_tub",
+                        "kitchenette",
+                        "laundry_area",
+                        "library",
+                        "living_room",
+                        "movie_theater",
+                        "music_studio",
+                        "office",
+                        "patio",
+                        "photography_studio",
+                        "pool",
+                        "porch",
+                        "rooftop",
+                        "sunroom",
+                        "terrace",
+                        "theme_room",
+                        "wine_cellar",
+                        "woodshop",
+                        "workshop",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "property_size": {
+                "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
+                "exclusiveMinimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "property_size_unit": {
+                "description": "The unit of property_size. Size and unit must both be set or both null.",
+                "enum": [
+                  "square_meters",
+                  "square_feet",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_type": {
+                "description": "Airbnb property type, one the property_type_group offers. Null with property_type_group when not said.",
+                "enum": [
+                  "apartment",
+                  "condominium",
+                  "serviced_apartment",
+                  "loft",
+                  "house",
+                  "townhouse",
+                  "bungalow",
+                  "cabin",
+                  "chalet",
+                  "earthhouse",
+                  "hut",
+                  "lighthouse",
+                  "villa",
+                  "dome",
+                  "cottage",
+                  "farmstay",
+                  "houseboat",
+                  "tiny_house",
+                  "guesthouse",
+                  "private_suite",
+                  "boat",
+                  "castle",
+                  "cave",
+                  "igloo",
+                  "island",
+                  "plane",
+                  "rv",
+                  "tent",
+                  "tipi",
+                  "train",
+                  "treehouse",
+                  "yurt",
+                  "other",
+                  "barn",
+                  "campsite",
+                  "windmill",
+                  "bus",
+                  "holiday_park",
+                  "ranch",
+                  "religious_building",
+                  "riad",
+                  "shipping_container",
+                  "tower",
+                  "bnb",
+                  "nature_eco_lodge",
+                  "boutique_hotel",
+                  "hostel",
+                  "aparthotel",
+                  "hotel",
+                  "resort",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_type_group": {
+                "description": "Airbnb's property group: apartments (Apartment: apartment, condominium, serviced_apartment, loft); houses (House: house, townhouse, bungalow, cabin, chalet, earthhouse, hut, lighthouse, villa, dome, cottage, farmstay, houseboat, tiny_house); secondary_units (Secondary unit: guesthouse, private_suite, farmstay); unique_homes (Unique space: boat, castle, cave, earthhouse, hut, igloo, island, lighthouse, plane, rv, tent, tipi, train, treehouse, yurt, other, dome, barn, campsite, farmstay, houseboat, tiny_house, windmill, bus, holiday_park, ranch, religious_building, riad, shipping_container, tower); bnb (Bed and breakfast: bnb, nature_eco_lodge, farmstay); boutique_hotels_and_more (Boutique hotel: boutique_hotel, nature_eco_lodge, hostel, serviced_apartment, aparthotel, hotel, resort). Set with property_type, both or neither.",
+                "enum": [
+                  "apartments",
+                  "houses",
+                  "secondary_units",
+                  "unique_homes",
+                  "bnb",
+                  "boutique_hotels_and_more",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "published": {
+                "description": "Whether the home is listed on the site.",
+                "type": "boolean"
+              },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "total_floors": {
+                "description": "Total floors in the property; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "wifi_network": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wifi_password": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "year_built": {
+                "description": "Year the property was built; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "product_id",
+              "name",
+              "location_id",
+              "timezone",
+              "currency",
+              "base_price_minor",
+              "base_price_tax_behavior",
+              "check_in_time",
+              "check_out_time",
+              "max_guests",
+              "min_nights",
+              "description",
+              "published",
+              "address",
+              "latitude",
+              "longitude",
+              "stay_map_sharing",
+              "property_type_group",
+              "property_type",
+              "listing_type",
+              "total_floors",
+              "listing_floor",
+              "year_built",
+              "property_size",
+              "property_size_unit",
+              "bedrooms",
+              "beds",
+              "bathrooms",
+              "amenities",
+              "cancellation_policy",
+              "long_term_cancellation_policy",
+              "check_in_method",
+              "check_in_instructions",
+              "wifi_network",
+              "wifi_password",
+              "directions",
+              "house_manual",
+              "checkout_instructions",
+              "assigned_member_id",
+              "assigned_team_id",
+              "channel",
+              "photos",
+              "photo_rooms"
+            ],
+            "type": "object"
+          },
+          "room": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "photo_ids": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "type": {
+                "enum": [
+                  "art_studio",
+                  "backyard",
+                  "balcony",
+                  "bedroom",
+                  "bowling_alley",
+                  "childrens_playroom",
+                  "courtyard",
+                  "darkroom",
+                  "deck",
+                  "dining_area",
+                  "event_room",
+                  "exterior",
+                  "front_yard",
+                  "full_bathroom",
+                  "full_kitchen",
+                  "game_room",
+                  "garage",
+                  "garden",
+                  "gym",
+                  "half_bathroom",
+                  "hot_tub",
+                  "kitchenette",
+                  "laundry_area",
+                  "library",
+                  "living_room",
+                  "movie_theater",
+                  "music_studio",
+                  "office",
+                  "patio",
+                  "photography_studio",
+                  "pool",
+                  "porch",
+                  "rooftop",
+                  "sunroom",
+                  "terrace",
+                  "theme_room",
+                  "wine_cellar",
+                  "woodshop",
+                  "workshop",
+                  "workspace"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "type",
+              "photo_ids"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "home",
+          "room"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "stays",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -7815,7 +8750,7 @@
                   "type": "string"
                 },
                 "stay": {
-                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                   "properties": {
                     "amenities": {
                       "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -8080,6 +9015,77 @@
                       "minimum": 1,
                       "type": "integer"
                     },
+                    "photo_rooms": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "type": {
+                            "enum": [
+                              "art_studio",
+                              "backyard",
+                              "balcony",
+                              "bedroom",
+                              "bowling_alley",
+                              "childrens_playroom",
+                              "courtyard",
+                              "darkroom",
+                              "deck",
+                              "dining_area",
+                              "event_room",
+                              "exterior",
+                              "front_yard",
+                              "full_bathroom",
+                              "full_kitchen",
+                              "game_room",
+                              "garage",
+                              "garden",
+                              "gym",
+                              "half_bathroom",
+                              "hot_tub",
+                              "kitchenette",
+                              "laundry_area",
+                              "library",
+                              "living_room",
+                              "movie_theater",
+                              "music_studio",
+                              "office",
+                              "patio",
+                              "photography_studio",
+                              "pool",
+                              "porch",
+                              "rooftop",
+                              "sunroom",
+                              "terrace",
+                              "theme_room",
+                              "wine_cellar",
+                              "woodshop",
+                              "workshop",
+                              "workspace"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "type",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "property_size": {
                       "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                       "exclusiveMinimum": 0,
@@ -8203,6 +9209,7 @@
                     "min_nights",
                     "assigned_member_id",
                     "assigned_team_id",
+                    "photo_rooms",
                     "property_type_group",
                     "property_type",
                     "listing_type",
@@ -16102,6 +17109,22 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
               "maps_url": {
                 "type": [
                   "string",
@@ -16427,6 +17450,14 @@
               "status": {
                 "type": "string"
               },
+              "stay_map_sharing": {
+                "description": "Public map precision for places to stay at this location; both choices keep their street address private.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
                 "minLength": 1,
@@ -16449,6 +17480,9 @@
               "id",
               "slug",
               "title",
+              "stay_map_sharing",
+              "latitude",
+              "longitude",
               "status",
               "timezone",
               "created_at",
@@ -22978,7 +24012,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                 "properties": {
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -23243,6 +24277,77 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "photo_rooms": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "type": {
+                          "enum": [
+                            "art_studio",
+                            "backyard",
+                            "balcony",
+                            "bedroom",
+                            "bowling_alley",
+                            "childrens_playroom",
+                            "courtyard",
+                            "darkroom",
+                            "deck",
+                            "dining_area",
+                            "event_room",
+                            "exterior",
+                            "front_yard",
+                            "full_bathroom",
+                            "full_kitchen",
+                            "game_room",
+                            "garage",
+                            "garden",
+                            "gym",
+                            "half_bathroom",
+                            "hot_tub",
+                            "kitchenette",
+                            "laundry_area",
+                            "library",
+                            "living_room",
+                            "movie_theater",
+                            "music_studio",
+                            "office",
+                            "patio",
+                            "photography_studio",
+                            "pool",
+                            "porch",
+                            "rooftop",
+                            "sunroom",
+                            "terrace",
+                            "theme_room",
+                            "wine_cellar",
+                            "woodshop",
+                            "workshop",
+                            "workspace"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "property_size": {
                     "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                     "exclusiveMinimum": 0,
@@ -23366,6 +24471,7 @@
                   "min_nights",
                   "assigned_member_id",
                   "assigned_team_id",
+                  "photo_rooms",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -42329,6 +43435,78 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "photo_rooms": {
+                "description": "Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "type": {
+                      "enum": [
+                        "art_studio",
+                        "backyard",
+                        "balcony",
+                        "bedroom",
+                        "bowling_alley",
+                        "childrens_playroom",
+                        "courtyard",
+                        "darkroom",
+                        "deck",
+                        "dining_area",
+                        "event_room",
+                        "exterior",
+                        "front_yard",
+                        "full_bathroom",
+                        "full_kitchen",
+                        "game_room",
+                        "garage",
+                        "garden",
+                        "gym",
+                        "half_bathroom",
+                        "hot_tub",
+                        "kitchenette",
+                        "laundry_area",
+                        "library",
+                        "living_room",
+                        "movie_theater",
+                        "music_studio",
+                        "office",
+                        "patio",
+                        "photography_studio",
+                        "pool",
+                        "porch",
+                        "rooftop",
+                        "sunroom",
+                        "terrace",
+                        "theme_room",
+                        "wine_cellar",
+                        "woodshop",
+                        "workshop",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "photos": {
                 "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
                 "items": {
@@ -42489,6 +43667,14 @@
                 "description": "Whether the home is listed on the site.",
                 "type": "boolean"
               },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
@@ -42545,6 +43731,7 @@
               "address",
               "latitude",
               "longitude",
+              "stay_map_sharing",
               "property_type_group",
               "property_type",
               "listing_type",
@@ -42569,7 +43756,8 @@
               "assigned_member_id",
               "assigned_team_id",
               "channel",
-              "photos"
+              "photos",
+              "photo_rooms"
             ],
             "type": [
               "object",
@@ -43098,6 +44286,22 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
               "maps_url": {
                 "type": [
                   "string",
@@ -43423,6 +44627,14 @@
               "status": {
                 "type": "string"
               },
+              "stay_map_sharing": {
+                "description": "Public map precision for places to stay at this location; both choices keep their street address private.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
                 "minLength": 1,
@@ -43445,6 +44657,9 @@
               "id",
               "slug",
               "title",
+              "stay_map_sharing",
+              "latitude",
+              "longitude",
               "status",
               "timezone",
               "created_at",
@@ -47592,7 +48807,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                 "properties": {
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -47857,6 +49072,77 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "photo_rooms": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "type": {
+                          "enum": [
+                            "art_studio",
+                            "backyard",
+                            "balcony",
+                            "bedroom",
+                            "bowling_alley",
+                            "childrens_playroom",
+                            "courtyard",
+                            "darkroom",
+                            "deck",
+                            "dining_area",
+                            "event_room",
+                            "exterior",
+                            "front_yard",
+                            "full_bathroom",
+                            "full_kitchen",
+                            "game_room",
+                            "garage",
+                            "garden",
+                            "gym",
+                            "half_bathroom",
+                            "hot_tub",
+                            "kitchenette",
+                            "laundry_area",
+                            "library",
+                            "living_room",
+                            "movie_theater",
+                            "music_studio",
+                            "office",
+                            "patio",
+                            "photography_studio",
+                            "pool",
+                            "porch",
+                            "rooftop",
+                            "sunroom",
+                            "terrace",
+                            "theme_room",
+                            "wine_cellar",
+                            "woodshop",
+                            "workshop",
+                            "workspace"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "property_size": {
                     "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                     "exclusiveMinimum": 0,
@@ -47980,6 +49266,7 @@
                   "min_nights",
                   "assigned_member_id",
                   "assigned_team_id",
+                  "photo_rooms",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -58724,6 +60011,78 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "photo_rooms": {
+                "description": "Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "type": {
+                      "enum": [
+                        "art_studio",
+                        "backyard",
+                        "balcony",
+                        "bedroom",
+                        "bowling_alley",
+                        "childrens_playroom",
+                        "courtyard",
+                        "darkroom",
+                        "deck",
+                        "dining_area",
+                        "event_room",
+                        "exterior",
+                        "front_yard",
+                        "full_bathroom",
+                        "full_kitchen",
+                        "game_room",
+                        "garage",
+                        "garden",
+                        "gym",
+                        "half_bathroom",
+                        "hot_tub",
+                        "kitchenette",
+                        "laundry_area",
+                        "library",
+                        "living_room",
+                        "movie_theater",
+                        "music_studio",
+                        "office",
+                        "patio",
+                        "photography_studio",
+                        "pool",
+                        "porch",
+                        "rooftop",
+                        "sunroom",
+                        "terrace",
+                        "theme_room",
+                        "wine_cellar",
+                        "woodshop",
+                        "workshop",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "photos": {
                 "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
                 "items": {
@@ -58884,6 +60243,14 @@
                 "description": "Whether the home is listed on the site.",
                 "type": "boolean"
               },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
@@ -58940,6 +60307,7 @@
               "address",
               "latitude",
               "longitude",
+              "stay_map_sharing",
               "property_type_group",
               "property_type",
               "listing_type",
@@ -58964,7 +60332,8 @@
               "assigned_member_id",
               "assigned_team_id",
               "channel",
-              "photos"
+              "photos",
+              "photo_rooms"
             ],
             "type": "object"
           },
@@ -65116,6 +66485,904 @@
         }
       ],
       "domain": "organizations",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "move_stay_photos",
+      "title": "Move stay photos",
+      "description": "Move selected Product photos together to room_id, null for Additional photos, or a new room of new_room_type. Supply exactly one destination. Every photo needs its expected_room_id from photo_rooms; a changed source or removed photo refuses the entire move, including new room creation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "new_room_type": {
+            "enum": [
+              "art_studio",
+              "backyard",
+              "balcony",
+              "bedroom",
+              "bowling_alley",
+              "childrens_playroom",
+              "courtyard",
+              "darkroom",
+              "deck",
+              "dining_area",
+              "event_room",
+              "exterior",
+              "front_yard",
+              "full_bathroom",
+              "full_kitchen",
+              "game_room",
+              "garage",
+              "garden",
+              "gym",
+              "half_bathroom",
+              "hot_tub",
+              "kitchenette",
+              "laundry_area",
+              "library",
+              "living_room",
+              "movie_theater",
+              "music_studio",
+              "office",
+              "patio",
+              "photography_studio",
+              "pool",
+              "porch",
+              "rooftop",
+              "sunroom",
+              "terrace",
+              "theme_room",
+              "wine_cellar",
+              "woodshop",
+              "workshop",
+              "workspace"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "photos": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "expected_room_id": {
+                  "description": "The room from the latest photo_rooms read; null only when the photo is unassigned. A changed membership refuses the whole move.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "photo_id": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "photo_id",
+                "expected_room_id"
+              ],
+              "type": "object"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "type": "array"
+          },
+          "product_id": {
+            "description": "The place to stay: a product of kind stay, from list_products.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "room_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "product_id",
+          "photos"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "home": {
+            "properties": {
+              "address": {
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
+                "properties": {
+                  "address": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "ac",
+                    "dryer",
+                    "essentials",
+                    "heating",
+                    "hot_water",
+                    "kitchen",
+                    "tv",
+                    "washer",
+                    "wireless_internet",
+                    "bathtub",
+                    "bidet",
+                    "body_soap",
+                    "cleaning_products",
+                    "conditioner",
+                    "hair_dryer",
+                    "alfresco_shower",
+                    "shampoo",
+                    "shower_gel",
+                    "bed_linens",
+                    "wardrobe_or_closet",
+                    "clothes_drying_rack",
+                    "extra_pillows_and_blankets",
+                    "hangers",
+                    "iron",
+                    "mosquito_net",
+                    "room_darkening_shades",
+                    "safe",
+                    "arcade_machine",
+                    "batting_cage",
+                    "books",
+                    "bowling_alley",
+                    "climbing_wall",
+                    "ethernet_connection",
+                    "exercise_equipment",
+                    "game_console",
+                    "laser_tag",
+                    "life_size_games",
+                    "mini_golf",
+                    "home_theater",
+                    "piano",
+                    "ping_pong_table",
+                    "pool_table",
+                    "record_player",
+                    "skate_ramp",
+                    "sound_system",
+                    "theme_room",
+                    "baby_bath",
+                    "baby_monitor",
+                    "childrens_bike",
+                    "playroom",
+                    "stair_gates",
+                    "babysitter_recommendations",
+                    "board_games",
+                    "changing_table",
+                    "childrens_books_and_toys",
+                    "childrens_dinnerware",
+                    "crib",
+                    "fireplace_guards",
+                    "high_chair",
+                    "playground",
+                    "outlet_covers",
+                    "pack_n_play_travel_crib",
+                    "table_corner_guards",
+                    "window_guards",
+                    "ceiling_fan",
+                    "fireplace",
+                    "portable_fans",
+                    "carbon_monoxide_detector",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "smoke_detector",
+                    "laptop_friendly_workspace",
+                    "pocket_wifi",
+                    "baking_sheet",
+                    "barbeque_utensils",
+                    "bread_maker",
+                    "blender",
+                    "coffee",
+                    "coffee_maker",
+                    "cooking_basics",
+                    "dining_table",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "freezer",
+                    "hot_water_kettle",
+                    "kitchenette",
+                    "microwave",
+                    "mini_fridge",
+                    "oven",
+                    "refrigerator",
+                    "rice_maker",
+                    "stove",
+                    "toaster",
+                    "trash_compacter",
+                    "wine_glasses",
+                    "beach_access",
+                    "lake_access",
+                    "laundromat_nearby",
+                    "private_entrance",
+                    "resort_access",
+                    "ski_in_ski_out",
+                    "waterfront",
+                    "garden_or_backyard",
+                    "bbq_area",
+                    "beach_essentials",
+                    "bicycle",
+                    "boat_slip",
+                    "fire_pit",
+                    "hammock",
+                    "kayak",
+                    "alfresco_dining",
+                    "outdoor_seating",
+                    "outdoor_kitchen",
+                    "patio_or_belcony",
+                    "sun_loungers",
+                    "free_parking",
+                    "street_parking",
+                    "paid_parking_on_premises",
+                    "paid_parking",
+                    "free_parking_off_premises",
+                    "elevator",
+                    "ev_charger",
+                    "hockey_rink",
+                    "gym",
+                    "jacuzzi",
+                    "pool",
+                    "private_living_room",
+                    "sauna",
+                    "single_level_home",
+                    "ebike_charger",
+                    "solar_power",
+                    "recycling",
+                    "composting",
+                    "doorman",
+                    "gated_community",
+                    "breakfast",
+                    "cleaning_before_checkout",
+                    "long_term_stays_allowed",
+                    "luggage_dropoff_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "base_price_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "channel": {
+                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "channex"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "importing",
+                      "connected",
+                      "disconnected"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "check_in_instructions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_method": {
+                "description": "How guests get in.",
+                "enum": [
+                  "smart_lock",
+                  "keypad",
+                  "lockbox",
+                  "building_staff",
+                  "in_person",
+                  "other",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "check_out_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "checkout_instructions": {
+                "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "details": {
+                      "description": "Required for additional.",
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task": {
+                      "enum": [
+                        "gather_towels",
+                        "throw_trash",
+                        "turn_off",
+                        "lock_up",
+                        "return_keys",
+                        "additional"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "details"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "currency": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "description": {
+                "description": "The listing description; empty when none is written.",
+                "type": "string"
+              },
+              "directions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "house_manual": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "listing_floor": {
+                "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "listing_type": {
+                "description": "Whether guests book the entire place, a private room or a shared room. Null when not said.",
+                "enum": [
+                  "entire_place",
+                  "private_room",
+                  "shared_room",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "max_guests": {
+                "type": "integer"
+              },
+              "min_nights": {
+                "type": "integer"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "photo_rooms": {
+                "description": "Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "type": {
+                      "enum": [
+                        "art_studio",
+                        "backyard",
+                        "balcony",
+                        "bedroom",
+                        "bowling_alley",
+                        "childrens_playroom",
+                        "courtyard",
+                        "darkroom",
+                        "deck",
+                        "dining_area",
+                        "event_room",
+                        "exterior",
+                        "front_yard",
+                        "full_bathroom",
+                        "full_kitchen",
+                        "game_room",
+                        "garage",
+                        "garden",
+                        "gym",
+                        "half_bathroom",
+                        "hot_tub",
+                        "kitchenette",
+                        "laundry_area",
+                        "library",
+                        "living_room",
+                        "movie_theater",
+                        "music_studio",
+                        "office",
+                        "patio",
+                        "photography_studio",
+                        "pool",
+                        "porch",
+                        "rooftop",
+                        "sunroom",
+                        "terrace",
+                        "theme_room",
+                        "wine_cellar",
+                        "woodshop",
+                        "workshop",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "property_size": {
+                "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
+                "exclusiveMinimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "property_size_unit": {
+                "description": "The unit of property_size. Size and unit must both be set or both null.",
+                "enum": [
+                  "square_meters",
+                  "square_feet",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_type": {
+                "description": "Airbnb property type, one the property_type_group offers. Null with property_type_group when not said.",
+                "enum": [
+                  "apartment",
+                  "condominium",
+                  "serviced_apartment",
+                  "loft",
+                  "house",
+                  "townhouse",
+                  "bungalow",
+                  "cabin",
+                  "chalet",
+                  "earthhouse",
+                  "hut",
+                  "lighthouse",
+                  "villa",
+                  "dome",
+                  "cottage",
+                  "farmstay",
+                  "houseboat",
+                  "tiny_house",
+                  "guesthouse",
+                  "private_suite",
+                  "boat",
+                  "castle",
+                  "cave",
+                  "igloo",
+                  "island",
+                  "plane",
+                  "rv",
+                  "tent",
+                  "tipi",
+                  "train",
+                  "treehouse",
+                  "yurt",
+                  "other",
+                  "barn",
+                  "campsite",
+                  "windmill",
+                  "bus",
+                  "holiday_park",
+                  "ranch",
+                  "religious_building",
+                  "riad",
+                  "shipping_container",
+                  "tower",
+                  "bnb",
+                  "nature_eco_lodge",
+                  "boutique_hotel",
+                  "hostel",
+                  "aparthotel",
+                  "hotel",
+                  "resort",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_type_group": {
+                "description": "Airbnb's property group: apartments (Apartment: apartment, condominium, serviced_apartment, loft); houses (House: house, townhouse, bungalow, cabin, chalet, earthhouse, hut, lighthouse, villa, dome, cottage, farmstay, houseboat, tiny_house); secondary_units (Secondary unit: guesthouse, private_suite, farmstay); unique_homes (Unique space: boat, castle, cave, earthhouse, hut, igloo, island, lighthouse, plane, rv, tent, tipi, train, treehouse, yurt, other, dome, barn, campsite, farmstay, houseboat, tiny_house, windmill, bus, holiday_park, ranch, religious_building, riad, shipping_container, tower); bnb (Bed and breakfast: bnb, nature_eco_lodge, farmstay); boutique_hotels_and_more (Boutique hotel: boutique_hotel, nature_eco_lodge, hostel, serviced_apartment, aparthotel, hotel, resort). Set with property_type, both or neither.",
+                "enum": [
+                  "apartments",
+                  "houses",
+                  "secondary_units",
+                  "unique_homes",
+                  "bnb",
+                  "boutique_hotels_and_more",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "published": {
+                "description": "Whether the home is listed on the site.",
+                "type": "boolean"
+              },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "total_floors": {
+                "description": "Total floors in the property; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "wifi_network": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wifi_password": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "year_built": {
+                "description": "Year the property was built; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "product_id",
+              "name",
+              "location_id",
+              "timezone",
+              "currency",
+              "base_price_minor",
+              "base_price_tax_behavior",
+              "check_in_time",
+              "check_out_time",
+              "max_guests",
+              "min_nights",
+              "description",
+              "published",
+              "address",
+              "latitude",
+              "longitude",
+              "stay_map_sharing",
+              "property_type_group",
+              "property_type",
+              "listing_type",
+              "total_floors",
+              "listing_floor",
+              "year_built",
+              "property_size",
+              "property_size_unit",
+              "bedrooms",
+              "beds",
+              "bathrooms",
+              "amenities",
+              "cancellation_policy",
+              "long_term_cancellation_policy",
+              "check_in_method",
+              "check_in_instructions",
+              "wifi_network",
+              "wifi_password",
+              "directions",
+              "house_manual",
+              "checkout_instructions",
+              "assigned_member_id",
+              "assigned_team_id",
+              "channel",
+              "photos",
+              "photo_rooms"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "home"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "stays",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -80261,7 +82528,7 @@
                   "type": "string"
                 },
                 "stay": {
-                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                   "properties": {
                     "amenities": {
                       "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -80526,6 +82793,77 @@
                       "minimum": 1,
                       "type": "integer"
                     },
+                    "photo_rooms": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "id": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "type": {
+                            "enum": [
+                              "art_studio",
+                              "backyard",
+                              "balcony",
+                              "bedroom",
+                              "bowling_alley",
+                              "childrens_playroom",
+                              "courtyard",
+                              "darkroom",
+                              "deck",
+                              "dining_area",
+                              "event_room",
+                              "exterior",
+                              "front_yard",
+                              "full_bathroom",
+                              "full_kitchen",
+                              "game_room",
+                              "garage",
+                              "garden",
+                              "gym",
+                              "half_bathroom",
+                              "hot_tub",
+                              "kitchenette",
+                              "laundry_area",
+                              "library",
+                              "living_room",
+                              "movie_theater",
+                              "music_studio",
+                              "office",
+                              "patio",
+                              "photography_studio",
+                              "pool",
+                              "porch",
+                              "rooftop",
+                              "sunroom",
+                              "terrace",
+                              "theme_room",
+                              "wine_cellar",
+                              "woodshop",
+                              "workshop",
+                              "workspace"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "type",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "property_size": {
                       "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                       "exclusiveMinimum": 0,
@@ -80649,6 +82987,7 @@
                     "min_nights",
                     "assigned_member_id",
                     "assigned_team_id",
+                    "photo_rooms",
                     "property_type_group",
                     "property_type",
                     "listing_type",
@@ -83122,7 +85461,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                 "properties": {
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -83387,6 +85726,77 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "photo_rooms": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "type": {
+                          "enum": [
+                            "art_studio",
+                            "backyard",
+                            "balcony",
+                            "bedroom",
+                            "bowling_alley",
+                            "childrens_playroom",
+                            "courtyard",
+                            "darkroom",
+                            "deck",
+                            "dining_area",
+                            "event_room",
+                            "exterior",
+                            "front_yard",
+                            "full_bathroom",
+                            "full_kitchen",
+                            "game_room",
+                            "garage",
+                            "garden",
+                            "gym",
+                            "half_bathroom",
+                            "hot_tub",
+                            "kitchenette",
+                            "laundry_area",
+                            "library",
+                            "living_room",
+                            "movie_theater",
+                            "music_studio",
+                            "office",
+                            "patio",
+                            "photography_studio",
+                            "pool",
+                            "porch",
+                            "rooftop",
+                            "sunroom",
+                            "terrace",
+                            "theme_room",
+                            "wine_cellar",
+                            "woodshop",
+                            "workshop",
+                            "workspace"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "property_size": {
                     "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                     "exclusiveMinimum": 0,
@@ -83510,6 +85920,7 @@
                   "min_nights",
                   "assigned_member_id",
                   "assigned_team_id",
+                  "photo_rooms",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -83719,6 +86130,831 @@
         }
       ],
       "domain": "products",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "remove_stay_photo_room",
+      "title": "Remove stay photo room",
+      "description": "Delete one authored photo-tour room. Its photos return to Additional photos; the Product’s cover/gallery and library files are retained.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "product_id": {
+            "description": "The place to stay: a product of kind stay, from list_products.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "room_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "room_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "home": {
+            "properties": {
+              "address": {
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
+                "properties": {
+                  "address": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "ac",
+                    "dryer",
+                    "essentials",
+                    "heating",
+                    "hot_water",
+                    "kitchen",
+                    "tv",
+                    "washer",
+                    "wireless_internet",
+                    "bathtub",
+                    "bidet",
+                    "body_soap",
+                    "cleaning_products",
+                    "conditioner",
+                    "hair_dryer",
+                    "alfresco_shower",
+                    "shampoo",
+                    "shower_gel",
+                    "bed_linens",
+                    "wardrobe_or_closet",
+                    "clothes_drying_rack",
+                    "extra_pillows_and_blankets",
+                    "hangers",
+                    "iron",
+                    "mosquito_net",
+                    "room_darkening_shades",
+                    "safe",
+                    "arcade_machine",
+                    "batting_cage",
+                    "books",
+                    "bowling_alley",
+                    "climbing_wall",
+                    "ethernet_connection",
+                    "exercise_equipment",
+                    "game_console",
+                    "laser_tag",
+                    "life_size_games",
+                    "mini_golf",
+                    "home_theater",
+                    "piano",
+                    "ping_pong_table",
+                    "pool_table",
+                    "record_player",
+                    "skate_ramp",
+                    "sound_system",
+                    "theme_room",
+                    "baby_bath",
+                    "baby_monitor",
+                    "childrens_bike",
+                    "playroom",
+                    "stair_gates",
+                    "babysitter_recommendations",
+                    "board_games",
+                    "changing_table",
+                    "childrens_books_and_toys",
+                    "childrens_dinnerware",
+                    "crib",
+                    "fireplace_guards",
+                    "high_chair",
+                    "playground",
+                    "outlet_covers",
+                    "pack_n_play_travel_crib",
+                    "table_corner_guards",
+                    "window_guards",
+                    "ceiling_fan",
+                    "fireplace",
+                    "portable_fans",
+                    "carbon_monoxide_detector",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "smoke_detector",
+                    "laptop_friendly_workspace",
+                    "pocket_wifi",
+                    "baking_sheet",
+                    "barbeque_utensils",
+                    "bread_maker",
+                    "blender",
+                    "coffee",
+                    "coffee_maker",
+                    "cooking_basics",
+                    "dining_table",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "freezer",
+                    "hot_water_kettle",
+                    "kitchenette",
+                    "microwave",
+                    "mini_fridge",
+                    "oven",
+                    "refrigerator",
+                    "rice_maker",
+                    "stove",
+                    "toaster",
+                    "trash_compacter",
+                    "wine_glasses",
+                    "beach_access",
+                    "lake_access",
+                    "laundromat_nearby",
+                    "private_entrance",
+                    "resort_access",
+                    "ski_in_ski_out",
+                    "waterfront",
+                    "garden_or_backyard",
+                    "bbq_area",
+                    "beach_essentials",
+                    "bicycle",
+                    "boat_slip",
+                    "fire_pit",
+                    "hammock",
+                    "kayak",
+                    "alfresco_dining",
+                    "outdoor_seating",
+                    "outdoor_kitchen",
+                    "patio_or_belcony",
+                    "sun_loungers",
+                    "free_parking",
+                    "street_parking",
+                    "paid_parking_on_premises",
+                    "paid_parking",
+                    "free_parking_off_premises",
+                    "elevator",
+                    "ev_charger",
+                    "hockey_rink",
+                    "gym",
+                    "jacuzzi",
+                    "pool",
+                    "private_living_room",
+                    "sauna",
+                    "single_level_home",
+                    "ebike_charger",
+                    "solar_power",
+                    "recycling",
+                    "composting",
+                    "doorman",
+                    "gated_community",
+                    "breakfast",
+                    "cleaning_before_checkout",
+                    "long_term_stays_allowed",
+                    "luggage_dropoff_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "base_price_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "channel": {
+                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "channex"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "importing",
+                      "connected",
+                      "disconnected"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "check_in_instructions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_method": {
+                "description": "How guests get in.",
+                "enum": [
+                  "smart_lock",
+                  "keypad",
+                  "lockbox",
+                  "building_staff",
+                  "in_person",
+                  "other",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "check_out_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "checkout_instructions": {
+                "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "details": {
+                      "description": "Required for additional.",
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task": {
+                      "enum": [
+                        "gather_towels",
+                        "throw_trash",
+                        "turn_off",
+                        "lock_up",
+                        "return_keys",
+                        "additional"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "details"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "currency": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "description": {
+                "description": "The listing description; empty when none is written.",
+                "type": "string"
+              },
+              "directions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "house_manual": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "listing_floor": {
+                "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "listing_type": {
+                "description": "Whether guests book the entire place, a private room or a shared room. Null when not said.",
+                "enum": [
+                  "entire_place",
+                  "private_room",
+                  "shared_room",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "max_guests": {
+                "type": "integer"
+              },
+              "min_nights": {
+                "type": "integer"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "photo_rooms": {
+                "description": "Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "type": {
+                      "enum": [
+                        "art_studio",
+                        "backyard",
+                        "balcony",
+                        "bedroom",
+                        "bowling_alley",
+                        "childrens_playroom",
+                        "courtyard",
+                        "darkroom",
+                        "deck",
+                        "dining_area",
+                        "event_room",
+                        "exterior",
+                        "front_yard",
+                        "full_bathroom",
+                        "full_kitchen",
+                        "game_room",
+                        "garage",
+                        "garden",
+                        "gym",
+                        "half_bathroom",
+                        "hot_tub",
+                        "kitchenette",
+                        "laundry_area",
+                        "library",
+                        "living_room",
+                        "movie_theater",
+                        "music_studio",
+                        "office",
+                        "patio",
+                        "photography_studio",
+                        "pool",
+                        "porch",
+                        "rooftop",
+                        "sunroom",
+                        "terrace",
+                        "theme_room",
+                        "wine_cellar",
+                        "woodshop",
+                        "workshop",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "property_size": {
+                "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
+                "exclusiveMinimum": 0,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "property_size_unit": {
+                "description": "The unit of property_size. Size and unit must both be set or both null.",
+                "enum": [
+                  "square_meters",
+                  "square_feet",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_type": {
+                "description": "Airbnb property type, one the property_type_group offers. Null with property_type_group when not said.",
+                "enum": [
+                  "apartment",
+                  "condominium",
+                  "serviced_apartment",
+                  "loft",
+                  "house",
+                  "townhouse",
+                  "bungalow",
+                  "cabin",
+                  "chalet",
+                  "earthhouse",
+                  "hut",
+                  "lighthouse",
+                  "villa",
+                  "dome",
+                  "cottage",
+                  "farmstay",
+                  "houseboat",
+                  "tiny_house",
+                  "guesthouse",
+                  "private_suite",
+                  "boat",
+                  "castle",
+                  "cave",
+                  "igloo",
+                  "island",
+                  "plane",
+                  "rv",
+                  "tent",
+                  "tipi",
+                  "train",
+                  "treehouse",
+                  "yurt",
+                  "other",
+                  "barn",
+                  "campsite",
+                  "windmill",
+                  "bus",
+                  "holiday_park",
+                  "ranch",
+                  "religious_building",
+                  "riad",
+                  "shipping_container",
+                  "tower",
+                  "bnb",
+                  "nature_eco_lodge",
+                  "boutique_hotel",
+                  "hostel",
+                  "aparthotel",
+                  "hotel",
+                  "resort",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "property_type_group": {
+                "description": "Airbnb's property group: apartments (Apartment: apartment, condominium, serviced_apartment, loft); houses (House: house, townhouse, bungalow, cabin, chalet, earthhouse, hut, lighthouse, villa, dome, cottage, farmstay, houseboat, tiny_house); secondary_units (Secondary unit: guesthouse, private_suite, farmstay); unique_homes (Unique space: boat, castle, cave, earthhouse, hut, igloo, island, lighthouse, plane, rv, tent, tipi, train, treehouse, yurt, other, dome, barn, campsite, farmstay, houseboat, tiny_house, windmill, bus, holiday_park, ranch, religious_building, riad, shipping_container, tower); bnb (Bed and breakfast: bnb, nature_eco_lodge, farmstay); boutique_hotels_and_more (Boutique hotel: boutique_hotel, nature_eco_lodge, hostel, serviced_apartment, aparthotel, hotel, resort). Set with property_type, both or neither.",
+                "enum": [
+                  "apartments",
+                  "houses",
+                  "secondary_units",
+                  "unique_homes",
+                  "bnb",
+                  "boutique_hotels_and_more",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "published": {
+                "description": "Whether the home is listed on the site.",
+                "type": "boolean"
+              },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "total_floors": {
+                "description": "Total floors in the property; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "wifi_network": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wifi_password": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "year_built": {
+                "description": "Year the property was built; null when not said.",
+                "maximum": 9007199254740991,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "product_id",
+              "name",
+              "location_id",
+              "timezone",
+              "currency",
+              "base_price_minor",
+              "base_price_tax_behavior",
+              "check_in_time",
+              "check_out_time",
+              "max_guests",
+              "min_nights",
+              "description",
+              "published",
+              "address",
+              "latitude",
+              "longitude",
+              "stay_map_sharing",
+              "property_type_group",
+              "property_type",
+              "listing_type",
+              "total_floors",
+              "listing_floor",
+              "year_built",
+              "property_size",
+              "property_size_unit",
+              "bedrooms",
+              "beds",
+              "bathrooms",
+              "amenities",
+              "cancellation_policy",
+              "long_term_cancellation_policy",
+              "check_in_method",
+              "check_in_instructions",
+              "wifi_network",
+              "wifi_password",
+              "directions",
+              "house_manual",
+              "checkout_instructions",
+              "assigned_member_id",
+              "assigned_team_id",
+              "channel",
+              "photos",
+              "photo_rooms"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "home"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "stays",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -95785,7 +99021,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                 "properties": {
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -96050,6 +99286,77 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "photo_rooms": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "type": {
+                          "enum": [
+                            "art_studio",
+                            "backyard",
+                            "balcony",
+                            "bedroom",
+                            "bowling_alley",
+                            "childrens_playroom",
+                            "courtyard",
+                            "darkroom",
+                            "deck",
+                            "dining_area",
+                            "event_room",
+                            "exterior",
+                            "front_yard",
+                            "full_bathroom",
+                            "full_kitchen",
+                            "game_room",
+                            "garage",
+                            "garden",
+                            "gym",
+                            "half_bathroom",
+                            "hot_tub",
+                            "kitchenette",
+                            "laundry_area",
+                            "library",
+                            "living_room",
+                            "movie_theater",
+                            "music_studio",
+                            "office",
+                            "patio",
+                            "photography_studio",
+                            "pool",
+                            "porch",
+                            "rooftop",
+                            "sunroom",
+                            "terrace",
+                            "theme_room",
+                            "wine_cellar",
+                            "woodshop",
+                            "workshop",
+                            "workspace"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "property_size": {
                     "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                     "exclusiveMinimum": 0,
@@ -96173,6 +99480,7 @@
                   "min_nights",
                   "assigned_member_id",
                   "assigned_team_id",
+                  "photo_rooms",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -97316,7 +100624,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                 "properties": {
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -97581,6 +100889,77 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "photo_rooms": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "type": {
+                          "enum": [
+                            "art_studio",
+                            "backyard",
+                            "balcony",
+                            "bedroom",
+                            "bowling_alley",
+                            "childrens_playroom",
+                            "courtyard",
+                            "darkroom",
+                            "deck",
+                            "dining_area",
+                            "event_room",
+                            "exterior",
+                            "front_yard",
+                            "full_bathroom",
+                            "full_kitchen",
+                            "game_room",
+                            "garage",
+                            "garden",
+                            "gym",
+                            "half_bathroom",
+                            "hot_tub",
+                            "kitchenette",
+                            "laundry_area",
+                            "library",
+                            "living_room",
+                            "movie_theater",
+                            "music_studio",
+                            "office",
+                            "patio",
+                            "photography_studio",
+                            "pool",
+                            "porch",
+                            "rooftop",
+                            "sunroom",
+                            "terrace",
+                            "theme_room",
+                            "wine_cellar",
+                            "woodshop",
+                            "workshop",
+                            "workspace"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "property_size": {
                     "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                     "exclusiveMinimum": 0,
@@ -97704,6 +101083,7 @@
                   "min_nights",
                   "assigned_member_id",
                   "assigned_team_id",
+                  "photo_rooms",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -98465,6 +101845,78 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "photo_rooms": {
+                "description": "Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "type": {
+                      "enum": [
+                        "art_studio",
+                        "backyard",
+                        "balcony",
+                        "bedroom",
+                        "bowling_alley",
+                        "childrens_playroom",
+                        "courtyard",
+                        "darkroom",
+                        "deck",
+                        "dining_area",
+                        "event_room",
+                        "exterior",
+                        "front_yard",
+                        "full_bathroom",
+                        "full_kitchen",
+                        "game_room",
+                        "garage",
+                        "garden",
+                        "gym",
+                        "half_bathroom",
+                        "hot_tub",
+                        "kitchenette",
+                        "laundry_area",
+                        "library",
+                        "living_room",
+                        "movie_theater",
+                        "music_studio",
+                        "office",
+                        "patio",
+                        "photography_studio",
+                        "pool",
+                        "porch",
+                        "rooftop",
+                        "sunroom",
+                        "terrace",
+                        "theme_room",
+                        "wine_cellar",
+                        "woodshop",
+                        "workshop",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "photos": {
                 "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
                 "items": {
@@ -98625,6 +102077,14 @@
                 "description": "Whether the home is listed on the site.",
                 "type": "boolean"
               },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
@@ -98681,6 +102141,7 @@
               "address",
               "latitude",
               "longitude",
+              "stay_map_sharing",
               "property_type_group",
               "property_type",
               "listing_type",
@@ -98705,7 +102166,8 @@
               "assigned_member_id",
               "assigned_team_id",
               "channel",
-              "photos"
+              "photos",
+              "photo_rooms"
             ],
             "type": "object"
           },
@@ -104869,7 +108331,7 @@
     {
       "name": "update_location",
       "title": "Update location",
-      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, and contact info. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
+      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, and map sharing for its places to stay. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -105203,6 +108665,14 @@
               "draft",
               "active",
               "inactive"
+            ],
+            "type": "string"
+          },
+          "stay_map_sharing": {
+            "description": "Public map precision for every place to stay at this location. General shows the area; specific shows its precise pin. Both keep the street address private until a confirmed booking. Omit to keep the saved choice.",
+            "enum": [
+              "general",
+              "specific"
             ],
             "type": "string"
           },
@@ -107216,7 +110686,7 @@
                         "type": "string"
                       },
                       "stay": {
-                        "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                        "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                         "properties": {
                           "amenities": {
                             "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -107481,6 +110951,77 @@
                             "minimum": 1,
                             "type": "integer"
                           },
+                          "photo_rooms": {
+                            "items": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "id": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "photo_ids": {
+                                  "items": {
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "type": "array",
+                                  "uniqueItems": true
+                                },
+                                "type": {
+                                  "enum": [
+                                    "art_studio",
+                                    "backyard",
+                                    "balcony",
+                                    "bedroom",
+                                    "bowling_alley",
+                                    "childrens_playroom",
+                                    "courtyard",
+                                    "darkroom",
+                                    "deck",
+                                    "dining_area",
+                                    "event_room",
+                                    "exterior",
+                                    "front_yard",
+                                    "full_bathroom",
+                                    "full_kitchen",
+                                    "game_room",
+                                    "garage",
+                                    "garden",
+                                    "gym",
+                                    "half_bathroom",
+                                    "hot_tub",
+                                    "kitchenette",
+                                    "laundry_area",
+                                    "library",
+                                    "living_room",
+                                    "movie_theater",
+                                    "music_studio",
+                                    "office",
+                                    "patio",
+                                    "photography_studio",
+                                    "pool",
+                                    "porch",
+                                    "rooftop",
+                                    "sunroom",
+                                    "terrace",
+                                    "theme_room",
+                                    "wine_cellar",
+                                    "woodshop",
+                                    "workshop",
+                                    "workspace"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "type",
+                                "photo_ids"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
                           "property_size": {
                             "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                             "exclusiveMinimum": 0,
@@ -107604,6 +111145,7 @@
                           "min_nights",
                           "assigned_member_id",
                           "assigned_team_id",
+                          "photo_rooms",
                           "property_type_group",
                           "property_type",
                           "listing_type",
@@ -111534,7 +115076,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.",
                 "properties": {
                   "amenities": {
                     "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
@@ -111799,6 +115341,77 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "photo_rooms": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "photo_ids": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "type": {
+                          "enum": [
+                            "art_studio",
+                            "backyard",
+                            "balcony",
+                            "bedroom",
+                            "bowling_alley",
+                            "childrens_playroom",
+                            "courtyard",
+                            "darkroom",
+                            "deck",
+                            "dining_area",
+                            "event_room",
+                            "exterior",
+                            "front_yard",
+                            "full_bathroom",
+                            "full_kitchen",
+                            "game_room",
+                            "garage",
+                            "garden",
+                            "gym",
+                            "half_bathroom",
+                            "hot_tub",
+                            "kitchenette",
+                            "laundry_area",
+                            "library",
+                            "living_room",
+                            "movie_theater",
+                            "music_studio",
+                            "office",
+                            "patio",
+                            "photography_studio",
+                            "pool",
+                            "porch",
+                            "rooftop",
+                            "sunroom",
+                            "terrace",
+                            "theme_room",
+                            "wine_cellar",
+                            "woodshop",
+                            "workshop",
+                            "workspace"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "type",
+                        "photo_ids"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "property_size": {
                     "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
                     "exclusiveMinimum": 0,
@@ -111922,6 +115535,7 @@
                   "min_nights",
                   "assigned_member_id",
                   "assigned_team_id",
+                  "photo_rooms",
                   "property_type_group",
                   "property_type",
                   "listing_type",
@@ -121062,6 +124676,78 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "photo_rooms": {
+                "description": "Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "type": {
+                      "enum": [
+                        "art_studio",
+                        "backyard",
+                        "balcony",
+                        "bedroom",
+                        "bowling_alley",
+                        "childrens_playroom",
+                        "courtyard",
+                        "darkroom",
+                        "deck",
+                        "dining_area",
+                        "event_room",
+                        "exterior",
+                        "front_yard",
+                        "full_bathroom",
+                        "full_kitchen",
+                        "game_room",
+                        "garage",
+                        "garden",
+                        "gym",
+                        "half_bathroom",
+                        "hot_tub",
+                        "kitchenette",
+                        "laundry_area",
+                        "library",
+                        "living_room",
+                        "movie_theater",
+                        "music_studio",
+                        "office",
+                        "patio",
+                        "photography_studio",
+                        "pool",
+                        "porch",
+                        "rooftop",
+                        "sunroom",
+                        "terrace",
+                        "theme_room",
+                        "wine_cellar",
+                        "woodshop",
+                        "workshop",
+                        "workspace"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "type",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "photos": {
                 "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
                 "items": {
@@ -121222,6 +124908,14 @@
                 "description": "Whether the home is listed on the site.",
                 "type": "boolean"
               },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
@@ -121278,6 +124972,7 @@
               "address",
               "latitude",
               "longitude",
+              "stay_map_sharing",
               "property_type_group",
               "property_type",
               "listing_type",
@@ -121302,7 +124997,8 @@
               "assigned_member_id",
               "assigned_team_id",
               "channel",
-              "photos"
+              "photos",
+              "photo_rooms"
             ],
             "type": "object"
           }
@@ -121458,18 +125154,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:6b6c5210d3c4d22ac40117fe57ef7618a0025b2c4d7c044ec2cdf10823eb91c2",
-        "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
+        "create_product": "sha256:8e496bb4137b6dec40f2d48706d0f78177a6fa021bda67bc429eadd8a3dd40b8",
+        "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:c79d6fb56dd3348fa86f240df5a03df56a1c61e9149272c92701c498ef026583",
+        "reconcile_products": "sha256:ab0df5ae82726467f0e1b86bbd89578375fe8f1568ca725fa0e00552b862676e",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:a98669973156cf353a911e15ddc542aedbc30a6cbc61653d444092a8bbcf4bbe",
-        "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3"
+        "update_menu": "sha256:e9cf2b6b003db772a0d034aa10b867089cab71b86b833e3234fef4760de92d12",
+        "update_product": "sha256:9d38dbb14c16921d5290e044c091e1f7467f2ae29e402ecfc8741772e9945d52"
       }
     },
     {
@@ -121514,8 +125210,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
-        "create_product": "sha256:6b6c5210d3c4d22ac40117fe57ef7618a0025b2c4d7c044ec2cdf10823eb91c2",
-        "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
+        "create_product": "sha256:8e496bb4137b6dec40f2d48706d0f78177a6fa021bda67bc429eadd8a3dd40b8",
+        "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
@@ -121577,9 +125273,9 @@
       },
       "toolContracts": {
         "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
-        "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
+        "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
+        "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
@@ -121595,7 +125291,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:6b6c5210d3c4d22ac40117fe57ef7618a0025b2c4d7c044ec2cdf10823eb91c2",
+        "create_product": "sha256:8e496bb4137b6dec40f2d48706d0f78177a6fa021bda67bc429eadd8a3dd40b8",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
@@ -121606,7 +125302,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
-        "update_menu": "sha256:a98669973156cf353a911e15ddc542aedbc30a6cbc61653d444092a8bbcf4bbe",
+        "update_menu": "sha256:e9cf2b6b003db772a0d034aa10b867089cab71b86b833e3234fef4760de92d12",
         "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
         "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
@@ -121620,8 +125316,8 @@
         "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
-        "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
+        "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
+        "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -121629,7 +125325,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:c007ea9559df74ac50714b2adf181eb57053b53523366adb89d0df9fff291b3b",
-        "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3",
+        "update_product": "sha256:9d38dbb14c16921d5290e044c091e1f7467f2ae29e402ecfc8741772e9945d52",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -121649,7 +125345,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
-        "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3",
+        "update_product": "sha256:9d38dbb14c16921d5290e044c091e1f7467f2ae29e402ecfc8741772e9945d52",
         "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
@@ -121665,14 +125361,14 @@
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
-        "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
+        "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3"
+        "update_product": "sha256:9d38dbb14c16921d5290e044c091e1f7467f2ae29e402ecfc8741772e9945d52"
       }
     }
   ],
@@ -121681,7 +125377,7 @@
       "slug": "what-you-can-edit-through-chatgpt",
       "contentHash": "sha256:6b1c5205427d0e9f78516a5fa1f2af3a556033059a0801405c3cc9fc076fe2af",
       "toolContracts": {
-        "create_location": "sha256:ef110ee2087e2488032115e25a979dfe72197c511ddb24c2318fa5fea1d48935",
+        "create_location": "sha256:76191e793ce66aae9289cf1e505b47bd44a04320d4b29660f173959391e9c5b0",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
@@ -121700,7 +125396,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
+        "get_product": "sha256:c463ffc483f408a1ab448d1a1ccd47b43b16442190ea3a615c9d500886e640b8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
@@ -121708,7 +125404,7 @@
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:a98669973156cf353a911e15ddc542aedbc30a6cbc61653d444092a8bbcf4bbe"
+        "update_menu": "sha256:e9cf2b6b003db772a0d034aa10b867089cab71b86b833e3234fef4760de92d12"
       }
     },
     {

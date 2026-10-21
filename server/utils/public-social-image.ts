@@ -1,8 +1,10 @@
-import type { DbClient } from '~/server/db'
+import { d1JsonStringSet, queryAll, type DbClient } from '~/server/db'
 import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import type { MediaPlacementItem } from '~/server/utils/media-placement'
 import type { MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 import { publicSocialMediaFromPlacements, type PublicSocialMedia as PublicSocialMediaContract } from '~/utils/social-metadata'
+import { publicLocationIsProtected } from '~/shared/location-sharing'
+import { publicLocationProtectedSql } from '~/server/utils/public-location-privacy'
 
 export type PublicSocialMedia = PublicSocialMediaContract<MediaPlacementItem>
 
@@ -15,6 +17,18 @@ export interface PublicMediaPlacement {
   mime_type?: string | null
   width?: number | null
   height?: number | null
+}
+
+/** Home locations use their actual picture; generated Location prose may contain private address facts. */
+export function publicLocationSocialMediaFromPlacements<T extends PublicMediaPlacement>(
+  source: { is_stay_location: unknown },
+  ownerMedia: readonly T[],
+  organizationMedia: readonly PublicMediaPlacement[],
+) {
+  const media = publicLocationIsProtected(source.is_stay_location)
+    ? ownerMedia.filter(item => item.slot !== 'social_card')
+    : ownerMedia
+  return publicSocialMediaFromPlacements('business_location', media, organizationMedia)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -73,13 +87,21 @@ export async function loadPublicSocialMedia(
   const uniqueOwnerIds = [...new Set(ownerIds)]
   // The organization's placements are read for its `social_share`, which is
   // the picture of an owner that has none of its own — never its logo.
-  const [ownerPlacements, organizationPlacements] = await Promise.all([
+  const [ownerPlacements, organizationPlacements, locationPrivacyRows] = await Promise.all([
     readMediaPlacements(db, { organizationId, ownerType, ownerIds: uniqueOwnerIds }),
     readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] }),
+    ownerType === 'business_location' ? queryAll<{ id: string; is_stay_location: number }>(db, `
+      SELECT bl.id, ${publicLocationProtectedSql('bl')} AS is_stay_location FROM business_locations bl
+       WHERE bl.organization_id = ? AND bl.id IN (SELECT value FROM json_each(?))
+    `, [organizationId, d1JsonStringSet(uniqueOwnerIds)]) : [],
   ])
   const organizationMedia = organizationPlacements.get(organizationId) ?? []
-  return new Map(uniqueOwnerIds.map(ownerId => [
-    ownerId,
-    publicSocialMediaFromPlacements(ownerType, ownerPlacements.get(ownerId) ?? [], organizationMedia),
-  ]))
+  const locationPrivacy = new Map(locationPrivacyRows.map(location => [location.id, location]))
+  return new Map(uniqueOwnerIds.map((ownerId): [string, PublicSocialMedia] => {
+    const media = ownerPlacements.get(ownerId) ?? []
+    if (ownerType !== 'business_location') return [ownerId, publicSocialMediaFromPlacements(ownerType, media, organizationMedia)]
+    const source = locationPrivacy.get(ownerId)
+    if (!source) throw new Error('Location social image privacy context is unavailable')
+    return [ownerId, publicLocationSocialMediaFromPlacements(source, media, organizationMedia)]
+  }))
 }

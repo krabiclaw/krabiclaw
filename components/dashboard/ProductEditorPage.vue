@@ -139,6 +139,7 @@ import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
 import type { StayArrivalGuide, StayArrivalField } from '~/shared/stay-arrival'
 import type { StaySafetySection } from '~/shared/stay-safety'
+import type { StayPhotoRoom, StayPhotoRoomType } from '~/shared/stay-photos'
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
@@ -274,7 +275,11 @@ export interface ProductEditor {
   moveGalleryPhoto: (from: number, to: number) => Promise<void>
   /** The Product's cover and gallery, in the same order guests see them. */
   photoAssets: ComputedRef<Product['gallery']>
-  addStayPhoto: (assetId: string) => Promise<boolean>
+  photoRooms: ComputedRef<StayPhotoRoom[]>
+  createStayPhotoRoom: (type: StayPhotoRoomType) => Promise<StayPhotoRoom | null>
+  deleteStayPhotoRoom: (roomId: string) => Promise<boolean>
+  moveStayPhotos: (photos: Array<{ photo_id: string; expected_room_id: string | null }>, target: { room_id: string | null } | { new_room_type: StayPhotoRoomType }) => Promise<boolean>
+  addStayPhoto: (assetId: string, roomId?: string) => Promise<boolean>
   reorderStayPhotos: (photoIds: string[]) => Promise<boolean>
   describeStayPhoto: (photoId: string, text: string) => Promise<boolean>
   removeStayPhotos: (photoIds: string[]) => Promise<boolean>
@@ -612,6 +617,7 @@ function restorePreviewFocus() {
   if (previewButton.value?.$el instanceof HTMLElement && previewButton.value.$el.isConnected) previewButton.value.$el.focus({ preventScroll: true })
 }
 const photoAssets = computed(() => product.value ? uniqueMediaAssets([...(product.value.image ? [product.value.image] : []), ...product.value.gallery]) : [])
+const photoRooms = computed(() => product.value?.stay?.photo_rooms ?? [])
 const stayPhotos = computed(() => photoAssets.value.map(mediaStillUrl).filter((url): url is string => Boolean(url)))
 const stayAmenityPreview = computed(() => (product.value?.stay?.amenities ?? []).map(code => ({ code, ...STAY_AMENITIES[code] })).sort((left, right) => left.label.localeCompare(right.label)))
 const savedHouseRules = computed(() => product.value?.kind === 'stay' ? stayHouseRuleLines(product.value.details, value => formatTime(value, locale.value)) : [])
@@ -639,6 +645,7 @@ const stayConfigError = computed(() => {
     !MINUTE_TIME_PATTERN.test(stay.check_out_time) && 'checkout time',
     !(Number.isInteger(stay.max_guests) && stay.max_guests >= 1 && stay.max_guests <= 99) && 'sleeps',
     !(Number.isInteger(stay.min_nights) && stay.min_nights >= 1 && stay.min_nights <= 365) && 'minimum nights',
+    !Array.isArray(stay.photo_rooms) && 'photo tour',
   ].filter(Boolean)
   return invalid.length ? `This place to stay has invalid stay settings: ${invalid.join(', ')}.` : null
 })
@@ -1777,10 +1784,10 @@ async function changeStayPhotos(change: () => Promise<unknown>): Promise<boolean
   }
 }
 
-async function addStayPhoto(assetId: string) {
+async function addStayPhoto(assetId: string, roomId?: string) {
   return await changeStayPhotos(async () => {
     if (photoAssets.value.some(photo => photo.asset_id === assetId)) throw new Error('This photo is already on the listing.')
-    await dashboardApi(stayPhotoUrl(), { method: 'POST', body: { asset_id: assetId }, validate: isStayPhotoMutation })
+    await dashboardApi(stayPhotoUrl(), { method: 'POST', body: { asset_id: assetId, ...(roomId ? { room_id: roomId } : {}) }, validate: isStayPhotoMutation })
   })
 }
 
@@ -1802,6 +1809,34 @@ async function removeStayPhotos(photoIds: string[]) {
     // would race their whole-list replacements against one another.
     for (const photoId of photoIds) await dashboardApi(`${stayPhotoUrl()}/${encodeURIComponent(photoId)}`, { method: 'DELETE', validate: isStayPhotoMutation })
   })
+}
+
+const stayRoomsUrl = () => `/api/dashboard/stay-homes/${encodeURIComponent(productId.value)}/rooms`
+
+async function createStayPhotoRoom(type: StayPhotoRoomType): Promise<StayPhotoRoom | null> {
+  let roomId: string | null = null
+  if (!await changeStayPhotos(async () => {
+    const result = await dashboardApi(stayRoomsUrl(), {
+      method: 'POST', body: { type },
+      validate: (value: unknown): value is { home: { product_id: string; photos: unknown[] }; room: { id: string } } =>
+        isRecord(value) && isRecord(value.room) && typeof value.room.id === 'string' && isStayPhotoMutation(value),
+    })
+    roomId = result.room.id
+  })) return null
+  const room = photoRooms.value.find(entry => entry.id === roomId)
+  if (!room) {
+    photoError.value = 'The room was added, but it could not be read again.'
+    return null
+  }
+  return room
+}
+
+async function deleteStayPhotoRoom(roomId: string) {
+  return await changeStayPhotos(async () => await dashboardApi(`${stayRoomsUrl()}/${encodeURIComponent(roomId)}`, { method: 'DELETE', validate: isStayPhotoMutation }))
+}
+
+async function moveStayPhotos(photos: Array<{ photo_id: string; expected_room_id: string | null }>, target: { room_id: string | null } | { new_room_type: StayPhotoRoomType }) {
+  return await changeStayPhotos(async () => await dashboardApi(`${stayPhotoUrl()}/move`, { method: 'PUT', body: { ...target, photos }, validate: isStayPhotoMutation }))
 }
 
 // ── Localization ────────────────────────────────────────
@@ -1908,6 +1943,10 @@ provide(productEditorKey, {
   removeGalleryPhoto,
   moveGalleryPhoto,
   photoAssets,
+  photoRooms,
+  createStayPhotoRoom,
+  deleteStayPhotoRoom,
+  moveStayPhotos,
   addStayPhoto,
   reorderStayPhotos,
   describeStayPhoto,

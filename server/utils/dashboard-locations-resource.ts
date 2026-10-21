@@ -4,11 +4,13 @@ import { queryAll } from '~/server/db'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { parsePostalAddress } from '~/utils/postal-address'
+import type { StayMapSharing } from '~/shared/stay-listing'
 
 export interface DashboardLocationResource {
   id: string
   slug: string
   title: string
+  stay_map_sharing: StayMapSharing
   status: string
   address: string | null | Record<string, unknown>
   phone: string | null
@@ -23,7 +25,7 @@ export async function listDashboardLocationsResource(
     organizationSlug: scope.organizationSlug,
   })
   const locations = await queryAll<DashboardLocationResource>(db, `
-    SELECT id, slug, title, status, address, phone, email
+    SELECT id, slug, title, status, address, stay_map_sharing, phone, email
       FROM business_locations
      WHERE organization_id = ?
      ORDER BY title ASC

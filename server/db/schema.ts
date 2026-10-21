@@ -6,6 +6,8 @@ import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, fo
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
 import { NOTIFICATION_CATEGORIES, PUSH_ONLY_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
+import { STAY_MAP_SHARING_MODES } from "../../shared/stay-listing"
+import { STAY_PHOTO_ROOM_TYPES, type StayPhotoRoomType } from "../../shared/stay-photos"
 
 export const account = sqliteTable("account", {
 	id: text().primaryKey(),
@@ -31,6 +33,7 @@ export const business_locations = sqliteTable("business_locations", {
 	slug: text().notNull(),
 	title: text().notNull(),
 	address: text(),
+	stay_map_sharing: text({ enum: STAY_MAP_SHARING_MODES }).default("general").notNull(),
 	phone: text(),
 	website_url: text(),
 	maps_url: text(),
@@ -73,6 +76,7 @@ export const business_locations = sqliteTable("business_locations", {
 	check("business_locations_opening_hours_check", sql`opening_hours IS NULL OR (json_valid(opening_hours) AND json_type(opening_hours) IS 'object' AND json_type(opening_hours, '$.periods') IS 'array')`),
 	check("business_locations_special_hours_check", sql`special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array')`),
 	check("business_locations_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
+	check("business_locations_stay_map_sharing_check", sql`stay_map_sharing IN (${sql.raw(STAY_MAP_SHARING_MODES.map(mode => `'${mode}'`).join(', '))})`),
 ]);
 
 
@@ -1176,6 +1180,39 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_directions_check", sql`directions IS NULL OR length(trim(directions)) BETWEEN 1 AND 5000`),
 	check("product_stay_configs_house_manual_check", sql`house_manual IS NULL OR length(trim(house_manual)) BETWEEN 1 AND 5000`),
 	check("product_stay_configs_checkout_instructions_check", sql`json_valid(checkout_instructions) AND json_type(checkout_instructions) = 'array'`),
+]);
+
+// Authored spaces in a home's photo tour. Counts and amenities do not create rooms.
+export const product_stay_photo_rooms = sqliteTable("product_stay_photo_rooms", {
+	id: text().primaryKey(),
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	type: text().$type<StayPhotoRoomType>().notNull(),
+	sort_order: integer().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	created_by: text().notNull(),
+}, table => [
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_stay_photo_rooms_home_fk" }).onDelete("cascade"),
+	unique("product_stay_photo_rooms_scope_id_unique").on(table.organization_id, table.product_id, table.id),
+	unique("product_stay_photo_rooms_scope_order_unique").on(table.organization_id, table.product_id, table.sort_order),
+	check("product_stay_photo_rooms_type_check", sql`type IN (${sql.raw(Object.keys(STAY_PHOTO_ROOM_TYPES).map(type => `'${type}'`).join(', '))})`),
+	check("product_stay_photo_rooms_order_check", sql`sort_order >= 0`),
+	check("product_stay_photo_rooms_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+]);
+
+// An asset may belong to one room per home. Its Product image/gallery
+// placements remain the photo source; no row means Additional photos.
+export const product_stay_photo_room_memberships = sqliteTable("product_stay_photo_room_memberships", {
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	asset_id: text().notNull(),
+	room_id: text().notNull(),
+}, table => [
+	primaryKey({ columns: [table.organization_id, table.product_id, table.asset_id] }),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.room_id], foreignColumns: [product_stay_photo_rooms.organization_id, product_stay_photo_rooms.product_id, product_stay_photo_rooms.id], name: "product_stay_photo_room_memberships_room_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.asset_id], foreignColumns: [media_assets.organization_id, media_assets.id], name: "product_stay_photo_room_memberships_asset_fk" }).onDelete("cascade"),
+	index("product_stay_photo_room_memberships_room_idx").on(table.organization_id, table.product_id, table.room_id),
+	index("product_stay_photo_room_memberships_asset_idx").on(table.organization_id, table.asset_id),
 ]);
 
 // Workspace-owned reply text, optionally scheduled for explicitly named homes.

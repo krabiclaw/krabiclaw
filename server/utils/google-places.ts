@@ -3,37 +3,10 @@ import { serializeOpeningHours } from '~/server/utils/location-management'
 import type { D1Database } from '@cloudflare/workers-types'
 import { normalizeGoogleReview, type GoogleReview } from '~/shared/google-review'
 import { executeBatch } from '~/server/db'
-import { formatPostalAddress, parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { toE164 } from '~/utils/phone'
 
 const PLACES_BASE = 'https://places.googleapis.com/v1/places'
-
-// Generate a canonical Google Maps embed URL from the location data already
-// stored by the Places importer. This helper does not call Google.
-export const calculateMapEmbedUrl = (loc: {
-  title: string
-  maps_url?: string | null
-  latitude?: number | null
-  longitude?: number | null
-  address?: PostalAddress | null
-}) => {
-  if (loc.maps_url) {
-    try {
-      const url = new URL(loc.maps_url)
-      const cid = url.searchParams.get('cid')
-      if (cid) return `https://maps.google.com/maps?cid=${cid}&output=embed`
-    } catch { /* use the next available source */ }
-  }
-
-  if (loc.latitude != null && loc.longitude != null) {
-    return `https://maps.google.com/maps?q=${loc.latitude},${loc.longitude}&output=embed`
-  }
-
-  const address = formatPostalAddress(loc.address ?? null)
-  if (!address) return null
-  const query = loc.title ? `${loc.title}, ${address}` : address
-  return `https://maps.google.com/maps?q=${encodeURIComponent(String(query))}&output=embed`
-}
 
 const DETAIL_FIELD_MASK = [
   'id',

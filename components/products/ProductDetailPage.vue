@@ -42,9 +42,9 @@
               </span>
               <span aria-hidden="true">·</span>
               <span class="underline">{{ reviewCountLabel }}</span>
-              <span aria-hidden="true">·</span>
+              <span v-if="stayPlaceName" aria-hidden="true">·</span>
             </template>
-            <span class="underline">{{ stayPlaceName }}</span>
+            <span v-if="stayPlaceName" class="underline">{{ stayPlaceName }}</span>
             <ShareButton class="ml-auto" :title="displayTitle" />
           </div>
         </header>
@@ -52,7 +52,7 @@
         <!-- Airbnb's experience and service pages: the photographs on the left and
              the title beside them; a stay's photographs run the full width. -->
         <div :class="!isStay && galleryItems.length ? 'lg:grid lg:grid-cols-2 lg:items-center lg:gap-12' : undefined">
-        <MediaGallery v-if="galleryItems.length" :items="galleryItems" :title="displayTitle" />
+        <MediaGallery v-if="galleryItems.length" :items="galleryItems" :title="displayTitle" :photo-groups="photoGroups" />
 
         <header v-if="!isStay" class="mx-auto mt-10 max-w-3xl text-center" :class="galleryItems.length ? 'lg:mt-0' : undefined">
           <p class="tenant-kicker mb-3">{{ collectionName }}</p>
@@ -103,7 +103,7 @@
           <!-- Airbnb's overview under the photos: what kind of place, where, and its size. -->
           <div v-if="isStay" class="pb-6">
             <h2 class="text-xl font-semibold text-default sm:text-2xl">
-              {{ stayPropertyTypeLabel ? `${stayPropertyTypeLabel} in ${stayPlaceName}` : displayTitle }}
+              {{ stayPropertyTypeLabel && stayPlaceName ? `${stayPropertyTypeLabel} in ${stayPlaceName}` : stayPropertyTypeLabel || displayTitle }}
             </h2>
             <p class="mt-1 text-default">{{ staySpecsSummary }}</p>
             <HostedBy class="mt-6 border-t border-default pt-6" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" />
@@ -220,8 +220,9 @@
               <div class="flex items-start gap-4 p-6">
                 <TenantIcon name="map-pin" class="mt-0.5 size-5 shrink-0 text-primary" />
                 <div class="min-w-0">
-                  <p class="font-semibold text-default">{{ location?.title ?? organizationName }}</p>
+                  <p class="font-semibold text-default">{{ locationName }}</p>
                   <p v-if="addressLine" class="mt-1 text-sm text-muted">{{ addressLine }}</p>
+                  <p v-if="isStay && location?.stay_map_sharing && mapEmbedUrl" class="mt-2 text-sm leading-6 text-muted">{{ t(location.public_area?.approximate ? 'stay.general_location_notice' : 'stay.specific_location_notice') }}</p>
                   <p v-if="location?.phone" class="mt-1 text-sm text-muted">{{ formatPhone(location.phone) }}</p>
                   <p v-if="meetingPoint" class="mt-3 whitespace-pre-line text-sm leading-6 text-default">{{ meetingPoint }}</p>
                   <a
@@ -239,7 +240,7 @@
               <iframe
                 v-if="mapEmbedUrl"
                 :src="mapEmbedUrl"
-                :title="location?.title ?? organizationName"
+                :title="locationName"
                 class="h-56 w-full border-t border-default"
                 style="border-width: 1px 0 0"
                 loading="lazy"
@@ -480,6 +481,8 @@ import type { ProductPresentation, PublicProduct } from '~/server/types/products
 import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
 import { STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { stayPhotoRoomName, stayPhotoTourReady } from '~/shared/stay-photos'
+import type { MediaGalleryGroup } from '~/components/MediaLightbox.vue'
 import type { CurrencyCode } from '~/shared/currencies'
 import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -505,7 +508,7 @@ import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 import MediaGallery from '~/components/MediaGallery.vue'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
-import { uniqueMediaAssets } from '~/shared/media-placement-contract'
+import { mediaStillUrl, uniqueMediaAssets } from '~/shared/media-placement-contract'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 
 const props = defineProps<{
@@ -683,11 +686,29 @@ const galleryItems = computed(() => uniqueMediaAssets([
   ...props.product.gallery,
   ...(props.pageDocument?.media.filter(asset => asset.slot === 'cover' || asset.slot === 'gallery') ?? []),
 ]).filter(asset => asset.public_url).map(asset => ({
+  asset_id: asset.asset_id,
   url: asset.public_url!,
   kind: asset.kind,
   poster: asset.kind === 'video' ? asset.thumbnail_url : undefined,
   alt: asset.alt_text ?? undefined,
 })))
+
+/** A room tour is public only when every authored room has renderable Product media. */
+const photoGroups = computed<MediaGalleryGroup[]>(() => {
+  if (!isStay.value) return []
+  const productMedia = uniqueMediaAssets([
+    ...(props.product.image ? [props.product.image] : []),
+    ...props.product.gallery,
+  ]).filter(asset => asset.public_url && mediaStillUrl(asset))
+  const productIds = new Set(productMedia.map(asset => asset.asset_id))
+  const rooms = (props.product.stay?.photo_rooms ?? []).map(room => ({ ...room, photo_ids: room.photo_ids.filter(id => productIds.has(id)) }))
+  if (!stayPhotoTourReady(rooms)) return []
+  const assigned = new Set(rooms.flatMap(room => room.photo_ids))
+  const groups = rooms.map(room => ({ id: room.id, title: stayPhotoRoomName(room, rooms, t(`stay.photo_room_types.${room.type}`)), asset_ids: room.photo_ids }))
+  const additional = galleryItems.value.filter(item => !assigned.has(item.asset_id)).map(item => item.asset_id)
+  if (additional.length) groups.push({ id: 'additional', title: t('stay.additional_photos'), asset_ids: additional })
+  return groups
+})
 
 /**
  * The two facts a guest decides on before opening the form: how long it runs
@@ -863,7 +884,8 @@ const thingsToKnow = computed(() => [
 
 const addressLine = computed(() => formatPostalAddress(props.location?.address ?? null))
 // A home is named by its town, as Airbnb's "Villa in Ao Nang"; its location's title is the home's own name.
-const stayPlaceName = computed(() => addressPlaceName(props.location?.address ?? null) || props.location?.title || props.organizationName)
+const stayPlaceName = computed(() => props.location?.public_area?.locality || props.location?.public_area?.administrative_area || props.location?.public_area?.label || addressPlaceName(props.location?.address ?? null))
+const locationName = computed(() => props.location?.public_area?.label || props.location?.title || props.organizationName)
 // A map from the coordinates the branch already has; no key, no second source.
 const mapEmbedUrl = computed(() => props.location?.map_embed_url ?? null)
 
