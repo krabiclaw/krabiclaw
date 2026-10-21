@@ -44,7 +44,7 @@
       <p v-if="eyebrow" data-field="hero.eyebrow" class="tenant-eyebrow mb-6 text-white/70">
         {{ eyebrow }}
       </p>
-      <h1 data-field="hero.title" class="tenant-display-lg max-w-4xl whitespace-pre-line text-white">
+      <h1 data-field="hero.title" :class="longTitle ? 'tenant-display-md' : 'tenant-display-lg'" class="max-w-4xl whitespace-pre-line text-white">
         {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--tenant-accent)]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
       </h1>
       <p v-if="description" class="mt-6 max-w-2xl text-lg text-white">
@@ -86,12 +86,12 @@
   <!-- Every other page opens on the site's band; a divider closing the hero section cuts the shield from it -->
   <template v-else>
     <section class="relative overflow-hidden bg-[var(--tenant-band)]" data-parity-section="page-hero">
-      <div class="tenant-container relative pb-12 pt-16 sm:pb-16 sm:pt-20">
+      <div class="tenant-container relative pb-16 pt-20 sm:pb-24 sm:pt-28">
         <div class="mx-auto max-w-4xl text-center">
           <p v-if="eyebrow" class="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--tenant-accent-strong)]">
             {{ eyebrow }}
           </p>
-          <h1 v-if="title" class="tenant-display text-4xl font-bold text-highlighted sm:text-5xl">
+          <h1 v-if="title" class="tenant-display-md text-highlighted">
             {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--tenant-accent-strong)]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
           </h1>
           <TenantRichText
@@ -136,6 +136,8 @@ const eyebrow = computed(() => blockText(props.block?.data?.eyebrow))
 const description = computed(() => blockText(props.block?.data?.description) || subtitle.value || (isHome.value ? '' : props.page.summary ?? ''))
 const descriptionParts = computed(() => description.value.split(/\n\s*\n/).map(part => part.trim()).filter(Boolean))
 const splitTitle = computed(() => splitAccent(title.value, blockText(props.block?.data?.accent)))
+// A home headline past a short line is set a size down, so it and its action fit the first screen.
+const longTitle = computed(() => title.value.length > 48)
 
 function destination(url: string): string {
   return url && isInternalRoute(url) ? localePath(url) : url
