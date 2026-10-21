@@ -45,8 +45,7 @@
         {{ eyebrow }}
       </p>
       <h1 data-field="hero.title" class="tenant-display-lg max-w-4xl whitespace-pre-line text-white">
-        {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--tenant-accent)]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}<br v-if="subtitle">
-        <em v-if="subtitle" data-field="hero.subtitle" class="tenant-italic">{{ subtitle }}</em>
+        {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--tenant-accent)]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
       </h1>
       <p v-if="description" class="mt-6 max-w-2xl text-lg text-white">
         {{ description }}
@@ -133,9 +132,8 @@ const isSchedule = computed(() => props.page.recipe === 'schedule')
 const title = computed(() => blockText(props.block?.data?.title) || props.page.title || '')
 const subtitle = computed(() => blockText(props.block?.data?.subtitle))
 const eyebrow = computed(() => blockText(props.block?.data?.eyebrow))
-// The home hero sets its subtitle under the title; other heroes have no
-// subtitle line, so their subtitle is the words beneath the title.
-const description = computed(() => blockText(props.block?.data?.description) || (isHome.value ? '' : subtitle.value) || (isHome.value ? '' : props.page.summary ?? ''))
+// A hero's subtitle is the words beneath its title; a page hero without one reads the page summary.
+const description = computed(() => blockText(props.block?.data?.description) || subtitle.value || (isHome.value ? '' : props.page.summary ?? ''))
 const descriptionParts = computed(() => description.value.split(/\n\s*\n/).map(part => part.trim()).filter(Boolean))
 const splitTitle = computed(() => splitAccent(title.value, blockText(props.block?.data?.accent)))
 

@@ -123,12 +123,16 @@
 }
 
 /* Typography */
+/* Every display heading follows the site's heading casing. */
+.tenant-display, .tenant-display-lg, .tenant-display-md, .tenant-display-sm {
+  text-transform: var(--site-display-transform, none);
+}
+
 .tenant-display {
   font-family: var(--font-heading);
   font-weight: 400;
   letter-spacing: -0.01em;
   line-height: 1.15;
-  text-transform: var(--site-display-transform, none);
 }
 
 .tenant-display-lg {
