@@ -1830,6 +1830,8 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   const absentHomeAnswers = unknownHomeAccessibility.map(answer => answer.feature === 'path_to_entrance_lit_at_night' ? { ...answer, available: false } : answer)
   expect(absentHomeFeature.data!.product.stay.accessibility).toEqual(absentHomeAnswers)
   await expect(homeFeatureLink).toContainText('Not available')
+  await expect(page.getByTestId('editor-card-accessibility')).toContainText('Path to entrance lit at night: Not available')
+  await expect(page.getByTestId('editor-card-accessibility')).not.toContainText('Add details')
   await homeFeatureLink.click()
   await homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true }).check()
   await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
