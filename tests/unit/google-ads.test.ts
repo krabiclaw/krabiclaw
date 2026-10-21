@@ -27,7 +27,7 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
 
     if (url.endsWith('/customers:listAccessibleCustomers')) {
       return Response.json({
-        resourceNames: ['customers/3317427925', 'customers/1234567890', 'customers/5555555555'],
+        resourceNames: ['customers/3317427925', 'customers/1234567890', 'customers/5555555555', 'customers/8699514202'],
       })
     }
 
@@ -51,6 +51,10 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
       return Response.json({ error: { code: 403, message: 'The caller does not have permission', details: [{ errors: [{ errorCode: { authorizationError: 'DEVELOPER_TOKEN_NOT_APPROVED' }, message: 'The developer token is only approved for use with test accounts.' }] }] } }, { status: 403 })
     }
 
+    if (url.includes('/customers/8699514202/googleAds:search')) {
+      return Response.json({ error: { code: 403, message: 'The caller does not have permission', details: [{ errors: [{ errorCode: { authorizationError: 'CUSTOMER_NOT_ENABLED' }, message: "The customer account can't be accessed because it is not yet enabled or has been deactivated." }] }] } }, { status: 403 })
+    }
+
     if (url.includes('/customers/1234567890/googleAds:search')) {
       return Response.json({
         results: [
@@ -71,9 +75,11 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
   })
 
   const accounts = await listGoogleAdsAccounts('test-token', 'dev-tok-123')
-  assert.equal(accounts.length, 3)
+  assert.equal(accounts.length, 4)
   // An account Google will not describe carries Google's reason, not a made-up name.
   assert.deepEqual(accounts[2], { customerId: '5555555555', formattedCustomerId: '555-555-5555', descriptiveName: null, error: 'DEVELOPER_TOKEN_NOT_APPROVED: The developer token is only approved for use with test accounts.' })
+  // A cancelled or never-enabled account is marked, not reported as a failure.
+  assert.deepEqual(accounts[3], { customerId: '8699514202', formattedCustomerId: '869-951-4202', descriptiveName: null, notEnabled: true })
   assert.deepEqual(accounts[0], {
     customerId: '3317427925',
     formattedCustomerId: '331-742-7925',
@@ -90,7 +96,7 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
     timeZone: 'Asia/Bangkok',
     isManager: true,
   })
-  assert.equal(requests.length, 4)
+  assert.equal(requests.length, 5)
 })
 
 test('listGoogleAdsCampaigns queries campaigns and formats performance metrics', async (t) => {
@@ -149,6 +155,8 @@ test('creating a search campaign submits its budget, targeting and copy atomical
     assert.equal(campaign.name, 'New Blog Post Campaign')
     assert.equal(campaign.status, 'PAUSED')
     assert.equal(campaign.advertisingChannelType, 'SEARCH')
+    assert.equal(campaign.containsEuPoliticalAdvertising, 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING')
+    assert.deepEqual(campaign.networkSettings, { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false })
     assert.equal(campaign.campaignBudget, budget.resourceName)
     assert.equal(adGroup.campaign, campaign.resourceName)
     assert.deepEqual(operations.slice(3, 5).map((operation: {
@@ -187,6 +195,7 @@ test('creating a search campaign submits its budget, targeting and copy atomical
     keywords: [{ text: 'krabi tours', matchType: 'PHRASE' }, { text: 'local island guide', matchType: 'EXACT' }],
     headlines,
     descriptions,
+    containsEuPoliticalAdvertising: false,
   })
 
   assert.equal(providerFetch.mock.callCount(), 1)
@@ -206,7 +215,7 @@ test('creating a search campaign reports a provider rejection instead of returni
     assert.equal(url.origin, 'https://googleads.googleapis.com')
     assert.match(url.pathname, /^\/v\d+\/customers\/3317427925\/googleAds:mutate$/)
     assert.equal(init?.method, 'POST')
-    return Response.json({ error: { message: 'Customer account is not enabled.' } }, { status: 403 })
+    return Response.json({ error: { code: 400, message: 'Request contains an invalid argument.', details: [{ errors: [{ errorCode: { fieldError: 'REQUIRED' }, message: 'The required field was not present.', location: { fieldPathElements: [{ fieldName: 'mutate_operations', index: 1 }, { fieldName: 'campaign_operation' }, { fieldName: 'create' }, { fieldName: 'contains_eu_political_advertising' }] } }] }] } }, { status: 400 })
   })
 
   await assert.rejects(createGoogleAdsSearchCampaign('test-token', 'dev-tok', '331-742-7925', {
@@ -216,7 +225,8 @@ test('creating a search campaign reports a provider rejection instead of returni
     keywords: [{ text: 'krabi tours', matchType: 'PHRASE' }],
     headlines: ['Discover Krabi', 'Authentic Tours', 'Book Online Now'],
     descriptions: ['Explore breathtaking islands with local experts.', 'Personalized tours with guaranteed quality.'],
-  }), /Google Ads campaign creation failed \(403\).*Customer account is not enabled\./)
+    containsEuPoliticalAdvertising: false,
+  }), { message: 'Google Ads campaign creation failed: REQUIRED: The required field was not present. (mutate_operations[1].campaign_operation.create.contains_eu_political_advertising)' })
 })
 
 test('cloneGoogleAdsCampaign reads source campaign, applies replacements, and creates new campaign', async (t) => {
@@ -281,6 +291,7 @@ test('cloneGoogleAdsCampaign reads source campaign, applies replacements, and cr
     targetUrl: 'https://krabiclaw.com/blog/new-destination',
     headlineReplacements: { Island: 'Beach' },
     status: 'PAUSED',
+    containsEuPoliticalAdvertising: false,
   })
 
   assert.equal(cloned.campaignId, '201')

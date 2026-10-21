@@ -22,6 +22,7 @@
         <USelectMenu v-model="selected" :items="options" value-key="value" placeholder="Choose a Google Ads account" class="w-full" />
         <p v-if="!data.error && !options.length" class="mt-2 text-sm text-muted">This Google account has no accessible Google Ads accounts.</p>
         <p v-for="line in accountErrors" :key="line" class="mt-2 text-sm text-error">{{ line }}</p>
+        <p v-if="notEnabledCount" class="mt-2 text-sm text-muted">{{ notEnabledCount === 1 ? '1 account is' : `${notEnabledCount} accounts are` }} cancelled or not yet set up in Google Ads.</p>
       </UFormField>
     </IntegrationLeaf>
   </DashboardLeafPanel>
@@ -38,7 +39,7 @@ definePageMeta({ layout: 'dashboard' })
 interface AdsLeaf {
   account_id: string | null
   ads: ConnectedIntegration | null
-  accounts: Array<{ customerId: string; formattedCustomerId: string; descriptiveName: string | null; isManager?: boolean; error?: string }>
+  accounts: Array<{ customerId: string; formattedCustomerId: string; descriptiveName: string | null; isManager?: boolean; notEnabled?: true; error?: string }>
   error: string | null
 }
 
@@ -60,7 +61,7 @@ const { data, refresh, error: loadError } = await useAsyncData(
 )
 const selected = ref<string | undefined>()
 
-const options = computed(() => (data.value?.accounts ?? []).map(account => ({
+const options = computed(() => (data.value?.accounts ?? []).filter(account => !account.notEnabled).map(account => ({
   label: `${account.descriptiveName ? `${account.descriptiveName} (${account.formattedCustomerId})` : account.formattedCustomerId}${account.isManager ? ' · manager account' : ''}`,
   value: account.customerId,
   // A manager account holds other accounts and has no campaigns or results of its own.
@@ -68,6 +69,8 @@ const options = computed(() => (data.value?.accounts ?? []).map(account => ({
 })))
 // Google's reason for each account it would not describe, shown under the picker.
 const accountErrors = computed(() => (data.value?.accounts ?? []).filter(account => account.error).map(account => `${account.formattedCustomerId}: ${account.error}`))
+// Cancelled or never-enabled accounts cannot be connected; they are counted, not offered.
+const notEnabledCount = computed(() => (data.value?.accounts ?? []).filter(account => account.notEnabled).length)
 
 const loadFailure = computed(() => loadError.value ? getErrorMessage(loadError.value, 'Could not load Google Ads.') : '')
 const saving = ref(false)

@@ -2,7 +2,7 @@
   <DashboardIndexPanel id="catalog-menu" :title="chosenLocation ? `${chosenLocation.title} menu` : 'Menu'">
     <template v-if="chosenLocation?.status !== 'active' && chosenLocation" #right><UBadge label="Inactive location" color="neutral" variant="soft" /></template>
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Menu could not be loaded" :description="loadError" />
-    <div v-else class="space-y-10">
+    <div v-else-if="!locationId || chosenLocation" class="space-y-10">
       <section v-for="scope in scopes" :key="scope.id ?? 'shared'" :data-testid="`menu-scope-${scope.id ?? 'shared'}`">
         <div v-if="scopes.length > 1" class="flex items-center justify-between gap-4 px-1">
           <h2 class="text-sm font-semibold text-muted">{{ scope.title }}</h2>

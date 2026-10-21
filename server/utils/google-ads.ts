@@ -13,22 +13,25 @@ import { isValidTimezone } from '~/utils/timezone'
 export interface GoogleAdsCustomer {
   customerId: string
   formattedCustomerId: string
-  /** Null when Google would not describe the account; `error` says why. */
+  /** Null when Google would not describe the account; `error` or `notEnabled` says why. */
   descriptiveName: string | null
   currencyCode?: string
   timeZone?: string
   isManager?: boolean
+  /** Google reports the account cancelled or not yet set up (`CUSTOMER_NOT_ENABLED`); it cannot be connected. */
+  notEnabled?: true
   error?: string
 }
 
-/** Google's own message for a failed Ads request, kept short enough to show. */
-function googleAdsErrorMessage(status: number, body: string): string {
-  if (!body.trimStart().startsWith('{')) return `${status}: ${body.slice(0, 200)}`
-  const parsed = JSON.parse(body) as { error?: { message?: string; details?: Array<{ errors?: Array<{ message?: string; errorCode?: Record<string, string> }> }> } }
+/** Google's own code and message for a failed Ads request, kept short enough to show. */
+function googleAdsError(status: number, body: string): { code?: string; message: string } {
+  if (!body.trimStart().startsWith('{')) return { message: `${status}: ${body.slice(0, 200)}` }
+  const parsed = JSON.parse(body) as { error?: { message?: string; details?: Array<{ errors?: Array<{ message?: string; errorCode?: Record<string, string>; location?: { fieldPathElements?: Array<{ fieldName: string; index?: number }> } }> }> } }
   const detail = parsed.error?.details?.[0]?.errors?.[0]
   const code = detail?.errorCode ? Object.values(detail.errorCode)[0] : undefined
-  const message = detail?.message ?? parsed.error?.message ?? body.slice(0, 200)
-  return code ? `${code}: ${message}` : `${status}: ${message}`
+  const field = detail?.location?.fieldPathElements?.map(element => element.index === undefined ? element.fieldName : `${element.fieldName}[${element.index}]`).join('.')
+  const message = `${detail?.message ?? parsed.error?.message ?? body.slice(0, 200)}${field ? ` (${field})` : ''}`
+  return { code, message: code ? `${code}: ${message}` : `${status}: ${message}` }
 }
 
 /** Formats a 10-digit customer ID as XXX-XXX-XXXX */
@@ -66,8 +69,8 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
   }
 
   // 2. Each customer's own details. Google answers per account, and an account
-  // it will not describe (a token without access, a deactivated sub-account) is
-  // listed with Google's reason, never with a made-up name.
+  // it will not describe is listed with Google's reason, never with a made-up
+  // name; a cancelled or never-enabled account is marked as such.
   const customers: GoogleAdsCustomer[] = []
   for (const resourceName of resourceNames) {
     const customerId = resourceName.replace(/^customers\//, '')
@@ -80,7 +83,10 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
       }),
     })
     if (!searchResponse.ok) {
-      customers.push({ customerId, formattedCustomerId, descriptiveName: null, error: googleAdsErrorMessage(searchResponse.status, await searchResponse.text()) })
+      const failure = googleAdsError(searchResponse.status, await searchResponse.text())
+      customers.push(failure.code === 'CUSTOMER_NOT_ENABLED'
+        ? { customerId, formattedCustomerId, descriptiveName: null, notEnabled: true }
+        : { customerId, formattedCustomerId, descriptiveName: null, error: failure.message })
       continue
     }
     const searchData = (await searchResponse.json()) as {
@@ -335,6 +341,8 @@ export interface CreateSearchCampaignInput {
   headlines: string[]
   descriptions: string[]
   status?: 'ENABLED' | 'PAUSED'
+  /** The advertiser's EU political advertising self-declaration, which Google requires on every new campaign. */
+  containsEuPoliticalAdvertising: boolean
 }
 
 export interface CreateCampaignResult {
@@ -390,9 +398,11 @@ export async function createGoogleAdsSearchCampaign(
           status: input.status ?? 'PAUSED',
           advertisingChannelType: 'SEARCH',
           campaignBudget: `customers/${cid}/campaignBudgets/${tempBudgetId}`,
+          containsEuPoliticalAdvertising: input.containsEuPoliticalAdvertising ? 'CONTAINS_EU_POLITICAL_ADVERTISING' : 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING',
+          // Google Search only: Google refused Search Partners on create (CANNOT_TARGET_SEARCH_NETWORK).
           networkSettings: {
             targetGoogleSearch: true,
-            targetSearchNetwork: true,
+            targetSearchNetwork: false,
             targetContentNetwork: false,
             targetPartnerSearchNetwork: false,
           },
@@ -455,8 +465,7 @@ export async function createGoogleAdsSearchCampaign(
   })
 
   if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(`Google Ads campaign creation failed (${response.status}): ${errorText.slice(0, 500)}`)
+    throw new Error(`Google Ads campaign creation failed: ${googleAdsError(response.status, await response.text()).message}`)
   }
 
   const result = await response.json() as {
@@ -493,6 +502,7 @@ export interface CloneCampaignInput {
   headlineReplacements?: Record<string, string>
   additionalKeywords?: string[]
   status?: 'ENABLED' | 'PAUSED'
+  containsEuPoliticalAdvertising: boolean
 }
 
 /** Clones an existing campaign structure adapting it for a new landing page */
@@ -536,6 +546,7 @@ export async function cloneGoogleAdsCampaign(
       'Quality guaranteed with personalized service. Explore our latest offerings.',
     ],
     status: input.status ?? 'PAUSED',
+    containsEuPoliticalAdvertising: input.containsEuPoliticalAdvertising,
   })
 }
 

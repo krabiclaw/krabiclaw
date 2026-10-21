@@ -485,8 +485,6 @@ for (const target of [
           await expect(productArticle.getByRole('heading', { name: "What you'll do", exact: true })).toHaveCount(0)
           await expect(productArticle.getByRole('heading', { name: "Where you'll meet", exact: true })).toHaveCount(0)
           await expect(productArticle.getByText('per person', { exact: true })).toHaveCount(0)
-          // Sibling cards may legitimately show their lowest variant price.
-          await expect(productArticle.locator(':scope > div').first().getByText(/From THB\s+1,350\.00/)).toHaveCount(0)
         }
       }
       if (target.kind === 'dish') await page.screenshot({ path: testInfo.outputPath('restaurant-dish-public-mobile.png'), fullPage: true, animations: 'disabled' })

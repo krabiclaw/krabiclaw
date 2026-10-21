@@ -1,8 +1,17 @@
--- Keep every existing positive amenity; missing codes remain unknown.
-UPDATE product_stay_configs AS home SET amenities = (
-  SELECT json_group_array(json_object('code', value, 'available', json('true')))
-  FROM json_each(home.amenities)
-);
+-- Reject invalid legacy facts through the existing NOT NULL constraint. SQLite
+-- aborts this entire UPDATE, preserving every home for explicit source repair.
+-- Keep every valid positive amenity; missing codes remain unknown.
+UPDATE product_stay_configs AS home SET amenities = CASE
+  WHEN EXISTS (
+    SELECT 1 FROM json_each(home.amenities)
+    WHERE type <> 'text' OR value NOT IN ('ac', 'dryer', 'essentials', 'heating', 'hot_water', 'kitchen', 'tv', 'washer', 'wireless_internet', 'bathtub', 'bidet', 'body_soap', 'cleaning_products', 'conditioner', 'hair_dryer', 'alfresco_shower', 'shampoo', 'shower_gel', 'bed_linens', 'wardrobe_or_closet', 'clothes_drying_rack', 'extra_pillows_and_blankets', 'hangers', 'iron', 'mosquito_net', 'room_darkening_shades', 'safe', 'arcade_machine', 'batting_cage', 'books', 'bowling_alley', 'climbing_wall', 'ethernet_connection', 'exercise_equipment', 'game_console', 'laser_tag', 'life_size_games', 'mini_golf', 'home_theater', 'piano', 'ping_pong_table', 'pool_table', 'record_player', 'skate_ramp', 'sound_system', 'theme_room', 'baby_bath', 'baby_monitor', 'childrens_bike', 'playroom', 'stair_gates', 'babysitter_recommendations', 'board_games', 'changing_table', 'childrens_books_and_toys', 'childrens_dinnerware', 'crib', 'fireplace_guards', 'high_chair', 'playground', 'outlet_covers', 'pack_n_play_travel_crib', 'table_corner_guards', 'window_guards', 'ceiling_fan', 'fireplace', 'portable_fans', 'carbon_monoxide_detector', 'fire_extinguisher', 'first_aid_kit', 'smoke_detector', 'laptop_friendly_workspace', 'pocket_wifi', 'baking_sheet', 'barbeque_utensils', 'bread_maker', 'blender', 'coffee', 'coffee_maker', 'cooking_basics', 'dining_table', 'dishes_and_silverware', 'dishwasher', 'freezer', 'hot_water_kettle', 'kitchenette', 'microwave', 'mini_fridge', 'oven', 'refrigerator', 'rice_maker', 'stove', 'toaster', 'trash_compacter', 'wine_glasses', 'beach_access', 'lake_access', 'laundromat_nearby', 'private_entrance', 'resort_access', 'ski_in_ski_out', 'waterfront', 'garden_or_backyard', 'bbq_area', 'beach_essentials', 'bicycle', 'boat_slip', 'fire_pit', 'hammock', 'kayak', 'alfresco_dining', 'outdoor_seating', 'outdoor_kitchen', 'patio_or_belcony', 'sun_loungers', 'free_parking', 'street_parking', 'paid_parking_on_premises', 'paid_parking', 'free_parking_off_premises', 'elevator', 'ev_charger', 'hockey_rink', 'gym', 'jacuzzi', 'pool', 'private_living_room', 'sauna', 'single_level_home', 'ebike_charger', 'solar_power', 'recycling', 'composting', 'doorman', 'gated_community', 'breakfast', 'cleaning_before_checkout', 'long_term_stays_allowed', 'luggage_dropoff_allowed', 'bay_view', 'beach_view', 'canal_view', 'city_view', 'courtyard_view', 'desert_view', 'garden_view', 'golf_view', 'harbor_view', 'lake_view', 'marina_view', 'mountain_view', 'ocean_view', 'park_view', 'pool_view', 'resort_view', 'river_view', 'sea_view', 'valley_view', 'vineyard_view', 'landmark_view')
+  ) OR (SELECT count(*) <> count(DISTINCT value) FROM json_each(home.amenities))
+  THEN NULL
+  ELSE (
+    SELECT json_group_array(json_object('code', value, 'available', json('true')))
+    FROM json_each(home.amenities)
+  )
+END;
 --> statement-breakpoint
 CREATE TABLE `__new_product_stay_photo_room_amenities` (
 	`organization_id` text NOT NULL,

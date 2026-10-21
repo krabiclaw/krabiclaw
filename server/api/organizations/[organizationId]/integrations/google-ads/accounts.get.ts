@@ -29,6 +29,8 @@ export default defineHandler(async (event) => {
     })
     const { accessToken } = await linkedAccountAccessToken(env, accountId)
     const accounts = await listGoogleAdsAccounts(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN)
+    const notEnabled = accounts.filter(account => account.notEnabled).map(account => account.customerId)
+    if (notEnabled.length) console.info('google_ads_accounts_not_enabled', { organizationId: organization.id, accountId, customerIds: notEnabled })
     return jsonResponse({ success: true, account_id: accountId, ads, accounts, error: null })
   } catch (error) {
     rethrowHttpError(error)
