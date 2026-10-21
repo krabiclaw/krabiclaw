@@ -155,6 +155,7 @@ test('creating a search campaign submits its budget, targeting and copy atomical
     assert.equal(campaign.name, 'New Blog Post Campaign')
     assert.equal(campaign.status, 'PAUSED')
     assert.equal(campaign.advertisingChannelType, 'SEARCH')
+    assert.equal(campaign.containsEuPoliticalAdvertising, 'DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING')
     assert.deepEqual(campaign.networkSettings, { targetGoogleSearch: true, targetSearchNetwork: false, targetContentNetwork: false, targetPartnerSearchNetwork: false })
     assert.equal(campaign.campaignBudget, budget.resourceName)
     assert.equal(adGroup.campaign, campaign.resourceName)
@@ -194,6 +195,7 @@ test('creating a search campaign submits its budget, targeting and copy atomical
     keywords: [{ text: 'krabi tours', matchType: 'PHRASE' }, { text: 'local island guide', matchType: 'EXACT' }],
     headlines,
     descriptions,
+    containsEuPoliticalAdvertising: false,
   })
 
   assert.equal(providerFetch.mock.callCount(), 1)
@@ -213,7 +215,7 @@ test('creating a search campaign reports a provider rejection instead of returni
     assert.equal(url.origin, 'https://googleads.googleapis.com')
     assert.match(url.pathname, /^\/v\d+\/customers\/3317427925\/googleAds:mutate$/)
     assert.equal(init?.method, 'POST')
-    return Response.json({ error: { message: 'Customer account is not enabled.' } }, { status: 403 })
+    return Response.json({ error: { code: 400, message: 'Request contains an invalid argument.', details: [{ errors: [{ errorCode: { fieldError: 'REQUIRED' }, message: 'The required field was not present.', location: { fieldPathElements: [{ fieldName: 'mutate_operations', index: 1 }, { fieldName: 'campaign_operation' }, { fieldName: 'create' }, { fieldName: 'contains_eu_political_advertising' }] } }] }] } }, { status: 400 })
   })
 
   await assert.rejects(createGoogleAdsSearchCampaign('test-token', 'dev-tok', '331-742-7925', {
@@ -223,7 +225,8 @@ test('creating a search campaign reports a provider rejection instead of returni
     keywords: [{ text: 'krabi tours', matchType: 'PHRASE' }],
     headlines: ['Discover Krabi', 'Authentic Tours', 'Book Online Now'],
     descriptions: ['Explore breathtaking islands with local experts.', 'Personalized tours with guaranteed quality.'],
-  }), /Google Ads campaign creation failed \(403\).*Customer account is not enabled\./)
+    containsEuPoliticalAdvertising: false,
+  }), { message: 'Google Ads campaign creation failed: REQUIRED: The required field was not present. (mutate_operations[1].campaign_operation.create.contains_eu_political_advertising)' })
 })
 
 test('cloneGoogleAdsCampaign reads source campaign, applies replacements, and creates new campaign', async (t) => {
@@ -288,6 +291,7 @@ test('cloneGoogleAdsCampaign reads source campaign, applies replacements, and cr
     targetUrl: 'https://krabiclaw.com/blog/new-destination',
     headlineReplacements: { Island: 'Beach' },
     status: 'PAUSED',
+    containsEuPoliticalAdvertising: false,
   })
 
   assert.equal(cloned.campaignId, '201')
