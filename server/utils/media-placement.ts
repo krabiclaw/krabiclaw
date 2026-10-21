@@ -19,6 +19,7 @@ import { isEditableMediaPlacement, isEditableMediaPlacementOwnerType, uniqueMedi
 import { refreshSocialCard, socialCardRefreshOwnersForPlacement } from '~/server/utils/social-card'
 import { postMediaMutationQueries } from '~/server/utils/post-management'
 import { isStayPhotoRoom, parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
+import { isStayAmenity, STAY_AMENITIES, stayCodes } from '~/shared/stay-listing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 
 export { EDITABLE_MEDIA_PLACEMENT_OWNERS, MEDIA_CATEGORIES, WRITABLE_MEDIA_CATEGORIES, isMediaCategory } from '~/shared/media-placement-contract'
@@ -422,7 +423,7 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
   const rooms = new Map<string, StayPhotoRoom[]>(productIds.map(id => [id, []]))
   if (!productIds.length) return rooms
   const ids = d1JsonStringSet(productIds)
-  const [savedRooms, memberships] = await executeBatch(db, [
+  const [savedRooms, memberships, amenities] = await executeBatch(db, [
     { query: `SELECT id, product_id, type, details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms
         WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY type, sort_order, id`, params: [organizationId, ids] },
     { query: `SELECT m.product_id, m.room_id, m.asset_id FROM product_stay_photo_room_memberships m
@@ -431,11 +432,15 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
         JOIN media_assets ma ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
         WHERE m.organization_id = ? AND m.product_id IN (SELECT value FROM json_each(?))
         ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, mp.asset_id`, params: [organizationId, ids] },
+    { query: `SELECT a.room_id, a.amenity_code,
+        EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value = a.amenity_code) AS on_listing
+        FROM product_stay_photo_room_amenities a JOIN product_stay_configs c ON c.organization_id = a.organization_id AND c.product_id = a.product_id
+        WHERE a.organization_id = ? AND a.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Read stay photo rooms' })
   const byId = new Map<string, StayPhotoRoom>()
   for (const row of savedRooms!.results as Array<{ id: string; product_id: string; type: unknown; details_version: number; sleeping_arrangements: string | null; private_attached_bathroom: number | null }>) {
     const room = {
-      id: row.id, type: row.type, photo_ids: [], details_version: row.details_version,
+      id: row.id, type: row.type, photo_ids: [], amenities: [], details_version: row.details_version,
       sleeping_arrangements: parseStaySleepingArrangements(row.sleeping_arrangements === null ? null : JSON.parse(row.sleeping_arrangements)),
       private_attached_bathroom: row.private_attached_bathroom === 1 ? true : row.private_attached_bathroom === 0 ? false : row.private_attached_bathroom,
     }
@@ -448,6 +453,13 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
     if (!room) throw new TypeError(`Photo membership has no room ${row.room_id}`)
     if (!room.photo_ids.includes(row.asset_id)) room.photo_ids.push(row.asset_id)
   }
+  for (const row of amenities!.results as Array<{ room_id: string; amenity_code: unknown; on_listing: number }>) {
+    const room = byId.get(row.room_id)
+    if (!room || !isStayAmenity(row.amenity_code) || row.on_listing !== 1) throw new TypeError(`Room amenity has no canonical listing fact for room ${row.room_id}`)
+    room.amenities.push(row.amenity_code)
+  }
+  const amenityOrder = stayCodes(STAY_AMENITIES)
+  for (const room of byId.values()) room.amenities = amenityOrder.filter(code => room.amenities.includes(code))
   return rooms
 }
 

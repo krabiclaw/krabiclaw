@@ -508,10 +508,23 @@ The same existing Bedroom was opened again, without saving any changes.
 - Room **Amenities** opens **Add amenities**, with search and **All /
   Suggested** pills. Suggested contains bedroom-relevant choices; All uses
   the full amenity vocabulary, including alarms. The scope is explicitly
-  the room or space. No amenity selection was changed.
+  the room or space. No amenity selection was changed. A fresh read on October
+  20 showed Suggested selected by default, square checkboxes, pictograms and
+  plain labels. Its eleven Bedroom suggestions were Air conditioning, Bed
+  linens, Clothing storage, Essentials, Extra pillows and blankets, Hangers,
+  Heating, Iron, Room-darkening shades, Safe and TV. Search looks across All.
+  Cancel search returned to Suggested without changing any selection.
+  This read did not establish Airbnb's persistence behavior for adding a room
+  amenity that is absent from the listing.
 - Bedroom **Accessibility features** offers **Step-free access** and
   **Entrance wider than 32 inches**. A feature opens its definition, example
   photographs, photo guidelines and **I don't have / I have this feature**.
   Selecting the latter in an unsaved draft revealed required photo evidence
   and Airbnb's own review process. **Cancel** discarded that draft. This
   review process must not be represented as a KrabiClaw approval service.
+
+The listing-level **Amenities** page was also rechecked on October 20. Its
+saved amenity rows include definition text for choices such as Air conditioning,
+Cooking basics, Dedicated workspace and Wifi; other rows such as Hangers have
+only a label. Room picker rows have plain labels. The live reference supports
+keeping the listing's saved definitions while keeping the room chooser compact.

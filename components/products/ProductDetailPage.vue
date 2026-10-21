@@ -153,7 +153,10 @@
             <div class="mt-5 grid gap-4 sm:grid-cols-2">
               <article v-for="room in authoredRoomDetails" :key="room.id" class="rounded-xl border border-default p-5" :data-testid="`stay-room-details-${room.id}`">
                 <h3 class="font-semibold text-default">{{ room.title }}</h3>
-                <ul class="mt-3 space-y-2 text-sm text-muted"><li v-for="detail in room.details" :key="detail">{{ detail }}</li></ul>
+                <ul v-if="room.details?.length" class="mt-3 space-y-2 text-sm text-muted"><li v-for="detail in room.details" :key="detail">{{ detail }}</li></ul>
+                <ul v-if="room.features?.length" class="mt-3 space-y-3 text-sm text-muted">
+                  <li v-for="feature in room.features" :key="feature.id" class="flex items-center gap-3"><UIcon :name="feature.icon" class="size-5 shrink-0" aria-hidden="true" /><span>{{ feature.label }}</span></li>
+                </ul>
               </article>
             </div>
           </section>
@@ -717,9 +720,14 @@ const stayRoomGroups = computed<MediaGalleryGroup[]>(() => {
         : [t('stay.no_sleeping_arrangements')]),
       ...(room.private_attached_bathroom === null ? [] : [t(room.private_attached_bathroom ? 'stay.private_attached_bathroom' : 'stay.no_private_attached_bathroom')]),
     ],
+    features: room.amenities.map(code => {
+      const amenity = stayAmenitiesList.value.find(item => item.code === code)
+      if (!amenity) throw new TypeError(`Room ${room.id} refers to an amenity the listing does not offer`)
+      return { id: code, label: amenity.label, icon: amenity.icon }
+    }),
   }))
 })
-const authoredRoomDetails = computed(() => stayRoomGroups.value.filter(room => room.details?.length))
+const authoredRoomDetails = computed(() => stayRoomGroups.value.filter(room => room.details?.length || room.features?.length))
 const roomDetailsTitle = computed(() => t(props.product.stay?.photo_rooms.some(room => room.sleeping_arrangements?.length) ? 'stay.where_youll_sleep' : 'stay.room_details'))
 
 /** A room tour is public only when every authored room has renderable Product media. */

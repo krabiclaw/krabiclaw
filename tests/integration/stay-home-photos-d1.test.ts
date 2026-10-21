@@ -157,7 +157,7 @@ test('a home authors room details and manages its product photos through authent
     assert.equal(createdRoom.status, 201, JSON.stringify(createdRoom.body))
     const roomId = (createdRoom.body.room as StayPhotoRoom).id
     assert.equal(typeof roomId, 'string')
-    const unansweredRoom: StayPhotoRoom = { id: roomId, type: 'bedroom', photo_ids: [], details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null }
+    const unansweredRoom: StayPhotoRoom = { id: roomId, type: 'bedroom', photo_ids: [], amenities: [], details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null }
     assert.deepEqual(createdRoom.body.room, unansweredRoom)
     assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [unansweredRoom])
 
@@ -189,6 +189,50 @@ test('a home authors room details and manages its product photos through authent
     assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [clearedRoom])
     assert.deepEqual(await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ?').bind(ORG, productId, roomId).first(), { sleeping_arrangements: null, private_attached_bathroom: null })
     assert.equal(await db.prepare('SELECT beds FROM product_stay_configs WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).first('beds'), 2)
+
+    // Native room amenities use the listing's canonical amenity owner. A mixed
+    // write persists together, and another editor cannot undo it from version4.
+    const roomAmenities = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 4, amenities: ['wireless_internet', 'tv'], sleeping_arrangements: [], private_attached_bathroom: false })
+    assert.equal(roomAmenities.status, 200, JSON.stringify(roomAmenities.body))
+    const featuredRoom: StayPhotoRoom = { ...clearedRoom, details_version: 5, amenities: ['tv', 'wireless_internet'], sleeping_arrangements: [], private_attached_bathroom: false }
+    assert.deepEqual(roomAmenities.body.room, featuredRoom)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [featuredRoom])
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.amenities, ['tv', 'wireless_internet'])
+    assert.deepEqual(await db.prepare('SELECT amenity_code FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY amenity_code').bind(ORG, productId, roomId).all().then(result => result.results), [{ amenity_code: 'tv' }, { amenity_code: 'wireless_internet' }])
+    assert.deepEqual(await db.prepare('SELECT details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ?').bind(ORG, productId, roomId).first(), { details_version: 5, sleeping_arrangements: '[]', private_attached_bathroom: 0 })
+    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 4, amenities: ['hot_water'], private_attached_bathroom: true })), { status: 409, code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' })
+    for (const amenities of [null, ['unknown'], ['tv', 'tv']]) {
+      assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 5, amenities })), { status: 422, code: 'INVALID_ROOM_DETAILS', field: 'amenities' })
+    }
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [featuredRoom])
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.amenities, ['tv', 'wireless_internet'])
+
+    const featuredShell = await shell()
+    assert.equal(featuredShell.status, 200, await featuredShell.clone().text())
+    assert.equal(featuredShell.headers.get('x-bootstrap-cache'), 'MISS')
+    const cachedFeaturedShell = await shell()
+    assert.equal(cachedFeaturedShell.status, 200, await cachedFeaturedShell.clone().text())
+    assert.equal(cachedFeaturedShell.headers.get('x-bootstrap-cache'), 'HIT')
+    const removeListingAmenity = await call(owner, 'PATCH', `/${productId}`, { amenities: ['tv'] })
+    assert.equal(removeListingAmenity.status, 200, JSON.stringify(removeListingAmenity.body))
+    const prunedShell = await shell()
+    assert.equal(prunedShell.status, 200, await prunedShell.clone().text())
+    assert.equal(prunedShell.headers.get('x-bootstrap-cache'), 'MISS')
+    const prunedRoom: StayPhotoRoom = { ...featuredRoom, details_version: 6, amenities: ['tv'] }
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [prunedRoom])
+    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).first('amenities'), '["tv"]')
+    assert.deepEqual(await db.prepare('SELECT amenity_code FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, productId, roomId).all().then(result => result.results), [{ amenity_code: 'tv' }])
+    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 5, amenities: ['tv', 'wireless_internet'] })), { status: 409, code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' })
+    const restoreListingAmenity = await call(owner, 'PATCH', `/${productId}`, { amenities: ['wireless_internet', 'tv'] })
+    assert.equal(restoreListingAmenity.status, 200, JSON.stringify(restoreListingAmenity.body))
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [prunedRoom])
+    const clearRoomAmenities = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 6, amenities: [], sleeping_arrangements: null, private_attached_bathroom: null })
+    assert.equal(clearRoomAmenities.status, 200, JSON.stringify(clearRoomAmenities.body))
+    clearedRoom.details_version = 7
+    assert.deepEqual(clearRoomAmenities.body.room, clearedRoom)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [clearedRoom])
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.amenities, ['tv', 'wireless_internet'])
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).first('n'), 0)
 
     // Ordering makes the first photo the cover; the product the pages render agrees.
     const ordered = await call(owner, 'PUT', `/${productId}/photos`, { photo_ids: ['bedroom', 'deck', 'kitchen'] })
@@ -242,8 +286,9 @@ test('a home authors room details and manages its product photos through authent
 
     // Only managers change a home's photos.
     const helper = await cookieFor('helper')
-    assert.deepEqual(refusal(await call(helper, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 4, private_attached_bathroom: true })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
+    assert.deepEqual(refusal(await call(helper, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 7, amenities: ['hot_water'], private_attached_bathroom: true })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [clearedRoom])
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.amenities, ['tv', 'wireless_internet'])
     assert.deepEqual(refusal(await call(helper, 'PUT', `/${productId}/photos`, { photo_ids: ['kitchen', 'deck'] })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual(refusal(await call(helper, 'DELETE', `/${productId}/photos/deck`)), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual(refusal(await call(helper, 'POST', `/${productId}/photos`, { asset_id: 'bedroom' })), { status: 403, code: 'STAY_ROLE_REQUIRED' })

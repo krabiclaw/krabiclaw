@@ -1,4 +1,6 @@
-/** Authored rooms and spaces in a home's photo tour. These do not imply capacity or amenities. */
+import { isStayAmenity, type StayAmenity } from './stay-listing'
+
+/** Authored rooms and spaces in a home's photo tour. Their existence implies no capacity or amenities. */
 export const STAY_PHOTO_ROOM_TYPES = {
   art_studio: { label: 'Art studio', icon: 'i-lucide-palette' },
   backyard: { label: 'Backyard', icon: 'i-lucide-trees' },
@@ -97,6 +99,8 @@ export interface StayPhotoRoom {
   sleeping_arrangements: StaySleepingArrangement[] | null
   /** Only authored bedrooms may state whether they have a private attached bathroom. */
   private_attached_bathroom: boolean | null
+  /** Room references to amenities present in the canonical listing amenity set. */
+  amenities: StayAmenity[]
 }
 
 export function isStayPhotoRoomType(value: unknown): value is StayPhotoRoomType {
@@ -107,7 +111,7 @@ export function isStayPhotoRoomType(value: unknown): value is StayPhotoRoomType 
 export function isStayPhotoRoom(value: unknown): value is StayPhotoRoom {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const room = value as Record<string, unknown>
-  return Object.keys(room).every(key => ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom'].includes(key))
+  return Object.keys(room).every(key => ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities'].includes(key))
     && typeof room.id === 'string' && room.id.length > 0
     && isStayPhotoRoomType(room.type)
     && Array.isArray(room.photo_ids) && room.photo_ids.every(id => typeof id === 'string' && id.length > 0)
@@ -115,6 +119,7 @@ export function isStayPhotoRoom(value: unknown): value is StayPhotoRoom {
     && Number.isInteger(room.details_version) && (room.details_version as number) >= 1
     && isStaySleepingArrangements(room.sleeping_arrangements)
     && (room.private_attached_bathroom === null || (room.type === 'bedroom' && typeof room.private_attached_bathroom === 'boolean'))
+    && Array.isArray(room.amenities) && room.amenities.every(isStayAmenity) && new Set(room.amenities).size === room.amenities.length
 }
 
 /** Multiple authored rooms of a type receive a number in their saved order. */

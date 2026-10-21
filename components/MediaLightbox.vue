@@ -29,6 +29,9 @@
                 <ul v-if="group.details?.length" class="mt-3 space-y-2 text-sm leading-relaxed text-gray-600">
                   <li v-for="detail in group.details" :key="detail">{{ detail }}</li>
                 </ul>
+                <ul v-if="group.features?.length" class="mt-3 space-y-3 text-sm leading-relaxed text-gray-600">
+                  <li v-for="feature in group.features" :key="feature.id" class="flex items-center gap-3"><UIcon :name="feature.icon" class="size-5 shrink-0" aria-hidden="true" /><span>{{ feature.label }}</span></li>
+                </ul>
               </div>
               <div class="grid grid-cols-2 gap-2 sm:gap-3">
                 <button v-for="(entry, position) in group.entries" :key="entry.index" type="button" class="relative overflow-hidden rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4" :class="position === 0 && group.entries.length % 2 === 1 ? 'col-span-2' : ''" :aria-label="t('stay.open_room_photo', { room: group.title, number: position + 1 })" @click="openPhoto(entry.index)">
@@ -65,6 +68,7 @@ export interface MediaGalleryGroup {
   title: string
   asset_ids: string[]
   details?: string[]
+  features?: Array<{ id: string; label: string; icon: string }>
 }
 </script>
 

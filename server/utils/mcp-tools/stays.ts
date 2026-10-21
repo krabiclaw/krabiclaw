@@ -75,7 +75,8 @@ const sleepingArrangements = { type: ['array', 'null'], maxItems: Object.keys(ST
 } }
 const roomDetailsVersion = { type: 'integer', minimum: 1, description: 'The room details_version from the latest photo_rooms read. A stale version refuses the entire edit.' }
 const privateBathroom = { type: ['boolean', 'null'], description: 'Whether this bedroom has a private attached bathroom. Null is unanswered. Only bedrooms may author this fact.' }
-export const STAY_PHOTO_ROOM_SCHEMA = { type: 'object', properties: { id: text, type: roomType, photo_ids: { type: 'array', items: text, uniqueItems: true }, details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom }, required: ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom'], additionalProperties: false }
+const roomAmenities = { ...STAY_LISTING_SCHEMA.amenities, description: 'Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.' }
+export const STAY_PHOTO_ROOM_SCHEMA = { type: 'object', properties: { id: text, type: roomType, photo_ids: { type: 'array', items: text, uniqueItems: true }, details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom, amenities: roomAmenities }, required: ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities'], additionalProperties: false }
 const movePhotos = { type: 'array', minItems: 1, maxItems: MAX_ORDERED_MEDIA_ASSETS, items: { type: 'object', properties: {
   photo_id: text, expected_room_id: { ...nullableText, description: 'The room from the latest photo_rooms read; null only when the photo is unassigned. A changed membership refuses the whole move.' },
 }, required: ['photo_id', 'expected_room_id'], additionalProperties: false } }
@@ -112,9 +113,9 @@ export const STAYS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'add_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Add an authored room or space to a home’s photo tour. Does not change bedrooms, beds, bathrooms or amenities. Returns the created room’s authoritative ID and the updated home.',
     inputSchema: { product_id: productId, type: roomType }, required: ['product_id', 'type'],
     outputSchema: { type: 'object', properties: { home: stayHomeObject, room: STAY_PHOTO_ROOM_SCHEMA }, required: ['home', 'room'] } }),
-  organizationTool({ name: 'update_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Update sleeping arrangements or bedroom private-bathroom information on one authored room under its details_version. Fields omitted are retained, null clears an answer, and [] explicitly states no sleeping arrangements. Room bed quantities allocate the listing’s declared beds total, which must be known and cover every room’s allocations. Does not change listing totals, photos or amenities.',
-    inputSchema: { product_id: productId, room_id: text, expected_details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom,
-      anyOf: [{ required: ['sleeping_arrangements'] }, { required: ['private_attached_bathroom'] }] }, required: ['product_id', 'room_id', 'expected_details_version'],
+  organizationTool({ name: 'update_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Update sleeping arrangements, bedroom private-bathroom information or amenity memberships on one authored room under its details_version. Fields omitted are retained. Null clears sleeping/privacy answers; [] explicitly states no sleeping arrangements or no amenity memberships. Beds allocate the known listing total. Selected room amenities are atomically added to the listing; deselection only unassigns them from this room. A stale version or invalid combination refuses every change. Listing totals and photos are unchanged.',
+    inputSchema: { product_id: productId, room_id: text, expected_details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom, amenities: roomAmenities,
+      anyOf: [{ required: ['sleeping_arrangements'] }, { required: ['private_attached_bathroom'] }, { required: ['amenities'] }] }, required: ['product_id', 'room_id', 'expected_details_version'],
     outputSchema: { type: 'object', properties: { home: stayHomeObject, room: STAY_PHOTO_ROOM_SCHEMA }, required: ['home', 'room'] } }),
   organizationTool({ name: 'remove_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Delete one authored photo-tour room. Its photos return to Additional photos; the Product’s cover/gallery and library files are retained.',
     inputSchema: { product_id: productId, room_id: text }, required: ['product_id', 'room_id'],
@@ -156,6 +157,7 @@ export async function handleStaysTools(ctx: McpExecutorContext): Promise<unknown
       expected_details_version: args.expected_details_version,
       ...(Object.hasOwn(args, 'sleeping_arrangements') ? { sleeping_arrangements: args.sleeping_arrangements } : {}),
       ...(Object.hasOwn(args, 'private_attached_bathroom') ? { private_attached_bathroom: args.private_attached_bathroom } : {}),
+      ...(Object.hasOwn(args, 'amenities') ? { amenities: args.amenities } : {}),
     })
     case 'remove_stay_photo_room': return { home: await removeStayPhotoRoom(db, env, access, requiredString(args, 'product_id'), requiredString(args, 'room_id')) }
     case 'move_stay_photos': return { home: await moveStayPhotos(db, env, access, requiredString(args, 'product_id'), { ...(Object.hasOwn(args, 'room_id') ? { room_id: args.room_id } : {}), ...(Object.hasOwn(args, 'new_room_type') ? { new_room_type: args.new_room_type } : {}), photos: args.photos }) }

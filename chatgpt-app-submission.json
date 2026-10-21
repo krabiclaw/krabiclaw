@@ -1959,9 +1959,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Changes an authored room’s sleeping arrangements or bedroom private attached bathroom under its details version. Bed quantities allocate the declared listing total; invalid allocations or stale versions refuse the entire edit. Listing totals, photos and library files are unchanged.",
-        "open_world_justification": "Changes room sleeping arrangements or bedroom privacy information shown to guests, without changing listing totals or contacting providers.",
-        "destructive_justification": "Changes an authored room’s sleeping arrangements or bedroom private attached bathroom under its details version. Bed quantities allocate the declared listing total; invalid allocations or stale versions refuse the entire edit. Listing totals, photos and library files are unchanged."
+        "read_only_justification": "Changes an authored room’s sleeping arrangements, bedroom private attached bathroom or amenity memberships under its details version. Selected amenities are atomically added to the canonical listing set; unassigning retains listing facts. Invalid allocations, contradictory facts or stale versions refuse the entire edit. Listing totals, photos and library files are unchanged.",
+        "open_world_justification": "Changes room sleeping arrangements, bedroom privacy or amenity memberships shown to guests, adding selected room amenities to the listing when needed, without changing listing totals or contacting providers.",
+        "destructive_justification": "Changes an authored room’s sleeping arrangements, bedroom private attached bathroom or amenity memberships under its details version. Selected amenities are atomically added to the canonical listing set; unassigning retains listing facts. Invalid allocations, contradictory facts or stale versions refuse the entire edit. Listing totals, photos and library files are unchanged."
       }
     },
     "update_team": {

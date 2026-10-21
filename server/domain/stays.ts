@@ -12,7 +12,7 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { parseStayMapSharing, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { isStayAmenity, parseStayMapSharing, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -26,12 +26,12 @@ import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import { toE164 } from '~/utils/phone'
-import { arrangeProductPhotos, isStayBedAllocationConflict, readProductPhotos, readStayPhotoRooms, stayBedAllocationGuardQuery, type MediaPlacementItem } from '~/server/utils/media-placement'
+import { arrangeProductPhotos, readProductPhotos, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
-import { isStayPhotoRoomType, isStaySleepingArrangements, MAX_STAY_BEDS_PER_TYPE, parseStaySleepingArrangements, type StayPhotoRoom, type StayPhotoRoomType } from '~/shared/stay-photos'
+import { isStayPhotoRoomType, isStaySleepingArrangements, MAX_STAY_BEDS_PER_TYPE, type StayPhotoRoom, type StayPhotoRoomType } from '~/shared/stay-photos'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 
 /**
@@ -965,42 +965,27 @@ export async function updateStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
   const current = home.photo_rooms.find(room => room.id === roomId)
   if (!current) fail(404, 'PHOTO_ROOM_NOT_FOUND', 'That room is not on this home', 'room_id')
   if (!isRecord(body)) fail(422, 'INVALID_ROOM_DETAILS', 'Provide the room details to change', 'room')
-  const unknown = Object.keys(body).find(key => !['expected_details_version', 'sleeping_arrangements', 'private_attached_bathroom'].includes(key))
+  const unknown = Object.keys(body).find(key => !['expected_details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities'].includes(key))
   if (unknown) fail(422, 'INVALID_ROOM_DETAILS', `${unknown} cannot be changed here`, unknown)
   if (!Number.isInteger(body.expected_details_version) || (body.expected_details_version as number) < 1) fail(422, 'INVALID_ROOM_DETAILS', 'Provide the room details_version from the latest read', 'expected_details_version')
   const sleeping = Object.hasOwn(body, 'sleeping_arrangements')
   const privacy = Object.hasOwn(body, 'private_attached_bathroom')
-  if (!sleeping && !privacy) fail(422, 'INVALID_ROOM_DETAILS', 'Provide sleeping arrangements or private bathroom information', 'room')
+  const amenities = Object.hasOwn(body, 'amenities')
+  if (!sleeping && !privacy && !amenities) fail(422, 'INVALID_ROOM_DETAILS', 'Provide sleeping arrangements, private bathroom information or room amenities', 'room')
   if (sleeping && !isStaySleepingArrangements(body.sleeping_arrangements)) fail(422, 'INVALID_ROOM_DETAILS', `Sleeping arrangements must be null or a list of unique bed types with whole counts from 1 to ${MAX_STAY_BEDS_PER_TYPE}`, 'sleeping_arrangements')
   if (privacy && (current.type !== 'bedroom' || (body.private_attached_bathroom !== null && typeof body.private_attached_bathroom !== 'boolean'))) fail(422, 'INVALID_ROOM_DETAILS', 'Only a bedroom can state whether it has a private attached bathroom, as true, false or null', 'private_attached_bathroom')
+  if (amenities && (!Array.isArray(body.amenities) || !body.amenities.every(isStayAmenity) || new Set(body.amenities).size !== body.amenities.length)) fail(422, 'INVALID_ROOM_DETAILS', 'Room amenities must list amenity codes from the catalog, each once', 'amenities')
   if (current.details_version !== body.expected_details_version) fail(409, 'ROOM_DETAILS_CHANGED', 'The room details changed while you were editing. Reload the room and try again.', 'expected_details_version')
-  const assignments: string[] = ['details_version = details_version + 1']
-  const params: unknown[] = []
-  if (sleeping) {
-    const arrangements = parseStaySleepingArrangements(body.sleeping_arrangements)
-    assignments.push('sleeping_arrangements = ?')
-    params.push(arrangements === null ? null : JSON.stringify(arrangements))
-  }
-  if (privacy) {
-    assignments.push('private_attached_bathroom = ?')
-    params.push(body.private_attached_bathroom === null ? null : body.private_attached_bathroom ? 1 : 0)
-  }
-  try {
-    await executeBatch(db, [
-      // Check the room's version at the actual commit, including deletion.
-      { query: `UPDATE products SET updated_at = NULL WHERE organization_id = ? AND id = ? AND NOT EXISTS (
-          SELECT 1 FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ? AND details_version = ?)`,
-      params: [access.organizationId, productId, access.organizationId, productId, roomId, body.expected_details_version] },
-      { query: `UPDATE product_stay_photo_rooms SET ${assignments.join(', ')} WHERE organization_id = ? AND product_id = ? AND id = ?`, params: [...params, access.organizationId, productId, roomId] },
-      stayBedAllocationGuardQuery(access.organizationId, productId),
-      publicResourceCacheInvalidationQuery(access.organizationId, 'stay-photo-room-details'),
-    ], { operation: 'Update stay photo room details' })
-  } catch (error) {
-    if (isStayBedAllocationConflict(error)) fail(409, 'STAY_BED_ALLOCATION_EXCEEDED', 'Room beds need a declared listing bed total that covers all assigned beds. Update the listing total or reduce the room quantities.', 'sleeping_arrangements')
-    if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) fail(409, 'ROOM_DETAILS_CHANGED', 'The room details changed while you were editing. Nothing was changed; reload the room and try again.', 'expected_details_version')
-    throw error
-  }
-  const updated = await changedStayPhotoRooms(db, env, access, home)
+  await updateProduct(db, {
+    organizationId: access.organizationId, productId, patch: {}, actor: { actorId: access.actorId }, env,
+    stayRoomUpdate: {
+      roomId, expectedDetailsVersion: body.expected_details_version as number,
+      ...(sleeping ? { sleeping_arrangements: body.sleeping_arrangements as StayPhotoRoom['sleeping_arrangements'] } : {}),
+      ...(privacy ? { private_attached_bathroom: body.private_attached_bathroom as boolean | null } : {}),
+      ...(amenities ? { amenities: body.amenities as StayAmenity[] } : {}),
+    },
+  })
+  const updated = await readStayHome(db, access, productId)
   const room = updated.photo_rooms.find(entry => entry.id === roomId)
   if (!room) fail(409, 'ROOM_DETAILS_CHANGED', 'The room was removed after its details were saved; reload the photo tour', 'room_id')
   return { home: updated, room }
