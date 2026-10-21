@@ -1,4 +1,4 @@
-import { expect, request as playwrightRequest, test } from '@playwright/test'
+import { expect, request as playwrightRequest, test, type APIRequestContext } from '@playwright/test'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { mcpData, mcpRequest } from './helpers/mcp'
@@ -9,6 +9,81 @@ import type { PublicShellPayload } from '../../utils/public-resource-contracts'
 
 test.use({ timezoneId: 'America/New_York' })
 
+let consultationRestore: {
+  cleanupRequest: APIRequestContext
+  baseURL: string
+  organizationId: string
+  serviceId: string
+  originalProductId: string | null
+  previousMode: string
+  memberId: string
+  products: Product[]
+} | null = null
+
+test.afterEach(async ({ page }) => {
+  const restore = consultationRestore
+  consultationRestore = null
+  if (!restore) return
+  const { cleanupRequest, organizationId: org, products } = restore
+  const editor = `/api/editor/organizations/${org}`
+  const failures: unknown[] = []
+  try {
+    if (!page.isClosed()) await page.close()
+  } catch (error) { failures.push(error) }
+  try {
+    const currentResponse = await cleanupRequest.get(`${editor}/pages/${restore.serviceId}`)
+    expect(currentResponse.status(), await currentResponse.text()).toBe(200)
+    const current = (await currentResponse.json()).page
+    const binding = await cleanupRequest.patch(`${editor}/pages/${restore.serviceId}`, { data: { path: current.path, title: current.title, summary: current.summary, pageType: current.page_type, recipe: current.recipe, sortOrder: current.sort_order, blocks: current.blocks, expectedUpdatedAt: current.document.updated_at, productId: restore.originalProductId } })
+    expect(binding.status(), await binding.text()).toBe(200)
+    expect((await binding.json()).page.product_id).toBe(restore.originalProductId)
+    const restoredPage = await cleanupRequest.get(`${editor}/pages/${restore.serviceId}`)
+    expect(restoredPage.status(), await restoredPage.text()).toBe(200)
+    expect((await restoredPage.json()).page.product_id).toBe(restore.originalProductId)
+  } catch (error) { failures.push(error) }
+  try {
+    const restoredMode = await cleanupRequest.put(`${editor}/consultation`, { data: { mode: restore.previousMode } })
+    expect(restoredMode.status(), await restoredMode.text()).toBe(200)
+    const restoredSettings = await cleanupRequest.get(`${editor}/consultation`)
+    expect(restoredSettings.status()).toBe(200)
+    expect((await restoredSettings.json()).mode).toBe(restore.previousMode)
+  } catch (error) { failures.push(error) }
+  for (const product of products) {
+    try {
+      const unpublished = await cleanupRequest.put(`${editor}/products/${product.id}/publication`, { data: { published: false } })
+      expect(unpublished.status(), await unpublished.text()).toBe(200)
+      const publication = await cleanupRequest.get(`${editor}/products/${product.id}`)
+      expect(publication.status()).toBe(200)
+      expect((await publication.json()).product.publications).toContainEqual({ organization_id: org, published: false })
+      const deleted = await cleanupRequest.delete(`${editor}/products/${product.id}`)
+      if (deleted.status() === 200) continue
+      // Canonical Product deletion preserves booked history, even when cancelled.
+      expect(deleted.status(), await deleted.text()).toBe(409)
+      // No longer held online, it stops taking new times from the provider's hours.
+      const archivedBooking = await cleanupRequest.put(`${editor}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, held_online: false } })
+      expect(archivedBooking.status(), await archivedBooking.text()).toBe(200)
+      const deactivated = await cleanupRequest.patch(`${editor}/products/${product.id}`, { data: { active: false } })
+      expect(deactivated.status(), await deactivated.text()).toBe(200)
+      const archived = await cleanupRequest.get(`${editor}/products/${product.id}`)
+      expect(archived.status()).toBe(200)
+      expect((await archived.json()).product).toMatchObject({ active: false, booking: { held_online: false } })
+    } catch (error) { failures.push(error) }
+  }
+  try {
+    const removedMember = await cleanupRequest.post('/api/auth/organization/remove-member', { headers: authRequestHeaders(restore.baseURL), data: { organizationId: org, memberIdOrEmail: restore.memberId } })
+    expect(removedMember.status(), await removedMember.text()).toBe(200)
+    const remainingMembers = await cleanupRequest.get(`/api/organizations/${org}/members/scheduling`)
+    expect(remainingMembers.status(), await remainingMembers.text()).toBe(200)
+    expect((await remainingMembers.json()).members.some((member: { id: string }) => member.id === restore.memberId)).toBe(false)
+    const removedScheduling = await cleanupRequest.get(`/api/organizations/${org}/members/${restore.memberId}/scheduling`)
+    expect(removedScheduling.status(), await removedScheduling.text()).toBe(404)
+  } catch (error) { failures.push(error) }
+  try {
+    await cleanupRequest.dispose()
+  } catch (error) { failures.push(error) }
+  if (failures.length) throw new AggregateError(failures, 'Native consultation restoration failed')
+})
+
 test('native online review uses canonical Products, holds capacity, and releases it once', async ({ page, request, baseURL }) => {
   test.setTimeout(120_000)
   test.skip(process.env.NATIVE_CONSULTATION_PROOF !== 'true' || !['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Explicit opt-in in an isolated disposable checkout only; never mutate shared suite fixtures')
@@ -16,25 +91,19 @@ test('native online review uses canonical Products, holds capacity, and releases
   page.on('response', response => {
     if (/\/api\/(analytics\/track|public\/conversion-events)$/.test(new URL(response.url()).pathname) && response.status() >= 400) analyticsFailures.push(`${response.status()} ${response.url()}`)
   })
-  await loginAs(page.request, baseURL!)
-  const cleanupRequest = await playwrightRequest.newContext({ baseURL, storageState: await page.context().storageState() })
-  await loginAs(cleanupRequest, baseURL!, 'user-e2e-ncls-owner')
-  await page.context().clearCookies()
   await loginAs(page.request, baseURL!, 'user-e2e-ncls-consultation-owner')
   const org = 'org-ncls-blawby'
   const editor = `/api/editor/organizations/${org}`
-  const previous = await (await page.request.get(`${editor}/consultation`)).json()
+  const previousResponse = await page.request.get(`${editor}/consultation`)
+  expect(previousResponse.status(), await previousResponse.text()).toBe(200)
+  const previous = await previousResponse.json()
   const serviceListResponse = await page.request.get(`${editor}/pages?locale=en`)
   expect(serviceListResponse.status(), await serviceListResponse.text()).toBe(200)
   const serviceRow = (await serviceListResponse.json()).pages.find((page: { path: string }) => page.path === '/services/family')
   expect(serviceRow).toBeTruthy()
-  const service = (await (await page.request.get(`${editor}/pages/${serviceRow.id}`)).json()).page
-  const writeBinding = async (api: typeof page.request, productId: string | null) => {
-    const current = (await (await api.get(`${editor}/pages/${service.id}`)).json()).page
-    const response = await api.patch(`${editor}/pages/${service.id}`, { data: { path: current.path, title: current.title, summary: current.summary, pageType: current.page_type, recipe: current.recipe, sortOrder: current.sort_order, blocks: current.blocks, expectedUpdatedAt: current.document.updated_at, productId } })
-    expect(response.status(), await response.text()).toBe(200)
-    expect((await response.json()).page.product_id).toBe(productId)
-  }
+  const serviceResponse = await page.request.get(`${editor}/pages/${serviceRow.id}`)
+  expect(serviceResponse.status(), await serviceResponse.text()).toBe(200)
+  const service = (await serviceResponse.json()).page
   const stamp = Date.now()
   const products: Product[] = []
   const tomorrow = new Date(Date.now() + 86400000)
@@ -48,7 +117,12 @@ test('native online review uses canonical Products, holds capacity, and releases
   const self = (await membersResponse.json()).members.find((member: { self: boolean }) => member.self)
   expect(self).toBeTruthy()
   expect(self.scheduling).toBeNull()
-  try {
+  const cleanupRequest = await playwrightRequest.newContext({ baseURL })
+  consultationRestore = {
+    cleanupRequest, baseURL: baseURL!, organizationId: org, serviceId: service.id,
+    originalProductId: service.product_id, previousMode: previous.mode, memberId: self.id, products,
+  }
+  await loginAs(cleanupRequest, baseURL!, 'user-e2e-ncls-owner')
   const mcpScheduling = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: org, member_id: self.id } })
   expect(mcpScheduling.status(), await mcpScheduling.text()).toBe(200)
   const missingScheduling = (await mcpScheduling.json()).result
@@ -126,12 +200,17 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.getByLabel('Maximum guests per session', { exact: true }).fill('2')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(bookingPanel.getByRole('link', { name: 'Guest limit Up to 2 guests per session', exact: true })).toBeVisible()
+    await expect(page).toHaveURL(`${baseURL}${bookingPath}/duration`)
     expect(await readConfig()).toMatchObject({ default_capacity: 2, duration_minutes: 45, held_online: true, online_payment_required: false })
     await bookingPanel.getByRole('link', { name: 'Guest limit Up to 2 guests per session', exact: true }).click()
     await page.getByRole('radio', { name: 'One guest', exact: true }).click()
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true })).toBeVisible()
+    // Saved summaries update before Save finishes its readback and parent navigation.
+    await expect(page).toHaveURL(`${baseURL}${bookingPath}/duration`)
     await bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true }).click()
+    await expect(page).toHaveURL(`${baseURL}${bookingPath}/capacity`)
+    await expect(page.getByRole('radio', { name: 'One guest', exact: true })).toBeChecked()
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     await page.screenshot({ path: '/tmp/pr1211-booking-setup.png', fullPage: true })
     const desktopViewport = page.viewportSize()!
@@ -571,39 +650,4 @@ test('native online review uses canonical Products, holds capacity, and releases
     }
     const invalidCancel = await request.post(`/api/public/booking-requests/${instant.request_id}/cancel`, { headers: { ...headers, authorization: 'Bearer invalid-cancellation-token' } })
     expect(invalidCancel.status(), await invalidCancel.text()).toBe(404)
-  } finally {
-    await writeBinding(cleanupRequest, service.product_id ?? null)
-    const restoredMode = await cleanupRequest.put(`${editor}/consultation`, { data: { mode: previous.mode } })
-    expect(restoredMode.status(), await restoredMode.text()).toBe(200)
-    const restoredSettings = await cleanupRequest.get(`${editor}/consultation`)
-    expect(restoredSettings.status()).toBe(200)
-    expect((await restoredSettings.json()).mode).toBe(previous.mode)
-    for (const product of products) {
-      const unpublished = await cleanupRequest.put(`${editor}/products/${product.id}/publication`, { data: { published: false } })
-      expect(unpublished.status(), await unpublished.text()).toBe(200)
-      const publication = await cleanupRequest.get(`${editor}/products/${product.id}`)
-      expect(publication.status()).toBe(200)
-      expect((await publication.json()).product.publications).toContainEqual({ organization_id: org, published: false })
-      const deleted = await cleanupRequest.delete(`${editor}/products/${product.id}`)
-      if (deleted.status() === 200) continue
-      // Canonical Product deletion preserves booked history, even when cancelled.
-      expect(deleted.status(), await deleted.text()).toBe(409)
-      // No longer held online, it stops taking new times from the provider's hours.
-      const archivedBooking = await cleanupRequest.put(`${editor}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, held_online: false } })
-      expect(archivedBooking.status(), await archivedBooking.text()).toBe(200)
-      const deactivated = await cleanupRequest.patch(`${editor}/products/${product.id}`, { data: { active: false } })
-      expect(deactivated.status(), await deactivated.text()).toBe(200)
-      const archived = await cleanupRequest.get(`${editor}/products/${product.id}`)
-      expect(archived.status()).toBe(200)
-      expect((await archived.json()).product).toMatchObject({ active: false, booking: { held_online: false } })
-    }
-    const removedMember = await cleanupRequest.post('/api/auth/organization/remove-member', { headers: authRequestHeaders(baseURL!), data: { organizationId: org, memberIdOrEmail: self.id } })
-    expect(removedMember.status(), await removedMember.text()).toBe(200)
-    const remainingMembers = await cleanupRequest.get(`/api/organizations/${org}/members/scheduling`)
-    expect(remainingMembers.status(), await remainingMembers.text()).toBe(200)
-    expect((await remainingMembers.json()).members.some((member: { id: string }) => member.id === self.id)).toBe(false)
-    const removedScheduling = await cleanupRequest.get(`/api/organizations/${org}/members/${self.id}/scheduling`)
-    expect(removedScheduling.status(), await removedScheduling.text()).toBe(404)
-    await cleanupRequest.dispose()
-  }
 })

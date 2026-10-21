@@ -2,13 +2,11 @@
   <DashboardIndexPanel id="stay-night-calendar" title="Calendar" fill>
     <template #right>
       <div class="flex w-[calc(100vw-2rem)] flex-wrap items-center gap-2 sm:w-auto">
-        <UDropdownMenu :items="homes.map(home => ({ label: home.name, to: { path: level.path.value, query: { product_id: home.product_id } } }))" :content="{ align: 'end' }">
-          <UButton :label="homeOption?.name || 'Choose a home'" :title="homeOption?.name" trailing-icon="i-lucide-chevron-down" color="neutral" variant="outline" class="max-w-[calc(100vw-9rem)] sm:max-w-80" />
-        </UDropdownMenu>
-        <UButton label="Agenda" color="neutral" variant="soft" :to="{ path: level.path.value, query: {} }" />
+        <CalendarOfferingFilter :items="offeringItems" :disabled="busy || Boolean(level.child.value)" />
         <UButton v-if="data && level.mode.value === 'index'" label="Select nights" color="neutral" variant="outline" class="hidden sm:inline-flex" :disabled="busy" @click="openDates" />
       </div>
     </template>
+    <UAlert v-if="offeringsError" class="m-6" color="error" variant="soft" title="Offerings could not be loaded" :description="offeringsError" />
     <UAlert v-if="initialError" class="m-6" color="error" variant="soft" title="The nightly calendar could not be loaded" :description="initialError" />
     <div v-else class="min-h-0 flex-1" :class="level.mode.value === 'index' ? 'lg:grid lg:grid-cols-[minmax(0,7fr)_minmax(18rem,3fr)]' : undefined">
       <div class="min-w-0 overflow-y-auto px-4 pb-24 sm:px-6 lg:pb-8" :aria-busy="status === 'pending'">
@@ -99,6 +97,7 @@ import type { DateRange } from 'reka-ui'
 import type { StayHome, StayNight } from '~/server/domain/stays'
 import StayNightInspector, { type NightConcern, type NightDraft, type NightEditField } from './StayNightInspector.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
+import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
@@ -108,7 +107,7 @@ import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'cancellation_policy' | 'long_term_cancellation_policy'>
 interface CalendarPayload { home: Home; nights: StayNight[]; channel_push?: SuccessfulChannelPush | null }
-const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'timezone'>[]; manage: boolean; homeError: string }>()
+const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()

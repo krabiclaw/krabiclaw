@@ -897,17 +897,20 @@ Before you arrive and Cancellation policy open the existing Product detail
 editors directly. A cancellation description explains the host's terms; it
 does not configure an automatic refund policy.
 
-**Experience availability starts with the calendar.** Availability opens the
-existing session owner as a month, with actual saved times and a selected
-date's occurrences. Add availability opens the existing occurrence editor;
+**Experience availability uses the shared Calendar destination.** The Offering
+selector switches between bookings, nightly stays and configured experiences or
+legal consultations. Experiences use Calendar's existing month, list, year and
+day views with actual saved sessions, rather than a second Product calendar.
+Add availability opens the existing occurrence editor under Calendar;
 Repeating times opens the existing location-owned weekly rules. Month and
 date live in the URL. A successful write requires a fresh calendar read in
 the occurrence's month before its editor closes. Empty dates do not invent
 occurrences from rules or imply that an unmaterialized rule is unavailable.
 
-Physical start times belong to an explicit saved location. The chooser retains
-inactive, paused and hidden facts; choosing one changes scope, never membership.
-Adding availability requires an active physical location and its timezone.
+Physical start times belong to an explicit saved location. Location filtering
+changes scope, never membership; inactive locations remain visible.
+Add availability remains available across locations; its editor requires an
+explicit active physical location and its timezone before a time can be saved.
 Saved occurrences retain their own timezones when Location settings change.
 Online sessions use the assigned host's existing working hours; `online` is a
 public booking scope, never a physical Location or Price ID.

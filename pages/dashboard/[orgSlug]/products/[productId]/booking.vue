@@ -16,6 +16,7 @@ const route = useRoute()
 const router = useRouter()
 const to = (name: string) => router.resolve({ path: `${level.path.value}/${name}`, query: route.query }).fullPath
 const row = (id: string, label: string, summary: string, icon?: string) => ({ id, label, summary, icon, to: to(id) })
+const availability = () => ({ id: 'availability', label: 'Availability', summary: 'Add or change bookable times in Calendar', icon: 'i-lucide-calendar-days', to: router.resolve({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: p.product.value?.id, locationId: typeof route.query.location_id === 'string' ? route.query.location_id : undefined } }).fullPath })
 const groups = computed<EditorNavigationGroup[]>(() => {
   const config = p.product.value?.booking
   const items: EditorNavigationItem[] = config ? [] : [row('enabled', 'Booking calendar', 'Not set up', 'i-lucide-calendar-check')]
@@ -33,10 +34,10 @@ const groups = computed<EditorNavigationGroup[]>(() => {
     // Defaults above belong to the offering; weekly times belong to the chosen physical location.
     ...(route.query.location_id !== 'online' && (!config.held_online || p.product.value?.kind === 'experience' && (p.locationId.value || p.product.value.locations.length))
       ? p.product.value?.kind === 'experience' ? [
-          row('sessions', 'Availability', p.locationId.value ? `${p.location.value?.title ?? 'Location unavailable'} · Calendar and repeating times` : 'Choose a location or view the calendar', 'i-lucide-calendar-days'),
+          availability(),
         ] : [
           row('schedule', 'Weekly schedule', !p.locationId.value ? 'Choose a physical location' : p.scheduleError.value ?? `${p.location.value?.title ?? 'Location unavailable'} · ${p.weekdays.filter(day => p.savedSlotsFor(day.value).length).map(day => day.label).join(', ') || 'No weekly times set'}`),
-          row('sessions', 'Dated sessions', p.locationId.value ? `${p.location.value?.title ?? 'Location unavailable'} · Add or edit individual dates` : 'Choose a physical location or view saved dates', 'i-lucide-calendar-days'),
+          availability(),
         ]
       : []),
   )

@@ -966,8 +966,9 @@ test.describe('stateless MCP server', () => {
         await loginAs(page.request, baseURL!)
         await page.setExtraHTTPHeaders({})
         const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
+        const calendarPath = '/dashboard/ember-slice-demo/calendar'
         const sessionEndpoint = `/api/editor/organizations/${organizationId}/products/${product.id}/sessions`
-        expect((await page.goto(`${bookingPath}/sessions/new?date=${additionalSeating!.date}&location_id=${locationId}`))?.status()).toBe(200)
+        expect((await page.goto(`${calendarPath}/sessions/new?product_id=${product.id}&locationId=${locationId}&month=${additionalSeating!.date.slice(0, 7)}&date=${additionalSeating!.date}`))?.status()).toBe(200)
         await waitForNuxtHydration(page)
         const availability = page.locator('#dashboard-panel-product-session')
         await expect(availability.getByLabel('Date', { exact: true })).toHaveValue(additionalSeating!.date)
@@ -984,9 +985,9 @@ test.describe('stateless MCP server', () => {
         const addedSessions = (await addedResponse.json() as { sessions: SessionAvailability[] }).sessions
         expect(addedSessions).toHaveLength(1)
         const addedId = addedSessions[0]!.id
-        await expect(page).toHaveURL(url => url.pathname === `${bookingPath}/sessions` && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('location_id') === locationId)
-        expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ date: additionalSeating!.date, location_id: locationId })
-        await expect(page.locator('#dashboard-panel-product-sessions').getByTestId(`editor-row-${addedId}`)).toBeVisible()
+        await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('locationId') === locationId)
+        expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: product.id, locationId, month: additionalSeating!.date.slice(0, 7), date: additionalSeating!.date })
+        await expect(page.locator(`#dashboard-panel-org-calendar [data-session-id="${addedId}"]:visible`)).toBeVisible()
         const persisted = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
           product_id: product.id,
           from: localDateTimeToInstant(additionalSeating!.date, '00:00', location.timezone).toISOString(),
