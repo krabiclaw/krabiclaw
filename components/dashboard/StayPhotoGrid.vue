@@ -95,10 +95,22 @@ const orderDraft = ref<string[] | null>(null)
 const selecting = ref(false)
 const selectedIds = ref<string[]>([])
 const moving = ref(false)
-const moveDraft = ref<Array<{ photo_id: string; expected_room_id: string | null }>>([])
+const movePhotoIds = ref<string[]>([])
+const moveDraft = computed(() => movePhotoIds.value.map(photo_id => ({ photo_id, expected_room_id: p.photoRooms.value.find(room => room.photo_ids.includes(photo_id))?.id ?? null })))
 const adding = ref(false)
 const addSelected = ref<string[]>([])
-const addCandidates = ref<Array<{ photo_id: string; expected_room_id: string | null; room_name: string | null; url: string | null }>>([])
+const addCandidates = computed(() => p.photoAssets.value.filter(photo => !room.value?.photo_ids.includes(photo.asset_id)).map((photo) => {
+  const owner = p.photoRooms.value.find(entry => entry.photo_ids.includes(photo.asset_id))
+  return { photo_id: photo.asset_id, expected_room_id: owner?.id ?? null, room_name: owner ? stayPhotoRoomName(owner, p.photoRooms.value) : null, url: mediaStillUrl(photo) }
+}))
+watch([addCandidates, () => p.saving.value], ([candidates, saving]) => {
+  if (saving || !adding.value || !addSelected.value.length) return
+  const selected = addSelected.value
+  const candidateIds = new Set(candidates.map(photo => photo.photo_id))
+  if (selected.some(id => !candidateIds.has(id) && !room.value?.photo_ids.includes(id))) p.photoError.value = 'A selected photo is no longer on this listing. Review the remaining selection.'
+  addSelected.value = selected.filter(id => candidateIds.has(id))
+  if (!addSelected.value.length) adding.value = false
+})
 const confirmDelete = ref(false)
 const deleting = ref(false)
 const savedOrder = computed(() => p.photoAssets.value.map(photo => photo.asset_id))
@@ -191,16 +203,12 @@ async function removePhotos(ids: string[]) {
 }
 
 function openMove(ids: string[]) {
-  moveDraft.value = ids.map(id => ({ photo_id: id, expected_room_id: p.photoRooms.value.find(entry => entry.photo_ids.includes(id))?.id ?? null }))
+  movePhotoIds.value = ids
   moving.value = true
 }
 
 function openAdd() {
   addSelected.value = []
-  addCandidates.value = p.photoAssets.value.filter(photo => !room.value?.photo_ids.includes(photo.asset_id)).map((photo) => {
-    const owner = p.photoRooms.value.find(entry => entry.photo_ids.includes(photo.asset_id))
-    return { photo_id: photo.asset_id, expected_room_id: owner?.id ?? null, room_name: owner ? stayPhotoRoomName(owner, p.photoRooms.value) : null, url: mediaStillUrl(photo) }
-  })
   p.photoError.value = null
   adding.value = true
 }
@@ -218,10 +226,10 @@ async function addExisting() {
 async function addRoomPhoto(asset: { asset_id: string } | null) {
   if (!asset || !room.value) return
   const roomId = room.value.id
-  if (p.photoAssets.value.some(photo => photo.asset_id === asset.asset_id) || await p.addStayPhoto(asset.asset_id)) {
+  if (p.photoAssets.value.some(photo => photo.asset_id === asset.asset_id)) {
     const owner = p.photoRooms.value.find(entry => entry.photo_ids.includes(asset.asset_id))
     if (await p.moveStayPhotos([{ photo_id: asset.asset_id, expected_room_id: owner?.id ?? null }], { room_id: roomId })) adding.value = false
-  }
+  } else if (await p.addStayPhoto(asset.asset_id, roomId)) adding.value = false
 }
 
 async function deleteRoom() {

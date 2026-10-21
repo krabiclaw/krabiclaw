@@ -891,7 +891,7 @@ test('a host describes a place to stay through its focused editors and previews 
   const previewCollections: string[] = []
   page.on('request', outgoing => {
     const url = new URL(outgoing.url())
-    if (url.hostname !== new URL(baseURL!).hostname && ['/api/analytics/track', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
+    if (outgoing.frame() !== page.mainFrame() && ['/api/analytics/track', '/api/analytics/interactions', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
   })
   await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
   await previewLink.click()
@@ -1944,7 +1944,11 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await expect(page).toHaveURL(`${baseURL}${roomPath}`)
   await roomGrid.getByRole('link', { name: /^Privacy info/ }).click()
   await privacyPanel.getByRole('switch', { name: 'Private attached bathroom', exact: true }).click()
-  const concurrentPrivacy = await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: 6, private_attached_bathroom: false })
+  const beforeConcurrentPrivacy = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(beforeConcurrentPrivacy.error).toBeNull()
+  const bedroomBeforeConcurrentPrivacy = beforeConcurrentPrivacy.data!.product.stay.photo_rooms.find(room => room.id === bedroomId)
+  expect(bedroomBeforeConcurrentPrivacy).toMatchObject({ id: bedroomId, details_version: 6 })
+  const concurrentPrivacy = await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: bedroomBeforeConcurrentPrivacy!.details_version, private_attached_bathroom: false })
   expect(concurrentPrivacy.error).toBeNull()
   const staleRoom = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/rooms/${bedroomId}` && response.request().method() === 'PATCH')
   await privacyPanel.getByRole('button', { name: 'Save', exact: true }).click()
@@ -2028,6 +2032,20 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await addBedroomPhotos.getByRole('button', { name: 'Select photo 1', exact: true }).click()
   await addBedroomPhotos.getByRole('button', { name: 'Select photo 2', exact: true }).click()
   await expect(addBedroomPhotos.getByRole('button', { name: 'Select photo 2', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  // A concurrent MCP move refuses the stale bulk write without moving its
+  // sibling. The open dialog refreshes its sources and retries the same choice.
+  await page.route(`${baseURL}/api/dashboard/stay-homes/${productId}/photos/move**`, async route => {
+    const concurrentRoomMove = await call('move_stay_photos', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: red.id, expected_room_id: null }] })
+    expect(concurrentRoomMove.error).toBeNull()
+    await route.continue()
+  }, { times: 1 })
+  const refusedRoomMove = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos/move` && response.request().method() === 'PUT')
+  await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
+  expect((await refusedRoomMove).status()).toBe(409)
+  await expect(addBedroomPhotos.getByText('A selected photo moved to another room; reload the photo tour', { exact: true })).toBeVisible()
+  const afterRefusedRoomMove = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterRefusedRoomMove.error).toBeNull()
+  expect(afterRefusedRoomMove.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id], ...bedroomFacts }])
   await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
   await expect(addBedroomPhotos).not.toBeVisible()
   await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
@@ -2055,6 +2073,29 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await page.screenshot({ path: testInfo.outputPath('room-sleeping-arrangements-desktop.png'), animations: 'disabled' })
   await bedPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${roomPath}`)
+
+  // If the complete selection reaches the destination concurrently, the
+  // refreshed dialog completes instead of submitting an empty retry.
+  await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
+  await addBedroomPhotos.getByRole('button', { name: 'Select photo 3', exact: true }).click()
+  await page.route(`${baseURL}/api/dashboard/stay-homes/${productId}/photos/move**`, async route => {
+    const fulfilledElsewhere = await call('move_stay_photos', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: green.id, expected_room_id: null }] })
+    expect(fulfilledElsewhere.error).toBeNull()
+    await route.continue()
+  }, { times: 1 })
+  const alreadyMoved = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos/move` && response.request().method() === 'PUT')
+  await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
+  expect((await alreadyMoved).status()).toBe(409)
+  await expect(addBedroomPhotos).not.toBeVisible()
+  await expect(roomGrid.getByText('A selected photo moved to another room; reload the photo tour', { exact: true })).toBeVisible()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(3)
+  const afterCompletedSelection = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterCompletedSelection.error).toBeNull()
+  expect(afterCompletedSelection.data!.product.stay.photo_rooms).toEqual([{ ...afterRefusedRoomMove.data!.product.stay.photo_rooms[0]!, photo_ids: [red.id, blue.id, green.id] }])
+  const returnedToAdditional = await call('move_stay_photos', { product_id: productId, room_id: null, photos: [{ photo_id: green.id, expected_room_id: bedroomId }] })
+  expect(returnedToAdditional.error).toBeNull()
+  await page.reload()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
 
   // Accessibility is an authored answer with real image evidence. Uploading
   // to the library leaves the listing untouched until the feature is saved.
@@ -2424,6 +2465,26 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
     .toEqual([...uploadedPhotos, ...evidenceUploads].map(photo => ({ id: photo.id, status: 'active' })).sort((a, b) => a.id.localeCompare(b.id)))
   await page.reload()
   await expect(photoOverview.getByTestId('stay-additional-photos')).toContainText('1 photo')
+  // Append a retained library asset directly to an authored room through the
+  // picker. Green remains protected accessibility evidence; the unprotected
+  // blue photo exercises the atomic placement and membership write.
+  const detached = await request.delete(api(`stay-homes/${productId}/photos/${blue.id}`), { headers: authRequestHeaders(baseURL!) })
+  expect(detached.status(), await detached.text()).toBe(200)
+  await page.goto(`${photoPath}/rooms/${bedroomId}`)
+  await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
+  await addBedroomPhotos.getByRole('button', { name: 'Add from media library', exact: true }).click()
+  const libraryPicker = page.getByRole('dialog', { name: 'Add photos', exact: true })
+  await libraryPicker.locator(`img[src="${blue.url}"]`).click()
+  const roomAppend = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos` && response.request().method() === 'POST')
+  await libraryPicker.getByRole('button', { name: 'Done', exact: true }).click()
+  const appended = await roomAppend
+  expect(appended.status(), await appended.text()).toBe(201)
+  await expect(addBedroomPhotos).not.toBeVisible()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
+  const afterLibraryRoomAppend = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterLibraryRoomAppend.error).toBeNull()
+  expect(afterLibraryRoomAppend.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts }])
+  expect([afterLibraryRoomAppend.data!.product.image!.asset_id, ...afterLibraryRoomAppend.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, green.id, blue.id])
   expect(pageErrors).toEqual([])
 })
 
