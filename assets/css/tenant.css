@@ -27,6 +27,7 @@
   --tenant-accent-strong:   color-mix(in oklab, var(--tenant-accent) 80%, black);
   /* The band a page opens on; the shield divider beneath a hero continues it. */
   --tenant-band:            var(--tenant-accent-200);
+  --tenant-shield-height:   8.333vw;
 
   /* Site recipe defaults; a site's settings override them on the layout root. */
   --site-button-radius:     9999px;
@@ -77,15 +78,27 @@
    height, so its words keep their space and a picture hero's picture fills
    the shield. */
 .tenant-shield-edge {
-  --tenant-shield-height: 8.333vw;
-  -webkit-mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--tenant-shield-height)) no-repeat,
+  -webkit-mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--tenant-shield-height) + 1px) no-repeat,
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 160' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1920V23.4197C1920 40.325 1907.32 54.2924 1890.45 55.3984C1744.66 64.9576 1103.56 109.281 970.166 157.83C963.441 160.277 956.559 160.277 949.834 157.83C816.436 109.281 175.342 64.9576 29.5456 55.3984C12.6765 54.2924 0 40.325 0 23.4197V0Z'/%3E%3C/svg%3E") bottom / 100% var(--tenant-shield-height) no-repeat;
-  mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--tenant-shield-height)) no-repeat,
+  mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--tenant-shield-height) + 1px) no-repeat,
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 160' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1920V23.4197C1920 40.325 1907.32 54.2924 1890.45 55.3984C1744.66 64.9576 1103.56 109.281 970.166 157.83C963.441 160.277 956.559 160.277 949.834 157.83C816.436 109.281 175.342 64.9576 29.5456 55.3984C12.6765 54.2924 0 40.325 0 23.4197V0Z'/%3E%3C/svg%3E") bottom / 100% var(--tenant-shield-height) no-repeat;
+}
+
+.tenant-shield-edge {
+  position: relative;
+  z-index: 1;
 }
 
 .tenant-shield-edge > :nth-last-child(2) > :last-child {
   padding-bottom: calc(var(--tenant-shield-height) + 2rem);
+}
+
+/* What follows the shield slides up beneath it, so its own color fills the cut
+   and the hero flows into it. A transparent border keeps its words below the
+   point while its background reaches up behind it. */
+.tenant-shield-edge + * > :first-child {
+  margin-top: calc(-1 * var(--tenant-shield-height));
+  border-top: var(--tenant-shield-height) solid transparent;
 }
 
 /* Container */
