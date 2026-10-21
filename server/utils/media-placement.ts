@@ -18,7 +18,7 @@ import {
 import { isEditableMediaPlacement, isEditableMediaPlacementOwnerType, uniqueMediaAssets, type EditableMediaPlacementOwnerType, type LogoPresentation, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 import { refreshSocialCard, socialCardRefreshOwnersForPlacement } from '~/server/utils/social-card'
 import { postMediaMutationQueries } from '~/server/utils/post-management'
-import { isStayPhotoRoomType, type StayPhotoRoom } from '~/shared/stay-photos'
+import { isStayPhotoRoom, parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 
 export { EDITABLE_MEDIA_PLACEMENT_OWNERS, MEDIA_CATEGORIES, WRITABLE_MEDIA_CATEGORIES, isMediaCategory } from '~/shared/media-placement-contract'
@@ -423,7 +423,7 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
   if (!productIds.length) return rooms
   const ids = d1JsonStringSet(productIds)
   const [savedRooms, memberships] = await executeBatch(db, [
-    { query: `SELECT id, product_id, type FROM product_stay_photo_rooms
+    { query: `SELECT id, product_id, type, details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms
         WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY type, sort_order, id`, params: [organizationId, ids] },
     { query: `SELECT m.product_id, m.room_id, m.asset_id FROM product_stay_photo_room_memberships m
         JOIN media_placements mp ON mp.organization_id = m.organization_id AND mp.owner_type = 'product'
@@ -433,9 +433,13 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
         ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, mp.asset_id`, params: [organizationId, ids] },
   ], { operation: 'Read stay photo rooms' })
   const byId = new Map<string, StayPhotoRoom>()
-  for (const row of savedRooms!.results as Array<{ id: string; product_id: string; type: unknown }>) {
-    if (!isStayPhotoRoomType(row.type)) throw new TypeError(`Photo room ${row.id} has an invalid room type`)
-    const room: StayPhotoRoom = { id: row.id, type: row.type, photo_ids: [] }
+  for (const row of savedRooms!.results as Array<{ id: string; product_id: string; type: unknown; details_version: number; sleeping_arrangements: string | null; private_attached_bathroom: number | null }>) {
+    const room = {
+      id: row.id, type: row.type, photo_ids: [], details_version: row.details_version,
+      sleeping_arrangements: parseStaySleepingArrangements(row.sleeping_arrangements === null ? null : JSON.parse(row.sleeping_arrangements)),
+      private_attached_bathroom: row.private_attached_bathroom === 1 ? true : row.private_attached_bathroom === 0 ? false : row.private_attached_bathroom,
+    }
+    if (!isStayPhotoRoom(room)) throw new TypeError(`Photo room ${row.id} has invalid saved room details`)
     rooms.get(row.product_id)!.push(room)
     byId.set(row.id, room)
   }
@@ -445,6 +449,23 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
     if (!room.photo_ids.includes(row.asset_id)) room.photo_ids.push(row.asset_id)
   }
   return rooms
+}
+
+/** Both inventory totals and room allocations run this after their proposed writes. */
+export function stayBedAllocationGuardQuery(organizationId: string, productId: string): BatchQuery {
+  const allocated = `(SELECT COALESCE(SUM(json_extract(bed.value, '$.count')), 0)
+    FROM product_stay_photo_rooms room, json_each(room.sleeping_arrangements) bed
+    WHERE room.organization_id = product_stay_configs.organization_id AND room.product_id = product_stay_configs.product_id)`
+  return {
+    query: `UPDATE product_stay_configs SET updated_at = NULL WHERE organization_id = ? AND product_id = ?
+      AND ${allocated} > 0 AND (beds IS NULL OR beds < ${allocated})`,
+    params: [organizationId, productId],
+  }
+}
+
+/** The quota guard deliberately fails the existing required home timestamp. */
+export function isStayBedAllocationConflict(error: unknown): boolean {
+  return /NOT NULL constraint failed: product_stay_configs\.updated_at/.test(error instanceof Error ? error.message : String(error))
 }
 
 /**

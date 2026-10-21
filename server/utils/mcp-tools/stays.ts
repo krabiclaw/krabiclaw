@@ -4,10 +4,10 @@ import { NOT_HANDLED, requiredString, type McpExecutorContext } from './executio
 import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
 import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
 import { STAY_MAP_SHARING_MODES, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
-import { STAY_PHOTO_ROOM_TYPES } from '~/shared/stay-photos'
+import { MAX_STAY_BEDS_PER_TYPE, STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES } from '~/shared/stay-photos'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
-import { cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, STAY_CHANNELS, STAY_PAYMENT_METHODS, STAY_STATUSES } from '~/server/domain/stays'
+import { cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayPhotoRoom, STAY_CHANNELS, STAY_PAYMENT_METHODS, STAY_STATUSES } from '~/server/domain/stays'
 
 const text = { type: 'string', minLength: 1 }
 const nullableText = { type: ['string', 'null'] }
@@ -70,7 +70,12 @@ const homeAddress = { type: ['object', 'null'], properties: { address: text, cit
 const photo = { type: 'object', properties: { id: text, kind: { type: 'string', enum: ['image', 'video'] }, url: { ...text, description: 'The picture to show; a video shows its poster frame.' }, width: { type: ['integer', 'null'] }, height: { type: ['integer', 'null'] }, alt_text: nullableText, position: { type: 'integer', minimum: 0 } },
   required: ['id', 'kind', 'url', 'width', 'height', 'alt_text', 'position'] }
 const roomType = { type: 'string', enum: Object.keys(STAY_PHOTO_ROOM_TYPES) }
-export const STAY_PHOTO_ROOM_SCHEMA = { type: 'object', properties: { id: text, type: roomType, photo_ids: { type: 'array', items: text, uniqueItems: true } }, required: ['id', 'type', 'photo_ids'], additionalProperties: false }
+const sleepingArrangements = { type: ['array', 'null'], maxItems: Object.keys(STAY_BED_TYPES).length, description: 'Room allocations from the declared listing bed total. Null is unanswered; [] explicitly states none. Each bed type occurs once; all room quantities together must fit within a known listing beds total.', items: {
+  type: 'object', properties: { type: { type: 'string', enum: Object.keys(STAY_BED_TYPES) }, count: { type: 'integer', minimum: 1, maximum: MAX_STAY_BEDS_PER_TYPE } }, required: ['type', 'count'], additionalProperties: false,
+} }
+const roomDetailsVersion = { type: 'integer', minimum: 1, description: 'The room details_version from the latest photo_rooms read. A stale version refuses the entire edit.' }
+const privateBathroom = { type: ['boolean', 'null'], description: 'Whether this bedroom has a private attached bathroom. Null is unanswered. Only bedrooms may author this fact.' }
+export const STAY_PHOTO_ROOM_SCHEMA = { type: 'object', properties: { id: text, type: roomType, photo_ids: { type: 'array', items: text, uniqueItems: true }, details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom }, required: ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom'], additionalProperties: false }
 const movePhotos = { type: 'array', minItems: 1, maxItems: MAX_ORDERED_MEDIA_ASSETS, items: { type: 'object', properties: {
   photo_id: text, expected_room_id: { ...nullableText, description: 'The room from the latest photo_rooms read; null only when the photo is unassigned. A changed membership refuses the whole move.' },
 }, required: ['photo_id', 'expected_room_id'], additionalProperties: false } }
@@ -106,6 +111,10 @@ export const STAYS_TOOLS: McpToolDefinition[] = [
     inputSchema: { product_id: productId, from: day, to: { ...day, description: 'Exclusive; at most 500 days after from.' } }, required: ['product_id', 'from', 'to'], outputSchema: calendar }),
   organizationTool({ name: 'add_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Add an authored room or space to a home’s photo tour. Does not change bedrooms, beds, bathrooms or amenities. Returns the created room’s authoritative ID and the updated home.',
     inputSchema: { product_id: productId, type: roomType }, required: ['product_id', 'type'],
+    outputSchema: { type: 'object', properties: { home: stayHomeObject, room: STAY_PHOTO_ROOM_SCHEMA }, required: ['home', 'room'] } }),
+  organizationTool({ name: 'update_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Update sleeping arrangements or bedroom private-bathroom information on one authored room under its details_version. Fields omitted are retained, null clears an answer, and [] explicitly states no sleeping arrangements. Room bed quantities allocate the listing’s declared beds total, which must be known and cover every room’s allocations. Does not change listing totals, photos or amenities.',
+    inputSchema: { product_id: productId, room_id: text, expected_details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom,
+      anyOf: [{ required: ['sleeping_arrangements'] }, { required: ['private_attached_bathroom'] }] }, required: ['product_id', 'room_id', 'expected_details_version'],
     outputSchema: { type: 'object', properties: { home: stayHomeObject, room: STAY_PHOTO_ROOM_SCHEMA }, required: ['home', 'room'] } }),
   organizationTool({ name: 'remove_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Delete one authored photo-tour room. Its photos return to Additional photos; the Product’s cover/gallery and library files are retained.',
     inputSchema: { product_id: productId, room_id: text }, required: ['product_id', 'room_id'],
@@ -143,6 +152,11 @@ export async function handleStaysTools(ctx: McpExecutorContext): Promise<unknown
     case 'get_stay': return { stay: await getStay(db, access, requiredString(args, 'stay_id')) }
     case 'get_stay_calendar': return readStayCalendar(db, access, { productId: requiredString(args, 'product_id'), from: args.from, to: args.to })
     case 'add_stay_photo_room': return createStayPhotoRoom(db, env, access, requiredString(args, 'product_id'), { type: args.type })
+    case 'update_stay_photo_room': return updateStayPhotoRoom(db, env, access, requiredString(args, 'product_id'), requiredString(args, 'room_id'), {
+      expected_details_version: args.expected_details_version,
+      ...(Object.hasOwn(args, 'sleeping_arrangements') ? { sleeping_arrangements: args.sleeping_arrangements } : {}),
+      ...(Object.hasOwn(args, 'private_attached_bathroom') ? { private_attached_bathroom: args.private_attached_bathroom } : {}),
+    })
     case 'remove_stay_photo_room': return { home: await removeStayPhotoRoom(db, env, access, requiredString(args, 'product_id'), requiredString(args, 'room_id')) }
     case 'move_stay_photos': return { home: await moveStayPhotos(db, env, access, requiredString(args, 'product_id'), { ...(Object.hasOwn(args, 'room_id') ? { room_id: args.room_id } : {}), ...(Object.hasOwn(args, 'new_room_type') ? { new_room_type: args.new_room_type } : {}), photos: args.photos }) }
     case 'create_stay': return { stay: await createStay(db, env, access, { ...args, product_id: requiredString(args, 'product_id'), idempotency_key: requiredString(args, 'idempotency_key') }) }

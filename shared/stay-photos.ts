@@ -44,15 +44,77 @@ export const STAY_PHOTO_ROOM_TYPES = {
 
 export type StayPhotoRoomType = keyof typeof STAY_PHOTO_ROOM_TYPES
 
+export const STAY_BED_TYPES = {
+  single: { label: 'Single', icon: 'i-lucide-bed-single' },
+  double: { label: 'Double', icon: 'i-lucide-bed-double' },
+  queen: { label: 'Queen', icon: 'i-lucide-bed-double' },
+  king: { label: 'King', icon: 'i-lucide-bed-double' },
+  small_double: { label: 'Small double', icon: 'i-lucide-bed-double' },
+  bunk_bed: { label: 'Bunk bed', icon: 'i-lucide-bed-single' },
+  sofa_bed: { label: 'Sofa bed', icon: 'i-lucide-sofa' },
+  couch: { label: 'Couch', icon: 'i-lucide-sofa' },
+  floor_mattress: { label: 'Floor mattress', icon: 'i-lucide-bed-single' },
+  air_mattress: { label: 'Air mattress', icon: 'i-lucide-bed-single' },
+  crib: { label: 'Crib', icon: 'i-krabi-crib' },
+  toddler_bed: { label: 'Toddler bed', icon: 'i-lucide-bed-single' },
+  hammock: { label: 'Hammock', icon: 'i-krabi-hammock' },
+  water_bed: { label: 'Water bed', icon: 'i-lucide-bed-double' },
+} as const
+export type StayBedType = keyof typeof STAY_BED_TYPES
+export interface StaySleepingArrangement { type: StayBedType; count: number }
+export const MAX_STAY_BEDS_PER_TYPE = 50
+
+export function isStayBedType(value: unknown): value is StayBedType {
+  return typeof value === 'string' && Object.hasOwn(STAY_BED_TYPES, value)
+}
+
+/** Null is unanswered; an empty list explicitly records no sleeping arrangements. */
+export function isStaySleepingArrangements(value: unknown): value is StaySleepingArrangement[] | null {
+  if (value === null) return true
+  if (!Array.isArray(value)) return false
+  const types = new Set<StayBedType>()
+  return value.every(entry => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)
+      || Object.keys(entry).some(key => key !== 'type' && key !== 'count')
+      || !isStayBedType(entry.type) || types.has(entry.type)
+      || !Number.isInteger(entry.count) || entry.count < 1 || entry.count > MAX_STAY_BEDS_PER_TYPE) return false
+    types.add(entry.type)
+    return true
+  })
+}
+
+export function parseStaySleepingArrangements(value: unknown): StaySleepingArrangement[] | null {
+  if (!isStaySleepingArrangements(value)) throw new TypeError(`Sleeping arrangements must be null or a list of unique bed types with whole counts from 1 to ${MAX_STAY_BEDS_PER_TYPE}`)
+  return value === null ? null : Object.keys(STAY_BED_TYPES).flatMap(type => value.filter(bed => bed.type === type).map(bed => ({ ...bed })))
+}
+
 export interface StayPhotoRoom {
   id: string
   type: StayPhotoRoomType
   /** Product image/gallery asset IDs, in their canonical photo order. */
   photo_ids: string[]
+  details_version: number
+  sleeping_arrangements: StaySleepingArrangement[] | null
+  /** Only authored bedrooms may state whether they have a private attached bathroom. */
+  private_attached_bathroom: boolean | null
 }
 
 export function isStayPhotoRoomType(value: unknown): value is StayPhotoRoomType {
   return typeof value === 'string' && Object.hasOwn(STAY_PHOTO_ROOM_TYPES, value)
+}
+
+/** Every surface reads the same explicit room facts, including unanswered values. */
+export function isStayPhotoRoom(value: unknown): value is StayPhotoRoom {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const room = value as Record<string, unknown>
+  return Object.keys(room).every(key => ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom'].includes(key))
+    && typeof room.id === 'string' && room.id.length > 0
+    && isStayPhotoRoomType(room.type)
+    && Array.isArray(room.photo_ids) && room.photo_ids.every(id => typeof id === 'string' && id.length > 0)
+    && new Set(room.photo_ids).size === room.photo_ids.length
+    && Number.isInteger(room.details_version) && (room.details_version as number) >= 1
+    && isStaySleepingArrangements(room.sleeping_arrangements)
+    && (room.private_attached_bathroom === null || (room.type === 'bedroom' && typeof room.private_attached_bathroom === 'boolean'))
 }
 
 /** Multiple authored rooms of a type receive a number in their saved order. */

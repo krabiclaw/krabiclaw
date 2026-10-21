@@ -493,3 +493,25 @@ editor. No room, photo or listing details were changed.
   Privacy info, Amenities and Accessibility features, plus **Delete room or
   space**. The sleeping-arrangement editor shows actual per-type bed counts;
   these are distinct from the listing's aggregate capacity.
+
+### Authored bedroom details — later on 2026-10-20
+
+The same existing Bedroom was opened again, without saving any changes.
+
+- **Sleeping arrangements** has fourteen bed-type steppers: Single, Double,
+  Queen, King, Small double, Bunk bed, Sofa bed, Couch, Floor mattress, Air
+  mattress, Crib, Toddler bed, Hammock and Water bed. The editor has one lead
+  sentence and **Cancel / Save**.
+- **Privacy info** opens **Bedroom privacy**, with a single **Private
+  attached bathroom** switch and **Cancel / Save**. It describes a bathroom
+  attached to the bedroom that is just for its guests.
+- Room **Amenities** opens **Add amenities**, with search and **All /
+  Suggested** pills. Suggested contains bedroom-relevant choices; All uses
+  the full amenity vocabulary, including alarms. The scope is explicitly
+  the room or space. No amenity selection was changed.
+- Bedroom **Accessibility features** offers **Step-free access** and
+  **Entrance wider than 32 inches**. A feature opens its definition, example
+  photographs, photo guidelines and **I don't have / I have this feature**.
+  Selecting the latter in an unsaved draft revealed required photo evidence
+  and Airbnb's own review process. **Cancel** discarded that draft. This
+  review process must not be represented as a KrabiClaw approval service.

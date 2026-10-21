@@ -39,6 +39,47 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('room-details migration preserves authored rooms and photo memberships without deriving room facts from listing totals', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ idx: number; tag: string }> }
+    const roomMigration = journal.entries.findIndex(entry => entry.tag === '0014_stay_photo_rooms')
+    assert.notEqual(roomMigration, -1)
+    for (const entry of journal.entries.slice(0, roomMigration + 1)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Host', 'host', 'USD', 'America/Denver')").run()
+    database.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('site', 'org', 'site', 'Cabin', 'America/Denver')").run()
+    for (const productId of ['authored-home', 'counts-only-home']) {
+      database.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES (?, 'org', 'stay', ?, ?, 'host', 'host')").run(productId, productId, productId)
+      database.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', ?, 'site', 'host', 'host')").run(productId)
+      database.prepare("INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, bedrooms, beds, bathrooms, created_by, updated_by) VALUES ('org', ?, 'site', '16:00', '10:00', 6, 3, 5, 1.5, 'host', 'host')").run(productId)
+    }
+    database.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, status) VALUES ('photo', 'org', 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/h/room/public', 'active')").run()
+    database.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('cover', 'org', 'product', 'authored-home', 'image', 'photo')").run()
+    database.prepare("INSERT INTO product_stay_photo_rooms (id, organization_id, product_id, type, sort_order, created_by) VALUES ('bedroom', 'org', 'authored-home', 'bedroom', 3, 'host'), ('living-room', 'org', 'authored-home', 'living_room', 8, 'host')").run()
+    database.prepare("INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES ('org', 'authored-home', 'photo', 'bedroom')").run()
+    const rooms = database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all()
+    const memberships = database.prepare('SELECT * FROM product_stay_photo_room_memberships').all()
+    const placements = database.prepare('SELECT * FROM media_placements').all()
+    const listings = database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all()
+
+    database.exec(readFileSync('migrations/0015_stay_room_details.sql', 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT id, organization_id, product_id, type, sort_order, created_at, created_by FROM product_stay_photo_rooms ORDER BY sort_order').all(), rooms)
+    assert.deepEqual(database.prepare('SELECT id, details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms ORDER BY sort_order').all(), [
+      { id: 'bedroom', details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null },
+      { id: 'living-room', details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null },
+    ])
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_memberships').all(), memberships)
+    assert.deepEqual(database.prepare('SELECT * FROM media_placements').all(), placements)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), listings)
+    assert.equal(database.prepare("SELECT count(*) AS count FROM product_stay_photo_rooms WHERE product_id = 'counts-only-home'").get()!.count, 0)
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally {
+    database.close()
+  }
+})
+
 test('interleaved branch migration ledgers preserve authored rooms and location privacy and complete missing legal-site data migrations while refusing unknown files or schema', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-interleaved-transfer-'))
@@ -47,7 +88,7 @@ test('interleaved branch migration ledgers preserve authored rooms and location 
   assert.notEqual(commonEnd, -1)
   const common = journal.entries.slice(0, commonEnd + 1).map(entry => `${entry.tag}.sql`)
   const legalMigrations = ['0013_tenant_theme_id.sql', '0014_heading_level_column.sql']
-  const lodgingMigrations = ['0013_location_stay_map_sharing.sql', '0014_stay_photo_rooms.sql']
+  const lodgingMigrations = ['0013_location_stay_map_sharing.sql', '0014_stay_photo_rooms.sql', '0015_stay_room_details.sql']
   try {
     for (const history of ['staging-first', 'lodging-first', 'staging-pending'] as const) {
       const sourcePath = join(directory, `${history}.sqlite`)
@@ -77,7 +118,7 @@ test('interleaved branch migration ledgers preserve authored rooms and location 
       source.prepare("INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, beds, amenities, created_by, updated_by) VALUES ('host', 'home', 'cabin', '15:00', '11:00', 4, 2, '[\"smoke_detector\"]', 'owner', 'owner')").run()
       source.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, status) VALUES ('photo', 'host', 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/h/room/public', 'active')").run()
       source.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('cover', 'host', 'product', 'home', 'image', 'photo')").run()
-      source.prepare("INSERT INTO product_stay_photo_rooms (id, organization_id, product_id, type, sort_order, created_by) VALUES ('bedroom', 'host', 'home', 'bedroom', 2, 'owner')").run()
+      source.prepare("INSERT INTO product_stay_photo_rooms (id, organization_id, product_id, type, sort_order, created_by, details_version, sleeping_arrangements, private_attached_bathroom) VALUES ('bedroom', 'host', 'home', 'bedroom', 2, 'owner', 4, '[{\"type\":\"queen\",\"count\":1}]', 0)").run()
       source.prepare("INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES ('host', 'home', 'photo', 'bedroom')").run()
       const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'media_placements']
       const authored = preservedTables.map(table => source.prepare(`SELECT * FROM ${table}`).all())
