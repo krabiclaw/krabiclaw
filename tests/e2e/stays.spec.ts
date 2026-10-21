@@ -1068,8 +1068,7 @@ test('a host describes a place to stay through its focused editors and previews 
   expect(generalPublic.status(), await generalPublic.text()).toBe(200)
   const generalPublicData = await generalPublic.json() as { location: PublicLocationDisclosure }
   expect(generalPublicData.location).toMatchObject({ address: null, maps_url: null, latitude: null, longitude: null, stay_map_sharing: 'general', public_area: { approximate: true } })
-  expect(generalPublicData.location.public_area!.center).toEqual({ latitude: expect.any(Number), longitude: expect.any(Number) })
-  expect(generalPublicData.location.public_area!.center).not.toEqual(mapPin)
+  expect(generalPublicData.location.public_area).toMatchObject({ center: { latitude: 8.03, longitude: 98.83 }, radius_meters: 2000 })
   expect(JSON.stringify(generalPublicData)).not.toContain('12 Test Road')
   expect(JSON.stringify(generalPublicData)).not.toContain('8.0326')
   expect(JSON.stringify(generalPublicData)).not.toContain('98.822')

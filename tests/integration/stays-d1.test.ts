@@ -915,8 +915,8 @@ test('home location sharing protects every public projection after localization 
         if (mode === 'general') {
           assert.equal(projected.latitude, null)
           assert.equal(projected.longitude, null)
-          assert.notEqual(projected.public_area?.center?.latitude, location.latitude)
-          assert.notEqual(projected.public_area?.center?.longitude, location.longitude)
+          assert.deepEqual(projected.public_area?.center, { latitude: 8.03, longitude: 98.83 })
+          assert.equal(projected.public_area?.radius_meters, 2000)
           assert(!projected.map_embed_url?.includes('8.0326'))
         } else {
           assert.deepEqual([projected.latitude, projected.longitude], [location.latitude, location.longitude])

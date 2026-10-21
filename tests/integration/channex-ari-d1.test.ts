@@ -51,7 +51,7 @@ async function boot() {
     name: 'channex-ari-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'channex-ari-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'channex-ari-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
