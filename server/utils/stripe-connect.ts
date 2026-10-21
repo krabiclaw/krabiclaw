@@ -400,12 +400,19 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
   const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
   const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
   if (connected.status !== 'ready' || account.livemode !== saved.livemode) return { ready: false as const, statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', handoff }
-  // Stripe Tax is calculated by hosted Checkout only; checkout refuses an on-site payment for a business registered for it.
-  const [taxSettings, registrations] = await Promise.all([
-    stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
-    stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
-  ])
-  return { ready: true as const, stripe, account, connected, parent: keys.methodConfiguration!, handoff, automaticTax: taxSettings.status === 'active' && registrations.data.length > 0 }
+  // Thailand is a supported tax destination, but not a seller origin. Its Tax
+  // endpoints reject the request: https://docs.stripe.com/tax/supported-countries
+  // Elsewhere, preserve the registered-Tax guard for on-site payments and let
+  // provider errors propagate rather than treating a failed read as no tax.
+  let automaticTax = false
+  if (connected.country !== 'TH') {
+    const [taxSettings, registrations] = await Promise.all([
+      stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
+      stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
+    ])
+    automaticTax = taxSettings.status === 'active' && registrations.data.length > 0
+  }
+  return { ready: true as const, stripe, account, connected, parent: keys.methodConfiguration!, handoff, automaticTax }
 }
 
 /**
