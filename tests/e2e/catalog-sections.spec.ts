@@ -74,24 +74,65 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     expect(beforeOrder.status(), await beforeOrder.text()).toBe(200)
     const beforeSections = (await beforeOrder.json() as { collections: Collection[] }).collections
     const sharedBefore = beforeSections.filter(section => section.location_id === null).map(section => section.id)
-    const sourceIndex = sharedBefore.indexOf(source.id)
-    expect(sharedBefore[sourceIndex + 1]).toBe(sharedTarget.id)
+    const visibleSectionRows = menu.getByTestId('menu-scope-shared').locator('span[data-testid^="collection-"]')
+    const visibleBefore = await visibleSectionRows.evaluateAll(rows => rows.map(row => row.getAttribute('data-testid')!.slice('collection-'.length)))
+    expect(visibleBefore).toContain(source.id)
+    expect(visibleBefore).toContain(sharedTarget.id)
+    expect(visibleBefore).toEqual(sharedBefore.filter(id => visibleBefore.includes(id)))
+    const targetVisibleIndex = visibleBefore.indexOf(sharedTarget.id)
+    const direction = targetVisibleIndex > 0 ? 'up' : 'down'
+    const neighbourId = visibleBefore[targetVisibleIndex + (direction === 'up' ? -1 : 1)]!
+    expect(neighbourId).toBeDefined()
+    const targetIndex = sharedBefore.indexOf(sharedTarget.id)
+    const neighbourIndex = sharedBefore.indexOf(neighbourId)
     const sharedAfter = [...sharedBefore]
-    sharedAfter.splice(sourceIndex, 2, sharedTarget.id, source.id)
+    sharedAfter[targetIndex] = neighbourId
+    sharedAfter[neighbourIndex] = sharedTarget.id
     await menu.getByTestId('list-editor-toggle').click()
-    await menu.getByRole('button', { name: `Move ${sharedTarget.name} up`, exact: true }).click()
+    await menu.getByRole('button', { name: `Move ${sharedTarget.name} ${direction}`, exact: true }).click()
     const unsavedOrder = await page.request.get(`${editor}/collections`)
     expect(unsavedOrder.status(), await unsavedOrder.text()).toBe(200)
     expect((await unsavedOrder.json() as { collections: Collection[] }).collections).toEqual(beforeSections)
+
+    // Another editor commits after this draft was read. Even the same desired
+    // order cannot silently replace that newer snapshot.
+    const concurrentOrder = await page.request.put(`${editor}/collections/order`, { data: { collection_ids: sharedAfter, expected_collection_ids: sharedBefore, location_id: null } })
+    expect(concurrentOrder.status(), await concurrentOrder.text()).toBe(200)
+    const concurrentOrderRead = await page.request.get(`${editor}/collections`)
+    expect(concurrentOrderRead.status(), await concurrentOrderRead.text()).toBe(200)
+    const concurrentSections = (await concurrentOrderRead.json() as { collections: Collection[] }).collections
+    expect(concurrentSections.filter(section => section.location_id === null).map(section => section.id)).toEqual(sharedAfter)
+    const staleOrderSaved = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/collections/order` && response.request().method() === 'PUT')
+    await menu.getByRole('button', { name: 'Done', exact: true }).click()
+    const staleOrderResponse = await staleOrderSaved
+    expect(staleOrderResponse.status(), await staleOrderResponse.text()).toBe(409)
+    expect(staleOrderResponse.request().postDataJSON()).toEqual({ collection_ids: sharedAfter, expected_collection_ids: sharedBefore, location_id: null })
+    expect(await staleOrderResponse.json()).toMatchObject({ data: { code: 'COLLECTION_ORDER_CHANGED', field: 'expected_collection_ids' } })
+    const refusedOrderRead = await page.request.get(`${editor}/collections`)
+    expect(refusedOrderRead.status(), await refusedOrderRead.text()).toBe(200)
+    expect((await refusedOrderRead.json() as { collections: Collection[] }).collections).toEqual(concurrentSections)
+    await expect(menu).toContainText('The section order changed while you were editing.')
+    await expect(menu.getByTestId('list-editor-toggle')).toBeDisabled()
+    await page.getByRole('navigation', { name: 'Dashboard', exact: true }).getByRole('link', { name: 'Catalog', exact: true }).click()
+    await expect(page).toHaveURL(`${catalog}/menu`)
+    await menu.getByRole('button', { name: 'Use current order', exact: true }).click()
+    await expect(menu.getByRole('button', { name: 'Use current order', exact: true })).toHaveCount(0)
+    await expect(menu.getByTestId('list-editor-toggle')).toBeEnabled()
+    expect(await visibleSectionRows.evaluateAll(rows => rows.map(row => row.getAttribute('data-testid')!.slice('collection-'.length)))).toEqual(sharedAfter.filter(id => visibleBefore.includes(id)))
+    await menu.getByTestId('list-editor-toggle').click()
+    await menu.getByRole('button', { name: `Move ${sharedTarget.name} ${direction === 'up' ? 'down' : 'up'}`, exact: true }).click()
+    const recoveredDraftRead = await page.request.get(`${editor}/collections`)
+    expect(recoveredDraftRead.status(), await recoveredDraftRead.text()).toBe(200)
+    expect((await recoveredDraftRead.json() as { collections: Collection[] }).collections).toEqual(concurrentSections)
     const sectionOrderSaved = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/collections/order` && response.request().method() === 'PUT')
     await menu.getByRole('button', { name: 'Done', exact: true }).click()
     const sectionOrderResponse = await sectionOrderSaved
     expect(sectionOrderResponse.status(), await sectionOrderResponse.text()).toBe(200)
-    expect(sectionOrderResponse.request().postDataJSON()).toEqual({ collection_ids: sharedAfter, expected_collection_ids: sharedBefore, location_id: null })
+    expect(sectionOrderResponse.request().postDataJSON()).toEqual({ collection_ids: sharedBefore, expected_collection_ids: sharedAfter, location_id: null })
     const savedOrder = await page.request.get(`${editor}/collections`)
     expect(savedOrder.status(), await savedOrder.text()).toBe(200)
     const savedSections = (await savedOrder.json() as { collections: Collection[] }).collections
-    expect(savedSections.filter(section => section.location_id === null).map(section => section.id)).toEqual(sharedAfter)
+    expect(savedSections.filter(section => section.location_id === null).map(section => section.id)).toEqual(sharedBefore)
     expect(savedSections.filter(section => section.location_id === 'loc-demo')).toEqual(beforeSections.filter(section => section.location_id === 'loc-demo'))
 
     // Old shared links can still carry a location query. It may scope prices,

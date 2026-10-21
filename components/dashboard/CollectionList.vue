@@ -6,7 +6,7 @@
     :items="listItems"
     :error="loadError"
     :read-only="readOnly"
-    :disabled="Boolean(removingId) || savingOrder || Boolean(loadError)"
+    :disabled="Boolean(removingId) || savingOrder || Boolean(loadError) || Boolean(orderError)"
     empty-title="No sections yet"
     empty-icon="i-lucide-layout-list"
     add-label="Add section"
@@ -33,6 +33,7 @@
   </DashboardListEditor>
   <UAlert v-if="deleteError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="deleteError" />
   <UAlert v-if="orderError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="orderError" />
+  <UButton v-if="orderError" label="Use current order" color="neutral" variant="soft" :disabled="savingOrder || Boolean(removingId)" @click="resetOrder" />
 
   </div>
 </template>
@@ -175,7 +176,7 @@ const savingOrder = ref(false)
 const orderSnapshot = ref<string[] | null>(null)
 
 async function commitOrder(): Promise<boolean> {
-  if (savingOrder.value) return false
+  if (savingOrder.value || orderError.value) return false
   if (!orderDirty.value) return true
   orderDirty.value = false
   // The whole intended order for this scope — the site's own collections, or
@@ -203,7 +204,7 @@ async function commitOrder(): Promise<boolean> {
     if (JSON.stringify(persisted) !== JSON.stringify(order)) throw new Error('Section order changed. Review the current order before editing again.')
     return true
   } catch (error) {
-    if (props.scope === scope) localOrder.value = null
+    orderDirty.value = true
     orderError.value = getErrorMessage(error, 'Failed to save the new order')
     try { await load() } catch (readError) { orderError.value += ` The sections could not be read again: ${getErrorMessage(readError, 'Read failed')}` }
     return false
@@ -213,9 +214,23 @@ async function commitOrder(): Promise<boolean> {
 }
 
 watch(editing, (value, previous) => {
-  if (value && !previous) orderSnapshot.value = catalogRows.value.map(row => row.id)
+  if (value && !previous && !orderError.value) orderSnapshot.value = catalogRows.value.map(row => row.id)
   if (previous && !value) void commitOrder()
 })
+
+async function resetOrder() {
+  if (savingOrder.value || removingId.value) return
+  savingOrder.value = true
+  try {
+    await load()
+    localOrder.value = null
+    orderDirty.value = false
+    orderSnapshot.value = null
+    orderError.value = null
+    editing.value = false
+  } catch (error) { orderError.value = getErrorMessage(error, 'The current section order could not be read') }
+  finally { savingOrder.value = false }
+}
 
 // Resets this list's own edit state when the catalog underneath it changes.
 // The full catalog stays shared; changing the displayed scope resets its draft.

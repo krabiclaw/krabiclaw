@@ -108,7 +108,7 @@ async function addTo() {
   p.saving.value = true
   addError.value = null
   try {
-    await catalog.setCollectionProducts(addTarget.value, [...expected, p.product.value.id], expected)
+    await catalog.setCollectionProducts(addTarget.value, expected.includes(p.product.value.id) ? expected : [...expected, p.product.value.id], expected)
     await p.reload()
     addOpen.value = false
   } catch (cause) { addError.value = getErrorMessage(cause, 'The membership could not be added') }
