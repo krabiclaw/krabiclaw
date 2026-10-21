@@ -1087,7 +1087,7 @@ function bookingSummary(): string {
   if (experienceEditor.value && config) return [
     minutes,
     config.default_capacity === null ? 'No guest limit' : config.default_capacity === 0 ? 'Closed to new guests' : `Up to ${config.default_capacity} ${config.default_capacity === 1 ? 'guest' : 'guests'} per session`,
-    config.scheduling_mode === 'provider' ? 'Host’s working hours' : 'Weekly schedule and dated sessions',
+    config.scheduling_mode === 'provider' ? 'Host’s working hours' : 'Calendar and repeating times',
     config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request',
     config.online_payment_required ? 'Online payment required for paid sessions' : 'No payment collected at booking',
   ].join('\n')

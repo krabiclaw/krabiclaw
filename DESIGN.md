@@ -356,7 +356,7 @@ can need a long searchable list, and describing an accessibility feature can
 need an answer, photo evidence and guidelines. Splitting either into arbitrary
 levels would scatter the decision.
 
-The lodging reference distinguishes focused decisions from indexes:
+The captured host tools distinguish focused decisions from indexes:
 
 | Screen | The entire detail pane |
 | --- | --- |
@@ -365,7 +365,7 @@ The lodging reference distinguishes focused decisions from indexes:
 | Amenities | a searchable selection list, with filters that narrow the choices |
 | Pricing | one value row, one toggle, one link |
 | Hours by day | an index: one row per weekday previewing its hours; the day leaf is one switch and two time pickers |
-| Schedule | an index: one row per day previewing its start times; the day leaf is a list of times |
+| Repeating start times (KrabiClaw) | an index of saved weekly rules, reached from Availability; the day leaf edits that weekday's times |
 
 **Independent concerns belong behind their own saved summaries.** Airbnb's
 Description screen is not a form with five textareas; it is five rows —
@@ -500,10 +500,11 @@ connection, a failed background refresh — is the shell's one banner above the
 navigation, never a box repeated inside each screen; a screen shows only its
 own failures.
 
-**Leaf width is fixed from `lg`.** Below `lg` a level is the whole screen or a
-drawer and uses all of it. From `lg` the content column is `max-w-xl`, so a
-field does not stretch across a wide pane; it caps the right edge, never the
-left. A leaf that needs more width is a grid editor and says so.
+**Controls fill their pane's inner width.** Below `lg` a level is the whole
+screen or a drawer; above it the native panel owns its width. Paired indexes
+and leaves have no second width cap inside that panel. The title, field and
+footer share its gutter. Explicit standalone `column` screens retain the
+shared reading or leaf width; a calendar or grid takes the available frame.
 
 **A level alone in the frame is one of three things, and the empty right side
 of a desktop window is never the fourth.** Content that scales — a grid, a
@@ -515,13 +516,18 @@ Only a list of records with nothing of its own to open — Notifications, Past
 activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
 booking's notes, a calendar day) stands alone as a column, and says which in
 `DashboardIndexPanel column`: `reading` for the records, `leaf` for the screen.
-Beside a child every index is `leaf`. The widths live in
+Beside a child every index fills its own pane. Standalone widths live in
 `dashboardColumnWidths`; a page never states one. A column's title heads it,
 as a leaf's does. Every level title is `dashboardTitleClass`.
 
-**Short text is bare.** A name, title, headline, slug or link renders as a
+**Focused writing is bare.** A name, title, headline, slug or link renders as a
 borderless 22–26px field with a counter, the way Airbnb's title and custom
-link do. Long text is one bordered textarea.
+link do. A description uses the native textarea's `none` variant with no inner
+padding and native autoresize, filling its pane without a fixed-height scroll
+box. Pane-width changes invoke that same textarea sizing API. The live Airbnb
+listing-description editor was checked at phone and
+desktop breakpoints on October 21, 2026. Structured date, time and address
+controls retain their visible field boundaries.
 
 **Sizes come from the theme.** Controls are `lg` — 16px text, 44px tall, 8px
 radius — and the commit bar's Save is the one `xl` (48px). Body text is 16px
@@ -891,12 +897,27 @@ Before you arrive and Cancellation policy open the existing Product detail
 editors directly. A cancellation description explains the host's terms; it
 does not configure an automatic refund policy.
 
-Physical start times belong to an explicit saved location. Weekly schedule and
-Dated sessions offer those locations by name and retain inactive, paused and
-hidden facts. Choosing a location changes the editor's scope, never its
-memberships. Adding a dated session requires an active physical location and
-its time zone. Online sessions use the assigned host's existing working hours;
-`online` is a public booking scope, never a physical Location or Price ID.
+**Experience availability starts with the calendar.** Availability opens the
+existing session owner as a month, with actual saved times and a selected
+date's occurrences. Add availability opens the existing occurrence editor;
+Repeating times opens the existing location-owned weekly rules. Month and
+date live in the URL. A successful write requires a fresh calendar read in
+the occurrence's month before its editor closes. Empty dates do not invent
+occurrences from rules or imply that an unmaterialized rule is unavailable.
+
+Physical start times belong to an explicit saved location. The chooser retains
+inactive, paused and hidden facts; choosing one changes scope, never membership.
+Adding availability requires an active physical location and its timezone.
+Saved occurrences retain their own timezones when Location settings change.
+Online sessions use the assigned host's existing working hours; `online` is a
+public booking scope, never a physical Location or Price ID.
+
+Airbnb's [Experience calendar guide](https://www.airbnb.com/help/article/2645)
+describes Calendar → Add availability and optional daily or weekly repetition.
+The live account has only an in-progress Experience, so its published calendar
+has not been visually verified. KrabiClaw's continuing weekday rules have no
+bounded series or repeat-until date; do not present controls or “this and
+following” changes that those canonical operations cannot honor.
 
 **A control must not be able to build an invalid state.** If the server rejects
 a combination, the form should make it unrepresentable rather than allow it and

@@ -102,7 +102,7 @@ const hostOptions = computed(() => members.value ? [
   ...members.value.teams.map(team => ({ label: team.name, avatar: null, published: true, team: true, state: `${team.members.length} ${team.members.length === 1 ? 'member' : 'members'}: guests see each one with a published profile`, value: `team:${team.id}` })),
 ] : [])
 const setting = computed(() => concern.value === 'location' && p.product.value?.kind === 'experience'
-  ? { title: 'Meeting format', lead: 'Enable online booking in the host’s working hours. Physical start times are edited at each saved location under Weekly schedule or Dated sessions.' }
+  ? { title: 'Meeting format', lead: 'Enable online booking in the host’s working hours. Edit physical availability and repeating times at each saved location.' }
   : settings[concern.value as keyof typeof settings] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return

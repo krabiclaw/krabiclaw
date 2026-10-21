@@ -5,9 +5,10 @@ import { MCP_ORGANIZATION_ID, mcpRequest, mcpData, publishOwnHostProfile } from 
 import { E2E_POTTERY_ORGANIZATION_ID, tenantTestExtraHeaders } from './test-env'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
-import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone'
+import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../../utils/timezone'
 import type { OrganizationMembersData } from '../../utils/organization-members'
 import type { Product } from '../../server/types/products'
+import type { SessionAvailability } from '../../server/utils/availability'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
 // for why. This group covers the bulk of an owner's MCP tool surface: site
@@ -952,14 +953,61 @@ test.describe('stateless MCP server', () => {
         const sessions = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, {headers: tenantTestExtraHeaders()})
         expect(sessions.status(),await sessions.text()).toBe(200)
         expect((await sessions.json()).sessions).toEqual([expect.objectContaining({starts_at:start.toISOString(),remaining:6,is_full:false})])
+        let additionalSeating: { date: string; time: string } | undefined
+        for (let offset = 1; offset <= 7 && !additionalSeating; offset++) {
+          const date = addLocalDays(seating!.date, offset)
+          const time = generateReservationTimes(location.opening_hours, date, { lastSeatingBufferMinutes: 60, specialHours: location.special_hours })[0]
+          if (time) additionalSeating = { date, time }
+        }
+        expect(additionalSeating, 'the existing location has another open one-hour time on a later date').toBeDefined()
+        const additionalStart = localDateTimeToInstant(additionalSeating!.date, additionalSeating!.time, location.timezone)
+        const additionalEnd = new Date(additionalStart.getTime() + 60 * 60_000)
+        const additionalEndLocal = localNow(location.timezone, additionalEnd)
+        await loginAs(page.request, baseURL!)
+        await page.setExtraHTTPHeaders({})
+        const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
+        const sessionEndpoint = `/api/editor/organizations/${organizationId}/products/${product.id}/sessions`
+        expect((await page.goto(`${bookingPath}/sessions/new?date=${additionalSeating!.date}&location_id=${locationId}`))?.status()).toBe(200)
+        await waitForNuxtHydration(page)
+        const availability = page.locator('#dashboard-panel-product-session')
+        await expect(availability.getByLabel('Date', { exact: true })).toHaveValue(additionalSeating!.date)
+        await expect(availability.getByLabel('Starts', { exact: true })).toHaveValue('')
+        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('6')
+        await availability.getByLabel('Starts', { exact: true }).fill(additionalSeating!.time)
+        await expect(availability.getByLabel('Ends', { exact: true })).toHaveValue(`${additionalEndLocal.date}T${additionalEndLocal.time}`)
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('4')
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        const added = page.waitForResponse(response => new URL(response.url()).pathname === sessionEndpoint && response.request().method() === 'POST')
+        await availability.getByRole('button', { name: 'Add to calendar', exact: true }).click()
+        const addedResponse = await added
+        expect(addedResponse.status(), await addedResponse.text()).toBe(201)
+        const addedSessions = (await addedResponse.json() as { sessions: SessionAvailability[] }).sessions
+        expect(addedSessions).toHaveLength(1)
+        const addedId = addedSessions[0]!.id
+        await expect(page).toHaveURL(url => url.pathname === `${bookingPath}/sessions` && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('location_id') === locationId)
+        expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ date: additionalSeating!.date, location_id: locationId })
+        await expect(page.locator('#dashboard-panel-product-sessions').getByTestId(`editor-row-${addedId}`)).toBeVisible()
+        const persisted = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+          product_id: product.id,
+          from: localDateTimeToInstant(additionalSeating!.date, '00:00', location.timezone).toISOString(),
+          to: localDateTimeToInstant(addLocalDays(additionalSeating!.date, 1), '00:00', location.timezone).toISOString(),
+        })
+        expect(persisted.sessions).toEqual([expect.objectContaining({
+          id: addedId, organization_id: organizationId, product_id: product.id, location_id: locationId, timezone: location.timezone,
+          starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), capacity: 4, status: 'scheduled', claimed: 0, remaining: 4, is_full: false,
+        })])
+        const publicReadback = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, { headers: tenantTestExtraHeaders(), params: { location_id: locationId } })
+        expect(publicReadback.status(), await publicReadback.text()).toBe(200)
+        const publicSessions = (await publicReadback.json() as { sessions: Array<Pick<SessionAvailability, 'id' | 'starts_at' | 'ends_at' | 'location_id' | 'timezone' | 'remaining' | 'is_full'>> }).sessions
+        expect(publicSessions).toHaveLength(2)
+        expect(publicSessions.find(session => session.id === addedId)).toMatchObject({
+          id: addedId, location_id: locationId, timezone: location.timezone, starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), remaining: 4, is_full: false,
+        })
         // Online is a public booking scope, not a physical Product location.
         // Removing it from its own focused editor returns to the same Product
         // and rereads saved state without following an invalid online address.
         await call('set_product_publication', { product_id: product.id, published: false })
         await call('set_product_booking_config', { product_id: product.id, held_online: true, scheduling_mode: 'provider' })
-        await loginAs(page.request, baseURL!)
-        await page.setExtraHTTPHeaders({})
-        const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
         await page.goto(`${bookingPath}/location?location_id=online`)
         const format = page.locator('#dashboard-panel-booking-location')
         await expect(format.getByRole('switch', { name: 'Held online', exact: true })).toHaveAttribute('aria-checked', 'true')
@@ -977,7 +1025,11 @@ test.describe('stateless MCP server', () => {
         await expect(page).toHaveURL(`${bookingPath}/enabled`)
         expect((await call<{ product: Product }>('get_product', { product_id: product.id })).product.booking).toBeNull()
       } finally {
-        if (experienceId) expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId})).deleted).toBe(true)
+        if (experienceId) {
+          expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId})).deleted).toBe(true)
+          const deleted = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${experienceId}`)
+          expect(deleted.status(), await deleted.text()).toBe(404)
+        }
         for (const section of menu?.sections.filter(section => section.collection.name.endsWith(stamp)) ?? []) {
           for (const product of section.products) expect((await call<{deleted:boolean}>('delete_product',{product_id:product.id})).deleted).toBe(true)
           expect((await call<{deleted:boolean}>('delete_collection',{collection_id:section.collection.id})).deleted).toBe(true)

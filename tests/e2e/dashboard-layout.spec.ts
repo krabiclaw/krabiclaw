@@ -609,11 +609,14 @@ test.describe('dashboard pane hierarchy', () => {
     original: SessionAvailability | null
     release: (() => Promise<void>) | null
   } | null = null
-  test.afterEach(async ({ page }) => {
+  test.afterEach(async ({ page }, testInfo) => {
     const restore = datedSessionRestore
     datedSessionRestore = null
     if (!restore) return
     const failures: unknown[] = []
+    try {
+      if (testInfo.status !== 'passed' && !page.isClosed()) await page.close()
+    } catch (error) { failures.push(error) }
     try {
       const original = restore.original
       if (original) {
@@ -636,10 +639,10 @@ test.describe('dashboard pane hierarchy', () => {
           starts_at: original.starts_at, ends_at: original.ends_at, capacity: original.capacity, status: original.status,
         })
         if (!page.isClosed()) {
-          await open(page, `/dashboard/${restore.organizationId}/products/${restore.productId}/booking/sessions/${original.id}?location_id=${original.location_id}`)
-          const leaf = page.locator('#dashboard-panel-product-session')
           const starts = localNow(original.timezone, new Date(original.starts_at))
           const ends = localNow(original.timezone, new Date(original.ends_at))
+          await open(page, `/dashboard/${restore.organizationId}/products/${restore.productId}/booking/sessions/${original.id}?date=${starts.date}&location_id=${original.location_id}`)
+          const leaf = page.locator('#dashboard-panel-product-session')
           await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(`${starts.date}T${starts.time}`)
           await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(`${ends.date}T${ends.time}`)
           await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('8')
@@ -657,7 +660,163 @@ test.describe('dashboard pane hierarchy', () => {
     if (failures.length) throw new AggregateError(failures, 'Dated-session restoration failed')
   })
 
-  test('Dated session form saves times, capacity and status and restores the occurrence', async ({ page, baseURL, playwright }, testInfo) => {
+  test('Availability calendar keeps month, date and creation drafts consistent without changing saved sessions', async ({ page, baseURL }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Availability draft verification uses isolated local fixtures.')
+    const organizationId = 'org-user-pottery-house'
+    const productId = 'exp-ph-wheel'
+    const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
+    const endpoint = `${productEndpoint}/sessions`
+    const sessionsPath = `/dashboard/${organizationId}/products/${productId}/booking/sessions`
+    const schedulePath = `/dashboard/${organizationId}/products/${productId}/booking/schedule`
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
+      await page.context().clearCookies()
+      await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
+      const from = new Date(Date.now() + 25 * 86_400_000).toISOString()
+      const to = new Date(Date.now() + 40 * 86_400_000).toISOString()
+      const [sessionResponse, productResponse, locationResponse] = await Promise.all([
+        page.request.get(endpoint, { params: { from, to } }),
+        page.request.get(productEndpoint),
+        page.request.get('/api/dashboard/locations', { params: { org: organizationId, organization: 'true', status: 'all' } }),
+      ])
+      for (const response of [sessionResponse, productResponse, locationResponse]) expect(response.status(), await response.text()).toBe(200)
+      const originalSessions = (await sessionResponse.json() as { sessions: SessionAvailability[] }).sessions
+      const original = originalSessions.find(session => session.location_id === 'loc-pottery-house' && session.status === 'scheduled' && session.claimed === 0 && localNow(session.timezone, new Date(session.starts_at)).time === '11:00')
+      expect(original, 'the seeded Experience has a saved daytime occurrence to select').toBeDefined()
+      const { product } = await productResponse.json() as { product: Product }
+      const { locations } = await locationResponse.json() as { locations: DashboardLocation[] }
+      expect(product.booking?.duration_minutes, 'the offering has an authored duration for new availability').toBeGreaterThan(0)
+      const location = locations.find(entry => entry.id === original!.location_id)
+      expect(location, 'the saved occurrence belongs to a location in its organization').toBeDefined()
+      expect(location!.status).toBe('active')
+      expect(product.locations.some(placement => placement.location_id === location!.id)).toBe(true)
+      const sessionDay = localNow(original!.timezone, new Date(original!.starts_at)).date
+      const leaf = page.locator('#dashboard-panel-product-session')
+      await page.setViewportSize(WIDE)
+      await open(page, schedulePath)
+      await expect(page).toHaveURL(schedulePath)
+      const schedule = page.locator('#dashboard-panel-booking-schedule')
+      await expect(schedule.locator('[data-testid^="editor-row-"]')).toHaveCount(product.locations.length)
+      for (const placement of product.locations) {
+        const place = locations.find(row => row.id === placement.location_id)
+        expect(place, 'every location choice is a saved relationship in this organization').toBeDefined()
+        const choice = schedule.getByTestId(`editor-row-${place!.id}`)
+        await expect(choice).toContainText(place!.title)
+        await expect(choice).toContainText(placement.published ? 'Visible at this location' : 'Hidden at this location')
+        await expect(choice).toContainText(placement.active ? 'Accepting bookings' : 'Bookings paused')
+        if (place!.status === 'active') await expect(choice).toHaveAttribute('href', `${schedulePath}?location_id=${place!.id}`)
+        else {
+          await expect(choice).toContainText('Location inactive')
+          await expect(choice).not.toHaveAttribute('href')
+        }
+      }
+      await page.setViewportSize(PHONE)
+      await page.screenshot({ path: testInfo.outputPath('experience-weekly-location-chooser-phone.png') })
+      await schedule.getByTestId(`editor-row-${location!.id}`).click()
+      await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
+      await expect(schedule.getByTestId('editor-row-monday')).toHaveAttribute('href', `${schedulePath}/monday?location_id=${location!.id}`)
+      await schedule.getByTestId('editor-row-monday').click()
+      const weekday = page.locator('#dashboard-panel-booking-schedule-monday')
+      await expect(weekday.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await weekday.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
+
+      await open(page, `${sessionsPath}?date=${sessionDay}`)
+      const sessions = page.locator('#dashboard-panel-product-sessions')
+      await expect(sessions.getByRole('heading', { name: 'Availability', exact: true })).toBeVisible()
+      await expect(sessions.getByRole('button', { name: 'Add availability', exact: true })).toBeDisabled()
+      const scopeHref = new URL((await sessions.getByTestId(`editor-row-${location!.id}`).getAttribute('href'))!, baseURL)
+      expect(scopeHref.pathname).toBe(sessionsPath)
+      expect(Object.fromEntries(scopeHref.searchParams)).toEqual({ date: sessionDay, location_id: location!.id })
+      const occurrenceHref = new URL((await sessions.getByTestId(`editor-row-${original!.id}`).getAttribute('href'))!, baseURL)
+      expect(occurrenceHref.pathname).toBe(`${sessionsPath}/${original!.id}`)
+      expect(Object.fromEntries(occurrenceHref.searchParams)).toEqual({ date: sessionDay, location_id: location!.id })
+      await page.screenshot({ path: testInfo.outputPath('experience-availability-calendar-phone.png') })
+      await open(page, `${sessionsPath}/new?date=${sessionDay}`)
+      await expect(leaf.getByRole('heading', { name: 'Add availability', exact: true })).toBeVisible()
+      await expect(leaf.getByRole('button', { name: 'Add to calendar', exact: true })).toBeDisabled()
+      await expect(leaf.getByLabel('Starts', { exact: true })).toHaveCount(0)
+      const parentHref = new URL((await leaf.getByRole('link', { name: 'Availability', exact: true }).getAttribute('href'))!, baseURL)
+      expect(parentHref.pathname).toBe(sessionsPath)
+      expect(Object.fromEntries(parentHref.searchParams)).toEqual({ date: sessionDay })
+      await leaf.getByRole('link', { name: 'Availability', exact: true }).click()
+      await sessions.getByTestId(`editor-row-${location!.id}`).click()
+      await expect(page).toHaveURL(url => url.pathname === sessionsPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('location_id') === location!.id)
+      await expect(sessions.getByRole('link', { name: 'Repeating times', exact: true })).toHaveAttribute('href', `${schedulePath}?location_id=${location!.id}`)
+      const scopedAddHref = new URL((await sessions.getByRole('link', { name: 'Add availability', exact: true }).getAttribute('href'))!, baseURL)
+      expect(scopedAddHref.pathname).toBe(`${sessionsPath}/new`)
+      expect(Object.fromEntries(scopedAddHref.searchParams)).toEqual({ date: sessionDay, location_id: location!.id })
+      const scopedProductResponse = await page.request.get(productEndpoint)
+      expect(scopedProductResponse.status(), await scopedProductResponse.text()).toBe(200)
+      expect((await scopedProductResponse.json() as { product: Product }).product.locations).toEqual(product.locations)
+
+      const nextMonthDate = new Date(`${sessionDay}T12:00:00Z`)
+      nextMonthDate.setUTCDate(1)
+      nextMonthDate.setUTCMonth(nextMonthDate.getUTCMonth() + 1)
+      const nextMonth = nextMonthDate.toISOString().slice(0, 7)
+      const nextMonthLabel = new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(nextMonthDate)
+      const nextMonthFrom = new Date(Date.UTC(nextMonthDate.getUTCFullYear(), nextMonthDate.getUTCMonth(), 0)).toISOString()
+      const nextMonthTo = new Date(Date.UTC(nextMonthDate.getUTCFullYear(), nextMonthDate.getUTCMonth() + 1, 2)).toISOString()
+      const nextMonthRead = page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return url.pathname === endpoint && url.searchParams.get('from') === nextMonthFrom && url.searchParams.get('to') === nextMonthTo
+      })
+      await sessions.getByRole('button', { name: 'Next month', exact: true }).click()
+      const nextMonthResponse = await nextMonthRead
+      expect(nextMonthResponse.status(), await nextMonthResponse.text()).toBe(200)
+      const nextMonthSessions = (await nextMonthResponse.json() as { sessions: SessionAvailability[] }).sessions.filter(session => session.location_id === location!.id && localNow(session.timezone, new Date(session.starts_at)).date.startsWith(nextMonth))
+      await expect(page).toHaveURL(url => url.pathname === sessionsPath && url.searchParams.get('month') === nextMonth && url.searchParams.get('location_id') === location!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ month: nextMonth, location_id: location!.id })
+      await expect(sessions.getByText(nextMonthLabel, { exact: true })).toBeVisible()
+      await expect(sessions.locator('[data-testid^="editor-row-"]')).toHaveCount(nextMonthSessions.length)
+      await page.reload()
+      await waitForNuxtHydration(page)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ month: nextMonth, location_id: location!.id })
+      await expect(sessions.getByText(nextMonthLabel, { exact: true })).toBeVisible()
+      await expect(sessions.getByRole('button', { name: 'Show month', exact: true })).toHaveCount(0)
+      await sessions.getByRole('button', { name: 'Previous month', exact: true }).click()
+      const selectedDayLabel = new Intl.DateTimeFormat('en', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${sessionDay}T12:00:00Z`))
+      const selectedDay = sessions.getByRole('button', { name: selectedDayLabel, exact: true })
+      await selectedDay.click()
+      await expect(selectedDay).toHaveAttribute('data-selected', 'true')
+      await expect(page).toHaveURL(url => url.pathname === sessionsPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('location_id') === location!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ date: sessionDay, location_id: location!.id })
+      await expect(sessions.getByTestId(`editor-row-${original!.id}`)).toBeVisible()
+      await expect(sessions.locator('[data-testid^="editor-row-"]')).toHaveCount(originalSessions.filter(session => session.location_id === location!.id && localNow(session.timezone, new Date(session.starts_at)).date === sessionDay).length)
+      const add = sessions.getByRole('link', { name: 'Add availability', exact: true })
+      const addHref = new URL((await add.getAttribute('href'))!, baseURL)
+      expect(addHref.pathname).toBe(`${sessionsPath}/new`)
+      expect(Object.fromEntries(addHref.searchParams)).toEqual({ date: sessionDay, location_id: location!.id })
+      await add.click()
+      await expect(leaf.getByRole('heading', { name: 'Add availability', exact: true })).toBeVisible()
+      await expect(leaf).toContainText(`Times are in ${location!.timezone}.`)
+      await expect(leaf.getByLabel('Date', { exact: true })).toHaveValue(sessionDay)
+      await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue('')
+      await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue('')
+      await expect(leaf.getByRole('button', { name: 'Add to calendar', exact: true })).toBeDisabled()
+      await leaf.getByLabel('Starts', { exact: true }).fill(localNow(original!.timezone, new Date(original!.starts_at)).time)
+      const suggestedEnd = localNow(original!.timezone, new Date(Date.parse(original!.starts_at) + product.booking!.duration_minutes! * 60_000))
+      await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(`${suggestedEnd.date}T${suggestedEnd.time}`)
+      await expect(leaf.getByRole('button', { name: 'Add to calendar', exact: true })).toBeEnabled()
+      const customEnd = localNow(original!.timezone, new Date(Date.parse(original!.starts_at) + (product.booking!.duration_minutes! + 30) * 60_000))
+      await leaf.getByLabel('Ends', { exact: true }).fill(`${customEnd.date}T${customEnd.time}`)
+      await leaf.getByLabel('Starts', { exact: true }).fill(localNow(original!.timezone, new Date(Date.parse(original!.starts_at) + 15 * 60_000)).time)
+      await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(`${customEnd.date}T${customEnd.time}`)
+      await expect(leaf.getByRole('button', { name: 'Add to calendar', exact: true })).toBeEnabled()
+      await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === sessionsPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('location_id') === location!.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ date: sessionDay, location_id: location!.id })
+      const readback = await page.request.get(endpoint, { params: { from, to } })
+      expect(readback.status(), await readback.text()).toBe(200)
+      const afterCancelledCreation = (await readback.json() as { sessions: SessionAvailability[] }).sessions
+      expect(afterCancelledCreation.map(session => session.id).sort()).toEqual(originalSessions.map(session => session.id).sort())
+      expect(afterCancelledCreation.find(session => session.id === original!.id)).toMatchObject({ starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status })
+    } finally {
+      await release()
+    }
+  })
+
+  test('Availability calendar saves times, capacity and status and restores the occurrence', async ({ page, baseURL, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Session writes require isolated local D1.')
     const organizationId = 'org-user-pottery-house'
     const productId = 'exp-ph-wheel'
@@ -683,29 +842,15 @@ test.describe('dashboard pane hierarchy', () => {
     restore.original = original ?? null
     expect(original, 'the seeded product has an unclaimed daytime occurrence in its own location').toBeDefined()
     expect(original!.capacity).toBe(8)
-    const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
-    const [productResponse, locationResponse] = await Promise.all([
-      page.request.get(productEndpoint),
-      page.request.get('/api/dashboard/locations', { params: { org: 'org-user-pottery-house', organization: 'true', status: 'all' } }),
-    ])
-    for (const response of [productResponse, locationResponse]) expect(response.status(), await response.text()).toBe(200)
-    const { product } = await productResponse.json() as { product: Product }
-    const { locations } = await locationResponse.json() as { locations: DashboardLocation[] }
-    const location = locations.find(row => row.id === original!.location_id)
-    expect(location, 'the occurrence’s physical location exists in its own organization').toBeDefined()
-    expect(location!.status).toBe('active')
-    expect(product.locations.some(row => row.location_id === location!.id)).toBe(true)
     const localInput = (instant: string) => {
       const value = localNow(original!.timezone, new Date(instant))
       return `${value.date}T${value.time}`
     }
     const startsAt = new Date(Date.parse(original!.starts_at) + 15 * 60_000).toISOString()
     const endsAt = new Date(Date.parse(original!.ends_at) + 15 * 60_000).toISOString()
-    const bookingPath = `/dashboard/org-user-pottery-house/products/${productId}/booking`
-    const schedulePath = `${bookingPath}/schedule`
-    const sessionsPath = `${bookingPath}/sessions`
-    const sessionListPath = `${sessionsPath}?location_id=${original!.location_id}`
-    const path = `${sessionsPath}/${original!.id}?location_id=${original!.location_id}`
+    const sessionsPath = `/dashboard/org-user-pottery-house/products/${productId}/booking/sessions`
+    const sessionDay = localNow(original!.timezone, new Date(original!.starts_at)).date
+    const path = `${sessionsPath}/${original!.id}?date=${sessionDay}&location_id=${original!.location_id}`
     const leaf = page.locator('#dashboard-panel-product-session')
     const save = leaf.getByRole('button', { name: 'Save', exact: true })
     const commit = async () => {
@@ -714,62 +859,12 @@ test.describe('dashboard pane hierarchy', () => {
       await save.click()
       const response = await saved
       expect(response.status(), await response.text()).toBe(200)
-      await expect(page).toHaveURL(sessionListPath)
+      await expect(page).toHaveURL(url => url.pathname === sessionsPath && url.searchParams.get('date') === sessionDay && url.searchParams.get('location_id') === original!.location_id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ date: sessionDay, location_id: original!.location_id })
     }
-    await page.setViewportSize(WIDE)
-    await open(page, schedulePath)
-    await expect(page).toHaveURL(schedulePath)
-    const schedule = page.locator('#dashboard-panel-booking-schedule')
-    await expect(schedule.locator('[data-testid^="editor-row-"]')).toHaveCount(product.locations.length)
-    for (const placement of product.locations) {
-      const place = locations.find(row => row.id === placement.location_id)
-      expect(place, 'every location choice is a saved relationship in this organization').toBeDefined()
-      const choice = schedule.getByTestId(`editor-row-${place!.id}`)
-      await expect(choice).toContainText(place!.title)
-      await expect(choice).toContainText(placement.published ? 'Visible at this location' : 'Hidden at this location')
-      await expect(choice).toContainText(placement.active ? 'Accepting bookings' : 'Bookings paused')
-      if (place!.status === 'active') await expect(choice).toHaveAttribute('href', `${schedulePath}?location_id=${place!.id}`)
-      else {
-        await expect(choice).toContainText('Location inactive')
-        await expect(choice).not.toHaveAttribute('href')
-      }
-    }
-    await page.setViewportSize(PHONE)
-    await page.screenshot({ path: testInfo.outputPath('experience-weekly-location-chooser-phone.png') })
-    await schedule.getByTestId(`editor-row-${location!.id}`).click()
-    await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
-    await expect(schedule.getByTestId('editor-row-monday')).toHaveAttribute('href', `${schedulePath}/monday?location_id=${location!.id}`)
-    await schedule.getByTestId('editor-row-monday').click()
-    const weekday = page.locator('#dashboard-panel-booking-schedule-monday')
-    await expect(weekday.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await weekday.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(`${schedulePath}?location_id=${location!.id}`)
-
-    await open(page, sessionsPath)
-    const sessions = page.locator('#dashboard-panel-product-sessions')
-    await expect(sessions.getByRole('button', { name: 'Add a session', exact: true })).toBeDisabled()
-    await expect(sessions.getByTestId(`editor-row-${location!.id}`)).toHaveAttribute('href', sessionListPath)
-    await expect(sessions.getByTestId(`editor-row-${original!.id}`)).toHaveAttribute('href', path)
-    await page.screenshot({ path: testInfo.outputPath('experience-dated-location-chooser-phone.png') })
-    await open(page, `${sessionsPath}/new`)
-    await expect(leaf.getByRole('button', { name: 'Create session', exact: true })).toBeDisabled()
-    await expect(leaf.getByLabel('Starts', { exact: true })).toHaveCount(0)
-    await expect(leaf.getByRole('link', { name: 'Dated sessions', exact: true })).toHaveAttribute('href', sessionsPath)
-    await leaf.getByRole('link', { name: 'Dated sessions', exact: true }).click()
-    await sessions.getByTestId(`editor-row-${location!.id}`).click()
-    await expect(page).toHaveURL(sessionListPath)
-    await expect(sessions.getByRole('link', { name: 'Add a session', exact: true })).toHaveAttribute('href', `${sessionsPath}/new?location_id=${location!.id}`)
-    await sessions.getByRole('link', { name: 'Add a session', exact: true }).click()
-    await expect(leaf).toContainText(`Times are in ${location!.timezone}.`)
-    await expect(leaf.getByRole('button', { name: 'Create session', exact: true })).toBeDisabled()
-    await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(sessionListPath)
-    const scopedProductResponse = await page.request.get(productEndpoint)
-    expect(scopedProductResponse.status(), await scopedProductResponse.text()).toBe(200)
-    expect((await scopedProductResponse.json() as { product: Product }).product.locations).toEqual(product.locations)
-
     await page.setViewportSize(NARROW)
     await open(page, path)
+    await expect(leaf.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
     await expect(save).toBeDisabled()
     await leaf.getByLabel('Starts', { exact: true }).fill(localInput(startsAt))
     await commit()
@@ -1128,27 +1223,40 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('mobile scroll confines a short Description drawer to its body and pins its controls', async ({ page }) => {
-    const productsRead = await page.request.get('/api/editor/organizations/org-demo/products')
-    expect(productsRead.status(), await productsRead.text()).toBe(200)
-    const product = (await productsRead.json() as { products: Product[] }).products.find(row => row.kind === 'dish')
-    expect(product, 'The demo has an existing dish to describe').toBeDefined()
-    await page.setViewportSize({ width: 390, height: 480 })
-    await open(page, `${ORG}/products/${product!.id}/description`)
-    const dialog = page.getByRole('dialog', { name: 'Description', exact: true })
+  test('mobile scroll confines a growing Experience description to its drawer body and pins its controls', async ({ page, baseURL }) => {
+    const organizationId = 'org-user-pottery-house'
+    const productId = 'exp-ph-wheel'
+    await page.context().clearCookies()
+    await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
+    const productRead = await page.request.get(`/api/editor/organizations/${organizationId}/products/${productId}`)
+    expect(productRead.status(), await productRead.text()).toBe(200)
+    const { product } = await productRead.json() as { product: Product }
+    expect(product.kind).toBe('experience')
+    expect(product.description, 'The seeded Pottery class has its authored description').not.toBe('')
+    const productPath = `/dashboard/${organizationId}/products/${product.id}`
+    await page.setViewportSize(WIDE)
+    await open(page, `${productPath}/description`)
+    const dialog = page.getByRole('dialog', { name: 'What you’ll do', exact: true })
     const panel = page.locator('#dashboard-panel-product-description')
+    const textarea = panel.getByRole('textbox', { name: 'What you’ll do', exact: true })
+    await expect(textarea).toHaveValue(product.description)
+    await expect.poll(() => textarea.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
+    const desktopHeight = await textarea.evaluate(element => element.clientHeight)
+    await page.setViewportSize({ width: 390, height: 480 })
+    await expect(dialog).toBeVisible()
+    await expect(textarea).toHaveValue(product.description)
+    await expect.poll(() => textarea.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
+    expect(await textarea.evaluate(element => element.clientHeight), 'The same description grows when its column becomes narrower').toBeGreaterThan(desktopHeight)
     const body = panel.locator(':scope > [data-slot="body"]')
     const parentBody = page.locator('#dashboard-panel-product > [data-slot="body"]')
     const header = panel.locator(':scope > :has(h1)')
     const save = panel.getByRole('button', { name: 'Save', exact: true })
-    await expect(dialog).toBeVisible()
-    await expect(panel.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(product!.description ?? '')
     await panel.getByTestId('dashboard-navbar-close').hover()
     const bodyBox = await body.boundingBox()
     expect(bodyBox).not.toBeNull()
     const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
-    expect(maximum, 'The real ten-row Description control needs body scrolling in a short window').toBeGreaterThan(0)
-    // The body padding receives the wheel; a textarea can own its own scroll.
+    expect(maximum, 'The existing authored description grows beyond the short drawer body').toBeGreaterThan(0)
+    // The body padding receives the wheel so the drawer body owns the gesture.
     await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
     await page.mouse.wheel(0, -maximum - bodyBox!.height)
     await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
@@ -1157,13 +1265,13 @@ test.describe('dashboard pane hierarchy', () => {
     expect(headerBefore).not.toBeNull()
     expect(saveBefore).not.toBeNull()
     expect(saveBefore!.y).toBeGreaterThanOrEqual(0)
-    expect(saveBefore!.y + saveBefore!.height).toBeLessThanOrEqual(568)
+    expect(saveBefore!.y + saveBefore!.height).toBeLessThanOrEqual(480)
     expect(bodyBox!.y + bodyBox!.height).toBeLessThanOrEqual(saveBefore!.y)
     const parentBefore = await parentBody.evaluate(element => element.scrollTop)
     const documentBefore = await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))
     expect(documentBefore.top).toBe(0)
     expect(documentBefore.width).toBeLessThanOrEqual(390)
-    expect(documentBefore.height).toBeLessThanOrEqual(568)
+    expect(documentBefore.height).toBeLessThanOrEqual(480)
     await page.mouse.wheel(0, maximum + bodyBox!.height)
     await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
     await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
@@ -1175,7 +1283,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect(await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))).toEqual(documentBefore)
     expect(await body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
     await panel.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(`${ORG}/products/${product!.id}`)
+    await expect(page).toHaveURL(productPath)
   })
 
   test('mobile scroll ends Today after its real final card and one panel padding', async ({ page }, testInfo) => {

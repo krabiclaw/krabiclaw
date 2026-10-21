@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="booking-schedule" title="Weekly schedule" :auto-open="p.location.value?.status === 'active' && !scopeError ? groups[0]?.items[0]?.to ?? null : null">
+  <DashboardIndexPanel id="booking-schedule" :title="p.product.value?.kind === 'experience' ? 'Repeating times' : 'Weekly schedule'" :auto-open="p.location.value?.status === 'active' && !scopeError ? groups[0]?.items[0]?.to ?? null : null">
     <template v-if="p.locationId.value" #right><UButton :to="chooseLocationPath" label="Change location" color="neutral" variant="outline" /></template>
     <UAlert v-if="p.loadError.value || p.organizationLocationsError.value || scopeError" color="error" variant="soft" :description="p.loadError.value || p.organizationLocationsError.value || scopeError || ''" />
     <p v-else-if="!p.product.value" role="status" class="text-muted">Loading offering…</p>

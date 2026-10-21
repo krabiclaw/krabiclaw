@@ -1,8 +1,9 @@
 <template>
-  <DashboardLeafPanel id="product-session" :title="isNew ? newSession.title : 'Edit session'" :lead="timezone ? `Times are in ${timezone}.` : 'Choose a location first; online times come from the provider\'s working hours.'" :saving="saving" :disabled="pending || !valid || (!isNew && !form?.dirty && !saveError)" :error="saveError ?? p.loadError.value ?? scopeError ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? newSession.action : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
-    <UButton v-if="scopeError" :to="chooseLocationPath" color="neutral" variant="outline">Dated sessions</UButton>
+  <DashboardLeafPanel id="product-session" :title="isNew ? 'Add availability' : 'Edit availability'" :lead="timezone ? `Times are in ${timezone}.` : 'Choose a location first; online times come from the provider\'s working hours.'" :saving="saving" :disabled="pending || !valid || (!isNew && !form?.dirty && !saveError)" :error="saveError ?? p.loadError.value ?? scopeError ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add to calendar' : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
+    <UButton v-if="scopeError" :to="chooseLocationPath" color="neutral" variant="outline">Availability</UButton>
     <UForm v-else ref="form" :key="revision" :state="{ startsAt, endsAt, capacity, sessionStatus }" class="space-y-6" @submit="save">
-      <UFormField name="startsAt" label="Starts" required><UInput v-model="startsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
+      <UFormField v-if="isNew" name="startDate" label="Date" required><UInput v-model="startDate" type="date" class="w-full" /></UFormField>
+      <UFormField name="startsAt" label="Starts" required><UInput v-if="isNew" v-model="startTime" type="time" step="60" class="w-full" /><UInput v-else v-model="startsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
       <UFormField name="endsAt" label="Ends" required><UInput v-model="endsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
       <UFormField name="capacity" label="Guest limit" hint="Blank means no limit"><UInputNumber v-model="capacity" :min="data?.session.claimed ?? 0" class="w-full" /></UFormField>
       <UFormField v-if="!isNew" name="sessionStatus">
@@ -16,6 +17,7 @@
 
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
+import { productSessionsKey } from '~/pages/dashboard/[orgSlug]/products/[productId]/booking/sessions.vue'
 import { isSessionResponse, isSessionsResponse } from '~/utils/session-contract'
 import { isValidTimezone, localDateTimeToInstant, localNow } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
@@ -23,6 +25,7 @@ import type { ProductSessionStatus } from '~/shared/bookings'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
+const sessions = inject(productSessionsKey)!
 const route = useRoute()
 const router = useRouter()
 const level = useRouteLevel()
@@ -30,27 +33,21 @@ const chooseLocationPath = computed(() => router.resolve({ path: router.resolve(
 const dashboardApi = useDashboardApi()
 const sessionId = computed(() => String(route.params.sessionId))
 const isNew = computed(() => sessionId.value === 'new')
-const newSession = newRecordLabels('session')
 const endpoint = computed(() => `/api/editor/organizations/${p.organizationId}/products/${route.params.productId}/sessions`)
 const { data, error, pending, refresh: refreshSession } = await useAsyncData(
   () => `product-session:${p.organizationId}:${route.params.productId}:${sessionId.value}`,
   async () => isNew.value ? null : dashboardApi(`${endpoint.value}/${sessionId.value}`, { validate: isSessionResponse }),
 )
-// The mounted list owns this keyed request; Nuxt shares its data, refresh and failure state.
-const sessions = await useAsyncData(
-  () => `product-sessions:${p.organizationId}:${p.product.value?.id}:${route.query.location_id === 'online' ? 'online' : p.locationId.value ?? 'all'}`,
-  async () => p.product.value?.booking
-    ? dashboardApi(`/api/editor/organizations/${p.organizationId}/products/${p.product.value.id}/sessions`, { validate: isSessionsResponse })
-    : null,
-)
 const timezone = computed(() => data.value?.session.timezone ?? p.location.value?.timezone)
 const scopeError = computed(() => {
-  if (isNew.value) return p.location.value?.status === 'active' ? null : 'Choose an active physical location in Dated sessions before adding a session. Online times follow the host’s working hours.'
+  if (isNew.value) return p.location.value?.status === 'active' ? null : 'Choose an active physical location in Availability before adding a time. Online times follow the host’s working hours.'
   const session = data.value?.session
   return session && (p.locationId.value && session.location_id !== p.locationId.value || route.query.location_id === 'online' && session.location_id !== null)
     ? 'This session does not belong to the location in this address.' : null
 })
 const startsAt = ref('')
+const startDate = computed({ get: () => startsAt.value.split('T')[0] ?? '', set: (date: string) => { startsAt.value = `${date}T${startTime.value}` } })
+const startTime = computed({ get: () => startsAt.value.split('T')[1] ?? '', set: (time: string) => { startsAt.value = `${startDate.value}T${time}` } })
 const endsAt = ref('')
 const capacity = ref<number | undefined>()
 const sessionStatus = ref<ProductSessionStatus>('scheduled')
@@ -65,7 +62,7 @@ function localInput(instant: string, zone: string): string {
 }
 function reset() {
   const session = data.value?.session
-  startsAt.value = session ? localInput(session.starts_at, session.timezone) : ''
+  startsAt.value = session ? localInput(session.starts_at, session.timezone) : typeof route.query.date === 'string' ? `${route.query.date}T` : ''
   endsAt.value = session ? localInput(session.ends_at, session.timezone) : ''
   capacity.value = session ? session.capacity ?? undefined : p.product.value?.booking?.default_capacity ?? undefined
   sessionStatus.value = session?.status ?? 'scheduled'
@@ -80,6 +77,17 @@ function instant(value: string, original?: string): string {
   if (!date || !time || !isValidTimezone(timezone.value)) throw new Error('Choose valid start and end times in the offering’s time zone')
   return localDateTimeToInstant(date, time, timezone.value).toISOString()
 }
+// A chosen start uses the offering's authored duration, while a custom end is retained.
+watch(startsAt, (value, previous) => {
+  const duration = p.product.value?.booking?.duration_minutes
+  if (!isNew.value || !duration || !timezone.value) return
+  const endFor = (start: string) => {
+    try { return localInput(new Date(Date.parse(instant(start)) + duration * 60_000).toISOString(), timezone.value!) }
+    catch { return null }
+  }
+  const nextEnd = endFor(value)
+  if (nextEnd && (!endsAt.value || endsAt.value === endFor(previous))) endsAt.value = nextEnd
+})
 const valid = computed(() => {
   try { return Boolean(p.product.value?.booking) && !scopeError.value && !error.value && instant(endsAt.value, data.value?.session.ends_at) > instant(startsAt.value, data.value?.session.starts_at) && (capacity.value === undefined || (Number.isSafeInteger(capacity.value) && capacity.value >= (data.value?.session.claimed ?? 0))) }
   catch { return false }
@@ -115,9 +123,9 @@ async function save() {
     else await dashboardApi(`${endpoint.value}/${sessionId.value}`, {
       method: 'PATCH', body: { ...times, status: sessionStatus.value, expected_updated_at: data.value!.session.updated_at }, validate: isSessionResponse,
     })
-    await sessions.refresh()
-    if (sessions.error.value) throw sessions.error.value
-    await navigateTo(level.to.value ?? p.sectionPath('booking/sessions'))
+    const date = localInput(times.starts_at, timezone.value!).slice(0, 10)
+    await sessions.refresh(date)
+    await navigateTo({ path: router.resolve(level.to.value ?? p.sectionPath('booking/sessions')).path, query: { ...route.query, month: undefined, date } })
     if (creating) creationIntent.value = { key: crypto.randomUUID(), fingerprint: '' }
   } catch (failure) { saveError.value = getErrorMessage(failure, 'Session could not be saved') }
   finally { saving.value = false }

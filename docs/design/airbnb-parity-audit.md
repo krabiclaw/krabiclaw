@@ -21,8 +21,8 @@ every leaf read as "Nuxt UI default":
 | 1 | **A checkbox for every yes/no.** 19 `UCheckbox` vs 3 `USwitch`. | Never a checkbox. Three controls only: a **✕/✓ pair** for rules, a **switch** for one setting, a **selectable card** for one-of-N. | features, status, publication, reservations, seats, hours "Closed", booking "Takes bookings", qa visibility, url |
 | 2 | **Bordered boxes stacked.** `rounded-xl border` cards or `UCard` as the row primitive. | Rows separated by a **1px hairline**, 24px padding, no box. A box is reserved for a *picker* (cards you choose between) or a *value you tap into*. | reservations (7 boxes), features (2 UCards), options, hours exceptions, localization, members, insights (15 UCards) |
 | 3 | **Helper text everywhere, in five styles.** FF `description` (17), `help` (7), intro `<p>` above (≈15 leaves), inline `<p>` below, counter above bare input. | **One line, in one place:** a muted sentence under the title *or* a `44/50 available` counter. Rows carry a one-line sub-label. No sentence under a field. | address ("One line per line.", "Two-letter code, e.g. TH."), seats, notice, booking ("Leave empty for no limit. Zero means no places at all."), publication |
-| 4 | **Field density.** Full-width inputs (654px at 1440), 42px tall, `rounded-md` (6px), 17px label *and* value *and* helper all the same size and weight-ish. | Title/short text is a **bare 22–26px text field** with no border. Long text is one textarea, 8px radius, 1px `#B0B0B0`. Labels are 16px `#222`, sub-labels 14px `#6C6C6C`. | every text leaf: name, title, headline, slug, contact |
-| 5 | **Width.** `DashboardLeafPanel` allows `max-w-5xl`; only booking and calendar-settings leaves narrow themselves (`max-w-md`), so leaves disagree with each other. | The leaf column is one width (≈560px of content) and nothing stretches to fill it. Whitespace is the design. | address at 1440 is six 654px inputs |
+| 4 | **Field density.** Full-width inputs (654px at 1440), 42px tall, `rounded-md` (6px), 17px label *and* value *and* helper all the same size and weight-ish. | Title/short text is a **bare 22–26px text field** with no border. The live listing-description textarea is also bare, 16px, without inner padding, and fills its pane's inner width (rechecked October 21, 2026). Labels are 16px `#222`, sub-labels 14px `#6C6C6C`. | every text leaf: name, title, headline, slug, contact |
+| 5 | **Width.** `DashboardLeafPanel` allows `max-w-5xl`; only booking and calendar-settings leaves narrow themselves (`max-w-md`), so leaves disagree with each other. | The native pane owns its width; fields fill its inner gutter. The live listing-description field fills 392px inside its desktop pane and 327px on a phone (rechecked October 21, 2026). A second cap inside a wider pane is not part of that reference. | address at 1440 is six 654px inputs |
 | 6 | **Compound leaves.** Hours (7 days × checkbox + 2 time inputs + add), booking (checkbox + 2 fields + 7-day schedule), announcement (7 controls), address (6 fields), section fields (every schema field). | Leaf size is enforced. Hours-like data is a **row per day** opening its own picker; a schedule is a list you add to; address is a *row* ("908 Islander Way, Chattanooga…") that opens one form. | hours, booking, announcement, address, `sections/[blockId]/[section]` |
 
 Fixing 1–5 is almost entirely `app.config.ts`, the two shells, and three new
@@ -105,10 +105,11 @@ Add a section **"Controls"** after *Leaf size*:
   container for a control.
 - **One explanation per leaf**, under the title. A field never carries a
   sentence. Counters (`44/50 available`) sit above the field in `text-sm`.
-- **Leaf width is fixed** (`max-w-xl`). Fields do not stretch to the pane.
+- **Controls fill their pane's inner width.** Explicit standalone reading
+  columns retain their shared cap; paired panes have no second field-width cap.
 - **Short text is bare**: name, title, headline, slug, link render as a
   borderless 22–26px field with a counter (Airbnb title/custom-link). Long
-  text is one bordered textarea.
+  description text is one borderless, growing native textarea.
 - Add to the *Leaf size* table rows for Hours-by-day and Schedule so the
   compound leaves have a named decomposition.
 
