@@ -2,7 +2,7 @@
   <!-- Airbnb's Share: the device's own share sheet, or the link copied where there is none. -->
   <button type="button" class="inline-flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-semibold text-default underline underline-offset-4 hover:bg-muted" @click="share">
     <TenantIcon name="share" class="size-4" />
-    {{ copied ? t('saya.experience_detail.link_copied') : t('saya.experience_detail.share') }}
+    {{ copied ? t('site.experience_detail.link_copied') : t('site.experience_detail.share') }}
   </button>
 </template>
 <script setup lang="ts">

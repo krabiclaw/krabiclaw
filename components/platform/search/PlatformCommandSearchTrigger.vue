@@ -29,7 +29,7 @@ const props = withDefaults(defineProps<{
   compact?: boolean
   label?: string
   ariaLabel?: string
-  variant?: 'platform' | 'blawby' | 'saya'
+  variant?: 'platform' | 'tenant'
 }>(), {
   compact: false,
   label: 'Search',

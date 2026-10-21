@@ -34,6 +34,9 @@ export interface McpToolSecurityScheme {
   scopes: string[]
 }
 
+/** Every phone a tool takes: stored as E.164, so a number without its calling code is refused. */
+export const PHONE_FORMAT = 'International number with its country calling code, e.g. +66812345678.'
+
 export const MCP_TOOL_SECURITY_SCHEMES: McpToolSecurityScheme[] = [
   { type: 'oauth2', scopes: ['tenant'] },
 ]

@@ -47,10 +47,10 @@ export interface PublicShellPayload {
   googleMaps: ApiRecord
   sections: Record<PublicSiteSection, boolean>
   platformMessages: Record<string, string> | null
-  consultation?: import('~/types/blawby').PublicConsultationSettings | null
+  consultation?: import('~/types/public-site').PublicConsultationSettings | null
   canSchedule?: boolean
-  compliance?: import('~/types/blawby').PublicCompliance | null
-  pageLinks?: import('~/types/blawby').PublicBlawbyPageLink[]
+  compliance?: import('~/types/public-site').PublicCompliance | null
+  pageLinks?: import('~/types/public-site').PublicPageLink[]
   searchConsoleVerification?: string | null
 }
 

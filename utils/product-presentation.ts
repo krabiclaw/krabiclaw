@@ -1,7 +1,7 @@
 import type { Collection, Product, ProductPresentation, ProductSurface, SiteProductSurface } from '~/server/types/products'
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { isMediaCategory, type MediaCategory } from '~/shared/media-placement-contract'
-import { organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/template-registry'
 
 /** Product kind owns its public surface; scheduling is an independent capability. */
 export function isExperience(product: Pick<Product, 'kind'>): boolean {
@@ -61,7 +61,11 @@ export const STAY_PRESENTATION: ProductPresentation = {
 export function catalogNavigation(vertical: string | null | undefined, sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
   const order: ProductSurface[] = ['menu', 'products', 'stays', 'experiences']
   return order.filter(surface => sections?.[surface] === true)
-    .map(surface => ({ surface, path: presentationForSurface(vertical, surface).collectionPath, labelKey: `saya.footer.${surface}` }))
+    .map((surface) => {
+      // Named by where it is listed: a legal practice's services are Services, not Products.
+      const path = presentationForSurface(vertical, surface).collectionPath
+      return { surface, path, labelKey: `site.footer.${path.slice(1)}` }
+    })
 }
 
 /** Where a location's items on one surface are listed. Homes have no branch index; they are listed site-wide. */
@@ -95,10 +99,10 @@ export function parseSiteProductPath(path: string): { surface: SiteProductSurfac
 
 /** The i18n key for a product card's call to action, by the product's own kind. */
 export function productCtaKey(kind: string | null | undefined): string {
-  return kind === 'experience' ? 'saya.common.view_experience'
-    : kind === 'dish' ? 'saya.common.view_dish'
+  return kind === 'experience' ? 'site.common.view_experience'
+    : kind === 'dish' ? 'site.common.view_dish'
       : kind === 'stay' ? 'stay.check_availability'
-        : 'saya.common.view_item'
+        : 'site.common.view_item'
 }
 
 /** The surface this product is read on, and the paths and words that go with it. */
@@ -133,12 +137,13 @@ export function resolveProductPresentation(vertical: string | null | undefined, 
   if (normalized === 'experience' || normalized === 'service' || normalized === 'lodging') {
     return {
       feature: 'products',
-      collectionPath: '/products',
+      // A legal practice lists its practice areas at /services; it has no /products.
+      collectionPath: isLegalPracticeSite({ vertical, themeId }) ? '/services' : '/products',
       locationCollectionSegment: 'products',
       productPath: (locationSlug, productSlug) => `/locations/${encodeURIComponent(locationSlug)}/products/${encodeURIComponent(productSlug)}`,
-      collectionLabel: organizationSupportsBlawbyTemplate({ vertical, themeId }) ? 'Services' : 'Products',
-      itemLabel: organizationSupportsBlawbyTemplate({ vertical, themeId }) ? 'Service' : 'Product',
-      itemLabelPlural: organizationSupportsBlawbyTemplate({ vertical, themeId }) ? 'Services' : 'Products',
+      collectionLabel: isLegalPracticeSite({ vertical, themeId }) ? 'Services' : 'Products',
+      itemLabel: isLegalPracticeSite({ vertical, themeId }) ? 'Service' : 'Product',
+      itemLabelPlural: isLegalPracticeSite({ vertical, themeId }) ? 'Services' : 'Products',
       collectionGroupLabel: 'Collection',
       collectionGroupLabelPlural: 'Collections',
       structuredDataType: 'Product',
@@ -277,7 +282,7 @@ export function collectionsOnSurface<
   })
 }
 
-export interface ProductCollectionGroup {
+export interface ProductCollectionGroup<T extends Pick<Product, 'id' | 'name' | 'collections'> = Product> {
   id: string
   name: string
   description: string | null
@@ -286,7 +291,7 @@ export interface ProductCollectionGroup {
   sort_order: number
   /** The location whose collection this is, or null for a site-wide one. */
   location_id: string | null
-  products: Product[]
+  products: T[]
 }
 
 /**
@@ -301,10 +306,10 @@ export interface ProductCollectionGroup {
  * Both the collection page and the home page's preview read their order from
  * here, so the order a merchant arranges is the order every surface shows.
  */
-export function groupProductsByCollection(
-  products: readonly Product[],
+export function groupProductsByCollection<T extends Pick<Product, 'id' | 'name' | 'collections'>>(
+  products: readonly T[],
   collections: readonly Collection[],
-): ProductCollectionGroup[] {
+): ProductCollectionGroup<T>[] {
   const positionFor = new Map<string, Map<string, number>>()
   for (const product of products) {
     for (const membership of product.collections) {

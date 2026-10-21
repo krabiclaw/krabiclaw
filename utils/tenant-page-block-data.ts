@@ -52,3 +52,37 @@ export function blockMedia(block: TenantPageBlock, slot: string) {
     .filter(item => item.slot === slot)
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
 }
+
+/**
+ * A heading cut into the part before its emphasised phrase, the phrase, and the
+ * part after — so the phrase can carry colour where it actually sits. A title
+ * that does not contain the phrase keeps no accent, so a heading in a locale
+ * the phrase was never translated into reads whole rather than gaining a stray
+ * English word.
+ */
+export function splitAccent(title: string, accent?: string | null): { before: string; accent: string; after: string } {
+  const phrase = accent ?? ''
+  const index = phrase ? title.indexOf(phrase) : -1
+  return index >= 0
+    ? { before: title.slice(0, index), accent: phrase, after: title.slice(index + phrase.length) }
+    : { before: title, accent: '', after: '' }
+}
+
+/**
+ * The prose block a page with pictures draws beside them, in the hero's own
+ * column: the markdown block straight after the hero. The hero draws it there
+ * and the renderer skips it — one answer read by both, rather than drawing the
+ * block twice.
+ */
+export function overviewProseBlockId(page: {
+  path: string
+  blocks: ReadonlyArray<{ id: string; type: string }>
+  media: ReadonlyArray<{ kind: string | null; slot: string }>
+}): string | null {
+  if (page.path === '/') return null
+  if (!page.media.some(item => item.kind === 'image' && (item.slot === 'cover' || item.slot === 'gallery'))) return null
+  const heroIndex = page.blocks.findIndex(block => block.type === 'hero')
+  if (heroIndex < 0) return null
+  const next = page.blocks[heroIndex + 1]
+  return next?.type === 'markdown' ? next.id : null
+}

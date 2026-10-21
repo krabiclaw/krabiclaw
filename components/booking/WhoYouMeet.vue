@@ -1,7 +1,7 @@
 <template>
   <!-- Airbnb's host card: who runs it, in their own published words. -->
   <section v-if="status !== 'success' || hosts.length" class="border-t border-default py-10" :aria-label="t('booking.provider_title')">
-    <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('booking.provider_title') }}</h2>
+    <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('booking.provider_title') }}</h2>
     <div v-if="error" class="mt-4 space-y-3">
       <UAlert color="error" :title="t('booking.provider_failed')" :description="getErrorMessage(error, '') || undefined" />
       <UButton color="neutral" variant="soft" @click="refresh()">{{ t('booking.provider_retry') }}</UButton>

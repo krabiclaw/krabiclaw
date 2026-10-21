@@ -13,7 +13,7 @@
       <div class="p-6 space-y-4">
         <div>
           <h3 class="text-lg font-semibold text-highlighted">Enter the code</h3>
-          <p class="mt-1 text-sm text-muted">Sent to {{ phoneInput }} on WhatsApp.</p>
+          <p class="mt-1 text-sm text-muted">Sent to {{ formatPhone(phoneInput) }} on WhatsApp.</p>
         </div>
         
         <UAlert v-if="verifyError" color="error" variant="soft" :description="verifyError" />
@@ -109,7 +109,7 @@ import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboa
 // -nocheck
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
-import { parsePhoneOrThrow } from '~/utils/phone'
+import { parsePhoneOrThrow, formatPhone } from '~/utils/phone'
 
 
 // The level runs while setup is still synchronous: it injects the record the

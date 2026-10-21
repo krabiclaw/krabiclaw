@@ -178,7 +178,7 @@ useSocialMetadata(() => page.value && ({
     { name: isPlatform ? 'Home' : organization.name, url: '/' },
     { name: page.value.title, url: page.value.path },
   ],
-  professionalService: template.slug === 'blawby' ? {
+  professionalService: !isPlatform && isLegalPractice(organization.vertical) ? {
     recipe: linkedOffer.value?.product.kind === 'service' ? 'service-detail' : page.value.recipe,
     offering: linkedOffer.value?.product.kind === 'service' ? {
       name: linkedOffer.value.product.name,

@@ -11,7 +11,7 @@
     </div>
 
     <div v-if="typeof review.rating === 'number' && review.rating > 0" class="mt-4 flex items-center gap-2">
-      <div class="flex gap-0.5" role="img" :aria-label="t('saya.reviews.stars_aria', { rating: review.rating })">
+      <div class="flex gap-0.5" role="img" :aria-label="t('site.reviews.stars_aria', { rating: review.rating })">
         <TenantIcon
           v-for="s in 5"
           :key="s"
@@ -32,7 +32,7 @@
     <p class="mt-3 text-sm leading-relaxed text-default">{{ review.content }}</p>
 
     <div v-if="review.owner_reply" class="mt-5 rounded-xl border-l-4 border-primary bg-default p-5">
-      <p class="mb-2 text-xs text-muted">{{ t('saya.reviews_page.owner_response') }}<template v-if="review.owner_reply_at"> · {{ formatDate(review.owner_reply_at) }}</template></p>
+      <p class="mb-2 text-xs text-muted">{{ t('site.reviews_page.owner_response') }}<template v-if="review.owner_reply_at"> · {{ formatDate(review.owner_reply_at) }}</template></p>
       <p class="text-sm leading-relaxed text-default">{{ review.owner_reply }}</p>
     </div>
 

@@ -1,7 +1,6 @@
 import { applicationFetch } from '~/composables/dashboardFetch'
 import { isRecord } from '~/utils/api-clients'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours } from '~/shared/reservation-hours'
-import { parsePhone } from '~/utils/phone'
 import { useOnboardingState, type OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { formatPostalAddress, postalAddressFromAnswers } from '~/utils/postal-address'
 import { isOrganizationFontPreset } from '~/shared/organization-fonts'
@@ -142,7 +141,7 @@ export function useOnboardingDraft() {
     details.postalCode = address?.postalCode ?? ''
     details.country = address?.regionCode ?? ''
     // The server hands the place's number over in E.164.
-    details.phone = parsePhone(preview.phone ?? '').e164 ?? ''
+    details.phone = preview.phone ?? ''
     state.value.hours.hours = parseOpeningHours((preview.openingHours ?? null) as OpeningHours)
     state.value.hours.specialHours = null
     state.value.hours.timezone = preview.timezone ?? ''

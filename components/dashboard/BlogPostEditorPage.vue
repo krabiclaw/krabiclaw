@@ -67,7 +67,6 @@ import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
 import type { BlogEditorBlock, BlogPost } from '~/lib/components/workspace/blog/types'
 import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlocks, writeBlogLocalizedText, type BlogLocalizedFieldPath } from '~/utils/blog-editor'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
-import { publicTemplateRegistry } from '~/utils/template-registry'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
 // One post. Rendered by `blog.vue`, which owns the frame — this level draws its
@@ -233,9 +232,7 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
   }
   const post = postResource.value?.post
   if (!post?.slug) throw new Error('Save the source post with a URL before localizing it.')
-  const template: unknown = post.editor_template
-  if (template !== 'saya' && template !== 'blawby' && template !== 'platform') throw new Error('Article template is missing or invalid.')
-  const sourcePath = tenantBlogPostPath({ themeId: publicTemplateRegistry[template].themeId }, post.slug, post.collection ?? 'blog')
+  const sourcePath = tenantBlogPostPath(post.slug, post.collection ?? 'blog')
   const response = await dashboardApi<BlogTranslationResponse>(
     `/api/editor/organizations/${organizationId}/localization/content_document/${postId}/${encodeURIComponent(locale)}`,
     {

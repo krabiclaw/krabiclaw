@@ -36,7 +36,7 @@
           <div class="min-w-0">
             <p class="font-semibold text-highlighted">WhatsApp number</p>
             <p v-if="account.editing.value !== 'phone'" class="mt-1 text-sm" :class="account.sessionData.value?.user?.phoneNumber ? 'text-muted' : 'italic text-dimmed'">
-              {{ account.sessionData.value?.user?.phoneNumber || 'Not provided' }}
+              {{ account.sessionData.value?.user?.phoneNumber ? formatPhone(account.sessionData.value.user.phoneNumber) : 'Not provided' }}
               <UBadge v-if="account.sessionData.value?.user?.phoneNumber" :color="account.sessionData.value?.user?.phoneNumberVerified ? 'success' : 'warning'" variant="subtle" size="sm" class="ms-2">{{ account.sessionData.value?.user?.phoneNumberVerified ? 'Verified' : 'Not verified' }}</UBadge>
             </p>
             <p class="mt-1 text-sm text-dimmed">Notifications and codes are sent over WhatsApp.</p>
@@ -44,7 +44,7 @@
           <UButton variant="link" color="neutral" class="shrink-0" :label="account.editing.value === 'phone' ? 'Cancel' : account.sessionData.value?.user?.phoneNumber ? 'Edit' : 'Add'" @click="account.toggleEdit('phone')" />
         </div>
         <div v-if="account.editing.value === 'phone'" class="mt-4 space-y-4">
-          <UInput v-model="account.phoneInput.value" type="tel" placeholder="Phone number with country code" autofocus class="w-full" @input="account.phoneTouched.value = true" @keydown.enter="account.requestPhoneVerify" />
+          <PhoneInput id="account-phone" v-model="account.phoneInput.value" autofocus @input="account.phoneTouched.value = true" @keydown.enter="account.requestPhoneVerify" />
           <p v-if="account.phoneError.value" class="text-sm text-error">{{ account.phoneError.value }}</p>
           <UButton label="Verify and save" :loading="account.phoneSaving.value" :disabled="!account.phoneDirty.value || !account.phoneInput.value.trim()" @click="account.requestPhoneVerify" />
         </div>
@@ -54,6 +54,8 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
+import PhoneInput from '~/components/PhoneInput.vue'
 import { accountEditorKey } from '~/components/dashboard/AccountProfilePage.vue'
 
 definePageMeta({ layout: 'dashboard' })

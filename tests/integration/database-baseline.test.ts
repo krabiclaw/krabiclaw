@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -44,7 +44,9 @@ test('room-details migration preserves authored rooms and photo memberships with
   database.pragma('foreign_keys = ON')
   try {
     const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ idx: number; tag: string }> }
-    for (const entry of journal.entries.filter(entry => entry.idx <= 14)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    const roomMigration = journal.entries.findIndex(entry => entry.tag === '0014_stay_photo_rooms')
+    assert.notEqual(roomMigration, -1)
+    for (const entry of journal.entries.slice(0, roomMigration + 1)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
     database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Host', 'host', 'USD', 'America/Denver')").run()
     database.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('site', 'org', 'site', 'Cabin', 'America/Denver')").run()
     for (const productId of ['authored-home', 'counts-only-home']) {
@@ -77,6 +79,81 @@ test('room-details migration preserves authored rooms and photo memberships with
     database.close()
   }
 })
+
+test('interleaved branch migration ledgers preserve authored rooms and location privacy and complete missing legal-site data migrations while refusing unknown files or schema', async () => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-interleaved-transfer-'))
+  const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+  const commonEnd = journal.entries.findIndex(entry => entry.tag === '0012_metronome_removed')
+  assert.notEqual(commonEnd, -1)
+  const common = journal.entries.slice(0, commonEnd + 1).map(entry => `${entry.tag}.sql`)
+  const legalMigrations = ['0013_tenant_theme_id.sql', '0014_heading_level_column.sql']
+  const lodgingMigrations = ['0013_location_stay_map_sharing.sql', '0014_stay_photo_rooms.sql', '0015_stay_room_details.sql']
+  try {
+    for (const history of ['staging-first', 'lodging-first', 'staging-pending'] as const) {
+      const sourcePath = join(directory, `${history}.sqlite`)
+      const source = new Database(sourcePath)
+      source.pragma('foreign_keys = ON')
+      source.exec('CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)')
+      const recordMigration = source.prepare('INSERT INTO d1_migrations (name) VALUES (?)')
+      for (const file of common) {
+        source.exec(readFileSync(`migrations/${file}`, 'utf8'))
+        recordMigration.run(file)
+      }
+      source.prepare("INSERT INTO organization (id, name, slug, vertical, theme_id, default_currency, timezone) VALUES ('legal', 'Recorded Legal Practice', 'legal', 'service', 'blawby-theme-v1', 'USD', 'America/New_York'), ('host', 'Recorded Cabin', 'host', 'lodging', 'saya-theme-v1', 'THB', 'Asia/Bangkok')").run()
+      source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('legal-en', 'legal', 'en', 1, 'published'), ('host-en', 'host', 'en', 1, 'published')").run()
+      source.prepare("INSERT INTO content_documents (id, organization_id, kind, row_role, locale, title, path) VALUES ('legal-page', 'legal', 'page', 'root', 'en', 'Legal help', '/legal-help')").run()
+      source.prepare("INSERT INTO content_blocks (id, document_id, type, data_json) VALUES ('legal-heading', 'legal-page', 'heading', '{\"text\":\"Recorded legal heading\",\"level\":3}')").run()
+      const branchFiles = history === 'staging-first' ? [...legalMigrations, ...lodgingMigrations]
+        : history === 'lodging-first' ? [...lodgingMigrations, ...legalMigrations] : lodgingMigrations
+      for (const file of branchFiles) {
+        source.exec(readFileSync(`migrations/${file}`, 'utf8'))
+        recordMigration.run(file)
+      }
+      source.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone, stay_map_sharing) VALUES ('cabin', 'host', 'cabin', 'Recorded Cabin', 'Asia/Bangkok', 'specific')").run()
+      source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, unit_label, created_by, updated_by) VALUES ('home', 'host', 'stay', 'Recorded Cabin', 'recorded-cabin', 'night', 'owner', 'owner')").run()
+      source.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('night', 'host', 'home', 'Night', 'owner', 'owner')").run()
+      source.prepare("INSERT INTO product_publications (organization_id, product_id, created_by, updated_by) VALUES ('host', 'home', 'owner', 'owner')").run()
+      source.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('host', 'home', 'cabin', 'owner', 'owner')").run()
+      source.prepare("INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, beds, amenities, created_by, updated_by) VALUES ('host', 'home', 'cabin', '15:00', '11:00', 4, 2, '[\"smoke_detector\"]', 'owner', 'owner')").run()
+      source.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, status) VALUES ('photo', 'host', 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/h/room/public', 'active')").run()
+      source.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('cover', 'host', 'product', 'home', 'image', 'photo')").run()
+      source.prepare("INSERT INTO product_stay_photo_rooms (id, organization_id, product_id, type, sort_order, created_by, details_version, sleeping_arrangements, private_attached_bathroom) VALUES ('bedroom', 'host', 'home', 'bedroom', 2, 'owner', 4, '[{\"type\":\"queen\",\"count\":1}]', 0)").run()
+      source.prepare("INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES ('host', 'home', 'photo', 'bedroom')").run()
+      const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'media_placements']
+      const authored = preservedTables.map(table => source.prepare(`SELECT * FROM ${table}`).all())
+      source.close()
+
+      const targetPath = join(directory, `${history}-transferred.sqlite`)
+      const manifest = await transferDatabaseExport(sourcePath, targetPath)
+      assert.deepEqual(manifest.source_migrations, [...common, ...branchFiles])
+      assert.deepEqual(manifest.invariants.filter(invariant => invariant.violations > 0), [])
+      const target = new Database(targetPath, { readonly: true })
+      try {
+        assert.deepEqual(preservedTables.map(table => target.prepare(`SELECT * FROM ${table}`).all()), authored)
+        assert.deepEqual(target.prepare("SELECT organization_id, product_id, beds, amenities FROM product_stay_configs WHERE product_id = 'home'").get(), { organization_id: 'host', product_id: 'home', beds: 2, amenities: '["smoke_detector"]' })
+        assert.deepEqual(target.prepare("SELECT organization_id, stay_map_sharing FROM business_locations WHERE id = 'cabin'").get(), { organization_id: 'host', stay_map_sharing: 'specific' })
+        assert.deepEqual(target.prepare("SELECT theme_id, json_extract(settings_json, '$.config.font_preset') AS font, json_extract(settings_json, '$.config.button_casing') AS casing FROM organization WHERE id = 'legal'").get(), { theme_id: 'tenant-theme-v1', font: 'marcellus', casing: 'uppercase' })
+        assert.deepEqual(target.prepare("SELECT level, data_json FROM content_blocks WHERE id = 'legal-heading'").get(), { level: 3, data_json: '{"text":"Recorded legal heading"}' })
+        assert.deepEqual(target.pragma('foreign_key_check'), [])
+      } finally { target.close() }
+    }
+    for (const invalid of ['unknown-migration', 'schema-mismatch'] as const) {
+      const sourcePath = join(directory, `${invalid}.sqlite`)
+      copyFileSync(join(directory, 'staging-pending.sqlite'), sourcePath)
+      const source = new Database(sourcePath)
+      if (invalid === 'unknown-migration') source.prepare("INSERT INTO d1_migrations (name) VALUES ('9999_unrecorded_migration.sql')").run()
+      else source.exec('ALTER TABLE business_locations ADD COLUMN unrecorded_fact TEXT')
+      source.close()
+      const targetPath = join(directory, `${invalid}-refused.sqlite`)
+      await assert.rejects(() => transferDatabaseExport(sourcePath, targetPath), /Source schema differs from every recorded migration chain; no rows were copied/)
+      const target = new Database(targetPath, { readonly: true })
+      try { assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all(), []) }
+      finally { target.close() }
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
 
 test('a v7 export transfers into the current baseline, its connections into organization_integrations', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
@@ -168,7 +245,7 @@ test('a v11 export transfers into the v12 baseline, which has no capability over
 
 test('a v12 export transfers into the v13 baseline with one site palette and logo presentations', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
-  const { TEMPLATE_PALETTES } = await import('../../shared/site-palette.ts')
+  const { DEFAULT_SITE_PALETTE } = await import('../../shared/site-palette.ts')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v12-transfer-'))
   const v12 = JSON.parse(readFileSync('migrations-history/v12/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
   const blawbyTokens = { bg: '#fbfaf7', surface: '#ffffff', primary: '#25356c', primaryDark: '#161f3b', primary100: '#f2f5ff', primary200: '#b4c5e5', primary800: '#1d294f', accent: '#c19855', accent100: '#faf5ea', accent200: '#f8f0e1', accentButton: '#b58c4f', accentStrong: '#a37732', border: '#e5e7eb', ink: '#162033' }
@@ -200,13 +277,17 @@ test('a v12 export transfers into the v13 baseline with one site palette and log
       // The Saya brand color is its palette's action color; everything else is Saya's own.
       const saya = settings('saya')
       assert.equal(saya.config.brand_color, undefined)
-      assert.deepEqual(saya.config.palette.light, { ...TEMPLATE_PALETTES.saya.light, action: '#96826A' })
-      assert.equal(saya.config.palette.dark.ground, TEMPLATE_PALETTES.saya.dark.ground)
+      assert.deepEqual(saya.config.palette.light, { ...DEFAULT_SITE_PALETTE.light, action: '#96826A' })
+      assert.equal(saya.config.palette.dark.ground, DEFAULT_SITE_PALETTE.dark.ground)
       assert.notEqual(saya.config.palette.dark.action, '#96826A')
-      // Blawby's stored tokens were its defaults: it wears its template's palette.
+      // Blawby's stored tokens were its defaults. Once one look serves every site
+      // (migration 0012), the legal site keeps those defaults as its own settings.
       const blawby = settings('blawby')
       assert.equal(blawby.theme_by_template, undefined)
-      assert.equal(blawby.config.palette, undefined)
+      assert.deepEqual(blawby.config.palette.light, { ground: '#FBFAF7', surface: '#FFFFFF', text: '#162033', muted: '#565D6A', action: '#25356C', accent: '#C19855' })
+      assert.equal(blawby.config.font_preset, 'marcellus')
+      assert.equal(blawby.config.button_color, 'accent')
+      assert.equal((target.prepare("SELECT theme_id FROM organization WHERE id = 'blawby'").get() as { theme_id: string }).theme_id, 'tenant-theme-v1')
       const presentation = (id: string) => (target.prepare("SELECT presentation_json FROM media_placements WHERE organization_id = ? AND slot = 'logo'").get(id) as { presentation_json: string | null }).presentation_json
       assert.deepEqual(JSON.parse(presentation('saya')!), { shape: 'circle', focus: { x: 0.5, y: 0.5 } })
       assert.equal(presentation('blawby'), null)

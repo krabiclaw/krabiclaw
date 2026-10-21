@@ -1,20 +1,13 @@
 <template>
   <div
     class="tenant-layout tenant-theme min-h-screen flex flex-col font-sans bg-default text-default"
-    :class="[isBlawby ? 'blawby-shell blawby-theme' : 'saya-theme']"
     :style="paletteStyle"
     :data-hydrated="hydrated ? 'true' : 'false'"
     :data-public-critical-shell="isHome ? 'true' : undefined"
     :data-font-preset="fontPreset"
   >
-    <!--
-      Universal portal root for modal and command palette escape.
-      Legacy #saya-portal-root and #blawby-portal-root are preserved so existing
-      Teleport sources retain their target in document order during SSR.
-    -->
+    <!-- Modals and the command palette teleport here, inside the site's theme scope. -->
     <div id="tenant-portal-root" />
-    <div id="saya-portal-root" />
-    <div id="blawby-portal-root" />
 
     <AnnouncementBanner />
 
@@ -54,9 +47,6 @@ const route = useRoute()
 const hydrated = ref(false)
 onMounted(() => { hydrated.value = true })
 
-const { organization } = useTenantOrganization()
-const { template } = organization
-const isBlawby = computed(() => template.slug === 'blawby')
 
 const { locale: i18nLocale } = useI18n()
 const activeLocale = computed(() => i18nLocale.value || 'en')
@@ -65,6 +55,7 @@ const isHome = computed(() => route.path === '/'
   || (activeLocale.value !== 'en' && route.path === `/${activeLocale.value}`)
   || (/^\/preview\/(?:site|draft)\/[^/]+\/?$/.test(route.path)))
 
+const { organization } = useTenantOrganization()
 const { fontPreset, paletteStyle } = usePublicSiteBrand()
 
 // ── Universal Shell State ─────────────────────────────────────

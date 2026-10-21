@@ -207,6 +207,9 @@ export function buildMediaPlacementReplacementQueries(input: {
   if (!isSupportedMediaPlacement(input.placement)) {
     throw new HTTPError({ statusCode: 400, statusMessage: 'Media placement owner and slot are not supported' })
   }
+  if (input.media.length > 1 && isSingleMediaPlacement(input.placement)) {
+    throw new HTTPError({ statusCode: 400, statusMessage: 'This media placement holds one asset' })
+  }
   const now = input.now ?? new Date().toISOString()
   return [
     {

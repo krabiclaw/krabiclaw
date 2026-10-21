@@ -46,6 +46,12 @@ export const useOrganizationSubscription = () => {
 
   // Stripe's hosted portal: card, invoices, receipts, cancelling. The plugin
   // exposes nothing else for those, so nothing here draws them.
+  function organizationSlug() {
+    const slug = dashboard.organization.value?.slug
+    if (!slug) throw new Error('Organization context is unavailable')
+    return slug
+  }
+
   async function openBillingPortal() {
     const organizationId = dashboard.organization.value?.id
     if (!organizationId) throw new Error('Organization context is unavailable')
@@ -78,6 +84,8 @@ export const useOrganizationSubscription = () => {
       plan,
       currentPlan,
       subscriptionId: subscription.id,
+      // The leaf that started the change may no longer apply once it is made, so the owner returns to the plan.
+      returnPath: `/dashboard/${encodeURIComponent(organizationSlug())}/billing`,
       onAction: action => {
         if (action === 'upgrade') trackSubscriptionUpgrade(plan, organizationId)
         if (action === 'downgrade' && plan !== 'free') trackSubscriptionDowngrade(plan, organizationId)

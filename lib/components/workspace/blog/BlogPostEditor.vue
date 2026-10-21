@@ -146,7 +146,7 @@ const section = computed<SettingsSection | null>(() => {
 })
 
 const form = reactive({ title: '', collection: 'blog' as ArticleCollection, category_id: '', excerpt: '', slug: '', visibility: 'listed' as 'listed' | 'unlisted', redirect_old_slug: true })
-const templateName = computed(() => post.value?.editor_template || 'saya')
+const templateName = computed(() => post.value?.editor_template || 'tenant')
 const collectionOptions = ARTICLE_COLLECTION_SLUGS.map(slug => ({ label: ARTICLE_COLLECTIONS[slug].label, value: slug }))
 if (!props.organizationId) throw new Error('The blog editor needs the organization it edits')
 // The page awaits the post before this editor exists; the draft is seeded from it
