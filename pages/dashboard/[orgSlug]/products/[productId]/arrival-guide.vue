@@ -59,7 +59,7 @@
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS } from '~/shared/stay-listing'
 import { stayHouseRuleLines } from '~/shared/product-details'
-import { staySafetyLines } from '~/shared/stay-safety'
+import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatTime } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
@@ -67,7 +67,7 @@ const p = inject(productEditorKey)!
 const { locale } = useI18n()
 const method = computed(() => p.arrivalHome.value?.check_in_method ? STAY_CHECK_IN_METHODS[p.arrivalHome.value.check_in_method] : null)
 const houseRules = computed(() => p.product.value ? stayHouseRuleLines(p.product.value.details, value => formatTime(value, locale.value)) : [])
-const safety = computed(() => p.product.value ? staySafetyLines(p.product.value.details) : [])
+const safety = computed(() => p.product.value?.stay ? [...staySafetyLines(p.product.value.details), ...stayAlarmLines(p.product.value.stay.amenity_answers, p.product.value.details)] : [])
 const hasGuideDetails = computed(() => {
   const home = p.arrivalHome.value
   return home && (home.directions || home.check_in_method || home.check_in_instructions || home.wifi_network || home.wifi_password || home.house_manual || home.checkout_instructions.length || houseRules.value.length || safety.value.length)

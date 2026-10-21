@@ -24,6 +24,7 @@ import { isNavigationFailure } from 'vue-router'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { STAY_SAFETY_SECTIONS, STAY_SAFETY_FIELDS, STAY_SAFETY_DETAIL_FIELDS, STAY_SAFETY_DETAILS_LIMIT, type StaySafetyDetailKey, type StaySafetySection } from '~/shared/stay-safety'
 import { getErrorMessage } from '~/utils/errors'
+import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAILS, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability } from '~/shared/stay-listing'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -36,6 +37,8 @@ const detail = computed(() => {
   const key = String(route.params.field)
   const flag = group.fields.find(flag => STAY_SAFETY_FIELDS[flag].detailsKey === key)
   if (flag && p.form.details[flag] === true) return { key: STAY_SAFETY_FIELDS[flag].detailsKey, title: STAY_SAFETY_FIELDS[flag].name, description: STAY_SAFETY_FIELDS[flag].description }
+  const alarm = section === 'devices' ? STAY_ALARM_AMENITIES.find(code => STAY_ALARM_DETAIL_KEYS[code] === key) : undefined
+  if (alarm && stayAmenityAvailability(p.form.stay_amenity_answers, alarm) === true) return { key: STAY_ALARM_DETAIL_KEYS[alarm], title: STAY_ALARM_DETAILS[alarm].name, description: STAY_ALARM_DETAILS[alarm].description }
   if ('textKey' in group && group.textKey === key) return { key: group.textKey, title: STAY_SAFETY_DETAIL_FIELDS[group.textKey].name, description: STAY_SAFETY_DETAIL_FIELDS[group.textKey].description }
   return null
 })

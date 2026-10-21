@@ -1,4 +1,4 @@
-import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
+import { isStayAmenityCodes, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
 import { assertPublishedHost } from '~/server/utils/public-provider'
@@ -8,10 +8,10 @@ import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type 
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
-import { buildDeleteOwnerPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQuery, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
-import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
+import { buildDeleteOwnerPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQueries, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
+import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
-import type { StayRoomAccessibility } from '~/shared/stay-accessibility'
+import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
@@ -33,7 +33,7 @@ import {
   type PriceInput,
   type PriceSelection,
 } from '~/shared/prices'
-import { assertProductKind, patchProductDetails, validateProductDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
+import { assertProductKind, patchProductDetails, validateProductDetails, validateStayAlarmDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
 import type { CatalogCounts } from '~/utils/product-presentation'
 import type {
   Collection,
@@ -235,7 +235,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
   // One batch, not nine round trips. The databases are a long way from the
   // Workers that read them, so each extra statement is real latency on every
   // catalog page; D1 charges one round trip for the batch.
-  const [batched, photoRooms] = await Promise.all([executeBatch(db, [
+  const [batched, photoRooms, accessibility] = await Promise.all([executeBatch(db, [
     { query: `SELECT id, product_id, name, sort_order FROM product_options
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order, id`, params: [organizationId, ids] },
     { query: `SELECT id, product_id, product_option_id, value, sort_order FROM product_option_values
@@ -266,7 +266,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
         listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit, bedrooms, beds, bathrooms, amenities,
         cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id FROM product_stay_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-  ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
+  ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
   const optionRows = rowsAt(0)
   const valueRows = rowsAt(1)
@@ -282,12 +282,14 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     const product = byId.get(String(row.product_id))
     if (product) product.stay = {
       photo_rooms: photoRooms.get(product.id) ?? [],
+      accessibility: accessibility.get(product.id)!,
       location_id: String(row.location_id), check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time),
       max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
     }
+    if (product?.stay) validateStayAlarmDetails(product.details, product.stay.amenity_answers)
   }
   for (const row of pageRows) {
     const product = byId.get(String(row.product_id))
@@ -713,7 +715,7 @@ interface PlannedProduct {
   variants: PlannedVariant[]
   details: Record<string, ProductDetailValue>
   source: ProductSource
-  stay: Omit<ProductStayConfig, 'photo_rooms'> | null
+  stay: Omit<ProductStayConfig, 'photo_rooms' | 'accessibility'> | null
 }
 
 const STAY_TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -726,7 +728,7 @@ function stayUnitLabel(kind: ProductKind, unitLabel: string | null): string | nu
 }
 
 /** A place to stay is at one location of this organization, with stay settings the calendar and channels enforce. */
-async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<Omit<ProductStayConfig, 'photo_rooms'> | null> {
+async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility'> | null> {
   if (kind !== 'stay') {
     if (value !== undefined && value !== null) invalid('Only a place to stay takes stay settings')
     return null
@@ -781,11 +783,7 @@ function stayPropertyType(stay: Record<string, unknown>): Pick<ProductStayConfig
 
 /** What a home is and offers, checked against the stay vocabularies. A field left out is unsaid. */
 function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig, StayListingField> {
-  const amenities = stay.amenities ?? []
-  if (!Array.isArray(amenities) || amenities.some(code => !isStayAmenity(code)) || new Set(amenities).size !== amenities.length) {
-    invalidStayField('amenities', 'stay.amenities must list amenity codes from the catalog, each once')
-  }
-  const chosen = new Set(amenities as StayAmenity[])
+  const answers = plannedAmenityAnswers([], stay)
   const totalFloors = stayCount(stay, 'total_floors', 1, Number.MAX_SAFE_INTEGER, 1)
   const listingFloor = stayCount(stay, 'listing_floor', 1, Number.MAX_SAFE_INTEGER, 1)
   if (totalFloors !== null && listingFloor !== null && listingFloor > totalFloors) invalidStayField('listing_floor', 'stay.listing_floor cannot exceed stay.total_floors')
@@ -805,7 +803,8 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
     bedrooms: stayCount(stay, 'bedrooms', 0, 50, 1),
     beds: stayCount(stay, 'beds', 1, 50, 1),
     bathrooms: stayCount(stay, 'bathrooms', 0, 50, 0.5),
-    amenities: stayCodes(STAY_AMENITIES).filter(code => chosen.has(code)),
+    amenities: answers.filter(answer => answer.available).map(answer => answer.code),
+    amenity_answers: answers,
     cancellation_policy: stayCode(stay, 'cancellation_policy', stayCodes(STAY_CANCELLATION_POLICIES)),
     long_term_cancellation_policy: stayCode(stay, 'long_term_cancellation_policy', stayCodes(STAY_LONG_TERM_CANCELLATION_POLICIES)),
   }
@@ -813,6 +812,7 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
 
 /** A stored home's listing facts; the table's checks guarantee their codes. */
 function storedStayListing(row: Row): Pick<ProductStayConfig, StayListingField> {
+  const answers = parseStayAmenityAnswers(JSON.parse(String(row.amenities)))
   return {
     property_type_group: row.property_type_group === null ? null : String(row.property_type_group) as StayPropertyTypeGroup,
     property_type: row.property_type === null ? null : String(row.property_type) as StayPropertyType,
@@ -825,9 +825,18 @@ function storedStayListing(row: Row): Pick<ProductStayConfig, StayListingField> 
     bedrooms: row.bedrooms === null ? null : Number(row.bedrooms),
     beds: row.beds === null ? null : Number(row.beds),
     bathrooms: row.bathrooms === null ? null : Number(row.bathrooms),
-    amenities: parseJsonArray<StayAmenity>(row.amenities, 'stay amenities'),
+    amenities: answers.filter(answer => answer.available).map(answer => answer.code),
+    amenity_answers: answers,
     cancellation_policy: row.cancellation_policy === null ? null : String(row.cancellation_policy) as StayCancellationPolicy,
     long_term_cancellation_policy: row.long_term_cancellation_policy === null ? null : String(row.long_term_cancellation_policy) as StayLongTermCancellationPolicy,
+  }
+}
+
+function plannedAmenityAnswers(current: ProductStayConfig['amenity_answers'], patch: { amenities?: unknown; amenity_answers?: unknown }): ProductStayConfig['amenity_answers'] {
+  try { return planStayAmenityAnswers(current, patch) }
+  catch (error) {
+    if (!(error instanceof TypeError)) throw error
+    invalidStayField(Object.hasOwn(patch, 'amenities') && !isStayAmenityCodes(patch.amenities) ? 'amenities' : 'amenity_answers', error.message)
   }
 }
 
@@ -982,6 +991,7 @@ async function planProduct(
     knownSlugs?: ReadonlyMap<string, string>
   },
 ): Promise<PlannedProduct> {
+  if (!context.existingId && input.stay && Object.hasOwn(input.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
   let kind: ProductKind
   try { kind = assertProductKind(input.kind); validateProductDetails(kind, input.details ?? {}) }
   catch (error) { if (!(error instanceof ProductDetailError)) throw error; invalid(error.message) }
@@ -1014,6 +1024,10 @@ async function planProduct(
       normalizePriceInput(price, defaultCurrency, `variants[${index}].prices[${priceIndex}]`)),
   }))
   const stay = await planStayConfig(db, organizationId, kind, input.stay)
+  if (stay) {
+    try { validateStayAlarmDetails(input.details ?? {}, stay.amenity_answers) }
+    catch (error) { if (!(error instanceof ProductDetailError)) throw error; invalid(error.message) }
+  }
   if (input.details?.no_property_parking === true && stay?.amenities.some(code => code === 'free_parking' || code === 'paid_parking_on_premises')) {
     invalid('Remove on-property parking amenities or change “No parking on the property” before saving.')
   }
@@ -1086,7 +1100,7 @@ function productWrites(
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
       'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
-    const assignments = columns.filter(column => options.stayFields === undefined || options.stayFields.includes(column))
+    const assignments = columns.filter(column => options.stayFields === undefined || options.stayFields.includes(column) || (column === 'amenities' && options.stayFields.includes('amenity_answers')))
       .map(column => `${column} = excluded.${column}`)
     // The location relationship first: the stay settings name it, so a home's one
     // location is the relationship its config holds.
@@ -1107,10 +1121,10 @@ function productWrites(
         planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type,
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
-        JSON.stringify(planned.stay.amenities), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
+        JSON.stringify(planned.stay.amenity_answers), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
         planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, now, actor.actorId, actor.actorId],
     })
-    if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities'))) {
+    if (upsert && (options.stayFields === undefined || options.stayFields.includes('amenities') || options.stayFields.includes('amenity_answers'))) {
       // A removed listing fact cannot retain room references. Invalidate every
       // affected room draft before deleting the references in this same batch.
       writes.push({
@@ -1118,16 +1132,26 @@ function productWrites(
           WHERE organization_id = ? AND product_id = ? AND EXISTS (
             SELECT 1 FROM product_stay_photo_room_amenities a JOIN product_stay_configs c ON c.organization_id = a.organization_id AND c.product_id = a.product_id
             WHERE a.organization_id = product_stay_photo_rooms.organization_id AND a.product_id = product_stay_photo_rooms.product_id AND a.room_id = product_stay_photo_rooms.id
-              AND NOT EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value = a.amenity_code))`,
+              AND NOT EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value ->> '$.code' = a.amenity_code AND value ->> '$.available' = 1))`,
         params: [organizationId, planned.id],
       }, {
         query: `DELETE FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ? AND NOT EXISTS (
           SELECT 1 FROM product_stay_configs c, json_each(c.amenities) amenity
           WHERE c.organization_id = product_stay_photo_room_amenities.organization_id AND c.product_id = product_stay_photo_room_amenities.product_id
-            AND amenity.value = product_stay_photo_room_amenities.amenity_code)`,
+            AND amenity.value ->> '$.code' = product_stay_photo_room_amenities.amenity_code AND amenity.value ->> '$.available' = 1)`,
         params: [organizationId, planned.id],
       })
     }
+  }
+
+  if (planned.stay) {
+    const clearedAlarmPaths = STAY_ALARM_AMENITIES.filter(code => stayAmenityAvailability(planned.stay!.amenity_answers, code) !== true || planned.details[STAY_ALARM_DETAIL_KEYS[code]] === undefined)
+      .map(code => `$.details.${STAY_ALARM_DETAIL_KEYS[code]}`)
+    if (clearedAlarmPaths.length) writes.push({
+      query: `UPDATE resource_localizations SET values_json = json_remove(values_json, ${clearedAlarmPaths.map(() => '?').join(', ')}), updated_at = ?, updated_by_user_id = ?
+        WHERE organization_id = ? AND resource_type = 'product' AND resource_id = ? AND (${clearedAlarmPaths.map(() => 'json_type(values_json, ?) IS NOT NULL').join(' OR ')})`,
+      params: [...clearedAlarmPaths, now, actor.actorId, organizationId, planned.id, ...clearedAlarmPaths],
+    })
   }
 
   for (const option of options.writeOptions === false ? [] : planned.options) {
@@ -1525,6 +1549,11 @@ async function planProductUpdate(db: DbClient, input: {
   cacheInvalidations: BatchQuery[]
 }): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct }> {
   const { current, patch, organizationId } = input
+  if (patch.stay && Object.hasOwn(patch.stay, 'accessibility')) invalid('Use the home accessibility operation to author accessibility information')
+  const previousUpdate = Date.parse(current.updated_at)
+  const requestedUpdate = Date.parse(input.now)
+  if (!Number.isFinite(previousUpdate) || !Number.isFinite(requestedUpdate)) throw new Error('The Product update timestamp is invalid')
+  const now = new Date(Math.max(requestedUpdate, previousUpdate + 1)).toISOString()
   const productId = current.id
   const variantsMode = patchListMode(patch.variants_mode, patch.variants, 'variants')
   const suppliedVariants = patch.variants ?? []
@@ -1546,6 +1575,11 @@ async function planProductUpdate(db: DbClient, input: {
   let details: Product['details']
   try { details = patchProductDetails(patch.kind ?? current.kind, current.details, patch.details, patch.details_mode) }
   catch (error) { if (!(error instanceof ProductDetailError)) throw error; invalid(error.message) }
+  const answers = current.stay ? plannedAmenityAnswers(current.stay.amenity_answers, patch.stay ?? {}) : undefined
+  if (answers) for (const code of STAY_ALARM_AMENITIES) {
+    const key = STAY_ALARM_DETAIL_KEYS[code]
+    if (stayAmenityAvailability(answers, code) !== true && !Object.hasOwn(patch.details ?? {}, key)) Reflect.deleteProperty(details, key)
+  }
   const merged: CreateProductInput = {
     kind: patch.kind ?? current.kind,
     name: patch.name ?? current.name,
@@ -1563,7 +1597,7 @@ async function planProductUpdate(db: DbClient, input: {
     variants,
     details,
     // The location a home is at is fixed: a patch naming another one is refused, never merged.
-    stay: current.stay ? { ...current.stay, ...patch.stay, location_id: current.stay.location_id } : patch.stay as CreateProductInput['stay'],
+    stay: current.stay ? { ...current.stay, ...patch.stay, amenity_answers: answers, amenities: answers!.filter(answer => answer.available).map(answer => answer.code), location_id: current.stay.location_id } : patch.stay as CreateProductInput['stay'],
   }
   const patchedLocation = (patch.stay as { location_id?: unknown } | undefined)?.location_id
   if (current.stay && patchedLocation !== undefined && patchedLocation !== current.stay.location_id) conflict('A place to stay keeps its location; create a new place to stay instead')
@@ -1621,7 +1655,7 @@ async function planProductUpdate(db: DbClient, input: {
     { query: 'DELETE FROM product_variants WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptVariants] },
     { query: 'DELETE FROM product_option_values WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptValues] },
     { query: 'DELETE FROM product_options WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptOptions] },
-    ...productWrites(organizationId, planned, input.actor, input.now, 'upsert', {
+    ...productWrites(organizationId, planned, input.actor, now, 'upsert', {
       writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds,
       stayFields: Object.keys(patch.stay ?? {}) as (keyof ProductStayConfig)[],
       // A narrow edit still restates the Product it read, including its details.
@@ -1732,11 +1766,16 @@ export async function updateProduct(db: DbClient, input: {
   deferStayNightPush?: true
   /** A room's authored details share this Product transaction when assigning listing amenities. */
   stayRoomUpdate?: { roomId: string; expectedDetailsVersion: number; accessibility?: StayRoomAccessibility } & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>>
+  /** Listing accessibility uses the Product version and the same photo transaction as room evidence. */
+  stayAccessibilityUpdate?: { expectedUpdatedAt: string; accessibility: StayHomeAccessibility }
 }): Promise<ProductMutation> {
   const env = input.env
   const roomUpdate = input.stayRoomUpdate
+  const homeUpdate = input.stayAccessibilityUpdate
   let photoPlan: Awaited<ReturnType<typeof prepareArrangeProductPhotos>> | undefined
   if (roomUpdate && (Object.keys(input.patch).length || input.booking)) invalid('Room details cannot be combined with unrelated product edits')
+  if (homeUpdate && (roomUpdate || Object.keys(input.patch).length || input.booking)) invalid('Home accessibility cannot be combined with unrelated product edits')
+  if (homeUpdate && (!isStayHomeAccessibility(homeUpdate.accessibility) || typeof homeUpdate.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(homeUpdate.expectedUpdatedAt)))) invalid('Home accessibility needs a valid answer and the Product updated_at value')
   const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
   const complete = async (product: Product): Promise<ProductMutation> => {
     let channelPush: ChannelPushCompletion = null
@@ -1753,7 +1792,7 @@ export async function updateProduct(db: DbClient, input: {
     })
   }
   const dedupeKey = input.idempotencyKey ? `product-update:${input.organizationId}:${input.productId}:${input.idempotencyKey}` : null
-  const requestHash = dedupeKey ? await creationRequestHash({ patch: input.patch, booking: input.booking?.data ?? null, ...(roomUpdate ? { stayRoomUpdate: roomUpdate } : {}) }) : null
+  const requestHash = dedupeKey ? await creationRequestHash({ patch: input.patch, booking: input.booking?.data ?? null, ...(roomUpdate ? { stayRoomUpdate: roomUpdate } : {}), ...(homeUpdate ? { stayAccessibilityUpdate: homeUpdate } : {}) }) : null
   const replay = async () => {
     if (!dedupeKey) return null
     const record = await readCreationRecord(db, dedupeKey)
@@ -1768,12 +1807,17 @@ export async function updateProduct(db: DbClient, input: {
   const roomChanged = (): never => {
     throw new HTTPError({ statusCode: 409, statusMessage: 'The room or listing changed while you were editing. Nothing was changed; reload the room and try again.', data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version', product_id: input.productId } })
   }
+  const homeChanged = (): never => {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'The listing changed while you were editing. Nothing was changed; reload the accessibility information and try again.', data: { code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at', product_id: input.productId } })
+  }
+  if (homeUpdate && (!current.stay || current.updated_at !== homeUpdate.expectedUpdatedAt)) homeChanged()
   if (roomUpdate && !current.stay?.photo_rooms.some(room => room.id === roomUpdate.roomId && room.details_version === roomUpdate.expectedDetailsVersion)) roomChanged()
-  if (roomUpdate?.accessibility?.available === true) {
-    const images = await hydrateMediaAssetRefs(db, { organizationId: input.organizationId, refs: roomUpdate.accessibility.photo_ids.map(asset_id => ({ asset_id })), allowedKinds: ['image'], fieldName: 'accessibility.photo_ids' })
+  const accessibilityAnswer = homeUpdate?.accessibility ?? roomUpdate?.accessibility
+  if (accessibilityAnswer?.available === true) {
+    const images = await hydrateMediaAssetRefs(db, { organizationId: input.organizationId, refs: accessibilityAnswer.photo_ids.map(asset_id => ({ asset_id })), allowedKinds: ['image'], fieldName: 'accessibility.photo_ids' })
     if (images.some(image => !image.public_url.trim())) throw new HTTPError({ statusCode: 400, statusMessage: 'accessibility.photo_ids must reference images with a public URL', data: { field: 'accessibility.photo_ids' } })
     const photos = ((await readProductPhotos(db, { organizationId: input.organizationId, productIds: [input.productId] })).get(input.productId) ?? []).map(photo => photo.asset_id)
-    const additions = roomUpdate.accessibility.photo_ids.filter(id => !photos.includes(id))
+    const additions = accessibilityAnswer.photo_ids.filter(id => !photos.includes(id))
     if (additions.length) {
       const membership = await resolveMembership(env, { organizationId: input.organizationId, userId: input.actor.actorId })
       if (!membership) throw new HTTPError({ statusCode: 403, statusMessage: 'Organization membership is required to attach accessibility photos' })
@@ -1795,11 +1839,21 @@ export async function updateProduct(db: DbClient, input: {
   })
   const writes = plan ? plan.writes : [publicResourceCacheInvalidationQuery(input.organizationId, 'stay-photo-room-details')]
   const keptVariants = plan ? plan.keptVariants : d1JsonArray(current.variants.map(variant => variant.id))
+  if (photoPlan) writes.push(...photoPlan.queries)
+  if (homeUpdate) {
+    const answer = homeUpdate.accessibility
+    writes.push({ query: 'DELETE FROM product_stay_accessibility WHERE organization_id = ? AND product_id = ? AND feature_code = ?', params: [input.organizationId, input.productId, answer.feature] })
+    if (answer.available !== null) writes.push({
+      query: 'INSERT INTO product_stay_accessibility (organization_id, product_id, feature_code, available) VALUES (?, ?, ?, ?)', params: [input.organizationId, input.productId, answer.feature, answer.available ? 1 : 0],
+    }, {
+      query: `INSERT INTO product_stay_accessibility_photos (organization_id, product_id, feature_code, asset_id)
+        SELECT ?, ?, ?, value FROM json_each(?)`, params: [input.organizationId, input.productId, answer.feature, d1JsonArray(answer.photo_ids)],
+    })
+  }
   if (roomUpdate) {
     writes.unshift({ query: `UPDATE products SET updated_at = NULL WHERE organization_id = ? AND id = ? AND NOT EXISTS (
       SELECT 1 FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ? AND details_version = ?)`,
     params: [input.organizationId, input.productId, input.organizationId, input.productId, roomUpdate.roomId, roomUpdate.expectedDetailsVersion] })
-    if (photoPlan) writes.push(...photoPlan.queries)
     const assignments = ['details_version = details_version + 1']
     const params: unknown[] = []
     if (Object.hasOwn(roomUpdate, 'sleeping_arrangements')) {
@@ -1828,15 +1882,15 @@ export async function updateProduct(db: DbClient, input: {
           SELECT ?, ?, ?, ?, value FROM json_each(?)`, params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature, d1JsonArray(answer.photo_ids)],
       })
     }
-    writes.push(stayAccessibilityEvidenceGuardQuery(input.organizationId, { productId: input.productId }))
     writes.push(stayBedAllocationGuardQuery(input.organizationId, input.productId), {
       // All room references must still have their canonical listing fact.
       query: `UPDATE products SET updated_at = NULL WHERE organization_id = ? AND id = ? AND EXISTS (
         SELECT 1 FROM product_stay_photo_room_amenities a JOIN product_stay_configs c ON c.organization_id = a.organization_id AND c.product_id = a.product_id
-        WHERE a.organization_id = ? AND a.product_id = ? AND NOT EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value = a.amenity_code))`,
+        WHERE a.organization_id = ? AND a.product_id = ? AND NOT EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value ->> '$.code' = a.amenity_code AND value ->> '$.available' = 1))`,
       params: [input.organizationId, input.productId, input.organizationId, input.productId],
     })
   }
+  if (roomUpdate || homeUpdate) writes.push(...stayAccessibilityEvidenceGuardQueries(input.organizationId, { productId: input.productId }))
   if (current.kind === 'stay' && reprice) {
     if (!env) throw new HTTPError({ statusCode: 503, message: 'The home change requires the organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', product_id: current.id } })
     await requireChannelPush(db, env, input.organizationId, current.id)
@@ -1872,6 +1926,7 @@ export async function updateProduct(db: DbClient, input: {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
       if (await replay()) return
       if (roomUpdate) roomChanged()
+      if (homeUpdate) homeChanged()
       throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', product_id: input.productId }, cause: error })
     }
     if (input.booking) {
@@ -2423,7 +2478,9 @@ export async function reconcileProducts(db: DbClient, input: {
   const missing = input.deactivateMissing ? await queryAll<{ id: string }>(db, `SELECT id FROM products WHERE organization_id=? AND active=1 AND id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.product_id=products.id AND pub.organization_id=?)`, [input.organizationId, d1JsonArray(touched), input.organizationId]) : []
   const answered = [...touched, ...missing.map(product => product.id)]
   const writes = perProduct.flat()
-  if (missing.length) writes.push({ query: 'UPDATE products SET active=0,updated_at=?,updated_by=? WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))', params: [now, input.actor.actorId, input.organizationId, d1JsonArray(missing.map(product => product.id))] })
+  if (missing.length) writes.push({ query: `UPDATE products SET active=0,
+    updated_at=CASE WHEN julianday(updated_at) IS NULL THEN NULL WHEN updated_at >= ? THEN strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0.001 seconds') ELSE ? END,
+    updated_by=? WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))`, params: [now, now, input.actor.actorId, input.organizationId, d1JsonArray(missing.map(product => product.id))] })
   writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
   try { await executeBatch(db, writes, { operation: 'Reconcile products' }) } catch (error) {

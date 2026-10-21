@@ -1,5 +1,6 @@
 import { PRODUCT_LIMITS } from './product-limits.ts'
-import { STAY_SAFETY_DETAIL_FIELDS, STAY_SAFETY_FIELDS } from './stay-safety.ts'
+import { STAY_SAFETY_DETAIL_FIELDS, STAY_SAFETY_FIELDS, STAY_SAFETY_DETAIL_KEYS } from './stay-safety.ts'
+import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, type StayAmenityAnswer } from './stay-listing.ts'
 
 /** Named product facts shared by validation, CMS, MCP, localization and templates. */
 export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'item', 'stay'] as const
@@ -13,6 +14,19 @@ export type ProductDetailValue = string | string[] | boolean
 export type ProductDetails = Partial<Record<ProductDetailKey, ProductDetailValue>>
 /** In an explicit merge, null removes only the named fact. */
 export type ProductDetailsPatch = Partial<Record<ProductDetailKey, ProductDetailValue | null>>
+
+export function validateStayAlarmDetails(details: Readonly<Record<string, unknown>>, answers: readonly StayAmenityAnswer[]): void {
+  for (const code of STAY_ALARM_AMENITIES) {
+    if (details[STAY_ALARM_DETAIL_KEYS[code]] !== undefined && stayAmenityAvailability(answers, code) !== true) throw new ProductDetailError(`details.${STAY_ALARM_DETAIL_KEYS[code]} requires the ${code} amenity to be present`)
+  }
+}
+
+/** A translation cannot restore details cleared from the source alarm fact. */
+export function projectStayAlarmDetails<T extends Record<string, unknown>>(details: T, source: Readonly<Record<string, unknown>>, answers: readonly StayAmenityAnswer[]): T {
+  const projected = { ...details }
+  for (const code of STAY_ALARM_AMENITIES) if (stayAmenityAvailability(answers, code) !== true || typeof source[STAY_ALARM_DETAIL_KEYS[code]] !== 'string') Reflect.deleteProperty(projected, STAY_ALARM_DETAIL_KEYS[code])
+  return projected
+}
 export interface ProductDetailField {
   id: string
   key: ProductDetailKey
@@ -55,6 +69,8 @@ const DETAIL_FIELDS = {
   guest_access: { name: 'Guest access', description: 'The spaces and facilities guests can use during their stay.', value_type: 'multi_line_text', kinds: ['stay'] },
   interaction_with_guests: { name: 'Interaction with guests', description: 'How guests can contact the host and what support is available.', value_type: 'multi_line_text', kinds: ['stay'] },
   other_details_to_note: { name: 'Other details to note', description: 'Additional information guests should know before booking.', value_type: 'multi_line_text', kinds: ['stay'] },
+  neighborhood_description: { name: 'Neighborhood description', description: 'Host-authored information about the neighborhood around this home.', value_type: 'multi_line_text', kinds: ['stay'], localizable: true, validations: { max_length: PRODUCT_LIMITS.description } },
+  getting_around: { name: 'Getting around', description: 'Host-authored transport and getting-around information for this home.', value_type: 'multi_line_text', kinds: ['stay'], localizable: true, validations: { max_length: PRODUCT_LIMITS.description } },
   house_rules: { icon: 'i-lucide-notebook-pen', name: 'House rules', description: 'The host’s rules for guests staying in the home, shown with the listing.', value_type: 'multi_line_text', kinds: ['stay'] },
   ...STAY_HOUSE_RULE_TOGGLES,
   quiet_hours_start: { name: 'Quiet hours start time', description: 'Local start of quiet hours, required with quiet hours and its end time.', value_type: 'single_line_text', localizable: false, validations: { choices: STAY_QUIET_HOUR_TIMES }, kinds: ['stay'] },
@@ -67,7 +83,10 @@ const DETAIL_FIELDS = {
 export type ProductDetailKey = keyof typeof DETAIL_FIELDS
 /** The additional sections of a home's Description; its introduction is Product.description. */
 export const STAY_DESCRIPTION_DETAIL_KEYS = ['your_property', 'guest_access', 'interaction_with_guests', 'other_details_to_note'] as const satisfies readonly ProductDetailKey[]
+export const STAY_LOCATION_DETAIL_KEYS = ['neighborhood_description', 'getting_around'] as const satisfies readonly ProductDetailKey[]
 export const STAY_HOUSE_RULE_DETAIL_KEYS = [...Object.keys(STAY_HOUSE_RULE_TOGGLES) as Array<keyof typeof STAY_HOUSE_RULE_TOGGLES>, 'quiet_hours_start', 'quiet_hours_end', 'house_rules'] as const satisfies readonly ProductDetailKey[]
+const STAY_FOCUSED_DETAIL_KEYS: ReadonlySet<string> = new Set([...STAY_DESCRIPTION_DETAIL_KEYS, ...STAY_HOUSE_RULE_DETAIL_KEYS, ...STAY_LOCATION_DETAIL_KEYS, ...STAY_SAFETY_DETAIL_KEYS])
+export function isStayFocusedDetail(key: string): boolean { return STAY_FOCUSED_DETAIL_KEYS.has(key) }
 export const PRODUCT_DETAIL_FIELDS: readonly ProductDetailField[] = Object.entries(DETAIL_FIELDS).map(([key, field]) => ({ ...field, id: key, key: key as ProductDetailKey, localizable: 'localizable' in field ? field.localizable : field.value_type !== 'boolean', validations: 'validations' in field ? field.validations : {} }))
 export const PRICING_NOTE_HANDLE = 'pricing_note'
 export const EXPERIENCE_ATTRIBUTE_HANDLES = { tagline: 'tagline', meetingPoint: 'meeting_point', includedItems: 'included_items', whatToBring: 'what_to_bring' } as const

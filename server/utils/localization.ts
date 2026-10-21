@@ -24,7 +24,9 @@ import {
   type LocalizedResourceType,
   type LocalizedValues,
 } from '~/server/utils/localization-registry'
-import { assertProductKind, validateProductDetails, type ProductKind } from '~/shared/product-details'
+import { assertProductKind, validateProductDetails, validateStayAlarmDetails, ProductDetailError, type ProductKind } from '~/shared/product-details'
+import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, parseStayAmenityAnswers } from '~/shared/stay-listing'
+import { isRecord } from '~/server/utils/type-guards'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { resolvePublicTemplate } from '~/utils/template-registry'
@@ -516,6 +518,19 @@ function resourceLocalizationWriteQueries(input: {
       input.prior?.created_at ?? input.now, input.prior?.created_by_user_id ?? input.userId, input.now, input.userId],
   })
   statements.push(canonicalResourceGuard(input.organizationId, input.resourceType, input.resourceId))
+  if (input.resourceType === 'product' && isRecord(input.values.details)) {
+    const alarmDetails = STAY_ALARM_AMENITIES.filter(code => Object.hasOwn(input.values.details as object, STAY_ALARM_DETAIL_KEYS[code])).map(code => ({ code, key: STAY_ALARM_DETAIL_KEYS[code] }))
+    if (alarmDetails.length) statements.push({
+      query: `UPDATE resource_localizations AS localized SET values_json = NULL
+        WHERE organization_id = ? AND resource_type = 'product' AND resource_id = ? AND locale = ? AND EXISTS (
+          SELECT 1 FROM json_each(?) alarm WHERE NOT EXISTS (
+            SELECT 1 FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id, json_each(c.amenities) answer
+            WHERE p.organization_id = localized.organization_id AND p.id = localized.resource_id
+              AND answer.value ->> '$.code' = alarm.value ->> '$.code' AND answer.value ->> '$.available' = 1
+              AND json_type(p.details_json, '$.' || (alarm.value ->> '$.key')) = 'text'))`,
+      params: [input.organizationId, input.resourceId, input.locale, JSON.stringify(alarmDetails)],
+    })
+  }
   return statements
 }
 
@@ -539,6 +554,14 @@ export async function putResourceLocalization(
   if (!canonical) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Canonical resource was not found', { resource_type: resourceType, resource_id: input.resourceId })
   const values = validateLocalizedValues(resourceType, input.values, resourceType === 'product' ? assertProductKind(canonical.kind) : undefined,
     status === 'published' && resourceType === 'organization' ? { publishedTemplate: resolvePublicTemplate({ themeId: canonical.theme_id, vertical: canonical.vertical }).slug } : undefined)
+  if (resourceType === 'product' && canonical.kind === 'stay' && isRecord(values.details) && STAY_ALARM_AMENITIES.some(code => Object.hasOwn(values.details as object, STAY_ALARM_DETAIL_KEYS[code]))) {
+    const source = await queryFirst<{ amenities: string; details_json: string }>(db, 'SELECT c.amenities, p.details_json FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = ? AND p.id = ?', [input.organizationId, input.resourceId])
+    if (!source) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source home is no longer available', { field: 'details' })
+    try { validateStayAlarmDetails(values.details, parseStayAmenityAnswers(JSON.parse(source.amenities))) }
+    catch (error) { if (!(error instanceof ProductDetailError)) throw error; localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', error.message, { field: 'details' }) }
+    const sourceDetails = validateProductDetails('stay', JSON.parse(source.details_json))
+    for (const code of STAY_ALARM_AMENITIES) if (Object.hasOwn(values.details, STAY_ALARM_DETAIL_KEYS[code]) && typeof sourceDetails[STAY_ALARM_DETAIL_KEYS[code]] !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', `Write source details.${STAY_ALARM_DETAIL_KEYS[code]} before translating it`, { field: `details.${STAY_ALARM_DETAIL_KEYS[code]}` })
+  }
   const routePath = validateLocalizedRoutePath(resourceType, locale, input.routePath, canonical.slug)
   const existing = await queryFirst<{ id: string; route_path: string | null; created_at: string; created_by_user_id: string }>(db, `
     SELECT id, route_path, created_at, created_by_user_id
@@ -556,6 +579,7 @@ export async function putResourceLocalization(
   try {
     await executeBatch(db, statements, { operation: 'replace resource localization' })
   } catch (error) {
+    if (error instanceof Error && /NOT NULL constraint failed: resource_localizations\.values_json/.test(error.message)) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source alarm details changed while translating; read the home again before saving', { field: 'details' })
     if (error instanceof Error && /resource_localizations_organization_locale_route_unique|UNIQUE constraint failed: resource_localizations\.organization_id/.test(error.message)) {
       localizationError(409, 'LOCALIZED_ROUTE_CONFLICT', 'Localized route path is already owned by another resource', { route_path: routePath })
     }
@@ -857,6 +881,7 @@ export async function replaceResourceLocalizations(
   try {
     await executeBatch(db, statements, { operation: 'replace resource localizations' })
   } catch (error) {
+    if (error instanceof Error && /NOT NULL constraint failed: resource_localizations\.values_json/.test(error.message)) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source alarm details changed while translating; read the home again before saving', { field: 'details' })
     if (error instanceof Error && /resource_localizations_organization_locale_route_unique|UNIQUE constraint failed: resource_localizations\.organization_id/.test(error.message)) {
       localizationError(409, 'LOCALIZED_ROUTE_CONFLICT', 'A localized route path is already owned by another resource')
     }

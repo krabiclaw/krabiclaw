@@ -16,8 +16,7 @@
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
-import { STAY_SAFETY_SECTIONS, staySafetyLines, type StaySafetySection } from '~/shared/stay-safety'
-import { STAY_AMENITIES } from '~/shared/stay-listing'
+import { STAY_SAFETY_SECTIONS, staySafetyLines, stayAlarmLines, type StaySafetySection } from '~/shared/stay-safety'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -28,7 +27,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'guest-safety', it
   const product = p.product.value
   const lines = product ? [
     ...staySafetyLines(product.details, { section, includeNo: true }),
-    ...(section === 'devices' ? (['smoke_detector', 'carbon_monoxide_detector'] as const).filter(code => product.stay?.amenities.includes(code)).map(code => STAY_AMENITIES[code].label) : []),
+    ...(section === 'devices' ? stayAlarmLines(product.stay!.amenity_answers, product.details) : []),
   ] : []
   return { id: section, label: STAY_SAFETY_SECTIONS[section].label, summary: lines.join('\n') || 'Not provided', placeholder: !lines.length, to: p.sectionPath(`guest-safety/${section}`) }
 }) }])

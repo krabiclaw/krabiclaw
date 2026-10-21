@@ -134,17 +134,17 @@
 <script lang="ts">
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
-import type { StayAmenity, StayCancellationPolicy, StayListingType, StayLongTermCancellationPolicy, StayPropertySizeUnit, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
+import type { StayAmenity, StayAmenityAnswer, StayCancellationPolicy, StayListingType, StayLongTermCancellationPolicy, StayPropertySizeUnit, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
 import type { StayArrivalGuide, StayArrivalField } from '~/shared/stay-arrival'
 import type { StaySafetySection } from '~/shared/stay-safety'
 import type { StayPhotoRoom, StayPhotoRoomType } from '~/shared/stay-photos'
-import type { StayRoomAccessibility } from '~/shared/stay-accessibility'
+import type { StayRoomAccessibility, StayHomeAccessibility } from '~/shared/stay-accessibility'
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
-  'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'arrival-guide', 'property-type', 'rooms', 'amenities', 'cancellation', 'team', 'guest-safety', 'location',
+  'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'arrival-guide', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
@@ -227,6 +227,7 @@ export interface ProductForm {
   stay_beds: string
   stay_bathrooms: string
   stay_amenities: StayAmenity[]
+  stay_amenity_answers: StayAmenityAnswer[]
   stay_cancellation_policy: StayCancellationPolicy | null
   stay_long_term_cancellation_policy: StayLongTermCancellationPolicy | null
 }
@@ -279,6 +280,7 @@ export interface ProductEditor {
   photoRooms: ComputedRef<StayPhotoRoom[]>
   createStayPhotoRoom: (type: StayPhotoRoomType) => Promise<StayPhotoRoom | null>
   updateStayPhotoRoom: (roomId: string, patch: Pick<StayPhotoRoom, 'details_version'> & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>> & { accessibility?: StayRoomAccessibility }) => Promise<boolean>
+  updateStayAccessibility: (answer: StayHomeAccessibility, expectedUpdatedAt: string) => Promise<boolean>
   deleteStayPhotoRoom: (roomId: string) => Promise<boolean>
   moveStayPhotos: (photos: Array<{ photo_id: string; expected_room_id: string | null }>, target: { room_id: string | null } | { new_room_type: StayPhotoRoomType }) => Promise<boolean>
   addStayPhoto: (assetId: string) => Promise<boolean>
@@ -322,8 +324,8 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import type { ProductDetailField, ProductDetailValue, ProductKind } from '~/shared/product-details'
-import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
-import { STAY_SAFETY_DETAIL_KEYS, STAY_SAFETY_SECTIONS, staySafetyLines, staySafetySectionKeys } from '~/shared/stay-safety'
+import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, isStayFocusedDetail, stayHouseRuleLines } from '~/shared/product-details'
+import { STAY_SAFETY_DETAIL_KEYS, STAY_SAFETY_SECTIONS, staySafetyLines, staySafetySectionKeys, stayAlarmLines } from '~/shared/stay-safety'
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -339,10 +341,14 @@ import { formatTime, MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import { isNavigationFailure } from 'vue-router'
 import { dashboardOverlayOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
+import { STAY_HOME_ACCESSIBILITY_FEATURES, isStayHomeAccessibility } from '~/shared/stay-accessibility'
 import {
   STAY_PROPERTY_TYPES,
   STAY_LISTING_TYPES,
   STAY_AMENITIES,
+  STAY_ALARM_AMENITIES,
+  stayAmenityAvailability,
+  isStayAmenityAnswers,
   STAY_PROPERTY_TYPE_GROUPS,
   STAY_CANCELLATION_POLICIES,
   STAY_LONG_TERM_CANCELLATION_POLICIES,
@@ -426,6 +432,7 @@ const sectionLabels: Record<SectionKey, string> = {
   'property-type': 'Property type',
   'rooms': 'Rooms and beds',
   'amenities': 'Amenities',
+  'accessibility': 'Accessibility features',
   'cancellation': 'Cancellation policy',
   'team': 'Looked after by',
   // Only a product with a kind has collections to choose.
@@ -625,7 +632,7 @@ const stayAmenityPreview = computed(() => (product.value?.stay?.amenities ?? [])
 const savedHouseRules = computed(() => product.value?.kind === 'stay' ? stayHouseRuleLines(product.value.details, value => formatTime(value, locale.value)) : [])
 const savedSafety = computed(() => product.value?.kind === 'stay' ? [
   ...staySafetyLines(product.value.details, { includeNo: true }),
-  ...(['smoke_detector', 'carbon_monoxide_detector'] as const).filter(code => product.value!.stay!.amenities.includes(code)).map(code => STAY_AMENITIES[code].label),
+  ...stayAlarmLines(product.value.stay!.amenity_answers, product.value.details),
 ] : [])
 // A product that is not there is not a page. A request that failed is a state
 // this level shows, because the product may well still exist.
@@ -648,6 +655,8 @@ const stayConfigError = computed(() => {
     !(Number.isInteger(stay.max_guests) && stay.max_guests >= 1 && stay.max_guests <= 99) && 'sleeps',
     !(Number.isInteger(stay.min_nights) && stay.min_nights >= 1 && stay.min_nights <= 365) && 'minimum nights',
     !Array.isArray(stay.photo_rooms) && 'photo tour',
+    !isStayAmenityAnswers(stay.amenity_answers) && 'amenity answers',
+    !(Array.isArray(stay.accessibility) && stay.accessibility.length === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).length && stay.accessibility.every((answer, index) => isStayHomeAccessibility(answer) && answer.feature === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES)[index])) && 'accessibility details',
   ].filter(Boolean)
   return invalid.length ? `This place to stay has invalid stay settings: ${invalid.join(', ')}.` : null
 })
@@ -722,7 +731,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   stay_property_type_group: null, stay_property_type: null,
   stay_listing_type: null, stay_total_floors: '', stay_listing_floor: '', stay_year_built: '', stay_property_size: '', stay_property_size_unit: null,
   stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
-  stay_amenities: [] as StayAmenity[], stay_cancellation_policy: null, stay_long_term_cancellation_policy: null,
+  stay_amenities: [] as StayAmenity[], stay_amenity_answers: [] as StayAmenityAnswer[], stay_cancellation_policy: null, stay_long_term_cancellation_policy: null,
 }))
 const form = reactive(draft.value)
 // One key per product being created, kept across the walk's leaves and retries.
@@ -810,6 +819,7 @@ function loadForm(row: Product) {
   form.stay_beds = stay && stay.beds !== null ? String(stay.beds) : ''
   form.stay_bathrooms = stay && stay.bathrooms !== null ? String(stay.bathrooms) : ''
   form.stay_amenities = stay ? [...stay.amenities] : []
+  form.stay_amenity_answers = stay ? stay.amenity_answers.map(answer => ({ ...answer })) : []
   form.stay_cancellation_policy = stay ? stay.cancellation_policy : null
   form.stay_long_term_cancellation_policy = stay ? stay.long_term_cancellation_policy : null
   loadedCatalogShape.value = catalogShapeOf()
@@ -1068,7 +1078,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'checkout-instructions', label: 'Checkout instructions', summary: home.checkout_instructions.length ? `${home.checkout_instructions.length} ${home.checkout_instructions.length === 1 ? 'instruction' : 'instructions'}` : 'Add details', placeholder: !home.checkout_instructions.length, to: sectionPath('checkout-instructions') },
     ] }]
   }
-  const authoredDetails = definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(definition.key) && !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(definition.key) && !(STAY_SAFETY_DETAIL_KEYS as readonly string[]).includes(definition.key))
+  const authoredDetails = definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !isStayFocusedDetail(definition.key))
   // One flat list, the same for every kind: what the product is, what it costs,
   // how it is booked, and where it is offered and shown.
   return [{
@@ -1113,6 +1123,12 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
                 : 'No amenities selected',
               placeholder: !product.value.stay!.amenities.length,
               to: sectionPath('amenities'),
+            },
+            {
+              id: 'accessibility', label: 'Accessibility features',
+              summary: product.value.stay!.accessibility.filter(answer => answer.available === true).map(answer => STAY_HOME_ACCESSIBILITY_FEATURES[answer.feature].label).join(', ') || 'Add details',
+              placeholder: !product.value.stay!.accessibility.some(answer => answer.available === true),
+              to: sectionPath('accessibility'),
             },
             {
               id: 'cancellation',
@@ -1176,7 +1192,7 @@ const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item
 // A service leads with what is changed most: who handles it, what it costs,
 // how it is booked and what its page says. Every other kind keeps the list as written.
 const SERVICE_ROW_ORDER = ['assignment', 'price', 'booking', 'description', 'page', 'locations', 'publication']
-const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
+const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
 function rowRank(id: string) {
   if (form.kind === 'stay') {
     const at = STAY_ROW_ORDER.indexOf(id)
@@ -1275,9 +1291,20 @@ function isSafetyConcern(concern: unknown): concern is StaySafetySection {
 
 function payload(concern?: ProductConcern) {
   if (form.kind === 'stay' && !isNew.value && editorKey.value === 'amenities') return { stay: { amenities: form.stay_amenities } }
+  if (form.kind === 'stay' && !isNew.value && editorKey.value === 'location' && STAY_LOCATION_DETAIL_KEYS.some(key => key === route.params.field)) {
+    const key = STAY_LOCATION_DETAIL_KEYS.find(key => key === route.params.field)!
+    return { details_mode: 'merge', details: { [key]: form.details[key] ?? null } }
+  }
   if (isSafetyConcern(concern)) {
     if (product.value?.kind !== 'stay') throw new Error('Guest safety requires a place to stay.')
-    return { details_mode: 'merge', details: Object.fromEntries(staySafetySectionKeys(concern).map(key => [key, form.details[key] ?? null])) }
+    return {
+      details_mode: 'merge',
+      details: Object.fromEntries(staySafetySectionKeys(concern).map(key => [key, form.details[key] ?? null])),
+      ...(concern === 'devices' ? { stay: { amenity_answers: STAY_ALARM_AMENITIES.flatMap(code => {
+        const available = stayAmenityAvailability(form.stay_amenity_answers, code)
+        return available === stayAmenityAvailability(product.value!.stay!.amenity_answers, code) ? [] : [{ code, available }]
+      }) } } : {}),
+    }
   }
   if (concern === 'arrival-time') {
     if (!product.value?.stay) throw new Error('Arrival times require a place to stay.')
@@ -1312,10 +1339,7 @@ function payload(concern?: ProductConcern) {
   // claim that it has none, which is not a product.
   const describesCatalog = catalog.variants.length > 0
   const changed = JSON.stringify(catalog) !== loadedCatalogShape.value
-  const attribute = editorKey.value === 'attributes' ? definitions.value.find(field => field.id === route.params.definitionId
-    && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(field.key)
-    && !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(field.key)
-    && !(STAY_SAFETY_DETAIL_KEYS as readonly string[]).includes(field.key)) : undefined
+  const attribute = editorKey.value === 'attributes' ? definitions.value.find(field => field.id === route.params.definitionId && !isStayFocusedDetail(field.key)) : undefined
   const detailKey = attribute ? productDetailKey(attribute)
     : editorKey.value === 'description' && form.kind === 'stay' ? STAY_DESCRIPTION_DETAIL_KEYS.find(key => key === route.params.section)
       : editorKey.value === 'price' && form.kind !== 'stay' && form.variants.length === 1 ? PRICING_NOTE_HANDLE : undefined
@@ -1421,7 +1445,9 @@ async function commit(concern?: ProductConcern) {
     stay_property_size_unit: form.stay_property_size_unit,
   } : null
   const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_out_time: form.check_out_time } : null
-  const safetyDraft = isSafetyConcern(concern) ? { keys: staySafetySectionKeys(concern), details: { ...form.details } } : null
+  const safetyDraft = isSafetyConcern(concern) ? { keys: staySafetySectionKeys(concern), details: { ...form.details }, answers: form.stay_amenity_answers.map(answer => ({ ...answer })) } : null
+  const locationDetailKey = editorKey.value === 'location' ? STAY_LOCATION_DETAIL_KEYS.find(key => key === route.params.field) : undefined
+  const locationDraft = locationDetailKey ? { key: locationDetailKey, value: form.details[locationDetailKey] } : null
   const houseRulesDraft = concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time' && editorKey.value === 'house-rules' ? {
     details: { ...form.details },
     max_guests: Number(form.max_guests) !== product.value?.stay?.max_guests ? form.max_guests : null,
@@ -1492,7 +1518,7 @@ async function commit(concern?: ProductConcern) {
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
-    if (safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+    if (locationDraft || safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
       try { await reload() } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
     }
     // A failed response may follow a committed write. Saved summaries
@@ -1501,7 +1527,12 @@ async function commit(concern?: ProductConcern) {
     if (concern === 'publication-availability' && publicationDraft !== null) form.active = publicationDraft
     if (propertyDraft) Object.assign(form, propertyDraft)
     if (arrivalTimeDraft) Object.assign(form, arrivalTimeDraft)
+    if (locationDraft) {
+      if (locationDraft.value === undefined) Reflect.deleteProperty(form.details, locationDraft.key)
+      else form.details[locationDraft.key] = locationDraft.value
+    }
     if (safetyDraft) {
+      if (concern === 'devices') form.stay_amenity_answers = safetyDraft.answers
       for (const key of safetyDraft.keys) {
         const value = safetyDraft.details[key]
         if (value === undefined) Reflect.deleteProperty(form.details, key)
@@ -1613,6 +1644,7 @@ async function saveSchedule(weekday: number) {
 function revert(concern?: 'additional-rules' | 'arrival-time' | StaySafetySection) {
   saveError.value = null
   if (isSafetyConcern(concern)) {
+    if (concern === 'devices' && product.value?.stay) form.stay_amenity_answers = product.value.stay.amenity_answers.map(answer => ({ ...answer }))
     for (const key of staySafetySectionKeys(concern)) {
       const value = product.value?.details[key]
       if (value === undefined) Reflect.deleteProperty(form.details, key)
@@ -1844,6 +1876,16 @@ async function updateStayPhotoRoom(roomId: string, patch: Pick<StayPhotoRoom, 'd
   }))
 }
 
+async function updateStayAccessibility(accessibility: StayHomeAccessibility, expectedUpdatedAt: string) {
+  return await changeStayPhotos(async () => await dashboardApi(`${arrivalUrl()}/accessibility`, {
+    method: 'PATCH', body: { expected_updated_at: expectedUpdatedAt, accessibility },
+    validate: (value: unknown): value is { home: { product_id: string; photos: unknown[]; accessibility: StayHomeAccessibility[] } } =>
+      isStayPhotoMutation(value) && isRecord(value.home) && Array.isArray(value.home.accessibility)
+      && value.home.accessibility.length === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).length
+      && value.home.accessibility.every((answer, index) => isStayHomeAccessibility(answer) && answer.feature === Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES)[index]),
+  }))
+}
+
 async function moveStayPhotos(photos: Array<{ photo_id: string; expected_room_id: string | null }>, target: { room_id: string | null } | { new_room_type: StayPhotoRoomType }) {
   return await changeStayPhotos(async () => await dashboardApi(`${stayPhotoUrl()}/move`, { method: 'PUT', body: { ...target, photos }, validate: isStayPhotoMutation }))
 }
@@ -1955,6 +1997,7 @@ provide(productEditorKey, {
   photoRooms,
   createStayPhotoRoom,
   updateStayPhotoRoom,
+  updateStayAccessibility,
   deleteStayPhotoRoom,
   moveStayPhotos,
   addStayPhoto,

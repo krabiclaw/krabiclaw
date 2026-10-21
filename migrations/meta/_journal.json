@@ -127,6 +127,20 @@
       "when": 1792504562249,
       "tag": "0017_stay_room_accessibility",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792551501364,
+      "tag": "0018_stay_amenity_answers",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792552731587,
+      "tag": "0019_stay_accessibility",
+      "breakpoints": true
     }
   ]
 }

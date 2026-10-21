@@ -154,22 +154,14 @@
               <article v-for="room in authoredRoomDetails" :key="room.id" class="rounded-xl border border-default p-5" :data-testid="`stay-room-details-${room.id}`">
                 <h3 class="font-semibold text-default">{{ room.title }}</h3>
                 <ul v-if="room.details?.length" class="mt-3 space-y-2 text-sm text-muted"><li v-for="detail in room.details" :key="detail">{{ detail }}</li></ul>
-                <ul v-if="room.features?.length" class="mt-3 space-y-3 text-sm text-muted">
-                  <li v-for="feature in room.features" :key="feature.id" class="flex items-start gap-3">
-                    <UIcon :name="feature.icon" class="size-5 shrink-0" aria-hidden="true" />
-                    <div class="min-w-0">
-                      <p>{{ feature.label }}</p>
-                      <p v-if="feature.description" class="mt-1 leading-relaxed">{{ feature.description }}</p>
-                      <div v-if="feature.asset_ids?.length" class="mt-3 flex flex-wrap gap-2">
-                        <button v-for="(assetId, position) in feature.asset_ids" :key="assetId" type="button" class="w-24 overflow-hidden rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4" :aria-label="t('stay.open_accessibility_photo', { feature: feature.label, number: position + 1 })" @click="openGalleryAsset(assetId)">
-                          <img :src="galleryItems.find(item => item.asset_id === assetId)!.url" alt="" class="aspect-4/3 w-full object-cover transition hover:brightness-95" loading="lazy">
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                </ul>
+                <StayFeatureList v-if="room.features?.length" class="mt-3" :features="room.features" :photos="galleryItems" @open-photo="openGalleryAsset" />
               </article>
             </div>
+          </section>
+
+          <section v-if="isStay && !compact && stayAccessibilityFeatures.length" class="mt-10 border-t border-default pt-8" data-testid="stay-accessibility-features">
+            <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('stay.accessibility_title') }}</h2>
+            <StayFeatureList class="mt-5" :features="stayAccessibilityFeatures" :photos="galleryItems" @open-photo="openGalleryAsset" />
           </section>
 
           <!-- What this place offers (Amenities) -->
@@ -270,6 +262,12 @@
                 loading="lazy"
                 referrerpolicy="strict-origin-when-cross-origin"
               />
+            </div>
+            <div v-if="isStay" class="mt-6 space-y-6">
+              <section v-for="detail in stayLocationDetails" :key="detail.key">
+                <h3 class="text-lg font-semibold text-default">{{ detail.label }}</h3>
+                <p class="mt-2 whitespace-pre-line text-sm leading-7 text-muted">{{ detail.text }}</p>
+              </section>
             </div>
           </section>
 
@@ -518,9 +516,9 @@ import UpcomingSessions from '~/components/booking/UpcomingSessions.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
-import { STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_ALARM_AMENITIES, STAY_AMENITY_GROUPS, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { stayPhotoRoomName, stayPhotoTourReady } from '~/shared/stay-photos'
-import { STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
+import { STAY_ROOM_ACCESSIBILITY_FEATURES, STAY_HOME_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import type { MediaGalleryGroup } from '~/components/MediaLightbox.vue'
 import type { CurrencyCode } from '~/shared/currencies'
 import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
@@ -529,8 +527,8 @@ import { ga4Major } from '~/utils/ga4-projection'
 import { productLocationCollectionPath, staySpecLabels } from '~/utils/product-presentation'
 import { extractDietarySchemaUrls, type ProductCollectionSibling } from '~/utils/product-seo'
 import type { ProductDetailValue } from '~/shared/product-details'
-import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
-import { STAY_SAFETY_DETAIL_KEYS, staySafetyLines } from '~/shared/stay-safety'
+import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
+import { STAY_SAFETY_DETAIL_KEYS, staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
@@ -546,6 +544,7 @@ import { PUBLIC_BOOKING_WINDOW_DAYS } from '~/shared/bookings'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 import MediaGallery from '~/components/MediaGallery.vue'
+import StayFeatureList from '~/components/products/StayFeatureList.vue'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
 import { mediaStillUrl, uniqueMediaAssets } from '~/shared/media-placement-contract'
 
@@ -741,6 +740,20 @@ function openGalleryAsset(assetId: string) {
   mediaGallery.value.openLightbox(index)
 }
 
+const stayAccessibilityFeatures = computed<NonNullable<MediaGalleryGroup['features']>>(() => {
+  if (!isStay.value || !props.product.stay) return []
+  const imageIds = new Set(productMedia.value.filter(asset => asset.kind === 'image' && asset.public_url).map(asset => asset.asset_id))
+  return props.product.stay.accessibility.filter(answer => answer.available === true).map(answer => {
+    if (!answer.photo_ids.length || answer.photo_ids.some(id => !imageIds.has(id))) throw new TypeError('The listing accessibility feature has no Product image evidence')
+    return {
+      id: answer.feature, icon: STAY_HOME_ACCESSIBILITY_FEATURES[answer.feature].icon,
+      label: t(`stay.home_accessibility_features.${answer.feature}.label`),
+      description: t(`stay.home_accessibility_features.${answer.feature}.description`),
+      asset_ids: answer.photo_ids,
+    }
+  })
+})
+
 /** Room facts remain available even when the photo tour is not complete. */
 const stayRoomGroups = computed<MediaGalleryGroup[]>(() => {
   if (!isStay.value || !props.product.stay) return []
@@ -935,7 +948,11 @@ const stayDescriptionDetails = computed(() => props.product.kind === 'stay'
 const meetingPoint = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.meetingPoint, asText))
 const includedItems = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.includedItems, asList) ?? [])
 const whatToBring = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.whatToBring, asList) ?? [])
-const PLACED_ATTRIBUTE_HANDLES = new Set<string>([...Object.values(EXPERIENCE_ATTRIBUTE_HANDLES), ...STAY_DESCRIPTION_DETAIL_KEYS])
+const PLACED_ATTRIBUTE_HANDLES = new Set<string>([...Object.values(EXPERIENCE_ATTRIBUTE_HANDLES), ...STAY_DESCRIPTION_DETAIL_KEYS, ...STAY_LOCATION_DETAIL_KEYS])
+const stayLocationDetails = computed(() => STAY_LOCATION_DETAIL_KEYS.flatMap(key => {
+  const text = props.product.details[key]
+  return typeof text === 'string' ? [{ key, label: t(`stay.${key}`), text }] : []
+}))
 const stayRules = computed(() => props.product.kind === 'stay' ? stayHouseRuleLines(props.product.details, value => formatTime(value, locale.value)) : [])
 /** Airbnb's three columns for a home: house rules with its times and party, safety and property, then its other details. */
 const stayHouseRules = computed(() => props.product.stay ? [
@@ -944,14 +961,13 @@ const stayHouseRules = computed(() => props.product.stay ? [
   t('stay.guests_maximum', props.product.stay.max_guests),
   ...stayRules.value,
 ] : [])
-// Safety equipment the host listed; an alarm they did not list is said to be unreported, as Airbnb says it.
+// Installed, absent and unanswered alarms retain their distinct authored meaning.
 const staySafety = computed(() => {
   const stay = props.product.stay
   if (!stay) return []
   return [
-    ...STAY_AMENITY_GROUPS.home_safety.amenities.flatMap(code => (stay.amenities as readonly string[]).includes(code)
-      ? [STAY_AMENITIES[code].label]
-      : code === 'carbon_monoxide_detector' || code === 'smoke_detector' ? [t('stay.not_reported', { item: STAY_AMENITIES[code].label })] : []),
+    ...STAY_AMENITY_GROUPS.home_safety.amenities.filter(code => !(STAY_ALARM_AMENITIES as readonly string[]).includes(code) && stay.amenities.includes(code)).map(code => STAY_AMENITIES[code].label),
+    ...stayAlarmLines(stay.amenity_answers, props.product.details, { includeUnknown: true, absent: item => t('stay.not_installed', { item }), unknown: item => t('stay.not_reported', { item }) }),
     ...staySafetyLines(props.product.details),
   ]
 })
@@ -1102,7 +1118,10 @@ const stayStructuredData = computed(() => {
     ...(stay.bedrooms !== null ? { numberOfBedrooms: stay.bedrooms } : {}),
     ...(stay.bathrooms !== null ? { numberOfBathroomsTotal: stay.bathrooms } : {}),
     ...(stay.beds !== null ? { bed: { '@type': 'BedDetails', numberOfBeds: stay.beds } } : {}),
-    ...(stay.amenities.length ? { amenityFeature: stay.amenities.map(code => ({ '@type': 'LocationFeatureSpecification', name: STAY_AMENITIES[code].label, value: true })) } : {}),
+    ...(stay.amenity_answers.length || stay.accessibility.some(answer => answer.available !== null) ? { amenityFeature: [
+      ...stay.amenity_answers.map(answer => ({ '@type': 'LocationFeatureSpecification', name: STAY_AMENITIES[answer.code].label, value: answer.available })),
+      ...stay.accessibility.flatMap(answer => answer.available === null ? [] : [{ '@type': 'LocationFeatureSpecification', name: t(`stay.home_accessibility_features.${answer.feature}.label`), value: answer.available }]),
+    ] } : {}),
     additionalProperty: [
       { '@type': 'PropertyValue', name: 'checkinTime', value: stay.check_in_time },
       { '@type': 'PropertyValue', name: 'checkoutTime', value: stay.check_out_time },

@@ -16,9 +16,12 @@ import describePhotoRoute from '../../server/api/dashboard/stay-homes/[productId
 import removePhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/[photoId].delete.ts'
 import createRoomRoute from '../../server/api/dashboard/stay-homes/[productId]/rooms/index.post.ts'
 import updateRoomRoute from '../../server/api/dashboard/stay-homes/[productId]/rooms/[roomId].patch.ts'
+import updateAccessibilityRoute from '../../server/api/dashboard/stay-homes/[productId]/accessibility.patch.ts'
 import { getProduct, hydrateProductMedia } from '../../server/utils/product-management.ts'
 import publicShellRoute from '../../server/api/public/shell.get.ts'
 import type { StayPhotoRoom } from '../../shared/stay-photos.ts'
+import { STAY_HOME_ACCESSIBILITY_FEATURES, type StayHomeAccessibility } from '../../shared/stay-accessibility.ts'
+import type { StayHome } from '../../server/domain/stays.ts'
 
 // A home's photos are its product's media: the product image is the cover and
 // the gallery follows. The native app's routes order, describe and remove them
@@ -71,6 +74,7 @@ test('a home authors room details and manages its product photos through authent
     app.delete('/api/dashboard/stay-homes/:productId/photos/:photoId', removePhotoRoute)
     app.post('/api/dashboard/stay-homes/:productId/rooms', createRoomRoute)
     app.patch('/api/dashboard/stay-homes/:productId/rooms/:roomId', updateRoomRoute)
+    app.patch('/api/dashboard/stay-homes/:productId/accessibility', updateAccessibilityRoute)
     const call = async (cookie: string, method: string, path: string, body?: Record<string, unknown> | FormData) => {
       const json = body !== undefined && !(body instanceof FormData)
       const response = await app.request(Object.assign(new Request(`${BASE}/api/dashboard/stay-homes${path}?org=org`, {
@@ -128,8 +132,60 @@ test('a home authors room details and manages its product photos through authent
     // The product as its pages read it: the image is the cover, the gallery follows.
     const rendered = async () => (await hydrateProductMedia(db, ORG, [await getProduct(db, ORG, productId)]))[0]!
     const photo = (id: string, position: number, alt_text: string | null = null) => ({ id, kind: 'image', url: `https://imagedelivery.net/acct/${id}/public`, width: 1600, height: 1200, alt_text, position })
-    const homes = async () => (await call(owner, 'GET', '')).body.homes as Array<{ photos: unknown[] }>
+    const homes = async () => (await call(owner, 'GET', '')).body.homes as StayHome[]
     assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0), photo('kitchen', 1), photo('bedroom', 2)])
+
+    // Listing answers have their own Product owner. Unknown answers do not
+    // manufacture rooms, and every save uses the Product version read by the UI.
+    const unknownFeatures = Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] }))
+    let currentHome = (await homes())[0]!
+    assert.deepEqual(currentHome.accessibility, unknownFeatures)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.accessibility, unknownFeatures)
+    assert.equal(currentHome.product_updated_at, (await getProduct(db, ORG, productId)).updated_at)
+    const firstVersion = currentHome.product_updated_at
+    const noParking = await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: firstVersion, accessibility: { feature: 'disabled_parking_spot', available: false, photo_ids: [] } })
+    assert.equal(noParking.status, 200, JSON.stringify(noParking.body))
+    currentHome = noParking.body.home as StayHome
+    assert.notEqual(currentHome.product_updated_at, firstVersion)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.accessibility[0], { feature: 'disabled_parking_spot', available: false, photo_ids: [] })
+    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: firstVersion, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['bedroom'] } })), { status: 409, code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at' })
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [])
+    for (const accessibility of [
+      { feature: 'home_step_free_access', available: true, photo_ids: [] },
+      { feature: 'step_free_access', available: false, photo_ids: [] },
+      { feature: 'home_step_free_access', available: false, photo_ids: ['bedroom'] },
+      { feature: 'home_step_free_access', available: true, photo_ids: ['bedroom', 'bedroom'] },
+    ]) assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: currentHome.product_updated_at, accessibility })), { status: 422, code: 'INVALID_STAY_ACCESSIBILITY', field: 'accessibility' })
+
+    assert.equal((await call(owner, 'DELETE', `/${productId}/photos/bedroom`)).status, 200)
+    const homeStepFree = await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: currentHome.product_updated_at, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['bedroom'] } })
+    assert.equal(homeStepFree.status, 200, JSON.stringify(homeStepFree.body))
+    currentHome = homeStepFree.body.home as StayHome
+    const answeredFeatures: StayHomeAccessibility[] = currentHome.accessibility
+    assert.deepEqual(answeredFeatures[0], { feature: 'disabled_parking_spot', available: false, photo_ids: [] })
+    assert.deepEqual(answeredFeatures[2], { feature: 'home_step_free_access', available: true, photo_ids: ['bedroom'] })
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.accessibility, answeredFeatures)
+    assert.deepEqual((await db.prepare('SELECT feature_code, available FROM product_stay_accessibility WHERE organization_id = ? AND product_id = ? ORDER BY feature_code').bind(ORG, productId).all()).results, [{ feature_code: 'disabled_parking_spot', available: 0 }, { feature_code: 'home_step_free_access', available: 1 }])
+    assert.deepEqual((await db.prepare('SELECT feature_code, asset_id FROM product_stay_accessibility_photos WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).all()).results, [{ feature_code: 'home_step_free_access', asset_id: 'bedroom' }])
+    assert.deepEqual([((await rendered()).image)?.asset_id, (await rendered()).gallery.map(asset => asset.asset_id)], ['deck', ['kitchen', 'bedroom']])
+    assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0), photo('kitchen', 1), photo('bedroom', 2)])
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [])
+    assert.deepEqual(refusal(await call(owner, 'DELETE', `/${productId}/photos/bedroom`)), { status: 409, code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' })
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.accessibility, answeredFeatures)
+    for (const feature of ['home_step_free_access', 'disabled_parking_spot']) {
+      const cleared = await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: currentHome.product_updated_at, accessibility: { feature, available: null, photo_ids: [] } })
+      assert.equal(cleared.status, 200, JSON.stringify(cleared.body))
+      const previousVersion = currentHome.product_updated_at
+      currentHome = cleared.body.home as StayHome
+      assert.notEqual(currentHome.product_updated_at, previousVersion)
+    }
+    assert.deepEqual((await homes())[0]!.accessibility, unknownFeatures)
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_accessibility WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).first('n'), 0)
+    const clearedVersion = currentHome.product_updated_at
+    const alreadyUnknown = await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: clearedVersion, accessibility: { feature: 'pool_hoist', available: null, photo_ids: [] } })
+    assert.equal(alreadyUnknown.status, 200, JSON.stringify(alreadyUnknown.body))
+    assert.notEqual((alreadyUnknown.body.home as StayHome).product_updated_at, clearedVersion)
+    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: clearedVersion, accessibility: { feature: 'pool_hoist', available: false, photo_ids: [] } })), { status: 409, code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at' })
 
     // The room allocates the explicitly declared listing inventory; neither
     // its photos nor its sleeping arrangements create a listing bed total.
@@ -203,7 +259,7 @@ test('a home authors room details and manages its product photos through authent
     assert.equal(prunedShell.headers.get('x-bootstrap-cache'), 'MISS')
     const prunedRoom: StayPhotoRoom = { ...featuredRoom, details_version: 6, amenities: ['tv'] }
     assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [prunedRoom])
-    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).first('amenities'), '["tv"]')
+    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).first('amenities'), '[{"code":"tv","available":true}]')
     assert.deepEqual(await db.prepare('SELECT amenity_code FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, productId, roomId).all().then(result => result.results), [{ amenity_code: 'tv' }])
     assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 5, amenities: ['tv', 'wireless_internet'] })), { status: 409, code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' })
     const restoreListingAmenity = await call(owner, 'PATCH', `/${productId}`, { amenities: ['wireless_internet', 'tv'] })
@@ -315,6 +371,7 @@ test('a home authors room details and manages its product photos through authent
 
     // Only managers change a home's photos.
     const helper = await cookieFor('helper')
+    assert.deepEqual(refusal(await call(helper, 'PATCH', `/${productId}/accessibility`, { expected_updated_at: (await getProduct(db, ORG, productId)).updated_at, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['deck'] } })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual(refusal(await call(helper, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 12, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['deck'] }, amenities: ['hot_water'], private_attached_bathroom: true })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [clearedRoom])
     assert.deepEqual((await getProduct(db, ORG, productId)).stay!.amenities, ['tv', 'wireless_internet'])

@@ -12,7 +12,7 @@ import {
   isSingleMediaPlacement,
   readMediaPlacements,
   pruneStayPhotoRoomMembershipsQuery,
-  stayAccessibilityEvidenceGuardQuery,
+  stayAccessibilityEvidenceGuardQueries,
   stayAccessibilityEvidenceWriteError,
   type MediaAssetRefInput,
   type StoredMediaPlacementItem,
@@ -22,7 +22,7 @@ import { refreshSocialCard, socialCardRefreshOwnersForPlacement } from '~/server
 import { postMediaMutationQueries } from '~/server/utils/post-management'
 import { isStayPhotoRoom, parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayAmenity, STAY_AMENITIES, stayCodes } from '~/shared/stay-listing'
-import { isStayRoomAccessibilityFeature, stayRoomAccessibilityFeatures } from '~/shared/stay-accessibility'
+import { isStayHomeAccessibility, isStayHomeAccessibilityFeature, isStayRoomAccessibilityFeature, STAY_HOME_ACCESSIBILITY_FEATURES, stayRoomAccessibilityFeatures, type StayHomeAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 
 export { EDITABLE_MEDIA_PLACEMENT_OWNERS, MEDIA_CATEGORIES, WRITABLE_MEDIA_CATEGORIES, isMediaCategory } from '~/shared/media-placement-contract'
@@ -181,7 +181,7 @@ export async function setSingleMediaPlacement(db: DbClient, input: {
   await executeBatch(db, [
     ...postQueries,
     ...buildSingleMediaPlacementQueries({ ...input, media: media.map(item => ({ ...item, presentation: input.presentation })) }),
-    ...(input.placement.owner_type === 'product' && input.placement.slot === 'image' ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id), stayAccessibilityEvidenceGuardQuery(input.organizationId, { productId: input.placement.owner_id })] : []),
+    ...(input.placement.owner_type === 'product' && input.placement.slot === 'image' ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id), ...stayAccessibilityEvidenceGuardQueries(input.organizationId, { productId: input.placement.owner_id })] : []),
   ]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
   await refreshSocialCardForPlacement(db, input)
   return canonicalPlacementState(db, input)
@@ -295,7 +295,7 @@ export async function removeMediaPlacement(db: DbClient, input: {
     DELETE FROM media_placements
      WHERE organization_id = ?  AND owner_type = ? AND owner_id = ? AND slot = ? AND asset_id = ?
   `, params: [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot, input.assetId] },
-  ...(input.placement.owner_type === 'product' && ['image', 'gallery'].includes(input.placement.slot) ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id), stayAccessibilityEvidenceGuardQuery(input.organizationId, { productId: input.placement.owner_id })] : []),
+  ...(input.placement.owner_type === 'product' && ['image', 'gallery'].includes(input.placement.slot) ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id), ...stayAccessibilityEvidenceGuardQueries(input.organizationId, { productId: input.placement.owner_id })] : []),
   ]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
   await refreshSocialCardForPlacement(db, input)
   return canonicalPlacementState(db, input)
@@ -421,6 +421,40 @@ export async function readProductPhotos(db: DbClient, input: { organizationId: s
   ])]))
 }
 
+/** Every listing feature is present in catalog order; absence of an answer is explicitly unknown. */
+export async function readStayHomeAccessibility(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, StayHomeAccessibility[]>> {
+  const features = Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).filter(isStayHomeAccessibilityFeature)
+  const answers = new Map<string, StayHomeAccessibility[]>(productIds.map(id => [id, features.map(feature => ({ feature, available: null, photo_ids: [] }))]))
+  if (!productIds.length) return answers
+  const ids = d1JsonStringSet(productIds)
+  const [saved, evidence] = await executeBatch(db, [{
+    query: 'SELECT product_id, feature_code, available FROM product_stay_accessibility WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))', params: [organizationId, ids],
+  }, {
+    query: `SELECT e.product_id, e.feature_code, e.asset_id,
+      EXISTS (SELECT 1 FROM media_assets ma WHERE ma.organization_id = e.organization_id AND ma.id = e.asset_id
+        AND ma.status = 'active' AND ma.kind = 'image' AND ma.generation_key IS NULL AND length(trim(ma.public_url)) > 0 AND mp.id IS NOT NULL) AS valid
+      FROM product_stay_accessibility_photos e LEFT JOIN media_placements mp
+        ON mp.organization_id = e.organization_id AND mp.owner_type = 'product' AND mp.owner_id = e.product_id
+        AND mp.asset_id = e.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+      WHERE e.organization_id = ? AND e.product_id IN (SELECT value FROM json_each(?))
+      ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, e.asset_id`, params: [organizationId, ids],
+  }], { operation: 'Read listing accessibility' })
+  for (const row of saved!.results as Array<{ product_id: string; feature_code: unknown; available: number }>) {
+    const answer = answers.get(row.product_id)?.find(entry => entry.feature === row.feature_code)
+    if (!answer || !isStayHomeAccessibilityFeature(row.feature_code) || (row.available !== 0 && row.available !== 1)) throw new TypeError(`Home ${row.product_id} has invalid accessibility information`)
+    answer.available = row.available === 1
+  }
+  for (const row of evidence!.results as Array<{ product_id: string; feature_code: unknown; asset_id: string; valid: number }>) {
+    const answer = answers.get(row.product_id)?.find(entry => entry.feature === row.feature_code)
+    if (!answer || row.valid !== 1) throw new TypeError(`Home ${row.product_id} has invalid accessibility photo evidence`)
+    if (!answer.photo_ids.includes(row.asset_id)) answer.photo_ids.push(row.asset_id)
+  }
+  for (const [productId, features] of answers) {
+    if (!features.every(isStayHomeAccessibility)) throw new TypeError(`Home ${productId} has incomplete accessibility photo evidence`)
+  }
+  return answers
+}
+
 /** The authored tour; each room follows the Product's deduplicated photo order. */
 export async function readStayPhotoRooms(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, StayPhotoRoom[]>> {
   const rooms = new Map<string, StayPhotoRoom[]>(productIds.map(id => [id, []]))
@@ -436,7 +470,7 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
         WHERE m.organization_id = ? AND m.product_id IN (SELECT value FROM json_each(?))
         ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, mp.asset_id`, params: [organizationId, ids] },
     { query: `SELECT a.room_id, a.amenity_code,
-        EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value = a.amenity_code) AS on_listing
+        EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value ->> '$.code' = a.amenity_code AND value ->> '$.available' = 1) AS on_listing
         FROM product_stay_photo_room_amenities a JOIN product_stay_configs c ON c.organization_id = a.organization_id AND c.product_id = a.product_id
         WHERE a.organization_id = ? AND a.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     { query: `SELECT room_id, feature_code, available FROM product_stay_room_accessibility
@@ -566,7 +600,7 @@ export async function prepareArrangeProductPhotos(db: DbClient, input: {
       ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: cover, media: media.slice(0, 1), now }),
       ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: gallery, media: media.slice(1), now }),
       pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.productId),
-      stayAccessibilityEvidenceGuardQuery(input.organizationId, { productId: input.productId }),
+      ...stayAccessibilityEvidenceGuardQueries(input.organizationId, { productId: input.productId }),
       publicResourceCacheInvalidationQuery(input.organizationId, 'product-photos-arrange'),
   ]
   return {

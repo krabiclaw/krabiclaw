@@ -1,4 +1,4 @@
-import { STAY_LISTING_SCHEMA, STAY_PHOTO_ROOM_SCHEMA } from './stays'
+import { STAY_HOME_ACCESSIBILITY_SCHEMA, STAY_LISTING_SCHEMA, STAY_LISTING_WRITE_SCHEMA, STAY_PHOTO_ROOM_SCHEMA } from './stays'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
@@ -217,11 +217,11 @@ const stayRules = {
   assigned_team_id: { type: ['string', 'null'], description: 'Team who look after the home, such as cleaners.' },
   ...STAY_LISTING_SCHEMA,
 }
-const stayObject = { type: ['object', 'null'], description: 'Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.', properties: { location_id: { type: 'string' }, ...stayRules, photo_rooms: { type: 'array', items: STAY_PHOTO_ROOM_SCHEMA } },
-  required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', ...Object.keys(STAY_LISTING_SCHEMA)] }
+const stayObject = { type: ['object', 'null'], description: 'Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.', properties: { location_id: { type: 'string' }, ...stayRules, photo_rooms: { type: 'array', items: STAY_PHOTO_ROOM_SCHEMA }, accessibility: STAY_HOME_ACCESSIBILITY_SCHEMA },
+  required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', 'accessibility', ...Object.keys(STAY_LISTING_SCHEMA)] }
 const staySetup = { type: 'object', description: 'Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.',
-  properties: { location_id: { type: 'string' }, ...stayRules }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests'], additionalProperties: false }
-const stayPatch = { type: 'object', description: 'Stay settings to change on a place to stay. Its location is fixed.', properties: stayRules, additionalProperties: false }
+  properties: { location_id: { type: 'string' }, ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests'], additionalProperties: false }
+const stayPatch = { type: 'object', description: 'Stay settings to change on a place to stay. Its location is fixed.', properties: { ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, additionalProperties: false }
 
 const productObject = {
   type: 'object',

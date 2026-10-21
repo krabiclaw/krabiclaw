@@ -550,3 +550,41 @@ catalogs were not inferred. Airbnb's positive-draft copy names its own photo
 review service. KrabiClaw uses host-authored facts and evidence, with no invented
 approval process. Evidence can reference an existing Product photo without
 moving it between authored rooms.
+
+### Listing accessibility, alarms and Location — 2026-10-21
+
+The live listing editor was read again without saving changes or uploading
+Airbnb photos. Listing-level Accessibility features has six destinations,
+separate from the existing Bedroom's two features:
+
+| Feature | Authored fact and photo guidance observed |
+| --- | --- |
+| Disabled parking spot | A private space at least 11 ft (3.35 m) wide, or a public space designated for disabled parking. Show the private space's full width or the public space's identifying signs. |
+| Lit path to the guest entrance | The entrance path is well lit at night. Show the lights and their relationship to the path; light from inside the listing does not count. |
+| Step-free access | The whole arrival/parking-to-entrance route, including shared paths, corridors and lifts, has no obstacle 5 cm (2 in) or higher. Photograph the route with doors/gates open and ramps in place, at intervals of about 3 m, plus the open entrance and threshold from outside. |
+| Guest entrance wider than 32 inches | The entrance is at least 32 in (81 cm) wide. Show a tape at the narrowest open-doorframe points, the whole measurement and readable units. |
+| Swimming pool or hot tub hoist | A device designed to transfer a person into and out of the pool or hot tub. Show the hoist and its position beside the water. |
+| Ceiling or mobile hoist | A fixed or freestanding device designed to transfer a person into and out of a wheelchair. Show the device and its position in the bedroom or bathroom. |
+
+These listing facts do not create a room or imply a room assignment. The
+bedroom-only scope above remains the observed room catalog; bathroom-specific
+catalogs were not inferred. KrabiClaw's feature controls reuse one evidence
+editor with explicit listing/room scope and retain host-authored facts rather
+than inventing Airbnb's photo review process.
+
+Guest safety → Safety devices shows the two existing alarm amenities alongside
+camera and sound-level-monitor controls, using explicit Off/On choices. An
+installed alarm offers a 300-character details leaf asking where each alarm is
+located. An unsaved CO-alarm Off draft also showed Airbnb's own necessity
+confirmation; the whole draft was cancelled. KrabiClaw keeps alarm presence in
+Amenities, distinguishes absent from unanswered, and uses the existing Product
+details owner for location text. No second safety alarm Boolean is introduced.
+
+Location shows its saved map and Address, Location sharing, Location features,
+Neighborhood description, Getting around and Scenic views. The two description
+editors are simple textareas with Cancel/Save. Scenic views is a plain multiple
+selection list with 21 choices; those choices belong to the existing amenity
+catalog. The observed Adjust pin mode adds map pan controls and a Save action.
+The owner explicitly chose to skip draggable-map work to avoid introducing new
+Maps JavaScript billing/key setup; existing embedded maps and address controls
+remain the intended scope.
