@@ -76,6 +76,9 @@ const effects = {
   list_stays: 'Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after.',
   get_stay: 'Reads one stay with its guest details and the offline payments recorded against it.',
   get_stay_calendar: 'Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it.',
+  add_stay_photo_room: 'Adds an explicitly authored room or space to one home’s photo tour and returns its created ID. Leaves bedroom, bed and bathroom counts, amenities, Product photos and library files unchanged.',
+  remove_stay_photo_room: 'Deletes one authored room and its photo memberships. The photos remain in the Product’s cover/gallery and media library, and appear as Additional photos.',
+  move_stay_photos: 'Atomically changes selected Product photos’ room membership, optionally creating their destination room in the same batch. A changed expected source or missing Product photo refuses the whole move; the Product’s global photo order and library assets are retained.',
   create_stay: 'Creates a host-entered stay with caller idempotency, holding its nights atomically; a night another stay holds refuses it. Sends no email and takes no payment.',
   update_stay: 'Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused.',
   cancel_stay: 'Cancels a host-entered stay under its version and frees its nights; sends no email and moves no money.',
@@ -177,6 +180,9 @@ const effects = {
 }
 
 const openWorldEffects = {
+  add_stay_photo_room: 'Adds a room used by the home’s public photo tour; incomplete tours retain the complete ordinary gallery.',
+  remove_stay_photo_room: 'Changes the home’s public photo-tour grouping, retaining the removed room’s pictures in Additional photos.',
+  move_stay_photos: 'Changes the home’s public photo-tour grouping without changing the selected Product photos or making provider requests.',
   set_stay_nights: 'Changes publicly bookable nights and prices on the website and, when connected, the home’s Airbnb listing through Channex.',
   create_google_ads_search_campaign: 'Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.',
   clone_google_ads_campaign: 'Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.',

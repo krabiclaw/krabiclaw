@@ -2,7 +2,7 @@ import { expect, test, type APIRequestContext, type Page, type Request, type Web
 import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
-import { openTenantPage } from './helpers'
+import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
 import type { GuestStay } from '../../server/domain/stays'
@@ -10,6 +10,7 @@ import { createReplayableReservationCancelToken } from '../../server/utils/reser
 import type { PostalAddress } from '../../utils/postal-address'
 import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
 import type { PublicLocationDisclosure } from '../../types/public-location'
+import type { StayPhotoRoom } from '../../shared/stay-photos'
 
 // A host's place to stay, end to end through the surfaces that own it: the
 // one Product editor creates the home, MCP adds a stay, Today and the stay's
@@ -626,7 +627,7 @@ test('a host describes a place to stay through its focused editors and previews 
   expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
     product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
     check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
-    check_in_instructions: null, photos: [],
+    check_in_instructions: null, photos: [], photo_rooms: [],
     // The editor's listing choices persist through the native home projection too.
     description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
     ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
@@ -1296,15 +1297,16 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await page.setViewportSize({ width: 1440, height: 900 })
   const photoPath = `/dashboard/${slug}/products/${productId}/photo`
   const allPhotosPath = `${photoPath}/photos`
-  await page.goto(photoPath)
+  await page.goto(allPhotosPath)
   const photoOverview = page.locator('#dashboard-panel-product-photo')
-  type PhotoProduct = { image: { asset_id: string; alt_text: string | null } | null; gallery: Array<{ asset_id: string; alt_text: string | null }> }
+  const uploadGrid = page.locator('#dashboard-panel-product-all-photos')
+  type PhotoProduct = { image: { asset_id: string; alt_text: string | null } | null; gallery: Array<{ asset_id: string; alt_text: string | null }>; stay: { photo_rooms: StayPhotoRoom[] } }
   const uploadedPhotos: Array<{ id: string; url: string; width: number; height: number }> = []
-  await expect(photoOverview.getByRole('heading', { name: 'Add your first photo', exact: true })).toBeVisible()
+  await expect(uploadGrid.getByRole('heading', { name: 'Add your first photo', exact: true })).toBeVisible()
   const stalePhotoPage = await page.context().newPage()
   try {
-    await stalePhotoPage.goto(photoPath)
-    const staleOverview = stalePhotoPage.locator('#dashboard-panel-product-photo')
+    await stalePhotoPage.goto(allPhotosPath)
+    const staleOverview = stalePhotoPage.locator('#dashboard-panel-product-all-photos')
     await expect(staleOverview.getByRole('heading', { name: 'Add your first photo', exact: true })).toBeVisible()
     for (const [name, background, width, height] of [
       ['red-upload-proof.avif', '#dc2626', 120, 80],
@@ -1314,7 +1316,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
       // The second editor was loaded empty before red became the cover.
       // Its Add must append blue against the server's current placements.
       const activePage = name === 'blue-upload-proof.avif' ? stalePhotoPage : page
-      const activeOverview = activePage.locator('#dashboard-panel-product-photo')
+      const activeOverview = activePage.locator('#dashboard-panel-product-all-photos')
       if (activePage === stalePhotoPage) await expect(activeOverview.getByRole('heading', { name: 'Add your first photo', exact: true })).toBeVisible()
       await activeOverview.getByRole('button', { name: 'Add photos', exact: true }).click()
       const picker = activePage.getByRole('dialog', { name: 'Add photos', exact: true })
@@ -1338,7 +1340,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
         expect(appendedProduct.data!.product.image!.asset_id).toBe(uploadedPhotos[0]!.id)
         expect(appendedProduct.data!.product.gallery.map(item => item.asset_id)).toEqual([asset.asset_id])
         await page.reload()
-        for (const overview of [photoOverview, staleOverview]) {
+        for (const overview of [uploadGrid, staleOverview]) {
           await expect(overview.locator('img')).toHaveCount(2)
           for (const [index, photo] of uploadedPhotos.entries()) {
             await expect(overview.locator('img').nth(index)).toHaveAttribute('src', photo.url)
@@ -1350,6 +1352,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   } finally {
     await stalePhotoPage.close()
   }
+  await page.goto(photoPath)
   const [red, blue, green] = uploadedPhotos as [typeof uploadedPhotos[number], typeof uploadedPhotos[number], typeof uploadedPhotos[number]]
   const storedUploads = await call<{ assets: Array<{ asset_id: string; public_url: string; provider: string; status: string; kind: string; alt_text: string | null }> }>('get_organization_media_assets', { kind: 'image' })
   expect(storedUploads.error).toBeNull()
@@ -1363,9 +1366,10 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   expect(duplicatePlacement.error).toBeNull()
   expect(duplicatePlacement.data!.product.image!.asset_id).toBe(red.id)
   expect(duplicatePlacement.data!.product.gallery.map(asset => asset.asset_id)).toEqual([blue.id, green.id, red.id])
+  expect(duplicatePlacement.data!.product.stay.photo_rooms).toEqual([])
   await page.reload()
-  await expect(photoOverview.locator('img')).toHaveCount(3)
-  for (const [index, photo] of uploadedPhotos.entries()) await expect(photoOverview.locator('img').nth(index)).toHaveAttribute('src', photo.url)
+  await expect(photoOverview.getByTestId('stay-additional-photos')).toContainText('3 photos')
+  await expect(photoOverview.getByTestId('stay-additional-photos').locator('img')).toHaveAttribute('src', red.url)
   const projectedHome = await request.get(api(`stay-homes/${productId}`))
   expect(projectedHome.status(), await projectedHome.text()).toBe(200)
   expect((await projectedHome.json() as { home: { photos: Array<{ id: string; position: number }> } }).home.photos.map(photo => ({ id: photo.id, position: photo.position })))
@@ -1386,6 +1390,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   }
   await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${photoPath}`)
+
   const photoCard = page.getByTestId('editor-card-photo')
   await expect(photoCard).toBeVisible()
   await expect(photoCard).toHaveAccessibleName('Photos 3 photos')
@@ -1535,6 +1540,274 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   const reattachedProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(reattachedProduct.error).toBeNull()
   expect([reattachedProduct.data!.product.image!.asset_id, ...reattachedProduct.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, blue.id])
+})
+
+test('a host authors a room photo tour and shares the same rooms through CMS, MCP and the guest gallery', async ({ page, baseURL }, testInfo) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const pageErrors: string[] = []
+  page.on('pageerror', error => pageErrors.push(error.stack ?? error.message))
+  const { request, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
+  const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
+  const photoPath = `/dashboard/${slug}/products/${productId}/photo`
+  const allPhotosPath = `${photoPath}/photos`
+  const photoOverview = page.locator('#dashboard-panel-product-photo')
+  const allPhotos = page.locator('#dashboard-panel-product-all-photos')
+  type PhotoProduct = { image: { asset_id: string } | null; gallery: Array<{ asset_id: string }>; stay: { photo_rooms: StayPhotoRoom[] } }
+  const uploadedPhotos: Array<{ id: string; url: string }> = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(allPhotosPath)
+  // Technical inputs go through the actual picker and storage upload. Room
+  // membership is then authored through the visible CMS and native MCP tools.
+  for (const [name, background] of [['red-room-proof.avif', '#dc2626'], ['blue-room-proof.avif', '#2563eb'], ['green-room-proof.avif', '#16a34a']] as const) {
+    await allPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
+    const picker = page.getByRole('dialog', { name: 'Add photos', exact: true })
+    const uploaded = page.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/media/upload` && response.request().method() === 'POST')
+    await picker.locator('input[type="file"]').setInputFiles({ name, mimeType: 'image/avif', buffer: await sharp({ create: { width: 120, height: 80, channels: 3, background } }).avif().toBuffer() })
+    const response = await uploaded
+    expect(response.status(), await response.text()).toBe(200)
+    const asset = await response.json() as { asset_id: string; public_url: string }
+    uploadedPhotos.push({ id: asset.asset_id, url: asset.public_url })
+    await picker.getByRole('button', { name: 'Done', exact: true }).click()
+    await expect(picker).not.toBeVisible()
+    await expect(allPhotos.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(uploadedPhotos.length)
+  }
+  const [red, blue, green] = uploadedPhotos as [typeof uploadedPhotos[number], typeof uploadedPhotos[number], typeof uploadedPhotos[number]]
+  const beforeRooms = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(beforeRooms.error).toBeNull()
+  expect(beforeRooms.data!.product.stay.photo_rooms).toEqual([])
+  await page.goto(photoPath)
+  // Rooms are authored choices with stable identities. An empty authored room
+  // keeps the guest gallery flat until the host gives every room a photo.
+  await photoOverview.getByRole('button', { name: 'Add photos, room, or space', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Add a room or space', exact: true }).click()
+  const chooseRoom = page.getByRole('dialog', { name: 'Choose a room or space', exact: true })
+  await chooseRoom.getByRole('textbox', { name: 'Search rooms and spaces', exact: true }).fill('Bedroom')
+  await chooseRoom.getByText('Bedroom', { exact: true }).click()
+  await expect(chooseRoom.getByRole('radio', { name: 'Bedroom', exact: true })).toBeChecked()
+  await chooseRoom.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`${photoPath}/rooms/[^/]+$`))
+  const bedroomProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(bedroomProduct.error).toBeNull()
+  expect(bedroomProduct.data!.product.stay.photo_rooms).toEqual([{ id: expect.any(String), type: 'bedroom', photo_ids: [] }])
+  const bedroomId = bedroomProduct.data!.product.stay.photo_rooms[0]!.id
+  await expect(page).toHaveURL(`${baseURL}${photoPath}/rooms/${bedroomId}`)
+  const roomGrid = page.locator('#dashboard-panel-product-all-photos')
+  await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
+  const addBedroomPhotos = page.getByRole('dialog', { name: 'Add photos to Bedroom', exact: true })
+  await addBedroomPhotos.getByRole('button', { name: 'Select photo 1', exact: true }).click()
+  await addBedroomPhotos.getByRole('button', { name: 'Select photo 2', exact: true }).click()
+  await expect(addBedroomPhotos.getByRole('button', { name: 'Select photo 2', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  // A concurrent MCP move refuses the stale bulk write without moving its
+  // sibling. The open dialog refreshes its sources and retries the same choice.
+  await page.route(`${baseURL}/api/dashboard/stay-homes/${productId}/photos/move**`, async route => {
+    const concurrentRoomMove = await call('move_stay_photos', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: red.id, expected_room_id: null }] })
+    expect(concurrentRoomMove.error).toBeNull()
+    await route.continue()
+  }, { times: 1 })
+  const refusedRoomMove = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos/move` && response.request().method() === 'PUT')
+  await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
+  expect((await refusedRoomMove).status()).toBe(409)
+  await expect(addBedroomPhotos.getByText('A selected photo moved to another room; reload the photo tour', { exact: true })).toBeVisible()
+  const afterRefusedRoomMove = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterRefusedRoomMove.error).toBeNull()
+  expect(afterRefusedRoomMove.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id] }])
+  await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
+  await expect(addBedroomPhotos).not.toBeVisible()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
+  // If the complete selection reaches the destination concurrently, the
+  // refreshed dialog completes instead of submitting an empty retry.
+  await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
+  await addBedroomPhotos.getByRole('button', { name: 'Select photo 3', exact: true }).click()
+  await page.route(`${baseURL}/api/dashboard/stay-homes/${productId}/photos/move**`, async route => {
+    const fulfilledElsewhere = await call('move_stay_photos', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: green.id, expected_room_id: null }] })
+    expect(fulfilledElsewhere.error).toBeNull()
+    await route.continue()
+  }, { times: 1 })
+  const alreadyMoved = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos/move` && response.request().method() === 'PUT')
+  await addBedroomPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
+  expect((await alreadyMoved).status()).toBe(409)
+  await expect(addBedroomPhotos).not.toBeVisible()
+  await expect(roomGrid.getByText('A selected photo moved to another room; reload the photo tour', { exact: true })).toBeVisible()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(3)
+  const afterCompletedSelection = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterCompletedSelection.error).toBeNull()
+  expect(afterCompletedSelection.data!.product.stay.photo_rooms).toEqual([{ ...afterRefusedRoomMove.data!.product.stay.photo_rooms[0]!, photo_ids: [red.id, blue.id, green.id] }])
+  const returnedToAdditional = await call('move_stay_photos', { product_id: productId, room_id: null, photos: [{ photo_id: green.id, expected_room_id: bedroomId }] })
+  expect(returnedToAdditional.error).toBeNull()
+  await page.reload()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
+  await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
+  await photoOverview.getByRole('button', { name: 'Add photos, room, or space', exact: true }).click()
+  await page.getByRole('menuitem', { name: 'Add a room or space', exact: true }).click()
+  await chooseRoom.getByRole('textbox', { name: 'Search rooms and spaces', exact: true }).fill('Living room')
+  await chooseRoom.getByText('Living room', { exact: true }).click()
+  await expect(chooseRoom.getByRole('radio', { name: 'Living room', exact: true })).toBeChecked()
+  await page.screenshot({ path: testInfo.outputPath('stay-photo-room-picker-desktop.png') })
+  await chooseRoom.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`${photoPath}/rooms/(?!${bedroomId})[^/]+$`))
+  const livingRoomProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(livingRoomProduct.error).toBeNull()
+  expect(livingRoomProduct.data!.product.stay.photo_rooms).toEqual([
+    { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id] },
+    { id: expect.any(String), type: 'living_room', photo_ids: [] },
+  ])
+  const livingRoomId = livingRoomProduct.data!.product.stay.photo_rooms[1]!.id
+  await expect(page).toHaveURL(`${baseURL}${photoPath}/rooms/${livingRoomId}`)
+  await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}${photoPath}`)
+  await previewLink.click()
+  await expect(previewModal).toBeVisible()
+  const flatPreviewFrame = await (await previewIframe.elementHandle())!.contentFrame()
+  expect(flatPreviewFrame).not.toBeNull()
+  await waitForNuxtHydration(flatPreviewFrame!)
+  expect(pageErrors).toEqual([])
+  await preview.getByRole('button', { name: 'Show all 3 photos', exact: true }).click()
+  await expect(preview.locator('[data-photo-tour]')).toHaveCount(0)
+  await expect(preview.getByRole('button', { name: 'Close photos and videos', exact: true })).toBeVisible()
+  expect(pageErrors).toEqual([])
+  await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+
+  await photoOverview.getByTestId('stay-additional-photos').click()
+  await roomGrid.getByRole('button', { name: 'Manage photos', exact: true }).click()
+  const roomSelection = page.getByTestId('grid-editor-takeover')
+  await roomSelection.getByRole('button', { name: 'Select Photo 3', exact: true }).click()
+  await roomSelection.getByRole('button', { name: 'Move selected photos', exact: true }).click()
+  const movePhotos = page.getByRole('dialog', { name: 'Move photos', exact: true })
+  const livingRoomDestination = movePhotos.getByRole('radio', { name: /^Living room/ })
+  await livingRoomDestination.locator('xpath=ancestor::label[1]').click()
+  await expect(livingRoomDestination).toBeChecked()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: testInfo.outputPath('stay-move-photos-mobile.png') })
+  await movePhotos.getByRole('button', { name: 'Move', exact: true }).click()
+  await expect(movePhotos).not.toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const authoredRooms = [
+    { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id] },
+    { id: livingRoomId, type: 'living_room', photo_ids: [green.id] },
+  ]
+  const roomHome = await request.get(api(`stay-homes/${productId}`))
+  expect(roomHome.status(), await roomHome.text()).toBe(200)
+  expect((await roomHome.json() as { home: { photo_rooms: StayPhotoRoom[]; photos: Array<{ id: string }> } }).home).toMatchObject({ photo_rooms: authoredRooms, photos: uploadedPhotos.map(photo => ({ id: photo.id })) })
+  const roomProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(roomProduct.error).toBeNull()
+  expect(roomProduct.data!.product.stay.photo_rooms).toEqual(authoredRooms)
+  await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}${photoPath}`)
+  await expect(photoOverview.getByTestId(`stay-photo-room-${livingRoomId}`)).toContainText('1 photo')
+  await page.screenshot({ path: testInfo.outputPath('stay-photo-tour-desktop.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: testInfo.outputPath('stay-photo-tour-mobile.png') })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await previewLink.click()
+  await expect(previewModal).toBeVisible()
+  const authoredPreviewFrame = await (await previewIframe.elementHandle())!.contentFrame()
+  expect(authoredPreviewFrame).not.toBeNull()
+  await waitForNuxtHydration(authoredPreviewFrame!)
+  const publicProductURL = new URL((await previewIframe.getAttribute('src'))!, baseURL)
+  publicProductURL.pathname = publicProductURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
+  const authoredPublicRead = await request.get(publicProductURL.href)
+  expect(authoredPublicRead.status(), await authoredPublicRead.text()).toBe(200)
+  expect((await authoredPublicRead.json() as { product: PhotoProduct }).product.stay.photo_rooms).toEqual(authoredRooms)
+  await preview.getByRole('button', { name: 'Show all 3 photos', exact: true }).click()
+  const publicTour = preview.locator('[data-photo-tour]')
+  await expect(publicTour).toBeVisible()
+  await expect(publicTour.getByRole('heading', { name: 'Bedroom', exact: true })).toBeVisible()
+  await expect(publicTour.getByRole('heading', { name: 'Living room', exact: true })).toBeVisible()
+  await expect(publicTour.locator('section img')).toHaveCount(3)
+  for (const [index, photo] of uploadedPhotos.entries()) await expect(publicTour.locator('section img').nth(index)).toHaveAttribute('src', photo.url)
+  await page.screenshot({ path: testInfo.outputPath('stay-guest-photo-tour-desktop.png') })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
+  expect(await preview.locator('html').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
+  await expect(publicTour.getByRole('link', { name: 'Bedroom', exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('stay-guest-photo-tour-mobile.png') })
+  await publicTour.getByRole('button', { name: 'Open Bedroom, photo 2', exact: true }).click()
+  await expect(preview.getByRole('button', { name: 'Back to photo tour', exact: true })).toBeVisible()
+  await preview.getByRole('button', { name: 'Back to photo tour', exact: true }).click()
+  await expect(publicTour).toBeVisible()
+  await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Deleting a room preserves its photos in the listing and public tour.
+  await page.goto(`${photoPath}/rooms/${livingRoomId}`)
+  await roomGrid.getByRole('button', { name: 'Delete room or space', exact: true }).click()
+  const deleteRoom = page.getByRole('dialog', { name: 'Delete room or space?', exact: true })
+  await deleteRoom.getByRole('button', { name: 'Delete room or space', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}${photoPath}`)
+  const roomDeletedProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(roomDeletedProduct.error).toBeNull()
+  expect(roomDeletedProduct.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id] }])
+  expect([roomDeletedProduct.data!.product.image!.asset_id, ...roomDeletedProduct.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, blue.id, green.id])
+  await expect(photoOverview.getByTestId(`stay-photo-room-${bedroomId}`)).toContainText('2 photos')
+  await expect(photoOverview.getByTestId('stay-additional-photos')).toContainText('1 photo')
+  await previewLink.click()
+  await expect(previewModal).toBeVisible()
+  const remainingPreviewFrame = await (await previewIframe.elementHandle())!.contentFrame()
+  expect(remainingPreviewFrame).not.toBeNull()
+  await waitForNuxtHydration(remainingPreviewFrame!)
+  await preview.getByRole('button', { name: 'Show all 3 photos', exact: true }).click()
+  await expect(publicTour.getByRole('heading', { name: 'Additional photos', exact: true })).toBeVisible()
+  await expect(publicTour.locator('section img')).toHaveCount(3)
+  await expect(publicTour.locator('#photo-room-additional img')).toHaveAttribute('src', green.url)
+  await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+
+  // Native MCP writes use the same authored IDs and selected-photo contract.
+  const addedByMcp = await call<{ room: StayPhotoRoom; home: { photo_rooms: StayPhotoRoom[] } }>('add_stay_photo_room', { product_id: productId, type: 'office' })
+  expect(addedByMcp.error).toBeNull()
+  const officeId = addedByMcp.data!.room.id
+  expect(addedByMcp.data!.room).toEqual({ id: expect.any(String), type: 'office', photo_ids: [] })
+  const afterMcpCreate = await request.get(api(`stay-homes/${productId}`))
+  expect(afterMcpCreate.status(), await afterMcpCreate.text()).toBe(200)
+  expect((await afterMcpCreate.json() as { home: { photo_rooms: StayPhotoRoom[] } }).home.photo_rooms).toEqual([
+    { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id] },
+    { id: officeId, type: 'office', photo_ids: [] },
+  ])
+  const movedByMcp = await call('move_stay_photos', { product_id: productId, room_id: officeId, photos: [{ photo_id: green.id, expected_room_id: null }] })
+  expect(movedByMcp.error).toBeNull()
+  const afterMcpMove = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterMcpMove.error).toBeNull()
+  expect(afterMcpMove.data!.product.stay.photo_rooms).toEqual([
+    { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id] },
+    { id: officeId, type: 'office', photo_ids: [green.id] },
+  ])
+  const removedByMcp = await call('remove_stay_photo_room', { product_id: productId, room_id: officeId })
+  expect(removedByMcp.error).toBeNull()
+  const afterMcpRemove = await request.get(api(`stay-homes/${productId}`))
+  expect(afterMcpRemove.status(), await afterMcpRemove.text()).toBe(200)
+  expect((await afterMcpRemove.json() as { home: { photo_rooms: StayPhotoRoom[]; photos: Array<{ id: string }> } }).home).toMatchObject({
+    photo_rooms: [{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id] }],
+    photos: uploadedPhotos.map(photo => ({ id: photo.id })),
+  })
+  const retainedLibrary = await call<{ assets: Array<{ asset_id: string; status: string }> }>('get_organization_media_assets', { kind: 'image' })
+  expect(retainedLibrary.error).toBeNull()
+  expect(retainedLibrary.data!.assets.map(asset => ({ id: asset.asset_id, status: asset.status })).sort((a, b) => a.id.localeCompare(b.id)))
+    .toEqual(uploadedPhotos.map(photo => ({ id: photo.id, status: 'active' })).sort((a, b) => a.id.localeCompare(b.id)))
+  await page.reload()
+  await expect(photoOverview.getByTestId('stay-additional-photos')).toContainText('1 photo')
+  // Append a retained library asset directly to an authored room through the
+  // picker. The native write must save the placement and membership together.
+  const detached = await request.delete(api(`stay-homes/${productId}/photos/${green.id}`), { headers: authRequestHeaders(baseURL!) })
+  expect(detached.status(), await detached.text()).toBe(200)
+  await page.goto(`${photoPath}/rooms/${bedroomId}`)
+  await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
+  await addBedroomPhotos.getByRole('button', { name: 'Add from media library', exact: true }).click()
+  const libraryPicker = page.getByRole('dialog', { name: 'Add photos', exact: true })
+  await libraryPicker.locator(`img[src="${green.url}"]`).click()
+  const roomAppend = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos` && response.request().method() === 'POST')
+  await libraryPicker.getByRole('button', { name: 'Done', exact: true }).click()
+  const appended = await roomAppend
+  expect(appended.status(), await appended.text()).toBe(201)
+  await expect(addBedroomPhotos).not.toBeVisible()
+  await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(3)
+  const afterLibraryRoomAppend = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(afterLibraryRoomAppend.error).toBeNull()
+  expect(afterLibraryRoomAppend.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id, green.id] }])
+  expect([afterLibraryRoomAppend.data!.product.image!.asset_id, ...afterLibraryRoomAppend.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, blue.id, green.id])
+  expect(pageErrors).toEqual([])
 })
 
 test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }, testInfo) => {

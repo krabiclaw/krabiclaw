@@ -94,7 +94,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
 
     const unspecifiedPropertyDetails = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
     const home = {
-      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [], stay_map_sharing: 'general',
+      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
       description: '', published: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
@@ -150,7 +150,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal(edited.status, 200)
     const changed = {
       product_id: made.product_id, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
-      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [], stay_map_sharing: 'general',
+      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       address: home.address, latitude: null, longitude: null, description: '', published: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     assert.deepEqual(edited.body, { home: changed, channel_push: null })

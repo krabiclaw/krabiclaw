@@ -468,3 +468,28 @@ recommendation.
 - **Help Center:** article content was not mapped.
 - **Phone width:** the narrow observations use a 520px Chrome window, not a
   390px device.
+
+## 12. Photo tour follow-up — 2026-10-20
+
+Read-only inspection of the owner's existing unlisted home in the live host
+editor. No room, photo or listing details were changed.
+
+- Photo tour shows authored room cards and an **Additional photos** card,
+  with an actual photo or a room pictogram, the room's name, and its photo
+  count or **Add photos**. It states that guests see the tour only once every
+  room has a photo. **All photos** remains a separate destination.
+- The plus menu offers **Add photos** and **Add a room or space**. The room
+  chooser is a grid of single-choice illustrated tiles with search and a
+  commit button. It includes indoor rooms and outdoor spaces; a bedroom
+  count does not supply the room identities.
+- Additional photos says that these photos remain in the listing even
+  though they are not assigned to a room or space.
+- An individual photo has **Move from Additional photos?** independently of
+  **Add a visual description** and the room/space caption. Move opens a
+  modal with existing room cards, Additional photos, and the room-type grid
+  for a new destination. Its footer is **Cancel / Move**. Closing the modal
+  leaves the photo unchanged.
+- The existing Bedroom has separate destinations for Sleeping arrangements,
+  Privacy info, Amenities and Accessibility features, plus **Delete room or
+  space**. The sleeping-arrangement editor shows actual per-type bed counts;
+  these are distinct from the listing's aggregate capacity.

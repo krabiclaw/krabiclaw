@@ -5,6 +5,7 @@ import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { SocialImageSource } from '~/utils/social-metadata'
 import type { PublicLocationArea } from '~/types/public-location'
 import type { StayMapSharing } from '~/shared/stay-listing'
+import { isStayPhotoRoomType } from '~/shared/stay-photos'
 import { isRecord } from '~/utils/api-clients'
 
 export interface PublicShellOrganization {
@@ -168,6 +169,11 @@ export function isPublicProduct(value: unknown): value is Product {
       && Number.isInteger(entry.sort_order))
     && (value.image === null || isRecord(value.image))
     && Array.isArray(value.gallery)
+    && (value.kind !== 'stay' || (isRecord(value.stay)
+      && Array.isArray(value.stay.photo_rooms)
+      && value.stay.photo_rooms.every(room => isRecord(room)
+        && typeof room.id === 'string' && isStayPhotoRoomType(room.type)
+        && Array.isArray(room.photo_ids) && room.photo_ids.every(id => typeof id === 'string'))))
 }
 
 export function isPublicCollection(value: unknown): value is Collection {

@@ -289,6 +289,22 @@ export function buildDeleteOwnerPlacementsQuery(input: {
   }
 }
 
+/** Run after a Product's complete photo mutation, never between slot replacements. */
+export function pruneStayPhotoRoomMembershipsQuery(organizationId: string, productId: string): BatchQuery {
+  return {
+    query: `DELETE FROM product_stay_photo_room_memberships
+      WHERE organization_id = ? AND product_id = ? AND NOT EXISTS (
+        SELECT 1 FROM media_placements mp JOIN media_assets ma
+          ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
+        WHERE mp.organization_id = product_stay_photo_room_memberships.organization_id
+          AND mp.owner_type = 'product' AND mp.owner_id = product_stay_photo_room_memberships.product_id
+          AND mp.asset_id = product_stay_photo_room_memberships.asset_id
+          AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+      )`,
+    params: [organizationId, productId],
+  }
+}
+
 export function toResolvedMediaAsset(row: MediaAsset): ResolvedMediaAsset {
   if (!row.public_url) {
     throw new HTTPError({ statusCode: 400, statusMessage: `Media asset ${row.id} does not have a public URL` })
@@ -731,6 +747,9 @@ export async function deleteMediaAsset(db: DbClient, env: MediaProviderEnv, id: 
       onlyIfPreviousChangedOneRow: true,
     }), {
       query: 'DELETE FROM media_placements WHERE organization_id = ? AND asset_id = ?',
+      params: [organizationId, pendingAsset.id],
+    }, {
+      query: 'DELETE FROM product_stay_photo_room_memberships WHERE organization_id = ? AND asset_id = ?',
       params: [organizationId, pendingAsset.id],
     }, publicResourceCacheInvalidationQuery(organizationId, 'media-delete')])
     if (Number(result?.meta?.changes ?? 0) !== 1) {

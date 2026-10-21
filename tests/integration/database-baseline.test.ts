@@ -39,7 +39,7 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
-test('interleaved branch migration ledgers preserve location privacy and complete missing legal-site data migrations while refusing unknown files or schema', async () => {
+test('interleaved branch migration ledgers preserve authored rooms and location privacy and complete missing legal-site data migrations while refusing unknown files or schema', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-interleaved-transfer-'))
   const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
@@ -47,7 +47,7 @@ test('interleaved branch migration ledgers preserve location privacy and complet
   assert.notEqual(commonEnd, -1)
   const common = journal.entries.slice(0, commonEnd + 1).map(entry => `${entry.tag}.sql`)
   const legalMigrations = ['0013_tenant_theme_id.sql', '0014_heading_level_column.sql']
-  const lodgingMigrations = ['0013_location_stay_map_sharing.sql']
+  const lodgingMigrations = ['0013_location_stay_map_sharing.sql', '0014_stay_photo_rooms.sql']
   try {
     for (const history of ['staging-first', 'lodging-first', 'staging-pending'] as const) {
       const sourcePath = join(directory, `${history}.sqlite`)
@@ -77,7 +77,9 @@ test('interleaved branch migration ledgers preserve location privacy and complet
       source.prepare("INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, beds, amenities, created_by, updated_by) VALUES ('host', 'home', 'cabin', '15:00', '11:00', 4, 2, '[\"smoke_detector\"]', 'owner', 'owner')").run()
       source.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, status) VALUES ('photo', 'host', 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/h/room/public', 'active')").run()
       source.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('cover', 'host', 'product', 'home', 'image', 'photo')").run()
-      const preservedTables = ['media_placements']
+      source.prepare("INSERT INTO product_stay_photo_rooms (id, organization_id, product_id, type, sort_order, created_by) VALUES ('bedroom', 'host', 'home', 'bedroom', 2, 'owner')").run()
+      source.prepare("INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES ('host', 'home', 'photo', 'bedroom')").run()
+      const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'media_placements']
       const authored = preservedTables.map(table => source.prepare(`SELECT * FROM ${table}`).all())
       source.close()
 

@@ -310,4 +310,6 @@ function clear() {
   emit('update:modelValue', null)
   emit('change', null)
 }
+
+defineExpose({ open })
 </script>
