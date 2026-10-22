@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { channexRequest, type ChannexEnv } from './client'
-import { ChannexDataError, integer, object, string } from './data'
+import { ChannexDataError, integer, object, received, string } from './data'
 
 /**
  * What an Airbnb listing says about itself, read through Channex: its details
@@ -50,7 +50,7 @@ function provided<T>(read: () => T): T {
 }
 
 function amount(value: unknown, label: string): string {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new ChannexDataError(`${label} is missing or invalid. Review the listing on Airbnb.`)
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new ChannexDataError(`${label} is missing or invalid (got ${received(value)}). Review the listing on Airbnb.`)
   return String(value)
 }
 
@@ -111,15 +111,22 @@ export async function listingCalendar(env: ChannexEnv, channelId: string, listin
       const matching = days.filter(day => day.date === date)
       if (matching.length !== 1) throw new ChannexDataError('Airbnb returned missing or duplicate calendar dates')
       const day = matching[0]!
-      const count = integer(day.available_count, 'Availability')
-      if ((day.availability !== 'available' && day.availability !== 'unavailable') || ![0, 1].includes(count)
-        || (day.availability === 'available') !== (count === 1) || typeof day.closed_to_arrival !== 'boolean' || typeof day.closed_to_departure !== 'boolean') {
-        throw new ChannexDataError("This listing's calendar cannot be imported without review")
-      }
-      return {
-        date, availability: count as 0 | 1, rate: amount(day.daily_price, 'Nightly price'),
-        minStay: integer(day.min_nights, 'Minimum nights', 1), maxStay: integer(day.max_nights, 'Maximum nights'),
-        closedToArrival: day.closed_to_arrival, closedToDeparture: day.closed_to_departure,
+      // A bad day names its date and the value Airbnb sent, so the host and the
+      // worker log both show which night stopped the import.
+      try {
+        const count = integer(day.available_count, 'Availability')
+        if ((day.availability !== 'available' && day.availability !== 'unavailable') || ![0, 1].includes(count)
+          || (day.availability === 'available') !== (count === 1) || typeof day.closed_to_arrival !== 'boolean' || typeof day.closed_to_departure !== 'boolean') {
+          throw new ChannexDataError(`This listing's calendar cannot be imported without review (availability ${received(day.availability)}, available_count ${received(count)}, closed_to_arrival ${received(day.closed_to_arrival)}, closed_to_departure ${received(day.closed_to_departure)})`)
+        }
+        return {
+          date, availability: count as 0 | 1, rate: amount(day.daily_price, 'Nightly price'),
+          minStay: integer(day.min_nights, 'Minimum nights', 1), maxStay: integer(day.max_nights, 'Maximum nights'),
+          closedToArrival: day.closed_to_arrival, closedToDeparture: day.closed_to_departure,
+        }
+      } catch (error) {
+        if (error instanceof ChannexDataError) throw new ChannexDataError(`${error.message} (night ${date})`)
+        throw error
       }
     })
   })

@@ -20,8 +20,15 @@ export function nullableString(value: unknown, label: string): string | null {
 }
 
 export function integer(value: unknown, label: string, minimum = 0): number {
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum) throw new ChannexDataError(`${label} must be an integer of at least ${minimum}`)
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum) throw new ChannexDataError(`${label} must be an integer of at least ${minimum}, got ${received(value)}`)
   return value
+}
+
+/** The value Channex actually sent, for error messages: JSON where it has one, otherwise its type. */
+export function received(value: unknown): string {
+  if (value === undefined) return 'nothing'
+  const json = JSON.stringify(value)
+  return json === undefined ? typeof value : json
 }
 
 export interface Resource {
