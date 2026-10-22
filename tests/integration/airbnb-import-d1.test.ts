@@ -105,11 +105,11 @@ class FakeChannex {
         bedrooms: 2, beds: 3, bathrooms: 1, house_manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi_network: '5 Star', wifi_password: 'open sesame',
         check_in_option: { category: 'smartlock', instruction: 'Door code 0126' },
       } : { rooms: [] }
-      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, timezone: TZ, email: 'host@example.test', phone: '+14355550100', country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
+      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
     }
     if (method === 'GET' && path === '/channels/chan-1/action/get_listing_calendar') {
       const from = url.searchParams.get('date_from')!
-      const days = Array.from({ length: 500 }, (_, i) => ({ date: addDays(from, i), availability: i === 3 ? 'unavailable' : 'available', available_count: i === 3 ? 0 : 1, daily_price: i === 0 ? 210 : 189.5, min_nights: 2, max_nights: 30, closed_to_arrival: false, closed_to_departure: i === 5 }))
+      const days = Array.from({ length: 500 }, (_, i) => ({ date: addDays(from, i), availability: i === 3 ? 'unavailable' : 'available', daily_price: i === 0 ? 210 : 189.5, min_nights: 2, max_nights: 30, closed_to_arrival: false, closed_to_departure: i === 5 }))
       return json({ data: { calendar: { listing_id: LISTING, start_date: from, end_date: url.searchParams.get('date_to'), days } } })
     }
     if (method === 'POST' && path === '/room_types') return resource('room_type')
@@ -180,7 +180,7 @@ async function connected(db: D1Database, env: CloudflareEnv, channex: FakeChanne
   return connection
 }
 
-const form = { missingDetails: { childBeds: '1', infantCots: '0' }, checkInTime: '15:00', checkOutTime: '11:00' }
+const form = { missingDetails: { email: 'Stay@Example.test', phone: '+1 435 555 0100', childBeds: '1', infantCots: '0' }, checkInTime: '15:00', checkOutTime: '11:00' }
 const manager = { organizationId: ORG, actorId: OWNER, manage: true } as const
 
 async function importAll(connection: AirbnbConnection, db: D1Database, channex: FakeChannex, productId: string): Promise<void> {
@@ -201,18 +201,23 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
   try {
     const connection = await connected(db, env, channex)
     const details = await connection.details(LISTING)
-    assert.deepEqual(details.missingFields, ['childBeds', 'infantCots'])
+    // The organization has no contact details yet, so the import asks for them once.
+    assert.deepEqual(details.missingFields, ['email', 'phone', 'childBeds', 'infantCots'])
+    assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.checkInTime, checkOut: details.checkOutTime }, { timezone: TZ, checkIn: '16:00', checkOut: '10:00' })
 
     const started = await connection.prepare(LISTING, form)
     assert.equal(started.stage, 'property')
     // Asking again returns the same import; nothing is created twice.
     assert.deepEqual(await connection.prepare(LISTING, form), started)
+    // What the host typed is now the organization's contact, so the next listing will not ask.
+    assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0100' })
+    assert.deepEqual((await connection.details(LISTING)).missingFields, ['childBeds', 'infantCots'])
     const productId = started.product_id
 
     const home = await db.prepare(`SELECT p.kind, p.name, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
       FROM products p JOIN product_stay_configs c ON c.product_id = p.id JOIN business_locations l ON l.id = c.location_id
       JOIN product_variants v ON v.product_id = p.id JOIN prices pr ON pr.product_variant_id = v.id WHERE p.id = ?`).bind(productId).first()
-    assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, location: 'Cliff Cabin', timezone: TZ, email: 'host@example.test', unit_amount: 18_950, currency: 'USD' })
+    assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, location: 'Cliff Cabin', timezone: TZ, email: 'Stay@Example.test', unit_amount: 18_950, currency: 'USD' })
     const nights = await db.prepare("SELECT COUNT(*) AS total, SUM(closed) AS closed, SUM(closed_to_departure) AS ctd, MAX(price_minor) AS top FROM product_nights WHERE product_id = ? AND source = 'import'").bind(productId).first()
     assert.deepEqual(nights, { total: 500, closed: 1, ctd: 1, top: 21_000 })
     const first = await db.prepare('SELECT date, price_minor, max_stay FROM product_nights WHERE product_id = ? ORDER BY date LIMIT 1').bind(productId).first()

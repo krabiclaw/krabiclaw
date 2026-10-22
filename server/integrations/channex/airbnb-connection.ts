@@ -14,7 +14,7 @@ import { STAY_ARRIVAL_TEXT_LIMITS } from '~/shared/stay-arrival'
 import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/shared/stay-listing'
 import { channexCreate, channexGet, channexRequest, ChannexError } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
-import { CALENDAR_NIGHTS, DETAIL_FIELDS, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DetailField, type ListingDetails, type ListingImage, type ListingNight } from './airbnb-listing'
+import { CALENDAR_NIGHTS, DETAIL_FIELDS, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { installChannexMessages } from './messages'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 
@@ -360,7 +360,38 @@ export class AirbnbConnection {
   async details(listingId: string): Promise<ListingDetails> {
     const row = await this.connected()
     await this.requireListing(row, listingId)
-    return await listingDetails(this.env, row.channel_id, listingId)
+    return await listingDetails(this.env, row.channel_id, listingId, await this.organizationContact())
+  }
+
+  /** The organization's contact email and phone, set on Website › Brand › Contact or by a first import. */
+  private async organizationContact(): Promise<OrganizationContact> {
+    const organization = await queryFirst<{ contact_email: string | null; contact_phone: string | null }>(this.db, 'SELECT contact_email, contact_phone FROM organization WHERE id = ?', [this.organizationId])
+    if (!organization) throw new Error(`Organization ${this.organizationId} has no row`)
+    return { email: organization.contact_email?.trim() || null, phone: organization.contact_phone?.trim() || null }
+  }
+
+  /**
+   * Contact details the host typed because the organization had none become
+   * the organization's, so the next import does not ask again. Validated as
+   * the organization settings validate them.
+   */
+  private async saveOrganizationContact(details: ListingDetails, values: Record<DetailField, string>): Promise<void> {
+    const sets: string[] = []
+    const params: unknown[] = []
+    if (details.missingFields.includes('email')) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email')
+      sets.push('contact_email = ?')
+      params.push(values.email.toLowerCase())
+    }
+    if (details.missingFields.includes('phone')) {
+      if (values.phone.length > 32) fail(422, 'INVALID_DETAIL', 'Contact phone must be 32 characters or fewer')
+      sets.push('contact_phone = ?')
+      params.push(values.phone)
+    }
+    if (sets.length === 0) return
+    sets.push('updated_at = ?', 'updated_by = ?')
+    params.push(now(), this.userId, this.organizationId)
+    await execute(this.db, `UPDATE organization SET ${sets.join(', ')} WHERE id = ?`, params)
   }
 
   /**
@@ -384,7 +415,7 @@ export class AirbnbConnection {
         return { product_id: existing.product_id, stage: 'inventory', waiting: false }
       }
 
-      const details = await listingDetails(this.env, channelId, listingId)
+      const details = await listingDetails(this.env, channelId, listingId, await this.organizationContact())
       const supplied = Object.keys(input.missingDetails ?? {})
       if (supplied.some(key => !(details.missingFields as string[]).includes(key))) fail(422, 'ONLY_MISSING_DETAILS', 'Only the listing details Airbnb left out may be supplied')
       const field = (key: DetailField): string => {
@@ -405,6 +436,8 @@ export class AirbnbConnection {
       }
       if (!isValidTimezone(values.timezone)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone')
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
+      // Every check has passed, so what the host typed becomes the organization's contact.
+      await this.saveOrganizationContact(details, values)
       // The home itself is checked and made as a home added by hand is.
       const home = await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
