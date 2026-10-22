@@ -114,13 +114,16 @@ export async function listingCalendar(env: ChannexEnv, channelId: string, listin
       // A bad day names its date and the value Airbnb sent, so the host and the
       // worker log both show which night stopped the import.
       try {
-        const count = integer(day.available_count, 'Availability')
-        if ((day.availability !== 'available' && day.availability !== 'unavailable') || ![0, 1].includes(count)
-          || (day.availability === 'available') !== (count === 1) || typeof day.closed_to_arrival !== 'boolean' || typeof day.closed_to_departure !== 'boolean') {
-          throw new ChannexDataError(`This listing's calendar cannot be imported without review (availability ${received(day.availability)}, available_count ${received(count)}, closed_to_arrival ${received(day.closed_to_arrival)}, closed_to_departure ${received(day.closed_to_departure)})`)
+        // Airbnb's calendar (checked live on 2026-10-22) carries availability only as
+        // this string; the available_count Channex's schema lists is never sent.
+        if (day.availability !== 'available' && day.availability !== 'unavailable') {
+          throw new ChannexDataError(`This listing's calendar cannot be imported without review (availability ${received(day.availability)})`)
+        }
+        if (typeof day.closed_to_arrival !== 'boolean' || typeof day.closed_to_departure !== 'boolean') {
+          throw new ChannexDataError(`Closed-to-arrival and closed-to-departure must be booleans (got ${received(day.closed_to_arrival)} and ${received(day.closed_to_departure)})`)
         }
         return {
-          date, availability: count as 0 | 1, rate: amount(day.daily_price, 'Nightly price'),
+          date, availability: day.availability === 'available' ? 1 : 0, rate: amount(day.daily_price, 'Nightly price'),
           minStay: integer(day.min_nights, 'Minimum nights', 1), maxStay: integer(day.max_nights, 'Maximum nights'),
           closedToArrival: day.closed_to_arrival, closedToDeparture: day.closed_to_departure,
         }
