@@ -10,6 +10,7 @@
     <div class="pb-10">
       <p v-if="!dashboard.canUpdateBilling.value && owner" class="mb-6 text-sm text-muted" data-testid="billing-owner-line">{{ owner }} is the owner and changes the plan and billing.</p>
       <UAlert v-if="billingError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(billingError, 'Failed to load billing')" />
+      <UAlert v-if="homesError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homesError, 'Homes could not be loaded')" />
       <UAlert v-if="servicesError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(servicesError, 'Services could not be loaded')" />
       <UAlert v-if="methodsError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(methodsError, 'Payment methods could not be loaded')" />
       <UAlert v-if="ownerError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(ownerError, 'The owner could not be loaded')" />
@@ -42,8 +43,8 @@
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
 import { classifyStripePlanChange } from '~/shared/stripe-ga4'
-import { BUSINESS_PLAN_ID, INCLUDED_HOMES, INCLUDED_LOCATIONS, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, additionalHomePrice, additionalLocationPrice, isNewSalePlan } from '~/shared/billing-model'
-import { cardBrandLabel, useOrganizationBilling, useOrganizationServices, usePaymentMethods } from '~/composables/usePaymentsSettings'
+import { BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, additionalLocationPrice, isNewSalePlan } from '~/shared/billing-model'
+import { cardBrandLabel, useHomesQuote, useOrganizationBilling, useOrganizationServices, usePaymentMethods } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 useSeoMeta({ title: 'Plan and billing | KrabiClaw', robots: 'noindex, nofollow' })
@@ -55,10 +56,11 @@ const dashboard = useDashboardOrganization()
 const { trackSubscriptionCheckoutSuccess } = useAnalytics()
 const { startOrganizationCheckout, openBillingPortal } = useOrganizationSubscription()
 const { formatExactDateTime } = useHumanTime()
-const { plans, formatRecurring } = await usePlans()
+const { plans, formatPrice, formatRecurring } = await usePlans()
 
-const [{ billing, billingError, refreshBilling }, { services, servicesError }, { methods, methodsError }] = await Promise.all([
-  useOrganizationBilling(), useOrganizationServices(), usePaymentMethods(),
+const organizationId = await useDashboardOrganizationId()
+const [{ billing, billingError, refreshBilling }, { services, servicesError }, { methods, methodsError }, { quote: homes, quoteError: homesError, refreshQuote: refreshHomes }] = await Promise.all([
+  useOrganizationBilling(), useOrganizationServices(), usePaymentMethods(), useHomesQuote(organizationId, 0),
 ])
 
 // Admins read billing and do not change it; the line names who does.
@@ -122,17 +124,18 @@ const locationsRow = computed<EditorNavigationItem | null>(() => {
   if (used === undefined) return null
   return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
 })
-// Homes the same way: a home is a place to stay, counted as a home and not as a
-// location. A subscription from before homes were priced carries no homes
-// price and is charged nothing for them, so the row says so instead.
+// Homes from the quote the capacity check answers by: in use, included, and what
+// the ones past those cost each month. A subscription from before homes were
+// priced carries no homes price and is charged nothing for them, so the row says so.
 const homesRow = computed<EditorNavigationItem | null>(() => {
-  const used = billing.value?.usage.homes
-  if (used === undefined) return null
+  const current = homes.value
+  if (!current) return null
+  const counted = `${current.homes.used} ${current.homes.used === 1 ? 'home' : 'homes'}`
   const summary = onStarter.value
-    ? `${used} in use · ${INCLUDED_HOMES} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_HOMES}`
-    : billing.value?.subscriptionPrice?.meters.includes('homes')
-      ? `${used} in use · ${INCLUDED_HOMES} included, then ${additionalHomePrice()}`
-      : `${used} in use · not billed on this subscription`
+    ? `${counted} · ${current.homes.included} included · ${nameOf(STARTER_PLAN_ID)} stops at ${current.homes.included}`
+    : current.homes.additional_price_minor
+      ? `${counted} · ${current.homes.included} included · ${formatPrice(current.homes.amount_minor)} per month`
+      : `${counted} · not billed on this subscription`
   return { id: 'homes', label: 'Homes', summary }
 })
 
@@ -176,7 +179,7 @@ async function keepPlan() {
     if (!organizationId) throw new Error('Organization context is unavailable')
     const restored = await authClient.subscription.restore({ referenceId: organizationId, customerType: 'organization' })
     if (restored.error) throw new Error(restored.error.message ?? 'Your plan could not be kept')
-    await refreshBilling()
+    await Promise.all([refreshBilling(), refreshHomes()])
   } catch (error) {
     errorMessage.value = getErrorMessage(error, 'Your plan could not be kept')
   } finally {

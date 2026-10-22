@@ -55,6 +55,11 @@ export const PAYMENTS_FEE_RATE = 0.014
 /** Managed ads' share of the connected Google Ads account's spend. */
 export const AD_SPEND_RATE = 0.1
 
+/** USD cents as the pricing page writes a plan price: "$49", "$2,000". The catalog sells in USD only. */
+export function formatPlanPrice(cents: number): string {
+  return (cents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 })
+}
+
 /** A rate as the percent Stripe writes it: 0.014 → "1.4". */
 export function ratePercent(rate: number): string {
   return String(Math.round(rate * 1e6) / 1e4)
