@@ -133,7 +133,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true })).toBeVisible()
     await bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await page.screenshot({ path: '/tmp/pr1211-booking-setup.png', fullPage: true })
     const desktopViewport = page.viewportSize()!
     await page.setViewportSize({ width: 390, height: 844 })
     await page.getByRole('radio', { name: 'A group of guests', exact: true }).click()
@@ -145,7 +144,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByRole('radio', { name: 'One guest', exact: true })).toBeChecked()
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     expect(await readConfig()).toMatchObject({ default_capacity: 1 })
-    await page.screenshot({ path: '/tmp/pr1211-booking-mobile.png', fullPage: true })
     await page.setViewportSize(desktopViewport)
     const bindViaMcp = async (productId?: string | null) => {
       const current = (await (await page.request.get(`${editor}/pages/${service.id}`)).json()).page
@@ -286,7 +284,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.getByRole('button',{name:'Close booking form',exact:true}).click()
     await expect(providerSection.getByText('Profile could not be loaded',{exact:true})).toBeVisible()
     await expect(providerSection.getByText('North Carolina Legal Services',{exact:true})).toHaveCount(0)
-    await providerSection.screenshot({path:'/tmp/pr1240-provider-error.png'})
     await page.unroute(providerRoute)
     const providerRetry=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
     await providerSection.getByRole('button',{name:'Try again',exact:true}).click()
@@ -296,7 +293,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(providerSection.getByText(host.name,{exact:true})).toBeVisible()
     await expect(providerSection.getByText(host.bio,{exact:true})).toBeVisible()
     await expect(page.getByRole('button',{name:'Try again',exact:true})).toHaveCount(0)
-    await page.locator('main').screenshot({path:'/tmp/pr1240-provider-recovered.png'})
     await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: /where.*meet/i })).toHaveCount(0)
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', new URL(service.path, baseURL).href)
@@ -406,7 +402,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(bookingDialog.getByText('Party size', { exact: true })).toHaveCount(0)
     await expect(bookingDialog.getByRole('button', { name: /more guests|fewer guests/i })).toHaveCount(0)
     await bookingDialog.getByRole('button', { name: /2:00 PM/ }).first().click()
-    await page.setViewportSize({ width: 1280, height: 720 })
     await page.setViewportSize({ width: 390, height: 844 })
     const sessions = await Promise.all(products.map(async product => {
       const response = await request.get(`/api/public/products/${product.slug}/sessions?location_id=online&from=${day}&to=${day}`, { headers })

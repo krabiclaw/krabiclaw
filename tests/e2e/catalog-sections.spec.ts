@@ -201,7 +201,6 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await expect(addDialog).toBeHidden()
     await expect(panel.getByTestId(`product-${located.id}`)).toContainText('Not listed')
     await expect(panel.getByTestId(`product-${unassigned.id}`)).toContainText('No photo')
-    await page.screenshot({ path: testInfo.outputPath('restaurant-section-desktop.png'), fullPage: true, animations: 'disabled' })
 
     await panel.getByTestId('list-editor-toggle').click()
     await panel.getByRole('checkbox', { name: `Select ${located.name}`, exact: true }).check()
@@ -246,7 +245,6 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await waitForNuxtHydration(page)
     await expect(panel.getByTestId(`product-${located.id}`)).toBeVisible()
     await expect(panel.getByTestId('editor-card-name')).toContainText(target.name)
-    await page.screenshot({ path: testInfo.outputPath('restaurant-section-mobile.png'), fullPage: true, animations: 'disabled' })
 
     // The dish's plural membership editor uses the same section operation;
     // removing one membership retains its other section and location offering.
@@ -310,7 +308,6 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     expect(new URL(page.url()).searchParams.get('previewViewport')).toBe('mobile')
     await expect(iframe).toHaveCSS('max-width', '390px')
     await expect(guest.getByRole('heading', { name: located.name, level: 1, exact: true })).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('restaurant-dish-preview-mobile.png'), fullPage: true, animations: 'disabled' })
     await preview.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(preview).toBeHidden()
     await expect(page).toHaveURL(`${catalog}/${located.id}/collections`)

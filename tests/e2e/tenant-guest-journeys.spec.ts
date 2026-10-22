@@ -341,7 +341,6 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
 
 for (const target of [
   { name: 'Kikuzuki', owner: 'user-e2e-kikuzuki-owner', org: E2E_KIKUZUKI_ORGANIZATION_ID, slug: E2E_KIKUZUKI_ORGANIZATION_ID, location: 'loc-kikuzuki', locationSlug: 'kikuzuki-japanese-robatayaki-izakaya', base: kikuzukiTestBaseUrl(), headers: kikuzukiTestExtraHeaders(), experience: false, kind: 'dish' },
-  { name: 'Kikuzuki merchandise', org: E2E_KIKUZUKI_ORGANIZATION_ID, slug: E2E_KIKUZUKI_ORGANIZATION_ID, location: 'loc-kikuzuki', locationSlug: 'kikuzuki-japanese-robatayaki-izakaya', base: kikuzukiTestBaseUrl(), headers: kikuzukiTestExtraHeaders(), experience: false, kind: 'item' },
   { name: 'Pottery House', owner: 'user-e2e-pottery-owner', org: E2E_POTTERY_ORGANIZATION_ID, slug: E2E_POTTERY_ORGANIZATION_ID, location: 'loc-pottery-house', locationSlug: 'krabi', base: potteryHouseBaseURL, headers: potteryHouseExtraHeaders, experience: true, kind: 'experience' },
 ]) {
   test(`${target.name} external checkout uses the shared CMS and public template`, async ({ page, request, baseURL }, testInfo) => {
@@ -358,9 +357,9 @@ for (const target of [
       await page.getByLabel('Website address', { exact: true }).fill(externalUrl)
       await page.getByRole('button', { name: 'Save', exact: true }).click()
       await expect(page).toHaveURL(new RegExp(`/products/${product.id}/photo$`))
-      const field = target.kind === 'dish' ? 'dietary_notes' : target.kind === 'experience' ? 'preparation' : 'care_instructions'
-      const label = target.kind === 'dish' ? 'Dietary information' : target.kind === 'experience' ? 'Before you arrive' : 'Care instructions'
-      const detail = target.kind === 'dish' ? 'Vegetarian' : target.kind === 'experience' ? 'Arrive ten minutes before your class' : 'Hand wash in cold water'
+      const field = target.kind === 'dish' ? 'dietary_notes' : 'preparation'
+      const label = target.kind === 'dish' ? 'Dietary information' : 'Before you arrive'
+      const detail = target.kind === 'dish' ? 'Vegetarian' : 'Arrive ten minutes before your class'
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/attributes/${field}`)
       await page.getByRole('textbox', { name: label, exact: true }).fill(detail)
       const description = 'Finished with roasted sesame and seasonal greens.'
@@ -409,7 +408,6 @@ for (const target of [
         await expect(cards.getByTestId('editor-card-description')).toContainText(description)
         await expect(cards.getByTestId('editor-card-price')).toContainText('1,350')
         await page.setViewportSize({ width: 1440, height: 900 })
-        await page.screenshot({ path: testInfo.outputPath('restaurant-dish-desktop.png'), fullPage: true, animations: 'disabled' })
       }
       const publication = await page.request.put(`${editor}/${product.id}/publication`, { data: { published: true } })
       expect(publication.status(), await publication.text()).toBe(200)

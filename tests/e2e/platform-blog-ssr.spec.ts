@@ -277,31 +277,29 @@ test('mobile docs keep the signed-in account control visible beside search and n
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
-for (const signedIn of [false, true]) {
-  test(`docs and blog global menu works on desktop and mobile ${signedIn ? 'signed in' : 'signed out'}`, async ({ page, baseURL }) => {
-    if (signedIn) await loginAs(page.request, baseURL!, 'user-e2e-oauth-private-cimd')
-    for (const width of [1440, 390]) {
-      await page.setViewportSize({ width, height: 900 })
-      for (const path of ['/docs', '/blog']) {
-        await page.goto(path)
-        // A click on the server-rendered toggle before hydration does nothing.
-        await waitForNuxtHydration(page)
-        const header = page.locator('header').first()
-        const toggle = header.getByRole('button', { name: 'Open menu', exact: true })
-        await expect(toggle).toBeVisible()
-        await toggle.click()
-        const menu = header.getByRole('navigation', { name: 'Site', exact: true })
-        await expect(menu).toBeVisible()
-        await expect(header.getByRole('button', { name: 'Close menu', exact: true })).toHaveAttribute('aria-expanded', 'true')
-        await page.keyboard.press('Escape')
-        await expect(menu).toHaveCount(0)
-        await expect(toggle).toBeFocused()
-        await toggle.click()
-        await menu.getByRole('link', { name: 'Products', exact: true }).click()
-        await expect(page).toHaveURL(/\/products$/)
-        await expect(page.locator('#platform-mobile-nav')).toHaveCount(0)
-        expect(await page.evaluate(() => document.documentElement.style.overflow)).not.toBe('hidden')
-      }
+// The signed-in header's account control is covered beside search above; the menu is the same either way.
+test('docs and blog global menu works on desktop and mobile', async ({ page }) => {
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    for (const path of ['/docs', '/blog']) {
+      await page.goto(path)
+      // A click on the server-rendered toggle before hydration does nothing.
+      await waitForNuxtHydration(page)
+      const header = page.locator('header').first()
+      const toggle = header.getByRole('button', { name: 'Open menu', exact: true })
+      await expect(toggle).toBeVisible()
+      await toggle.click()
+      const menu = header.getByRole('navigation', { name: 'Site', exact: true })
+      await expect(menu).toBeVisible()
+      await expect(header.getByRole('button', { name: 'Close menu', exact: true })).toHaveAttribute('aria-expanded', 'true')
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0)
+      await expect(toggle).toBeFocused()
+      await toggle.click()
+      await menu.getByRole('link', { name: 'Products', exact: true }).click()
+      await expect(page).toHaveURL(/\/products$/)
+      await expect(page.locator('#platform-mobile-nav')).toHaveCount(0)
+      expect(await page.evaluate(() => document.documentElement.style.overflow)).not.toBe('hidden')
     }
-  })
-}
+  }
+})

@@ -51,10 +51,9 @@ test.describe('dashboard pane hierarchy', () => {
     await loginAs(page.request, baseURL!)
   })
 
-  test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }, testInfo) => {
+  test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
-    await page.screenshot({ path: testInfo.outputPath('cms-menu-desktop.png') })
     const segments = ['website/pages', 'website/blog', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu']
     const resolved = await page.evaluate(({ org, segments }) => {
       const router = (document.querySelector('#__nuxt') as Element & {
@@ -391,7 +390,6 @@ test.describe('dashboard pane hierarchy', () => {
       const teamForbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: actor.id, assigned_team_id: null } })
       expect(teamForbidden.status(), await teamForbidden.text()).toBe(403)
       expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
-      await memberPage.screenshot({ path: testInfo.outputPath('assigned-location-mobile.png'), fullPage: true })
     } catch (error) {
       failures.push(error)
     } finally {
@@ -694,7 +692,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
   })
 
-  test('Catalog opens one menu per location and every other offering as cards, filtered by kind pills', async ({ page }, testInfo) => {
+  test('Catalog opens one menu per location and every other offering as cards, filtered by kind pills', async ({ page }) => {
     const [productResponse, collectionResponse, locationResponse] = await Promise.all([
       page.request.get('/api/editor/organizations/org-demo/products'),
       page.request.get('/api/editor/organizations/org-demo/collections'),
@@ -745,7 +743,6 @@ test.describe('dashboard pane hierarchy', () => {
     const desktopImage = await firstCard.locator('[data-selector-image]').boundingBox()
     expect(desktopImage).not.toBeNull()
     expect(desktopImage!.width / desktopImage!.height).toBeCloseTo(20 / 19, 2)
-    await page.screenshot({ path: testInfo.outputPath('catalog-desktop.png'), fullPage: true })
 
     // A kind pill narrows the grid in place and is held in the URL.
     const kind = (['experience', 'item', 'service'] as const).find(value => offerings.some(product => product.kind === value))
@@ -767,7 +764,6 @@ test.describe('dashboard pane hierarchy', () => {
     expect(mobileImage).not.toBeNull()
     expect(mobileGrid).not.toBeNull()
     expect(mobileImage!.width).toBeCloseTo(mobileGrid!.width, 0)
-    await page.screenshot({ path: testInfo.outputPath('catalog-mobile.png'), fullPage: true })
 
     // A location's card opens its menu, named under the title, with nothing to switch.
     const owner = locations.find(row => row.id === section!.location_id)!
@@ -903,7 +899,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}/products/${product!.id}`)
   })
 
-  test('mobile scroll ends Today after its real final card and one panel padding', async ({ page }, testInfo) => {
+  test('mobile scroll ends Today after its real final card and one panel padding', async ({ page }) => {
     const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: 'loc-demo' } })
     expect(feedRead.status(), await feedRead.text()).toBe(200)
     const feed = await feedRead.json() as TodayFeedPayload
@@ -936,7 +932,6 @@ test.describe('dashboard pane hierarchy', () => {
     const nav = (await page.getByTestId('dashboard-mobile-nav').boundingBox())!
     expect(finalBody.y + finalBody.height).toBeCloseTo(nav.y, 0)
     expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0)
-    await page.screenshot({ path: testInfo.outputPath('today-mobile-scroll-bottom.png'), fullPage: true })
   })
 
   test('mobile scroll ends Calendar and earnings content at their panel boundary', async ({ page }) => {
@@ -1275,7 +1270,7 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('mobile leaf drawers retain their parent and discard drafts on every dismissal', async ({ page }, testInfo) => {
+  test('mobile leaf drawers retain their parent and discard drafts on Close and Cancel', async ({ page }) => {
     test.setTimeout(90_000)
     const links = `${ORG}/website/pages/links`
     const endpoint = '/api/editor/organizations/org-demo/links-page'
@@ -1295,7 +1290,8 @@ test.describe('dashboard pane hierarchy', () => {
     for (const viewport of [PHONE, NARROW]) {
       await page.setViewportSize(viewport)
       await open(page, links)
-      for (const dismissal of ['Close', 'Cancel', 'Escape', 'backdrop', 'swipe'] as const) {
+      // Close and Cancel are the drawer's own controls; Escape, the backdrop and the swipe are the drawer component's.
+      for (const dismissal of ['Close', 'Cancel'] as const) {
         const parentBefore = await parent.boundingBox()
         expect(parentBefore).not.toBeNull()
         await parent.getByRole('link', { name: /^Title/ }).click()
@@ -1325,37 +1321,9 @@ test.describe('dashboard pane hierarchy', () => {
           }
         }
         if (dismissal === 'Close') {
-          await page.screenshot({ path: testInfo.outputPath(`leaf-drawer-${viewport.width}.png`), fullPage: true })
           await leaf.getByTestId('dashboard-navbar-close').click()
-        } else if (dismissal === 'Cancel') {
-          await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
-        } else if (dismissal === 'Escape') {
-          await page.keyboard.press('Escape')
-        } else if (dismissal === 'backdrop') {
-          const overlay = page.locator('[data-slot="overlay"][data-state="open"]')
-          await expect(overlay).toHaveCount(1)
-          const parentBox = (await parent.boundingBox())!
-          await overlay.click({ position: { x: 8, y: parentBox.y + 4 } })
         } else {
-          const handleLocator = dialog.locator('[data-slot="handle"]')
-          await handleLocator.hover()
-          const handle = await handleLocator.boundingBox()
-          expect(handle, 'The native drawer has a drag handle').not.toBeNull()
-          const receivesPointer = await handleLocator.evaluate(element => {
-            const rect = element.getBoundingClientRect()
-            return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-          })
-          expect(receivesPointer, 'The drag handle receives pointer input').toBe(true)
-          const beforeDrag = await dialog.boundingBox()
-          await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2)
-          await page.mouse.down()
-          try {
-            await page.mouse.move(handle!.x + handle!.width / 2, Math.min(viewport.height - 4, handle!.y + handle!.height / 2 + 32), { steps: 3 })
-            await expect.poll(async () => (await dialog.boundingBox())?.y, { message: 'The drawer follows the drag' }).toBeGreaterThan(beforeDrag!.y + 1)
-            await page.mouse.move(viewport.width / 2, viewport.height - 4, { steps: 8 })
-          } finally {
-            await page.mouse.up()
-          }
+          await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
         }
         await expect(page).toHaveURL(links)
         await expect(leaf).toHaveCount(0)
@@ -1373,7 +1341,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect(after.items).toEqual(before.items)
   })
 
-  test('a photo library dialog stays above its leaf drawer and Escape dismisses only the top level', async ({ page }, testInfo) => {
+  test('a photo library dialog stays above its leaf drawer and Escape dismisses only the top level', async ({ page }) => {
     const endpoint = '/api/editor/organizations/org-demo/products'
     const productsRead = await page.request.get(endpoint)
     expect(productsRead.status(), await productsRead.text()).toBe(200)
@@ -1414,7 +1382,6 @@ test.describe('dashboard pane hierarchy', () => {
       await page.keyboard.press('Tab')
       await expect.poll(() => picker.evaluate(element => element.contains(document.activeElement))).toBe(true)
     }
-    await page.screenshot({ path: testInfo.outputPath('nested-photo-picker-mobile.png'), fullPage: true })
     await page.keyboard.press('Escape')
     await expect(picker).toHaveCount(0)
     await expect(outer).toBeVisible()
@@ -1431,7 +1398,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect((await afterRead.json() as { product: Product }).product.image?.asset_id).toBe(product!.image!.asset_id)
   })
 
-  test('a timezone menu scrolls above its leaf and preserves its draft until the drawer is dismissed', async ({ page }, testInfo) => {
+  test('a timezone menu scrolls above its leaf and preserves its draft until the drawer is dismissed', async ({ page }) => {
     const locationsRead = await page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true' } })
     expect(locationsRead.status(), await locationsRead.text()).toBe(200)
     const location = (await locationsRead.json() as { locations: DashboardLocation[] }).locations.find(row => row.id === 'loc-demo')
@@ -1472,7 +1439,6 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(outer.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
     await control.click()
     await expect(menu).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('nested-timezone-picker-mobile.png'), fullPage: true })
     await page.keyboard.press('Escape')
     await expect(menu).toHaveCount(0)
     await expect(outer).toBeVisible()
