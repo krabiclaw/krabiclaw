@@ -57,7 +57,7 @@ export const PLAN_DEFINITIONS = Object.freeze([
     features: [
       'Business websites for restaurants, experiences and law firms',
       `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`,
-      `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}; a home is not a location`,
+      `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`,
       'Your own domain (yourbusiness.com)',
       'Update supported content, menus and photos through ChatGPT',
       'Bookings, consultation requests and ticketed experiences',

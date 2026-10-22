@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assertCatalogModeKey, buildCatalogPlan, sha256Json } from '../../scripts/lib/stripe-catalog-plan.mjs'
+import { assertCatalogModeKey, buildCatalogPlan, PLAN_DEFINITIONS, sha256Json } from '../../scripts/lib/stripe-catalog-plan.mjs'
 import { assertStripeCliIdentity, main, parseCli, parseStripeCliResponse } from '../../scripts/seed-stripe.mjs'
 
 // Catalog mutation must require an explicit live target, before provider access.
@@ -225,4 +225,10 @@ test('Business moves to the USD 149 offer without repricing a USD 99 subscriptio
   const full = buildCatalogPlan({ snapshot: after })
   assert.deepEqual(full.operations.filter(operation => operation.priceId === 'price_business_99').map(operation => operation.type), ['deactivate_price'])
   assert.equal(full.operations.some(operation => operation.type.includes('subscription')), false)
+})
+
+// Stripe refuses a product marketing feature longer than 80 characters, and refuses it mid-apply.
+test('every catalog marketing feature fits Stripe’s 80-character limit', () => {
+  const tooLong = PLAN_DEFINITIONS.flatMap(definition => definition.features.filter(feature => feature.length > 80).map(feature => `${definition.planId}: ${feature}`))
+  assert.deepEqual(tooLong, [])
 })
