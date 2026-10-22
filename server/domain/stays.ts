@@ -937,6 +937,22 @@ export async function updateStayHomePhoto(db: DbClient, env: GuestInboxPublicati
   return updated
 }
 
+/**
+ * Put these library assets first, in this order, ahead of the home's other
+ * photos; the first becomes the cover. A channel import places the photos it
+ * stored this way: an asset already on the home moves, one not yet on it is
+ * added, and the host's own photos follow. Each asset must be an active image
+ * of this organization.
+ */
+export async function placeStayHomePhotosFirst(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, assetIds: readonly string[]): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  if (new Set(assetIds).size !== assetIds.length) fail(422, 'INVALID_PHOTO_ORDER', 'Each photo is placed once', 'photo_ids')
+  const order = [...assetIds, ...home.photos.map(photo => photo.id).filter(id => !assetIds.includes(id))]
+  if (order.length > MAX_ORDERED_MEDIA_ASSETS) fail(422, 'PHOTO_LIMIT', `A home holds at most ${MAX_ORDERED_MEDIA_ASSETS} photos`, 'photo_ids')
+  if (order.length === home.photos.length && order.every((id, index) => home.photos[index]!.id === id)) return home
+  return await arrangeHomePhotos(db, env, access, principal, home, order)
+}
+
 /** Take a photo off the home. The file stays in the organization's media library; when the cover goes, the next photo becomes the cover. */
 export async function removeStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, photoId: string): Promise<StayHome> {
   const home = await managedHome(db, access, productId)
