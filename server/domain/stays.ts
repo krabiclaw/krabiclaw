@@ -1301,6 +1301,8 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
   const home = await readStayHome(db, access, input.product_id)
   const fields = stayFields(input, home)
+  // A payment the guest already made is written with the stay, so a stay never exists without it.
+  const payment = input.payment === undefined || input.payment === null ? null : stayPaymentFields(input.payment, 'payment.', false)
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const replay = async () => {
     const existing = await queryFirst<{ id: string; product_id: string; check_in_date: string; check_out_date: string; guest_name: string; total_minor: number }>(db,
@@ -1335,6 +1337,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
       ...reconcileNightsQueries(access.organizationId, id),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId: id, now, openedBy: { userId: access.actorId } }),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id }),
+      ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
     ], { operation: 'Create stay' })
   } catch (error) {
     if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
@@ -1562,14 +1565,50 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
 }
 
 /** Record money the host received (or, negative, refunded) outside Stripe for a stay they took. */
+interface StayPaymentFields {
+  amount_minor: number
+  method: StayPaymentMethod
+  paid_on: string
+  reference: string | null
+  note: string | null
+}
+
+/**
+ * A payment the host records against a stay. `prefix` names the fields in
+ * errors when the payment rides inside another body, as `payment.` does on a
+ * create. A refund (a negative amount) is allowed only on its own.
+ */
+function stayPaymentFields(input: unknown, prefix: string, allowRefund: boolean): StayPaymentFields {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail(422, 'INVALID_STAY_FIELD', `${prefix || 'payment'} must be an object`, prefix.replace(/\.$/, '') || 'payment')
+  const body = input as Record<string, unknown>
+  const amountMinor = amount(body.amount_minor, `${prefix}amount_minor`, allowRefund)
+  if (amountMinor === 0) fail(422, 'INVALID_AMOUNT', `${prefix}amount_minor must not be zero`, `${prefix}amount_minor`)
+  if (!STAY_PAYMENT_METHODS.includes(body.method as StayPaymentMethod)) fail(422, 'INVALID_STAY_FIELD', `${prefix}method must be one of ${STAY_PAYMENT_METHODS.join(', ')}`, `${prefix}method`)
+  return {
+    amount_minor: amountMinor, method: body.method as StayPaymentMethod, paid_on: date(body.paid_on, `${prefix}paid_on`),
+    reference: optionalText(body.reference, `${prefix}reference`, 200), note: optionalText(body.note, `${prefix}note`, 1000),
+  }
+}
+
+function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: string; location_id: string }, payment: StayPaymentFields, key: string, now: string): BatchQuery[] {
+  const id = crypto.randomUUID()
+  return [
+    {
+      query: `INSERT INTO stay_payments (id, organization_id, stay_id, amount_minor, currency, method, paid_on, reference, note, idempotency_key, created_at, created_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [id, access.organizationId, stay.id, payment.amount_minor, stay.currency, payment.method, payment.paid_on, payment.reference, payment.note, key, now, access.actorId],
+    },
+    organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_recorded', entityType: 'stay', entityId: stay.id, metadata: { payment_id: id, amount_minor: payment.amount_minor } }),
+  ]
+}
+
 export async function recordStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<StayDetail> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
   if (stay.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay is paid through its channel')
-  const amountMinor = amount(input.amount_minor, 'amount_minor', true)
-  if (amountMinor === 0) fail(422, 'INVALID_AMOUNT', 'amount_minor must not be zero', 'amount_minor')
-  if (!STAY_PAYMENT_METHODS.includes(input.method as StayPaymentMethod)) fail(422, 'INVALID_STAY_FIELD', `method must be one of ${STAY_PAYMENT_METHODS.join(', ')}`, 'method')
-  const paidOn = date(input.paid_on, 'paid_on')
+  const payment = stayPaymentFields(input, '', true)
+  const amountMinor = payment.amount_minor
+  const paidOn = payment.paid_on
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
   // A retry of a payment that was recorded returns the stay as it is; the same key for a different payment is refused.
@@ -1583,17 +1622,8 @@ export async function recordStayPayment(db: DbClient, env: GuestInboxPublication
   }
   const earlier = await replay()
   if (earlier) return earlier
-  const id = crypto.randomUUID()
   try {
-    await executeBatch(db, [
-      {
-        query: `INSERT INTO stay_payments (id, organization_id, stay_id, amount_minor, currency, method, paid_on, reference, note, idempotency_key, created_at, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [id, access.organizationId, stayId, amountMinor, stay.currency, input.method, paidOn,
-          optionalText(input.reference, 'reference', 200), optionalText(input.note, 'note', 1000), key, new Date().toISOString(), access.actorId],
-      },
-      organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_recorded', entityType: 'stay', entityId: stayId, metadata: { payment_id: id, amount_minor: amountMinor } }),
-    ], { operation: 'Record stay payment' })
+    await executeBatch(db, stayPaymentInsert(access, stay, payment, key, new Date().toISOString()), { operation: 'Record stay payment' })
   } catch (error) {
     if (/UNIQUE constraint failed: stay_payments\.organization_id, stay_payments\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
       const concurrent = await replay()
