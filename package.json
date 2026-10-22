@@ -148,6 +148,7 @@
     "@nuxtjs/robots": "6.2.0",
     "@nuxtjs/sitemap": "8.5.0",
     "@opentelemetry/api": "^1.9.1",
+    "@photostructure/tz-lookup": "11.7.0",
     "@resvg/resvg-wasm": "^2.6.2",
     "@stripe/stripe-js": "^9.15.0",
     "@vue-email/body": "0.0.3",
