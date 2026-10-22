@@ -1029,6 +1029,17 @@ test('a channel stay is read-only here and is paid through its channel; an app s
     const removed = await deleteStayPayment(db, env, manager, stay.id, refunded.payments.find(payment => payment.amount_minor === -5_000)!.id)
     assert.deepEqual([removed.paid_minor, removed.payment_status], [45_000, 'paid'])
     await assert.rejects(deleteStayPayment(db, env, manager, stay.id, 'missing'), code('PAYMENT_NOT_FOUND'))
+
+    // A guest who already paid: the stay and its first payment are one write, and a replay adds no second payment.
+    const withPayment = { product_id: cabin.id, idempotency_key: 'paid-up-front', check_in_date: '2026-12-10', check_out_date: '2026-12-12', ...guest, payment: { amount_minor: 45_000, method: 'cash', paid_on: '2026-12-01', reference: 'cash at the door' } }
+    const prepaid = await createStay(db, env, manager, withPayment)
+    assert.deepEqual([prepaid.paid_minor, prepaid.payment_status, prepaid.payments.length, prepaid.payments[0]!.method, prepaid.payments[0]!.reference], [45_000, 'paid', 1, 'cash', 'cash at the door'])
+    assert.equal((await createStay(db, env, manager, withPayment)).payments.length, 1)
+    assert.equal(await db.prepare('SELECT count(*) FROM stay_payments WHERE stay_id = ?').bind(prepaid.id).first('count(*)'), 1)
+    // A bad payment stops the whole create: no stay, no nights.
+    await assert.rejects(createStay(db, env, manager, { ...withPayment, idempotency_key: 'bad-payment', check_in_date: '2026-12-20', check_out_date: '2026-12-22', payment: { amount_minor: -100, method: 'cash', paid_on: '2026-12-01' } }), { status: 422, data: { code: 'INVALID_AMOUNT', field: 'payment.amount_minor' } })
+    await assert.rejects(createStay(db, env, manager, { ...withPayment, idempotency_key: 'bad-method', check_in_date: '2026-12-20', check_out_date: '2026-12-22', payment: { amount_minor: 100, method: 'crypto', paid_on: '2026-12-01' } }), { status: 422, data: { code: 'INVALID_STAY_FIELD', field: 'payment.method' } })
+    assert.equal(await db.prepare("SELECT count(*) FROM stays WHERE idempotency_key IN ('bad-payment', 'bad-method')").first('count(*)'), 0)
   } finally {
     await runtime.dispose()
   }
