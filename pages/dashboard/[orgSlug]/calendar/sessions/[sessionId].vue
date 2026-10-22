@@ -1,11 +1,11 @@
 <template>
   <DashboardLeafPanel id="product-session" :title="isNew ? 'Add availability' : 'Edit availability'" :lead="timezone ? `Times are in ${timezone}.` : p.product.value?.kind === 'service' ? 'Choose the office for this consultation.' : 'Choose where this experience takes place.'" :saving="saving" :disabled="pending || !valid || (!isNew && !form?.dirty && !saveError)" :error="saveError ?? scopeError ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add to calendar' : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
-    <UForm v-if="!scopeError" ref="form" :key="revision" :state="{ startsAt, endsAt, capacity, sessionStatus }" :validate="() => validation.errors" class="space-y-6" @submit="save">
+    <UForm v-if="!scopeError" ref="form" :key="revision" :state="{ location: p.locationId.value, startDate, startsAt, endsAt, capacity, sessionStatus }" :validate="() => validation.errors" class="space-y-6" @submit="save">
       <UFormField v-if="isNew" name="location" label="Location" required><USelect :model-value="p.locationId.value ?? undefined" :items="locationItems" placeholder="Choose a location" class="w-full" @update:model-value="chooseLocation" /></UFormField>
       <p v-else class="text-sm text-muted">{{ savedLocation?.title ?? 'Online' }}</p>
-      <UFormField v-if="isNew" name="startDate" label="Date" required><UInput v-model="startDate" type="date" class="w-full" /></UFormField>
-      <UFormField name="startsAt" label="Starts" required><UInput v-if="isNew" v-model="startTime" type="time" step="60" class="w-full" :disabled="!canCreate" /><UInput v-else v-model="startsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
-      <UFormField name="endsAt" label="Ends" required><UInput v-model="endsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests || isNew && !canCreate" /></UFormField>
+      <UFormField v-if="isNew" name="startDate" label="Date" required eager-validation><UInput v-model="startDate" type="date" class="w-full" /></UFormField>
+      <UFormField name="startsAt" label="Starts" required eager-validation><UInput v-if="isNew" v-model="startTime" type="time" step="60" class="w-full" :disabled="!canCreate" /><UInput v-else v-model="startsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
+      <UFormField name="endsAt" label="Ends" required eager-validation><UInput v-model="endsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests || isNew && !canCreate" /></UFormField>
       <UFormField name="capacity" label="Guest limit" hint="Blank means no limit"><UInputNumber v-model="capacity" :min="data?.session.claimed ?? 0" class="w-full" /></UFormField>
       <UFormField v-if="!isNew" name="sessionStatus">
         <URadioGroup v-model="sessionStatus" :items="[{ label: 'Scheduled', value: 'scheduled' }, { label: 'Cancelled', value: 'cancelled' }]" :disabled="hasGuests" variant="card" />
@@ -81,20 +81,25 @@ function reset() {
 watch([data, error, p.product, sessionId], ([,,, nextId], [,,, previousId]) => {
   if (nextId !== previousId || !saving.value && !recovering.value && !saveError.value && !error.value) reset()
 }, { immediate: true })
-function instant(value: string, original?: string): string | undefined {
+function instant(value: string, original?: string): string {
   if (original && timezone.value && value === localInput(original, timezone.value)) return original
   const [date, time] = value.split('T')
-  if (!date || !time) return undefined
+  if (!date || !time) throw new Error('Choose a complete date and time.')
   if (!isValidTimezone(timezone.value)) throw new Error('Choose a location with a valid time zone.')
   return localDateTimeToInstant(date, time, timezone.value).toISOString()
 }
 const validation = computed(() => {
   const errors: FormError[] = []
   const instants: Partial<Record<'startsAt' | 'endsAt', string>> = {}
+  if (isNew.value && !p.locationId.value) errors.push({ name: 'location', message: 'Choose a location.' })
+  if (isNew.value && !startDate.value) errors.push({ name: 'startDate', message: 'Choose a date.' })
+  if (isNew.value ? !startTime.value : !startsAt.value) errors.push({ name: 'startsAt', message: isNew.value ? 'Choose a start time.' : 'Choose a start date and time.' })
+  if (!endsAt.value) errors.push({ name: 'endsAt', message: 'Choose an end date and time.' })
   for (const [name, value, original] of [
     ['startsAt', startsAt.value, data.value?.session.starts_at],
     ['endsAt', endsAt.value, data.value?.session.ends_at],
   ] as const) {
+    if (!value || name === 'startsAt' && isNew.value && (!startDate.value || !startTime.value)) continue
     try { instants[name] = instant(value, original) }
     catch (failure) {
       const cause = getErrorMessage(failure, 'This local time could not be converted.')
@@ -124,7 +129,17 @@ watch(suggestedEnd, (next) => {
 })
 const valid = computed(() => Boolean(p.product.value?.booking) && (!isNew.value || canCreate.value) && !scopeError.value && !error.value && Boolean(validation.value.startsAt && validation.value.endsAt) && !validation.value.errors.length)
 const form = useTemplateRef('form')
-watch([form, validation], ([current, result]) => { current?.setErrors(result.errors) }, { immediate: true, flush: 'post' })
+// Revalidate native touched/error fields when a suggestion or time zone changes.
+// Untouched missing fields remain unmarked until their native input/blur or submit.
+watch(validation, async () => {
+  const current = form.value
+  if (!current) return
+  const names = new Set(current.getErrors().flatMap(({ name }) => name ? [name] : []))
+  for (const name of current.touchedFields) names.add(String(name))
+  if (startDate.value && startTime.value) names.add('startsAt')
+  if (endsAt.value) names.add('endsAt')
+  if (names.size) await current.validate({ name: [...names], silent: true })
+}, { flush: 'post' })
 // Cancel restores the draft; a new revision is a fresh form, so nothing reads as changed.
 const revision = ref(0)
 async function useSavedSession() {
@@ -138,12 +153,12 @@ async function useSavedSession() {
   finally { recovering.value = false }
 }
 async function save() {
-  const { startsAt: start, endsAt: end } = validation.value
-  if (!valid.value || !start || !end) return
   const creating = isNew.value
   saving.value = true
   saveError.value = null
   try {
+    const { startsAt: start, endsAt: end } = validation.value
+    if (!valid.value || !start || !end) throw new Error(validation.value.errors[0]?.message ?? scopeError.value ?? (error.value ? getErrorMessage(error.value, 'Session could not be loaded') : 'Check the offering’s booking calendar and location before saving.'))
     const times = { starts_at: start, ends_at: end, capacity: capacity.value ?? null }
     if (isNew.value) {
       const fingerprint = JSON.stringify({ ...times, location_id: p.locationId.value })

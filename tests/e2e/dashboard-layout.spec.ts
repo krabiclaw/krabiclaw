@@ -957,6 +957,10 @@ test.describe('dashboard pane hierarchy', () => {
     const current = (await list()).find(row => row.id === original!.id)!
     const concurrent = await page.request.patch(`${endpoint}/${original!.id}`, { data: { capacity: 9, expected_updated_at: current.updated_at } })
     expect(concurrent.status(), await concurrent.text()).toBe(200)
+    const concurrentReadback = (await list()).find(row => row.id === original!.id)
+    expect(concurrentReadback, 'the concurrent write preserves the existing session').toBeDefined()
+    expect(concurrentReadback).toEqual({ ...current, updated_at: concurrentReadback!.updated_at })
+    expect(Date.parse(concurrentReadback!.updated_at)).toBeGreaterThan(Date.parse(current.updated_at))
     const conflict = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/${original!.id}` && response.request().method() === 'PATCH')
     await save.click()
     expect((await conflict).status()).toBe(409)
