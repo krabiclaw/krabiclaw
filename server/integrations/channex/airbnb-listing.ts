@@ -8,9 +8,10 @@ import { ChannexDataError, integer, object, received, string } from './data'
  * What an Airbnb listing says about itself, read through Channex: its details
  * and its next 500 nights. Airbnb's listing (checked live on 2026-10-22) has
  * no time zone, email or phone: the time zone comes from the listing's
- * coordinates and the contact details from the host's own KrabiClaw account.
- * A field still unknown after that is reported as missing for the host to
- * supply; nothing is filled in for them.
+ * coordinates and the contact details from the organization, since Channex
+ * requires a contact email and phone on a property before it connects to
+ * Airbnb. A field still unknown after that is reported as missing for the
+ * host to supply; nothing is filled in for them.
  */
 
 export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'propertyType', 'childBeds', 'infantCots'] as const
@@ -33,8 +34,8 @@ export interface ListingDetails {
   checkOutTime: string | null
 }
 
-/** The host's own contact details, the account's email and verified phone, offered for the home. */
-export interface HostContact {
+/** The organization's guest contact details, which every imported home carries. */
+export interface OrganizationContact {
   email: string | null
   phone: string | null
 }
@@ -84,7 +85,7 @@ function coordinateTimezone(lat: unknown, lng: unknown): string | null {
   return isValidTimezone(zone) ? zone : null
 }
 
-export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, host: HostContact): Promise<ListingDetails> {
+export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {
   const raw = await channexRequest(env, `/channels/${encodeURIComponent(channelId)}/action/listing_details?${new URLSearchParams({ listing_id: listingId })}`)
   return provided(() => {
     const listing = object(object(raw.data, 'Listing details').listing, 'Airbnb listing')
@@ -102,8 +103,8 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
     }
     const timezone = coordinateTimezone(listing.lat, listing.lng)
     if (timezone) fields.timezone = timezone
-    if (host.email) fields.email = host.email
-    if (host.phone) fields.phone = host.phone
+    if (contact.email) fields.email = contact.email
+    if (contact.phone) fields.phone = contact.phone
     const booking = listing.booking_settings === undefined || listing.booking_settings === null ? {} : object(listing.booking_settings, 'Booking settings')
     if (listing.property_type_category !== undefined && listing.property_type_category !== null) {
       const category = string(listing.property_type_category, 'Airbnb property type')
