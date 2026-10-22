@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { organizationEventQuery } from '~/server/utils/organization-events'
+import { creationDedupeKey, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { requireHomeCapacity } from '~/server/utils/billing'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
@@ -800,11 +800,13 @@ export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db
  * billed as a home, not its location as a location: Basic is refused past the
  * homes it includes before anything is written, and the stay product's write
  * is guarded as a home. A home added by hand and one imported from a channel
- * are made here, the same way. The key replays every write.
+ * are made here, the same way. The key replays every write: a key that already
+ * made its location is a replay, not a new home, so it is not held to the
+ * limit the home it made may since have reached.
  */
 export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string): Promise<StayHome> {
   requireManager(access)
-  await requireHomeCapacity(env, db, access.organizationId)
+  if (!await readCreationRecord(db, creationDedupeKey('location', access.organizationId, idempotencyKey.trim()))) await requireHomeCapacity(env, db, access.organizationId)
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),

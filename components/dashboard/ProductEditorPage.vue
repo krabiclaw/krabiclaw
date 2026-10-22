@@ -781,6 +781,7 @@ const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} homes. Choose Growth or Business to add more.`, billing: `/dashboard/${String(route.params.orgSlug)}/billing` }
   const billed = isNew.value ? quote.adding.additional_homes > 0 : quote.homes.used > quote.homes.included
   if (!billed) return { text: `This home is one of your ${quote.homes.included} included homes.` }
+  if (!quote.homes.additional_price_minor) return { text: 'This home is not billed on your current subscription.' }
   if (!quote.billing.period_end) throw new Error('A billed home has no billing period')
   return { text: `This home adds ${formatPlanPrice(quote.homes.additional_price_minor)} per month to your plan, billed on your next invoice on ${formatExactDateTime(quote.billing.period_end)}.` }
 })

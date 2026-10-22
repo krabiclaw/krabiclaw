@@ -28,12 +28,20 @@ test('active locations and homes are reported to their Stripe meters, and only B
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'business-capacity-proof', exportName: 'Hub' } },
   } }] })
+  // The metered prices each Stripe subscription carries, as Stripe returns its items: Growth's carries
+  // the homes price; Business's is from before homes were priced and carries only the locations one.
+  const subscriptionMeters: Record<string, string[]> = { sub_grower: ['locations', 'homes'], sub_inn: ['locations'] }
   // Stripe receives the meter events; each one is kept as Stripe was sent it.
   const reported: Array<{ event: string; customer: string; value: number }> = []
   const originalFetch = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input))
     if (url.hostname !== 'api.stripe.com') return originalFetch(input, init)
+    const subscription = /^\/v1\/subscriptions\/(sub_[a-z]+)$/.exec(url.pathname)?.[1]
+    if (subscription) {
+      const items = subscriptionMeters[subscription]!.map(family => ({ object: 'subscription_item', id: `si_${family}`, price: { object: 'price', id: `price_${family}`, product: { object: 'product', id: `prod_${family}`, metadata: { product_family: family } } } }))
+      return Response.json({ object: 'subscription', id: subscription, customer: `cus_${subscription.slice(4)}`, items: { object: 'list', data: items, has_more: false } })
+    }
     assert.equal(url.pathname, '/v1/billing/meter_events')
     const body = new URLSearchParams(String(init?.body))
     reported.push({ event: body.get('event_name')!, customer: body.get('payload[stripe_customer_id]')!, value: Number(body.get('payload[value]')) })
@@ -83,6 +91,12 @@ test('active locations and homes are reported to their Stripe meters, and only B
     for (const key of ['villa-1', 'villa-2', 'villa-3']) villas.push(await home('inn', key))
     assert.deepEqual(await counts('inn'), { locations: 1, homes: 3 })
     assert.deepEqual(last('cus_inn'), { locations: 1, homes: 3 })
+    // A subscription without the homes price is charged nothing for homes: its quote prices each one at 0.
+    const innQuote = await homesQuote(env, db, 'inn', 1)
+    assert.deepEqual([innQuote.homes, innQuote.adding], [
+      { used: 3, included: 2, additional_price_minor: 0, amount_minor: 0 },
+      { count: 1, additional_homes: 1, amount_minor: 0, allowed: true },
+    ])
     // A stay product made at a location makes that location a home's: one more home, one fewer location.
     const cabin = await homeAt('inn', bistroId, 'Garden Cabin')
     assert.deepEqual(await counts('inn'), { locations: 0, homes: 4 })
@@ -157,6 +171,8 @@ test('active locations and homes are reported to their Stripe meters, and only B
     assert.deepEqual(await homesQuote(env, db, 'starter', 1), { ...starterQuote(2, 1, false), adding: { count: 1, additional_homes: 1, amount_minor: 900, allowed: false } })
     const homeLimit = { status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } } }
     await assert.rejects(home('starter', 'starter-villa-3'), homeLimit)
+    // A key that already made its home replays it; it is not a third home.
+    assert.deepEqual(await home('starter', 'starter-villa-2'), starterHomes[1])
     // The refusal wrote nothing: no third location was made for the refused home.
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM business_locations WHERE organization_id = 'starter'").first('n'), 4)
     // A stay product at one of the plain locations would be a third home too.
@@ -172,6 +188,11 @@ test('active locations and homes are reported to their Stripe meters, and only B
     assert.deepEqual(await counts('starter'), { locations: 2, homes: 1 })
     assert.equal((await updateLocation(db, 'starter', starterVilla, { status: 'active' }, OWNER, env)).status, 200)
     await assert.rejects(updateProduct(db, { env, organizationId: 'starter', productId: starterHomes[1]!.product_id, actor, patch: { active: true } }), homeLimit)
+    assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
+    // Deleting a home would make its location a third location: refused as a location while both slots are in use.
+    await assert.rejects(deleteProduct(db, { organizationId: 'starter', productId: starterHomes[1]!.product_id, env }), {
+      status: 402, data: { error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 } },
+    })
     assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
     assert.equal(reportsFor('cus_starter'), 0)
   } finally {

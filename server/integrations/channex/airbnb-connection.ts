@@ -330,19 +330,20 @@ export class AirbnbConnection {
   /**
    * Contact details the host typed because the organization had none become
    * the organization's, so the next import does not ask again. Validated as
-   * the organization settings validate them.
+   * the organization settings validate them. A detail set in Brand › Contact
+   * while the import ran is kept: each is written only while still empty.
    */
   private async saveOrganizationContact(details: ListingDetails, values: Record<DetailField, string>): Promise<void> {
     const sets: string[] = []
     const params: unknown[] = []
     if (details.missingFields.includes('email')) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email')
-      sets.push('contact_email = ?')
+      sets.push("contact_email = COALESCE(NULLIF(TRIM(contact_email), ''), ?)")
       params.push(values.email.toLowerCase())
     }
     if (details.missingFields.includes('phone')) {
       if (values.phone.length > 32) fail(422, 'INVALID_DETAIL', 'Contact phone must be 32 characters or fewer')
-      sets.push('contact_phone = ?')
+      sets.push("contact_phone = COALESCE(NULLIF(TRIM(contact_phone), ''), ?)")
       params.push(values.phone)
     }
     if (sets.length === 0) return
@@ -393,8 +394,6 @@ export class AirbnbConnection {
       }
       if (!isValidTimezone(values.timezone)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone')
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
-      // Every check has passed, so what the host typed becomes the organization's contact.
-      await this.saveOrganizationContact(details, values)
       // The home itself is checked and made as a home added by hand is: billed as a home, and refused past the homes Basic includes.
       const home = await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
@@ -413,6 +412,10 @@ export class AirbnbConnection {
       await execute(this.db, `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_calendar)
         VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
       [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)])
+      // The import is made, so what the host typed becomes the organization's
+      // contact. Saved last: a refused or failed import leaves the details
+      // missing, so the same form is accepted again on retry.
+      await this.saveOrganizationContact(details, values)
       return { product_id: home.product_id, stage: 'property', waiting: false }
     })
   }

@@ -124,11 +124,19 @@ const locationsRow = computed<EditorNavigationItem | null>(() => {
   if (used === undefined) return null
   return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
 })
-// Homes from the quote the capacity check answers by: in use, included, and what the ones past those cost each month.
+// Homes from the quote the capacity check answers by: in use, included, and what
+// the ones past those cost each month. A subscription from before homes were
+// priced carries no homes price and is charged nothing for them, so the row says so.
 const homesRow = computed<EditorNavigationItem | null>(() => {
   const current = homes.value
   if (!current) return null
-  return { id: 'homes', label: 'Homes', summary: `${current.homes.used} ${current.homes.used === 1 ? 'home' : 'homes'} · ${current.homes.included} included · ${onStarter.value ? `${nameOf(STARTER_PLAN_ID)} stops at ${current.homes.included}` : `${formatPrice(current.homes.amount_minor)} per month`}` }
+  const counted = `${current.homes.used} ${current.homes.used === 1 ? 'home' : 'homes'}`
+  const summary = onStarter.value
+    ? `${counted} · ${current.homes.included} included · ${nameOf(STARTER_PLAN_ID)} stops at ${current.homes.included}`
+    : current.homes.additional_price_minor
+      ? `${counted} · ${current.homes.included} included · ${formatPrice(current.homes.amount_minor)} per month`
+      : `${counted} · not billed on this subscription`
+  return { id: 'homes', label: 'Homes', summary }
 })
 
 const serviceRows = computed<EditorNavigationItem[]>(() => {

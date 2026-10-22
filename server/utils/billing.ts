@@ -6,7 +6,7 @@ import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
-import { ADDITIONAL_HOME_PRICE, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
+import { ADDITIONAL_HOME_PRICE, BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
@@ -28,7 +28,8 @@ export interface OrganizationBillingStatus {
   /** Better Auth's subscription schedule for a plan change at the end of the period. */
   stripeScheduleId?: string
   billingInterval?: 'month' | 'year'
-  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month' | 'year' }
+  /** The plan item's own charge, and the metered prices the subscription carries: an earlier contract may lack one added since. */
+  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month' | 'year'; meters: BillingMeterKey[] }
   /** What the plan bills by count: its active locations and homes. */
   usage: BillingCapacity
   entitlements: EntitlementsMap
@@ -106,7 +107,12 @@ export async function getOrganizationSubscriptionPrice(
   if (!interval || item.price.recurring?.interval_count !== 1) throw new Error('Stripe subscription has an unsupported billing interval')
   const currency = item.price.currency.toUpperCase()
   if (!isCurrencyCode(currency)) throw new Error(`Stripe subscription has unsupported currency ${item.price.currency}`)
-  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency, interval }
+  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency, interval, meters: subscriptionMeters(native) }
+}
+
+/** The metered prices a subscription carries, read from its items' products (expanded): one from before a meter was added lacks it. */
+function subscriptionMeters(native: Stripe.Subscription): BillingMeterKey[] {
+  return BILLING_METER_KEYS.filter(key => native.items.data.some(row => typeof row.price.product !== 'string' && !row.price.product.deleted && row.price.product.metadata.product_family === key))
 }
 
 function billingInterval(value: string | undefined): 'month' | 'year' | undefined {
@@ -269,6 +275,7 @@ export const MAX_HOMES_QUOTE = 500
 export interface HomesQuote {
   plan: string
   currency: 'USD'
+  /** `additional_price_minor` is what each home past the included ones costs: 0 on a paid subscription from before homes were priced. */
   homes: { used: number; included: number; additional_price_minor: number; amount_minor: number }
   adding: { count: number; additional_homes: number; amount_minor: number; allowed: boolean }
   billing: { period_end: string | null; prorated: false }
@@ -290,23 +297,44 @@ function additionalHomes(used: number, adding: number): number {
 }
 
 /**
- * The quote for adding `adding` homes to this organization. The plan is read
- * the way every capacity check reads it, so a quote that allows the homes is
- * one the write will allow: Basic refuses past the homes it includes, and a
- * paid plan bills each further one at the end of the period.
+ * Whether this organization's plan allows `adding` more homes: Basic refuses
+ * past the homes it includes, a paid plan never does. The capacity check and
+ * the quote both decide by this, so a quote that allows the homes is one the
+ * write will allow. Reads the subscription rows and nothing from Stripe.
  */
-export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number): Promise<HomesQuote> {
+async function homeAllowance(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number) {
   const [used, subscriptions] = await Promise.all([countActiveHomes(db, organizationId), readOrganizationSubscriptions(env, [organizationId])])
   const rows = subscriptions.get(organizationId) ?? []
   const plan = planFromSubscriptions(organizationId, rows)
   const paid = isKnownRecurringPlan(plan)
+  return { plan, used, subscription: paid ? entitlingSubscription(organizationId, rows) : null, allowed: paid || used + adding <= INCLUDED_HOMES }
+}
+
+/**
+ * The quote for adding `adding` homes to this organization. A paid plan bills
+ * each home past the included ones at the end of the period through the
+ * homes price on its subscription; a subscription from before homes were
+ * priced carries none and is charged nothing for them, so its price per home
+ * is 0. Basic has no period and is quoted the published price, what the homes
+ * past its included ones cost once Growth or Business is chosen.
+ */
+export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number): Promise<HomesQuote> {
+  const { plan, used, subscription, allowed } = await homeAllowance(env, db, organizationId, adding)
+  let price = ADDITIONAL_HOME_PRICE
+  if (subscription) {
+    if (!subscription.stripeSubscriptionId) throw new Error(`Subscription ${subscription.id} has no Stripe subscription`)
+    const native = await getStripe(env).subscriptions.retrieve(subscription.stripeSubscriptionId, { expand: ['items.data.price.product'] })
+    const customerId = typeof native.customer === 'string' ? native.customer : native.customer.id
+    if (customerId !== subscription.stripeCustomerId) throw new Error('Stripe subscription customer does not match its organization')
+    if (!subscriptionMeters(native).includes('homes')) price = 0
+  }
   const added = additionalHomes(used, adding)
   return {
     plan,
     currency: 'USD',
-    homes: { used, included: INCLUDED_HOMES, additional_price_minor: ADDITIONAL_HOME_PRICE, amount_minor: additionalHomes(0, used) * ADDITIONAL_HOME_PRICE },
-    adding: { count: adding, additional_homes: added, amount_minor: added * ADDITIONAL_HOME_PRICE, allowed: paid || used + adding <= INCLUDED_HOMES },
-    billing: { period_end: paid ? entitlingSubscription(organizationId, rows)?.periodEnd?.toISOString() ?? null : null, prorated: false },
+    homes: { used, included: INCLUDED_HOMES, additional_price_minor: price, amount_minor: additionalHomes(0, used) * price },
+    adding: { count: adding, additional_homes: added, amount_minor: added * price, allowed },
+    billing: { period_end: subscription?.periodEnd?.toISOString() ?? null, prorated: false },
   }
 }
 
@@ -314,12 +342,12 @@ export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationI
  * Refuse, before anything is written, the home Basic does not include. A home
  * is a location and then a stay product at it, written one after the other;
  * the location is a home's from the start, so it is not guarded as a location,
- * and the stay product's own write is guarded as a home. The quote decides:
- * on Basic a home past the included ones creates no location.
+ * and the stay product's own write is guarded as a home. The allowance the
+ * quote reports decides: on Basic a home past the included ones creates no location.
  */
 export async function requireHomeCapacity(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<void> {
-  const quote = await homesQuote(env, db, organizationId, 1)
-  if (!quote.adding.allowed) throw capacityRefusalError(homeLimit(quote.homes.used))
+  const { used, allowed } = await homeAllowance(env, db, organizationId, 1)
+  if (!allowed) throw capacityRefusalError(homeLimit(used))
 }
 
 /**

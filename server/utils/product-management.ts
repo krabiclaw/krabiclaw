@@ -18,7 +18,7 @@ import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPage
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
-import { executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
+import { executeWithinCapacity } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
@@ -1987,7 +1987,9 @@ export async function deleteProduct(db: DbClient, input: {
   }
   const pages = await Promise.all(bound.map(page => prepareTenantPageDelete(db, page.id, { scope: { organizationId: input.organizationId }, expectedUpdatedAt: page.updated_at })))
   const invalidations = await productCacheInvalidations(db, input.organizationId, input.productId, 'product_deleted')
-  await executeBatch(db, [
+  // A home deleted is one fewer home, and its location, if still active, is a
+  // location again: guarded as one, since Basic may already have the locations it includes.
+  await executeProductWrites(db, input.env, input.organizationId, [
     { query: `UPDATE products SET updated_at=NULL WHERE organization_id=? AND id=? AND (EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND product_id=?)
       OR EXISTS(SELECT 1 FROM stays WHERE organization_id=? AND product_id=?)
       OR EXISTS(SELECT 1 FROM channel_threads WHERE organization_id=? AND product_id=?)
@@ -1997,12 +1999,10 @@ export async function deleteProduct(db: DbClient, input: {
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
-  ], { operation: 'Delete product' }).catch(error => {
+  ], { operation: 'Delete product', action: 'delete it', stay: product.kind === 'stay' }).catch((error: unknown) => {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')
     throw error
   })
-  // A home deleted is one fewer home; its location, if still active, is a location again.
-  if (product.kind === 'stay') await reportBillingUsage(input.env, db, input.organizationId)
   await publishStayProducts(input.env, [product])
 }
 
