@@ -58,7 +58,7 @@ test('Upcoming keeps its navigation and loading visible while its real first pag
   }
 })
 
-test('Today keeps its location across range changes', async ({ page, baseURL }, testInfo) => {
+test('Today keeps its location across range changes', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!)
   await dismissPreviewToolbar(page)
   await page.setViewportSize({ width: 390, height: 844 })
@@ -75,7 +75,6 @@ test('Today keeps its location across range changes', async ({ page, baseURL }, 
   await page.reload()
   await expect(page).toHaveURL(url => url.searchParams.get('locationId') === 'loc-demo' && url.searchParams.get('range') === 'upcoming')
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
-  await page.screenshot({ path: testInfo.outputPath('upcoming-mobile.png'), fullPage: true })
 
   await page.getByRole('tab', { name: 'Today', exact: true }).click()
   await expect(page).toHaveURL(url => url.searchParams.get('locationId') === 'loc-demo' && url.searchParams.get('range') !== 'upcoming')

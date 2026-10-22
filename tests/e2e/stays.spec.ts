@@ -83,7 +83,7 @@ function previewLocators(page: Page) {
   return { previewLink, previewModal, previewIframe, preview: previewIframe.contentFrame() }
 }
 
-test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, browser, baseURL }, testInfo) => {
+test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!)
@@ -172,8 +172,6 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     await expect(accountHome.getByText(addressText, { exact: true })).toBeVisible()
     await expect(accountHome.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveAttribute('href', mapUrl)
     await receiptPage.setViewportSize({ width: 390, height: 844 })
-    await receiptPage.screenshot({ path: testInfo.outputPath('confirmed-guest-location-receipt-mobile.png'), fullPage: true, animations: 'disabled' })
-    await accountPage.screenshot({ path: testInfo.outputPath('confirmed-guest-location-account-desktop.png'), fullPage: true, animations: 'disabled' })
 
     await page.getByRole('button', { name: 'Cancel stay' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
@@ -231,7 +229,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 })
 
 for (const concern of ['property-and-amenities', 'description-and-safety'] as const) {
-  test(concern === 'property-and-amenities' ? 'a host authors property facts and amenities and previews their saved guest projection' : 'a host describes a place to stay through its focused editors and previews the saved guest page', async ({ page, browser, baseURL }, testInfo) => {
+  test(concern === 'property-and-amenities' ? 'a host authors property facts and amenities and previews their saved guest projection' : 'a host describes a place to stay through its focused editors and previews the saved guest page', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home } = await createStayHome(page, baseURL!)
@@ -287,17 +285,13 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(propertyPicker.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
     await expect(listingFloor).toHaveValue('2')
     await propertyGroup.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath('property-choices-mobile.png') })
     await propertySize.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath('property-details-mobile.png') })
     await page.setViewportSize({ width: 1440, height: 900 })
     const savedPropertyCard = page.getByTestId('editor-card-property-type')
     await expect(savedPropertyCard).toBeVisible()
     await expect(savedPropertyCard).toContainText('Choose property type')
     await propertyGroup.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath('property-details-desktop.png'), animations: 'disabled' })
     await propertySize.scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath('property-details-lower-desktop.png'), animations: 'disabled' })
     const interceptProperty = (url: URL) => url.pathname === productWritePath
     await page.route(interceptProperty, async route => route.request().method() === 'PATCH' ? await route.abort('failed') : await route.continue())
     const interruptedProperty = page.waitForEvent('requestfailed', outgoing => outgoing.method() === 'PATCH' && new URL(outgoing.url()).pathname === productWritePath)
@@ -384,7 +378,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(amenityPicker.getByRole('button', { name: 'Bathtub', exact: true })).toBeVisible()
     await expect(amenityPicker.getByRole('button', { name: 'Wifi', exact: true })).toHaveCount(0)
     await expect(dryer).toHaveCount(0)
-    await page.screenshot({ path: testInfo.outputPath('amenity-categories-mobile.png') })
     // Search crosses category boundaries while retaining the unsaved selection.
     await amenityPicker.getByRole('button', { name: 'Search amenities', exact: true }).click()
     await amenityPicker.getByRole('searchbox', { name: 'Search amenities', exact: true }).fill('e2e-no-matching-amenity')
@@ -398,7 +391,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(wifi).toBeVisible()
     await wifi.click()
     await expect(wifi).toHaveAttribute('aria-pressed', 'true')
-    await page.screenshot({ path: testInfo.outputPath('amenity-search-mobile.png') })
     await amenityPicker.getByRole('button', { name: 'Done', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/products/${productId}/amenities$`))
     const described = await call<{ product: { stay: { property_type_group: string; property_type: string; amenities: string[] } } }>('get_product', { product_id: productId })
@@ -450,7 +442,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(page).toHaveURL(new RegExp(`/products/${productId}/amenities$`))
     await expect(amenityPicker).not.toBeVisible()
     await expect(amenityOverview.getByText('Wifi', { exact: true })).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('amenities-mobile.png') })
     await page.setViewportSize({ width: 1440, height: 900 })
 
     // Desktop Back returns from Add to the selected overview and discards its draft.
@@ -475,7 +466,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(amenitiesCard).toContainText('Wifi')
     await amenitiesCard.scrollIntoViewIfNeeded()
     await expect(amenitiesCard).toBeInViewport()
-    await page.screenshot({ path: testInfo.outputPath('amenities-desktop.png') })
 
 
     const { previewLink, previewModal, preview } = previewLocators(page)
@@ -487,7 +477,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
       await expect(term.locator('..').getByRole('definition')).toHaveText(value)
     }
     await preview.getByRole('term').filter({ hasText: /^Listing type$/ }).scrollIntoViewIfNeeded()
-    await page.screenshot({ path: testInfo.outputPath('property-guest-facts-desktop.png'), animations: 'disabled' })
     const propertySchema = preview.locator('script[type="application/ld+json"]')
     await expect(propertySchema).toHaveCount(1)
     const accommodation = (JSON.parse((await propertySchema.textContent())!) as { '@graph': Array<Record<string, unknown>> })['@graph'].find(node => node['@type'] === 'Accommodation')
@@ -560,7 +549,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     expect(descriptionRead.data!.product.description).toBe(listingDescription)
     expect(descriptionRead.data!.product.details).toMatchObject(listingDetails)
     await expect(descriptionOverview).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('description-desktop.png') })
 
     // The two cancellation periods retain their own policy. Reading more about
     // another policy does not select it, and cancelling an edit changes neither.
@@ -588,7 +576,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await page.reload()
     await expect(cancellationPolicy.getByRole('radio', { name: /^Flexible/ })).toBeChecked()
     await expect(cancellationPolicy).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('cancellation-short-term-desktop.png') })
     await cancellationPolicy.getByText('Moderate', { exact: true }).click()
     await cancellationPolicy.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`/products/${productId}/cancellation$`))
@@ -596,7 +583,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     expect(policiesRead.error).toBeNull()
     expect(policiesRead.data!.product.stay).toMatchObject({ cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm' })
     await expect(cancellationOverview).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('cancellation-desktop.png') })
 
     // Saved settings are separate concerns; each save preserves the other
     // concerns and a cancelled capacity edit restores the loaded value.
@@ -610,7 +596,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await page.reload()
     await expect(guestsPanel.getByRole('spinbutton', { name: 'Guests', exact: true })).toHaveValue('6')
     await expect(guestsPanel).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('guests-desktop.png') })
     await guestsPanel.getByRole('spinbutton', { name: 'Guests', exact: true }).fill('9')
     await guestsPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(guestsPanel).not.toBeVisible()
@@ -622,7 +607,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await page.getByTestId('editor-card-availability').click()
     await expect(availabilityPanel.getByRole('spinbutton', { name: 'Minimum nights', exact: true })).toHaveValue('1')
     await expect(availabilityPanel).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('availability-desktop.png') })
     await availabilityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(availabilityPanel).not.toBeVisible()
     await page.getByRole('tab', { name: 'Arrival guide', exact: true }).click()
@@ -638,7 +622,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(arrivalPanel.getByLabel(/^Check-in from/)).toHaveValue('16:00')
     await expect(arrivalPanel.getByLabel(/^Checkout by/)).toHaveValue('10:00')
     await expect(arrivalPanel).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('arrival-time-desktop.png') })
     await arrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
     await expect(arrivalPanel).not.toBeVisible()
@@ -719,7 +702,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await safetySection.getByRole('link', { name: 'Unsecured pool or hot tub details', exact: true }).click()
     const safetyDetail = page.locator('#dashboard-panel-product-guest-safety-detail')
     await safetyDetail.getByRole('textbox', { name: 'Unsecured pool or hot tub', exact: true }).fill(poolDetail)
-    await page.screenshot({ path: testInfo.outputPath('guest-safety-detail-desktop.png'), animations: 'disabled' })
     await safetyDetail.getByRole('button', { name: 'Continue', exact: true }).click()
     await safetySection.getByRole('link', { name: 'Unsecured pool or hot tub details', exact: true }).click()
     await safetyDetail.getByRole('textbox', { name: 'Unsecured pool or hot tub', exact: true }).fill('Discard this local replacement.')
@@ -838,13 +820,11 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/guest-safety`)
     await expect(safetySection).toHaveCount(0)
     await expect(safetyIndex).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath('guest-safety-index-desktop.png'), animations: 'disabled' })
     await devicesLink.click()
     await expect(safetySection.getByRole('group', { name: 'Exterior security cameras', exact: true }).getByRole('button', { name: 'No', exact: true })).toBeVisible()
     await expect(safetySection.getByRole('group', { name: 'Exterior security cameras', exact: true }).getByRole('button', { name: 'No', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(safetySection.getByRole('group', { name: 'Noise decibel monitors', exact: true }).getByRole('button', { name: 'Yes', exact: true })).toBeVisible()
     await expect(safetySection.getByRole('group', { name: 'Noise decibel monitors', exact: true }).getByRole('button', { name: 'Yes', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await page.screenshot({ path: testInfo.outputPath('guest-safety-devices-desktop.png'), animations: 'disabled' })
     await safetySection.getByRole('group', { name: 'Smoke alarm', exact: true }).getByRole('button', { name: 'Yes', exact: true }).click()
     const alarmSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
     await safetySection.getByRole('button', { name: 'Save', exact: true }).click()
@@ -860,17 +840,14 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(safetySection).toHaveCount(0)
     await expect(safetyIndex).toBeVisible()
     await page.setViewportSize({ width: 390, height: 844 })
-    await page.screenshot({ path: testInfo.outputPath('guest-safety-index-mobile.png'), animations: 'disabled' })
     await devicesLink.click()
     await expect(safetySection.getByRole('group', { name: 'Exterior security cameras', exact: true }).getByRole('button', { name: 'No', exact: true })).toBeVisible()
     await expect(safetySection.getByRole('group', { name: 'Exterior security cameras', exact: true }).getByRole('button', { name: 'No', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(safetySection.getByRole('group', { name: 'Smoke alarm', exact: true }).getByRole('button', { name: 'Yes', exact: true })).toHaveAttribute('aria-pressed', 'true')
     for (const answer of ['No', 'Yes']) await expect(safetySection.getByRole('group', { name: 'Carbon monoxide alarm', exact: true }).getByRole('button', { name: answer, exact: true })).toHaveAttribute('aria-pressed', 'false')
-    await page.screenshot({ path: testInfo.outputPath('guest-safety-devices-mobile.png'), animations: 'disabled' })
     await safetySection.getByRole('link', { name: 'Noise decibel monitors details', exact: true }).click()
     await expect(safetyDetail.getByRole('textbox', { name: 'Noise decibel monitors', exact: true })).toBeVisible()
     await expect(safetyDetail.getByRole('textbox', { name: 'Noise decibel monitors', exact: true })).toHaveValue(monitorDetail)
-    await page.screenshot({ path: testInfo.outputPath('guest-safety-detail-mobile.png'), animations: 'disabled' })
     await safetyDetail.getByRole('button', { name: 'Cancel', exact: true }).click()
     await safetySection.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.setViewportSize({ width: 1440, height: 900 })
@@ -955,7 +932,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     // With no rules set, House rules holds only the home's own times and party, as Airbnb's does.
     const houseRules = preview.getByRole('heading', { name: 'House rules', exact: true }).locator('xpath=..').getByRole('listitem')
     await expect(houseRules).toHaveText(['Check-in after 4:00 PM', 'Checkout before 10:00 AM', '6 guests maximum'])
-    await page.screenshot({ path: testInfo.outputPath('stay-preview-desktop.png') })
     await previewModal.getByRole('tab', { name: 'Mobile view', exact: true }).click()
     await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'mobile')
     await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
@@ -973,7 +949,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
     expect(await preview.locator('html').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
-    await page.screenshot({ path: testInfo.outputPath('stay-preview-mobile.png') })
     await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(page).toHaveURL(previewSource)
     await expect(previewModal).not.toBeVisible()
@@ -1011,7 +986,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
 })
 }
 
-test('a host edits the shared lodging location and protects its exact address and pin in every guest projection', async ({ page, baseURL }, testInfo) => {
+test('a host edits the shared lodging location and protects its exact address and pin in every guest projection', async ({ page, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, slug, organizationId, location, call, productId } = await createStayHome(page, baseURL!)
@@ -1047,10 +1022,8 @@ test('a host edits the shared lodging location and protects its exact address an
     await expect(locationDescription.getByRole('textbox', { name: label, exact: true })).toHaveValue('')
     await locationDescription.getByRole('textbox', { name: label, exact: true }).fill(value)
     if (field === 'neighborhood_description') {
-      await page.screenshot({ path: testInfo.outputPath('location-neighborhood-desktop.png'), animations: 'disabled' })
       await page.setViewportSize({ width: 390, height: 844 })
       await expect(locationDescription.getByRole('textbox', { name: label, exact: true })).toHaveValue(value)
-      await page.screenshot({ path: testInfo.outputPath('location-neighborhood-mobile.png'), animations: 'disabled' })
       await page.setViewportSize({ width: 1440, height: 900 })
     }
     const textSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
@@ -1071,7 +1044,6 @@ test('a host edits the shared lodging location and protects its exact address an
   await expect(scenicPicker.getByRole('list').getByRole('button')).toHaveCount(21)
   await scenicPicker.getByRole('button', { name: 'Mountain view', exact: true }).click()
   await expect(scenicPicker.getByRole('button', { name: 'Mountain view', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await page.screenshot({ path: testInfo.outputPath('location-scenic-views-desktop.png'), animations: 'disabled' })
   const scenicSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
   await scenicPicker.getByRole('button', { name: 'Done', exact: true }).click()
   const scenicResponse = await scenicSaved
@@ -1166,19 +1138,15 @@ test('a host edits the shared lodging location and protects its exact address an
   expect(homeAfterAddress.error).toBeNull()
   expect(homeAfterAddress.data!.product.stay!.location_id).toBe(location.id)
   await expect(productLocation).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('location-index-desktop.png'), animations: 'disabled' })
   await addressLink.click()
   await expect(streetAddress).toHaveValue('12 Test Road')
   await expect(apartment).toHaveValue('Apartment 4')
   await expect(thirdAddressLine).toHaveValue('East building')
   await expect(addressCity).toHaveValue('Nong Thale')
   await streetAddress.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: testInfo.outputPath('location-address-desktop.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 390, height: 844 })
   await streetAddress.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: testInfo.outputPath('location-address-upper-mobile.png'), animations: 'disabled' })
   await country.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: testInfo.outputPath('location-address-lower-mobile.png'), animations: 'disabled' })
   await addressPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -1216,11 +1184,9 @@ test('a host edits the shared lodging location and protects its exact address an
   // Capture the provider's rendered map, rather than the iframe's empty initial document.
   await expect(specificPreview.contentFrame().getByRole('region', { name: 'Map', exact: true })).toBeVisible()
   await expect(specificPreview.contentFrame().getByRole('link', { name: 'Terms (opens in new tab)', exact: true })).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('location-sharing-desktop.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(specificLocation).toBeChecked()
   await expect(specificPreview.contentFrame().getByRole('link', { name: 'Terms (opens in new tab)', exact: true })).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('location-sharing-mobile.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 1440, height: 900 })
   await specificLocation.click()
   const generalPreview = sharingPanel.locator('iframe[title="General location preview"]')
@@ -1366,7 +1332,7 @@ test('a host edits the shared lodging location and protects its exact address an
 
 })
 
-test('a host distinguishes absent alarms from unanswered alarms and clears their descriptions and room claims together', async ({ page, baseURL }, testInfo) => {
+test('a host distinguishes absent alarms from unanswered alarms and clears their descriptions and room claims together', async ({ page, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, slug, organizationId, location, call, productId } = await createStayHome(page, baseURL!)
@@ -1433,10 +1399,8 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   await devicesLink.click()
   await expect(smoke.getByRole('button', { name: 'No', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(carbon.getByRole('button', { name: 'No', exact: true })).toHaveAttribute('aria-pressed', 'false')
-  await page.screenshot({ path: testInfo.outputPath('alarm-answers-devices-desktop.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 390, height: 844 })
   await smoke.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: testInfo.outputPath('alarm-answers-devices-mobile.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 1440, height: 900 })
 
   await smoke.getByRole('button', { name: 'Yes', exact: true }).click()
@@ -1449,9 +1413,6 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   await expect(description).toHaveValue('')
   const alarmDescription = 'A smoke alarm is mounted outside the bedroom.\nAnother is in the kitchen.'
   await description.fill(alarmDescription)
-  await page.screenshot({ path: testInfo.outputPath('alarm-description-desktop.png'), animations: 'disabled' })
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.screenshot({ path: testInfo.outputPath('alarm-description-mobile.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 1440, height: 900 })
   page.on('request', trackDraft)
   await detail.getByRole('button', { name: 'Continue', exact: true }).click()
@@ -1505,7 +1466,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
 })
 
-test("a host uploads, arranges, describes and removes a place to stay's photos", async ({ page, baseURL }, testInfo) => {
+test("a host uploads, arranges, describes and removes a place to stay's photos", async ({ page, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
@@ -1631,7 +1592,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   const allPhotosAction = photoOverview.getByRole('link', { name: 'All photos', exact: true })
   await expect(allPhotosAction).toBeInViewport({ ratio: 1 })
   await expect.poll(() => allPhotosAction.locator('[data-slot="label"]').evaluate(label => label.scrollWidth <= label.clientWidth)).toBe(true)
-  await page.screenshot({ path: testInfo.outputPath('stay-photos-overview-desktop.png') })
   await allPhotosAction.click()
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}`)
   const photoGrid = page.locator('#dashboard-panel-product-all-photos')
@@ -1679,7 +1639,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await expect(allPhotosBack).toBeVisible()
   await expect(allPhotosBack).toHaveAttribute('href', photoPath)
   await allPhotosBack.click({ trial: true })
-  await page.screenshot({ path: testInfo.outputPath('stay-photos-grid-desktop.png'), animations: 'disabled' })
 
   await photoLinks.nth(2).click()
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}/${blue.id}`)
@@ -1723,7 +1682,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   const describedProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(describedProduct.error).toBeNull()
   expect(describedProduct.data!.product.image).toMatchObject({ asset_id: blue.id, alt_text: photoDescription })
-  await page.screenshot({ path: testInfo.outputPath('stay-photo-description-desktop.png') })
 
   await page.setViewportSize({ width: 390, height: 844 })
   await photoDetail.getByRole('link', { name: 'Edit visual description', exact: true }).click()
@@ -1737,7 +1695,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await expect(photoDetail.locator('img')).toHaveAttribute('alt', photoDescription)
   await expect(photoDetail.locator('img')).toHaveJSProperty('naturalWidth', blue.width)
   await expect(photoDetail.locator('img')).toHaveJSProperty('naturalHeight', blue.height)
-  await page.screenshot({ path: testInfo.outputPath('stay-photo-detail-mobile.png') })
   await photoDetail.getByRole('button', { name: 'Remove photo', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}`)
   await expect(photoLinks).toHaveCount(2)
@@ -1750,7 +1707,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   const photoSelection = page.getByTestId('grid-editor-takeover')
   await photoSelection.getByRole('button', { name: 'Select Photo 2', exact: true }).click()
   await expect(photoSelection.getByRole('button', { name: 'Select Photo 2', exact: true })).toHaveAttribute('aria-pressed', 'true')
-  await page.screenshot({ path: testInfo.outputPath('stay-photos-selection-mobile.png') })
   await photoSelection.getByRole('button', { name: 'Remove selected photos', exact: true }).click()
   await expect(photoSelection).not.toBeVisible()
   await expect(photoLinks).toHaveCount(1)
@@ -1775,7 +1731,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
 })
 
 for (const concern of ['room-tour', 'accessibility'] as const) {
-  test(concern === 'room-tour' ? 'a host authors a room photo tour and shares the same rooms through CMS, MCP and the guest gallery' : 'a host authors listing and bedroom accessibility evidence through CMS, MCP and the guest gallery', async ({ page, baseURL }, testInfo) => {
+  test(concern === 'room-tour' ? 'a host authors a room photo tour and shares the same rooms through CMS, MCP and the guest gallery' : 'a host authors listing and bedroom accessibility evidence through CMS, MCP and the guest gallery', async ({ page, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const pageErrors: string[] = []
@@ -1892,9 +1848,6 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true })).toBeChecked()
     await expect(homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await page.screenshot({ path: testInfo.outputPath('home-accessibility-feature-desktop.png'), animations: 'disabled' })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.screenshot({ path: testInfo.outputPath('home-accessibility-feature-mobile.png'), animations: 'disabled' })
     await page.setViewportSize({ width: 1440, height: 900 })
   } else {
     // The room-tour journey starts with independently authored evidence facts;
@@ -1990,7 +1943,6 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await page.setViewportSize({ width: 390, height: 844 })
     await privacyPanel.getByRole('switch', { name: 'Private attached bathroom', exact: true }).click()
     await expect(privacyPanel.getByRole('switch', { name: 'Private attached bathroom', exact: true })).toBeChecked()
-    await page.screenshot({ path: testInfo.outputPath('room-bedroom-privacy-mobile.png'), animations: 'disabled' })
     await privacyPanel.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${roomPath}`)
     await page.setViewportSize({ width: 1440, height: 900 })
@@ -2079,7 +2031,6 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await expect(addBedroomPhotos).not.toBeVisible()
     await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
     await expect(roomGrid.getByRole('link', { name: /^Sleeping arrangements/ }).getByText('1 queen bed', { exact: true })).toBeInViewport({ ratio: 1 })
-    await page.screenshot({ path: testInfo.outputPath('room-details-host-desktop.png'), animations: 'disabled' })
     await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Bed linens')
     await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Wifi')
     await roomGrid.getByRole('link', { name: /^Amenities/ }).click()
@@ -2090,16 +2041,12 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toBeChecked()
     await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
     await amenityPanel.getByTestId('room-amenities-suggested').click()
-    await page.screenshot({ path: testInfo.outputPath('room-amenities-host-desktop.png'), animations: 'disabled' })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.screenshot({ path: testInfo.outputPath('room-amenities-host-mobile.png'), animations: 'disabled' })
     await page.setViewportSize({ width: 1440, height: 900 })
     await amenityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${roomPath}`)
     await roomGrid.getByRole('link', { name: /^Sleeping arrangements/ }).click()
     await expect(bedPanel.getByRole('spinbutton', { name: 'Queen', exact: true })).toHaveValue('1')
     await expect(bedPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await page.screenshot({ path: testInfo.outputPath('room-sleeping-arrangements-desktop.png'), animations: 'disabled' })
     await bedPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${roomPath}`)
 
@@ -2273,16 +2220,10 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect([greenEvidence.data!.product.image!.asset_id, ...greenEvidence.data!.product.gallery.map(photo => photo.asset_id)]).toEqual([red.id, blue.id, green.id])
     await expect(accessibilityIndex.getByRole('link', { name: /^Step-free access/ })).toContainText('1 photo')
     await expect(accessibilityIndex.getByRole('link', { name: /^Entrance wider than 32 inches/ })).toContainText('Not available')
-    await page.screenshot({ path: testInfo.outputPath('room-accessibility-host-desktop.png'), animations: 'disabled' })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.screenshot({ path: testInfo.outputPath('room-accessibility-host-mobile.png'), animations: 'disabled' })
     await page.setViewportSize({ width: 1440, height: 900 })
     await accessibilityIndex.getByRole('link', { name: /^Step-free access/ }).click()
     await expect(accessibilityPanel.getByRole('button', { name: 'Use photo 3 as evidence', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(accessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await page.screenshot({ path: testInfo.outputPath('room-accessibility-feature-desktop.png'), animations: 'disabled' })
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.screenshot({ path: testInfo.outputPath('room-accessibility-feature-mobile.png'), animations: 'disabled' })
     await page.setViewportSize({ width: 1440, height: 900 })
     await accessibilityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${accessibilityPath}`)
@@ -2306,7 +2247,6 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   await chooseRoom.getByRole('textbox', { name: 'Search rooms and spaces', exact: true }).fill('Living room')
   await chooseRoom.getByText('Living room', { exact: true }).click()
   await expect(chooseRoom.getByRole('radio', { name: 'Living room', exact: true })).toBeChecked()
-  await page.screenshot({ path: testInfo.outputPath('stay-photo-room-picker-desktop.png') })
   await chooseRoom.getByRole('button', { name: 'Add', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`${photoPath}/rooms/(?!${bedroomId})[^/]+$`))
   const livingRoomProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
@@ -2341,11 +2281,9 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   const guestHomeEvidence = guestHomeAccessibility.getByRole('button', { name: 'View Path to entrance lit at night, photo 1', exact: true })
   await expect(guestHomeEvidence.locator('img')).toHaveAttribute('src', red.url)
   await guestHomeAccessibility.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: testInfo.outputPath('home-accessibility-guest-desktop.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
   await guestHomeAccessibility.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: testInfo.outputPath('home-accessibility-guest-mobile.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 1440, height: 900 })
   await guestHomeEvidence.click()
   await expect(preview.locator(`img.object-contain[src="${red.url}"]`)).toBeInViewport({ ratio: 0.9 })
@@ -2367,11 +2305,9 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   await expect(guestLivingRoom).not.toContainText('Private attached bathroom')
   await expect(guestLivingRoom).not.toContainText('No sleeping arrangements')
   await guestBedroom.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: testInfo.outputPath('room-guest-sleeping-desktop.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
   await guestBedroom.scrollIntoViewIfNeeded()
-  await page.screenshot({ path: testInfo.outputPath('room-guest-sleeping-mobile.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 1440, height: 900 })
   await guestBedroom.getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).click()
   await expect(preview.locator(`img.object-contain[src="${green.url}"]`)).toBeInViewport({ ratio: 0.9 })
@@ -2395,7 +2331,6 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   await livingRoomDestination.locator('xpath=ancestor::label[1]').click()
   await expect(livingRoomDestination).toBeChecked()
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.screenshot({ path: testInfo.outputPath('stay-move-photos-mobile.png') })
   await movePhotos.getByRole('button', { name: 'Move', exact: true }).click()
   await expect(movePhotos).not.toBeVisible()
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -2412,9 +2347,6 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${photoPath}`)
   await expect(photoOverview.getByTestId(`stay-photo-room-${livingRoomId}`)).toContainText('1 photo')
-  await page.screenshot({ path: testInfo.outputPath('stay-photo-tour-desktop.png') })
-  await page.setViewportSize({ width: 390, height: 844 })
-  await page.screenshot({ path: testInfo.outputPath('stay-photo-tour-mobile.png') })
   await page.setViewportSize({ width: 1440, height: 900 })
   await previewLink.click()
   await expect(previewModal).toBeVisible()
@@ -2444,12 +2376,10 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   await expect(publicTour.locator(`#photo-room-${bedroomId}`).getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).locator('img')).toHaveAttribute('src', green.url)
   await expect(publicTour.locator(`#photo-room-${livingRoomId}`)).toContainText('TV')
   for (const [index, photo] of uploadedPhotos.entries()) await expect(publicTour.locator('section > div.grid img').nth(index)).toHaveAttribute('src', photo.url)
-  await page.screenshot({ path: testInfo.outputPath('stay-guest-photo-tour-desktop.png') })
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
   expect(await preview.locator('html').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
   await expect(publicTour.getByRole('link', { name: 'Bedroom', exact: true })).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('stay-guest-photo-tour-mobile.png') })
   await publicTour.locator(`#photo-room-${bedroomId}`).getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).click()
   await expect(preview.locator(`img.object-contain[src="${green.url}"]`)).toBeInViewport({ ratio: 0.9 })
   await expect(preview.getByText('3 / 3', { exact: true })).toBeVisible()
@@ -2546,7 +2476,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
 })
 }
 
-test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }, testInfo) => {
+test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, slug, organizationId, call, productId } = await createStayHome(page, baseURL!)
@@ -2632,7 +2562,6 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   expect(listedProduct.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(true)
   expect(publicationBodies).toEqual([{ published: true }, { published: true }])
   expect(availabilityBodies).toEqual([])
-  await page.screenshot({ path: testInfo.outputPath('listing-status-desktop.png') })
 
   const anonymousListing = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   try {
@@ -2719,7 +2648,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
 })
 
 for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
-  test(concern === 'arrival-guide' ? 'a host authors a private arrival guide and public house rules with scoped access' : 'a cleaner sees only assigned-home arrivals and departures on Today and Upcoming', async ({ page, browser, baseURL }, testInfo) => {
+  test(concern === 'arrival-guide' ? 'a host authors a private arrival guide and public house rules with scoped access' : 'a cleaner sees only assigned-home arrivals and departures on Today and Upcoming', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates local stays and uses disposable actors')
   await loginAs(page.request, baseURL!, 'user-e2e-lodging-host')
@@ -2912,7 +2841,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
       await rulesArrivalPanel.getByLabel(/^Check-in from/).fill('16:00')
       await rulesArrivalPanel.getByLabel(/^Checkout by/).fill('10:00')
-      await page.screenshot({ path: testInfo.outputPath('house-rules-arrival-time-desktop.png'), animations: 'disabled' })
       const rulesEndpoint = `/api/editor/organizations/${organizationId}/products/${assignedHome.product_id}`
       const interceptRules = (url: URL) => url.pathname === rulesEndpoint
       await page.route(interceptRules, async route => route.request().method() === 'PATCH' ? await route.abort('failed') : await route.continue())
@@ -2957,7 +2885,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(additionalRules).toHaveValue('')
       await additionalRules.fill(houseRules)
       await expect(additionalRulesPanel).toBeVisible()
-      await page.screenshot({ path: testInfo.outputPath('house-rules-additional-desktop.png'), animations: 'disabled' })
       await page.route(interceptRules, async route => route.request().method() === 'PATCH' ? await route.abort('failed') : await route.continue())
       const interruptedAdditional = page.waitForEvent('requestfailed', outgoing => outgoing.method() === 'PATCH' && new URL(outgoing.url()).pathname === rulesEndpoint)
       await additionalRulesPanel.getByRole('button', { name: 'Save', exact: true }).click()
@@ -3079,12 +3006,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
       await expect(ruleGuests).toHaveValue('5')
       await pets.scrollIntoViewIfNeeded()
-      await page.screenshot({ path: testInfo.outputPath('house-rules-desktop.png'), animations: 'disabled' })
       await page.setViewportSize({ width: 390, height: 844 })
       await pets.scrollIntoViewIfNeeded()
-      await page.screenshot({ path: testInfo.outputPath('house-rules-mobile.png'), animations: 'disabled' })
       await rulesPanel.getByRole('link', { name: /Additional rules/ }).scrollIntoViewIfNeeded()
-      await page.screenshot({ path: testInfo.outputPath('house-rules-quiet-mobile.png'), animations: 'disabled' })
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
       await expect(ruleGuests).toHaveValue('5')
@@ -3133,7 +3057,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(publicRules.data!.product.details).toEqual({ ...beforeRules.data!.product.details, guest_access: sharedGarden, house_rules: houseRules, pets_allowed: false, events_allowed: true, commercial_photography_allowed: false, quiet_hours: true, quiet_hours_start: '22:00', quiet_hours_end: '07:00' })
       expect(publicRules.data!.product.stay).toMatchObject({ check_in_time: '16:00', check_out_time: '10:00', max_guests: 5 })
       await expect(checkoutOverview).toBeVisible()
-      await page.screenshot({ path: testInfo.outputPath('arrival-editor-desktop.png') })
 
       // The private View remains on the authenticated dashboard. The public
       // preview and its API contain the house rules and none of the private guide.
@@ -3152,7 +3075,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(privateRules.getByText('No smoking, vaping or e-cigarettes', { exact: true })).toHaveCount(0)
       await expect(privateRules.getByText('Smoking, vaping and e-cigarettes allowed', { exact: true })).toHaveCount(0)
       await expect(privateGuide.getByRole('heading', { name: 'Safety & property', exact: true })).toHaveCount(0)
-      await privatePreview.screenshot({ path: testInfo.outputPath('arrival-guide-preview-desktop.png') })
       await privatePreview.close()
       const anonymous = await browser.newContext({ baseURL: baseURL! })
       try {
@@ -3171,7 +3093,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(wifiPanel).toBeVisible()
       await wifiPanel.getByTestId('dashboard-navbar-close').hover()
       await expect(wifiPanel.getByRole('button', { name: 'Save', exact: true })).toBeInViewport()
-      await page.screenshot({ path: testInfo.outputPath('arrival-wifi-mobile.png') })
       await wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true }).fill('A cancelled mobile network draft')
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true })).toHaveValue('A cancelled mobile network draft')
@@ -3310,7 +3231,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(restrictedResponse.status(), await restrictedResponse.text()).toBe(200)
       expect((await restrictedResponse.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights)
         .toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: false, price_minor: 420_000, min_stay_arrival: 2, min_stay_through: 3, max_stay: 7, closed_to_arrival: true, closed_to_departure: true })))
-      await page.screenshot({ path: testInfo.outputPath('nightly-calendar-desktop.png') })
 
       // Changing only the price across a mixed range preserves each night's own
       // stay restrictions, then restoring the base price preserves them again.
@@ -3392,7 +3312,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await inspector.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('3,200')
       await expect(inspector.getByText(`${TIME_ZONE} · THB`, { exact: true })).toBeVisible()
-      await page.screenshot({ path: testInfo.outputPath('nightly-calendar-mobile.png') })
       const cancelledPrice = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(6)}&to=${localDay(9)}`)
       expect(cancelledPrice.status(), await cancelledPrice.text()).toBe(200)
       expect((await cancelledPrice.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights.map(night => night.price_minor)).toEqual([320_000, 320_000, 320_000])
@@ -3428,7 +3347,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(calendarStayURL.pathname).toBe(`/dashboard/${slug}/calendar/stay/${stays[0]!.id}`)
       expect(calendarStayURL.searchParams.get('product_id')).toBe(assignedHome.product_id)
       expect(calendarStayURL.searchParams.get('month')).toBe(localDay(0).slice(0, 7))
-      await page.screenshot({ path: testInfo.outputPath('nightly-calendar-reserved-desktop.png') })
       await calendarStay.click()
       await expect(page).toHaveURL(calendarStayURL.href)
       const calendarStayDetails = page.locator('#dashboard-panel-stay-details')
