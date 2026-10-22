@@ -29,6 +29,20 @@
                 <ul v-if="group.details?.length" class="mt-3 space-y-2 text-sm leading-relaxed text-gray-600">
                   <li v-for="detail in group.details" :key="detail">{{ detail }}</li>
                 </ul>
+                <ul v-if="group.features?.length" class="mt-3 space-y-3 text-sm leading-relaxed text-gray-600">
+                  <li v-for="feature in group.features" :key="feature.id" class="flex items-start gap-3">
+                    <UIcon :name="feature.icon" class="size-5 shrink-0" aria-hidden="true" />
+                    <div class="min-w-0">
+                      <p>{{ feature.label }}</p>
+                      <p v-if="feature.description" class="mt-1">{{ feature.description }}</p>
+                      <div v-if="feature.photos.length" class="mt-3 flex flex-wrap gap-2">
+                        <button v-for="(photo, position) in feature.photos" :key="photo.index" type="button" class="w-24 overflow-hidden rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4" :aria-label="t('stay.open_accessibility_photo', { feature: feature.label, number: position + 1 })" @click="openPhoto(photo.index)">
+                          <img :src="photo.item.url" alt="" class="aspect-4/3 w-full object-cover transition hover:brightness-95" loading="lazy">
+                        </button>
+                      </div>
+                    </div>
+                  </li>
+                </ul>
               </div>
               <div class="grid grid-cols-2 gap-2 sm:gap-3">
                 <button v-for="(entry, position) in group.entries" :key="entry.index" type="button" class="relative overflow-hidden rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4" :class="position === 0 && group.entries.length % 2 === 1 ? 'col-span-2' : ''" :aria-label="t('stay.open_room_photo', { room: group.title, number: position + 1 })" @click="openPhoto(entry.index)">
@@ -65,6 +79,7 @@ export interface MediaGalleryGroup {
   title: string
   asset_ids: string[]
   details?: string[]
+  features?: Array<{ id: string; label: string; icon: string; description?: string; asset_ids?: string[] }>
 }
 </script>
 
@@ -96,6 +111,15 @@ const items = computed(() => props.items)
 const groups = computed(() => props.photoGroups.map(group => ({
   ...group,
   entries: items.value.flatMap((item, index) => typeof item.asset_id === 'string' && group.asset_ids.includes(item.asset_id) ? [{ item, index }] : []),
+  features: group.features?.map(feature => ({
+    ...feature,
+    photos: (feature.asset_ids ?? []).map(assetId => {
+      const index = items.value.findIndex(item => item.asset_id === assetId && item.kind === 'image')
+      const item = items.value[index]
+      if (!item) throw new TypeError('The accessibility photo is not in this listing gallery')
+      return { item, index }
+    }),
+  })),
 })).filter(group => group.entries.length > 0))
 const scroller = ref<HTMLElement | null>(null)
 const videoRefs = ref<Record<number, HTMLVideoElement>>({})

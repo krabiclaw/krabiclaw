@@ -6,6 +6,7 @@ import { E2E_KIKUZUKI_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHead
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import type { Product, PublicProduct } from '../../server/types/products'
 
 type NotificationRow = { template: string }
 type DeliveryRow = { channel: 'email' | 'whatsapp'; purpose: string; status: string }
@@ -340,47 +341,114 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
 
 for (const target of [
   { name: 'Kikuzuki', owner: 'user-e2e-kikuzuki-owner', org: E2E_KIKUZUKI_ORGANIZATION_ID, slug: E2E_KIKUZUKI_ORGANIZATION_ID, location: 'loc-kikuzuki', locationSlug: 'kikuzuki-japanese-robatayaki-izakaya', base: kikuzukiTestBaseUrl(), headers: kikuzukiTestExtraHeaders(), experience: false, kind: 'dish' },
-  { name: 'Kikuzuki merchandise', org: E2E_KIKUZUKI_ORGANIZATION_ID, slug: E2E_KIKUZUKI_ORGANIZATION_ID, location: 'loc-kikuzuki', locationSlug: 'kikuzuki-japanese-robatayaki-izakaya', base: kikuzukiTestBaseUrl(), headers: kikuzukiTestExtraHeaders(), experience: false, kind: 'item' },
   { name: 'Pottery House', owner: 'user-e2e-pottery-owner', org: E2E_POTTERY_ORGANIZATION_ID, slug: E2E_POTTERY_ORGANIZATION_ID, location: 'loc-pottery-house', locationSlug: 'krabi', base: potteryHouseBaseURL, headers: potteryHouseExtraHeaders, experience: true, kind: 'experience' },
 ]) {
-  test(`${target.name} external checkout uses the shared CMS and public template`, async ({ page, request, baseURL }) => {
+  test(`${target.name} external checkout uses the shared CMS and public template`, async ({ page, request, baseURL }, testInfo) => {
     test.skip(!writableEnvironment, 'External checkout verification writes only local disposable products')
     await loginAs(page.request, baseURL!)
     const editor = `/api/editor/organizations/${target.org}/products`
-    const created = await page.request.post(editor, { data: { kind: target.kind, name: `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: 'THB' }] }] } })
+    const inheritedPriceTerms = { tax_behavior: 'inclusive', compare_at_unit_amount: 200000, valid_from_at: '2020-01-01T00:00:00.000Z', valid_until_at: '2099-01-01T00:00:00.000Z' }
+    const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: 'THB', ...(target.kind === 'dish' ? inheritedPriceTerms : {}) }] }] } })
     expect(created.status(), await created.text()).toBe(201)
-    const product = (await created.json()).product
+    const product = (await created.json() as { product: Product }).product
     try {
       const externalUrl = `https://example.com/?checkout=${target.slug}`
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/order-url`)
       await page.getByLabel('Website address', { exact: true }).fill(externalUrl)
       await page.getByRole('button', { name: 'Save', exact: true }).click()
       await expect(page).toHaveURL(new RegExp(`/products/${product.id}/photo$`))
-      const field = target.kind === 'dish' ? 'tagline' : target.kind === 'experience' ? 'preparation' : 'care_instructions'
-      const label = target.kind === 'dish' ? 'Short introduction' : target.kind === 'experience' ? 'Before you arrive' : 'Care instructions'
-      const detail = target.kind === 'dish' ? 'Made to order' : target.kind === 'experience' ? 'Arrive ten minutes before your class' : 'Hand wash in cold water'
+      const field = target.kind === 'dish' ? 'dietary_notes' : 'preparation'
+      const label = target.kind === 'dish' ? 'Dietary information' : 'Before you arrive'
+      const detail = target.kind === 'dish' ? 'Vegetarian' : 'Arrive ten minutes before your class'
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/attributes/${field}`)
       await page.getByRole('textbox', { name: label, exact: true }).fill(detail)
+      const description = 'Finished with roasted sesame and seasonal greens.'
+      if (target.kind === 'dish') {
+        await page.getByRole('textbox', { name: label, exact: true }).press('Enter')
+        const loaded = await page.request.get(`${editor}/${product.id}`)
+        expect(loaded.status(), await loaded.text()).toBe(200)
+        const savedProduct = (await loaded.json() as { product: Product }).product
+        const concurrent = await page.request.patch(`${editor}/${product.id}`, { data: { description, expected_updated_at: savedProduct.updated_at } })
+        expect(concurrent.status(), await concurrent.text()).toBe(200)
+        const concurrentProduct = (await concurrent.json() as { product: Product }).product
+        const refusedSave = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `${editor}/${product.id}`)
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
+        const refusedResponse = await refusedSave
+        expect(refusedResponse.status(), await refusedResponse.text()).toBe(409)
+        expect(await refusedResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: product.id } })
+        expect(refusedResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { dietary_notes: [detail] }, expected_updated_at: savedProduct.updated_at })
+        const retained = page.locator('#dashboard-panel-product-attribute')
+        await expect(retained.getByText(detail, { exact: true })).toBeVisible()
+        const unchanged = await page.request.get(`${editor}/${product.id}`)
+        expect(unchanged.status(), await unchanged.text()).toBe(200)
+        const unchangedProduct = (await unchanged.json() as { product: Product }).product
+        expect(unchangedProduct.description).toBe(description)
+        expect(unchangedProduct.details).not.toHaveProperty(field)
+        expect(unchangedProduct.updated_at).toBe(concurrentProduct.updated_at)
+        await retained.getByRole('button', { name: 'Use saved details', exact: true }).click()
+        await expect(retained.getByText(detail, { exact: true })).toHaveCount(0)
+        await page.getByRole('textbox', { name: label, exact: true }).fill(detail)
+        await page.getByRole('textbox', { name: label, exact: true }).press('Enter')
+      }
       await page.getByRole('button', { name: 'Save', exact: true }).click()
       await expect(page).toHaveURL(new RegExp(`/products/${product.id}/attributes$`))
       const locations = await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: true, published: true } })
       expect(locations.status(), await locations.text()).toBe(200)
+      if (target.kind === 'dish') {
+        await page.goto(`/dashboard/${target.slug}/products/${product.id}/price?location_id=${target.location}`)
+        await expect(page.getByTestId('product-price')).toHaveValue('1200.00')
+        await page.getByTestId('product-price').fill('1350')
+        const scopedPrice = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `${editor}/${product.id}`)
+        await page.getByRole('button', { name: 'Save', exact: true }).click()
+        const scopedPriceResponse = await scopedPrice
+        expect(scopedPriceResponse.status(), await scopedPriceResponse.text()).toBe(200)
+        await expect(page).toHaveURL(`/dashboard/${target.slug}/products/${product.id}/photo?location_id=${target.location}`)
+        const cards = page.getByTestId('dish-editor-cards')
+        await expect(cards.getByTestId('editor-card-dietary_notes')).toContainText(detail)
+        await expect(cards.getByTestId('editor-card-description')).toContainText(description)
+        await expect(cards.getByTestId('editor-card-price')).toContainText('1,350')
+        await page.setViewportSize({ width: 1440, height: 900 })
+      }
       const publication = await page.request.put(`${editor}/${product.id}/publication`, { data: { published: true } })
       expect(publication.status(), await publication.text()).toBe(200)
-      const viaMcp = mcpData<{ product: { kind: string; details: Record<string, string> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
+      const viaMcp = mcpData<{ product: Product }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(viaMcp.kind).toBe(target.kind)
-      expect(viaMcp.details[field]).toBe(detail)
+      expect(viaMcp.details[field]).toEqual(target.kind === 'dish' ? [detail] : detail)
+      if (target.kind === 'dish') {
+        expect(viaMcp.description).toBe(description)
+        expect(viaMcp.variants).toHaveLength(1)
+        expect(viaMcp.variants[0]!.id).toBe(product.variants[0]!.id)
+        expect(viaMcp.variants[0]!.prices).toHaveLength(2)
+        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: 'THB', location_id: null }))
+        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, unit_amount: 135000, currency: 'THB', location_id: target.location }))
+        expect(viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id).not.toBe(product.variants[0]!.prices[0]!.id)
+      }
       const publicPath = target.experience ? `/experiences/${product.slug}` : `/locations/${target.locationSlug}/${target.kind === 'dish' ? 'menu' : 'products'}/${product.slug}`
       await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
       await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
       await expect(page.getByText(detail, { exact: true })).toBeVisible()
+      const productArticle = page.locator('article').filter({ has: page.getByRole('heading', { name: product.name, level: 1, exact: true }) })
+      if (target.kind === 'dish') {
+        await expect(page.getByText(description, { exact: true })).toBeVisible()
+        await expect(productArticle.getByRole('term')).toHaveText(product.name)
+        await expect(productArticle.getByRole('definition')).toHaveText('THB 2,000.00 THB 1,350.00')
+        await expect(productArticle.getByRole('definition')).toBeVisible()
+      }
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 844 })
         const handoff = page.locator(`a[href="${externalUrl}"]:visible`)
         await expect(handoff).toHaveCount(1)
         await expect(handoff).toHaveText(target.experience ? 'Book now' : 'Order Now')
         await expect(page.getByRole('button', { name: 'Book now', exact: true })).toHaveCount(0)
+        if (target.kind === 'dish') {
+          await expect(productArticle.getByRole('heading', { name: 'Description', level: 2, exact: true })).toBeVisible()
+          await expect(productArticle.getByRole('heading', { name: 'Find us', level: 2, exact: true })).toBeVisible()
+          await expect(productArticle.getByRole('heading', { name: "What you'll do", exact: true })).toHaveCount(0)
+          await expect(productArticle.getByRole('heading', { name: "Where you'll meet", exact: true })).toHaveCount(0)
+          await expect(productArticle.getByText('per person', { exact: true })).toHaveCount(0)
+        }
       }
+      if (target.kind === 'dish') await page.screenshot({ path: testInfo.outputPath('restaurant-dish-public-mobile.png'), fullPage: true, animations: 'disabled' })
       await waitForNuxtHydration(page)
       const recorded = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'product_order_external_click')
       const popup = page.waitForEvent('popup')
@@ -391,7 +459,14 @@ for (const target of [
       await destination.close()
       const saved = await request.get(`${target.base}${target.experience ? `/api/public/experiences/${product.slug}` : `/api/public/locations/${target.locationSlug}/products/${product.slug}`}`, { headers: target.headers })
       expect(saved.status(), await saved.text()).toBe(200)
-      expect((await saved.json()).product.order_url).toBe(externalUrl)
+      const savedProduct = (await saved.json() as { product: PublicProduct }).product
+      expect(savedProduct.order_url).toBe(externalUrl)
+      if (target.kind === 'dish') {
+        expect(savedProduct.variants[0]!.id).toBe(product.variants[0]!.id)
+        expect(savedProduct.variants[0]!.prices).toHaveLength(2)
+        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id, unit_amount: 135000, currency: 'THB', location_id: target.location }))
+        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: 'THB', location_id: null }))
+      }
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/publication/availability`)
       const availability = page.getByRole('switch', { name: target.experience ? 'Accept bookings' : 'Accept orders', exact: true })
       await expect(availability).toHaveAttribute('aria-checked', 'true')

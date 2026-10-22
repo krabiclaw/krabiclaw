@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { SUPPORTED_CURRENCIES } from './currencies'
+import { ATTRIBUTION_CHANNELS } from '../utils/analytics-attribution'
 
 const count = z.number().int().nonnegative()
 const amount = z.number()
@@ -9,6 +10,12 @@ const currency = z.enum(SUPPORTED_CURRENCIES)
 const attribution = { source: text, medium: text, campaign: nullableText, content: nullableText }
 const observedAttribution = { ...attribution, source: nullableText, medium: nullableText }
 const money = { currency, collectedMinor: amount, refundedMinor: amount, netMinor: amount }
+// Visits are sessions; viewed and intent are events; submitted and confirmed are requests; paid is
+// payments, with the cash collected per currency (never added across currencies).
+const funnelCounts = {
+  visits: count, viewed: count, intent: count, submitted: count, confirmed: count, paid: count,
+  paidCollected: z.array(z.object({ currency, collectedMinor: amount })),
+}
 
 /** The native D1 report contract, shared by its producer, dashboard and MCP. */
 export const analyticsReportSchema = z.object({
@@ -34,6 +41,11 @@ export const analyticsReportSchema = z.object({
   values: z.array(z.object({ eventName: text, basis: z.enum(['quoted', 'purchase', 'refund']), currency, events: count, valueMinor: amount, collectedMinor: amount.nullable() })),
   bookingValue: z.array(z.object({ productId: nullableText, productName: nullableText, locationId: nullableText, currency: currency.nullable(), bookings: count, valuedBookings: count, quotedValueMinor: amount })),
   net: z.array(z.object(money)),
+  funnel: z.object({
+    ...funnelCounts,
+    bySource: z.array(z.object({ channel: z.enum(ATTRIBUTION_CHANNELS), ...funnelCounts })),
+    byLocation: z.array(z.object({ locationId: nullableText, ...funnelCounts })),
+  }),
   signupCohort: z.object({
     observedThrough: text, signups: count, onboardedSignups: count, firstPaidSignups: count,
     bySignupAttribution: z.array(z.object({ ...observedAttribution, signups: count, onboardedSignups: count, firstPaidSignups: count, revenue: z.array(z.object(money)) })),

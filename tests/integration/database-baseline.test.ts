@@ -39,7 +39,7 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
-test('room-details migration preserves authored rooms and photo memberships without deriving room facts from listing totals', () => {
+test('room migrations preserve authored facts and photo memberships without deriving room facts from listing totals or amenities', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
@@ -74,13 +74,71 @@ test('room-details migration preserves authored rooms and photo memberships with
     assert.deepEqual(database.prepare('SELECT * FROM media_placements').all(), placements)
     assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), listings)
     assert.equal(database.prepare("SELECT count(*) AS count FROM product_stay_photo_rooms WHERE product_id = 'counts-only-home'").get()!.count, 0)
+
+    // The next migration adds membership without assigning a listing-wide
+    // amenity to any particular room or disturbing already authored facts.
+    database.prepare("UPDATE product_stay_photo_rooms SET sleeping_arrangements = '[{\"type\":\"queen\",\"count\":2}]', private_attached_bathroom = 0, details_version = 4 WHERE id = 'bedroom'").run()
+    database.prepare("UPDATE product_stay_configs SET amenities = '[\"tv\",\"wireless_internet\"]' WHERE product_id = 'authored-home'").run()
+    const authoredRooms = database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all()
+    const authoredListings = database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all()
+
+    database.exec(readFileSync('migrations/0016_stay_room_amenities.sql', 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all(), authoredRooms)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), authoredListings)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_memberships').all(), memberships)
+    assert.deepEqual(database.prepare('SELECT * FROM media_placements').all(), placements)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_amenities').all(), [])
+    assert.equal(database.prepare("SELECT count(*) AS count FROM product_stay_photo_rooms WHERE product_id = 'counts-only-home'").get()!.count, 0)
+    assert.throws(() => database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'authored-home', 'bedroom', 'invented_amenity')").run(), /product_stay_photo_room_amenities_code_check/)
+    assert.throws(() => database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'counts-only-home', 'bedroom', 'tv')").run(), /FOREIGN KEY constraint failed/)
+
+    database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'authored-home', 'bedroom', 'tv')").run()
+    const roomAmenities = database.prepare('SELECT * FROM product_stay_photo_room_amenities').all()
+    database.exec(readFileSync('migrations/0017_stay_room_accessibility.sql', 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all(), authoredRooms)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), authoredListings)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_memberships').all(), memberships)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_amenities').all(), roomAmenities)
+    assert.deepEqual(database.prepare('SELECT * FROM media_placements').all(), placements)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_room_accessibility').all(), [])
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_room_accessibility_photos').all(), [])
+    assert.throws(() => database.prepare("INSERT INTO product_stay_room_accessibility (organization_id, product_id, room_id, feature_code, available) VALUES ('org', 'authored-home', 'bedroom', 'invented_feature', 0)").run(), /product_stay_room_accessibility_feature_check/)
+    assert.throws(() => database.prepare("INSERT INTO product_stay_room_accessibility (organization_id, product_id, room_id, feature_code, available) VALUES ('org', 'authored-home', 'bedroom', 'step_free_access', 2)").run(), /product_stay_room_accessibility_available_check/)
+    assert.throws(() => database.prepare("INSERT INTO product_stay_room_accessibility (organization_id, product_id, room_id, feature_code, available) VALUES ('org', 'counts-only-home', 'bedroom', 'step_free_access', 0)").run(), /FOREIGN KEY constraint failed/)
+    database.prepare("UPDATE product_stay_configs SET amenities = '[\"tv\",\"wireless_internet\",\"smoke_detector\"]' WHERE product_id = 'authored-home'").run()
+    database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'authored-home', 'bedroom', 'smoke_detector')").run()
+    const priorRoomAmenities = database.prepare('SELECT * FROM product_stay_photo_room_amenities ORDER BY amenity_code').all()
+    const amenityMigration = readFileSync('migrations/0018_stay_amenity_answers.sql', 'utf8')
+    // A bad later home must abort the whole conversion, including the valid
+    // earlier home, without removing unknown facts or altering authored rooms.
+    for (const invalid of [[1], [null], ['invented_amenity'], ['tv', 'tv'], ['tv', {}]]) {
+      database.prepare("UPDATE product_stay_configs SET amenities = ? WHERE product_id = 'counts-only-home'").run(JSON.stringify(invalid))
+      const beforeRefusedMigration = database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all()
+      assert.throws(() => database.exec(amenityMigration), /NOT NULL constraint failed: product_stay_configs.amenities/)
+      assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), beforeRefusedMigration)
+      assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_amenities ORDER BY amenity_code').all(), priorRoomAmenities)
+      assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all(), authoredRooms)
+    }
+    database.prepare("UPDATE product_stay_configs SET amenities = '[]' WHERE product_id = 'counts-only-home'").run()
+    database.exec(amenityMigration)
+    assert.deepEqual(JSON.parse(database.prepare("SELECT amenities FROM product_stay_configs WHERE product_id = 'authored-home'").get()!.amenities as string), [
+      { code: 'tv', available: true }, { code: 'wireless_internet', available: true }, { code: 'smoke_detector', available: true },
+    ])
+    assert.equal(database.prepare("SELECT amenities FROM product_stay_configs WHERE product_id = 'counts-only-home'").get()!.amenities, '[]')
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_amenities ORDER BY amenity_code').all(), priorRoomAmenities)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all(), authoredRooms)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_memberships').all(), memberships)
+    assert.deepEqual(database.prepare('SELECT * FROM media_placements').all(), placements)
+    database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'authored-home', 'bedroom', 'mountain_view')").run()
     assert.deepEqual(database.pragma('foreign_key_check'), [])
   } finally {
     database.close()
   }
 })
 
-test('interleaved branch migration ledgers preserve authored rooms and location privacy and complete missing legal-site data migrations while refusing unknown files or schema', async () => {
+test('interleaved branch migration ledgers preserve location privacy and authored rooms while completing missing legal-site data migrations and refusing unknown files or schema', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-interleaved-transfer-'))
   const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
@@ -88,7 +146,7 @@ test('interleaved branch migration ledgers preserve authored rooms and location 
   assert.notEqual(commonEnd, -1)
   const common = journal.entries.slice(0, commonEnd + 1).map(entry => `${entry.tag}.sql`)
   const legalMigrations = ['0013_tenant_theme_id.sql', '0014_heading_level_column.sql']
-  const lodgingMigrations = ['0013_location_stay_map_sharing.sql', '0014_stay_photo_rooms.sql', '0015_stay_room_details.sql']
+  const lodgingMigrations = ['0013_location_stay_map_sharing.sql', '0014_stay_photo_rooms.sql', '0015_stay_room_details.sql', '0016_stay_room_amenities.sql', '0017_stay_room_accessibility.sql']
   try {
     for (const history of ['staging-first', 'lodging-first', 'staging-pending'] as const) {
       const sourcePath = join(directory, `${history}.sqlite`)
@@ -120,7 +178,10 @@ test('interleaved branch migration ledgers preserve authored rooms and location 
       source.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('cover', 'host', 'product', 'home', 'image', 'photo')").run()
       source.prepare("INSERT INTO product_stay_photo_rooms (id, organization_id, product_id, type, sort_order, created_by, details_version, sleeping_arrangements, private_attached_bathroom) VALUES ('bedroom', 'host', 'home', 'bedroom', 2, 'owner', 4, '[{\"type\":\"queen\",\"count\":1}]', 0)").run()
       source.prepare("INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES ('host', 'home', 'photo', 'bedroom')").run()
-      const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'media_placements']
+      source.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('host', 'home', 'bedroom', 'smoke_detector')").run()
+      source.prepare("INSERT INTO product_stay_room_accessibility (organization_id, product_id, room_id, feature_code, available) VALUES ('host', 'home', 'bedroom', 'step_free_access', 1)").run()
+      source.prepare("INSERT INTO product_stay_room_accessibility_photos (organization_id, product_id, room_id, feature_code, asset_id) VALUES ('host', 'home', 'bedroom', 'step_free_access', 'photo')").run()
+      const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'product_stay_photo_room_amenities', 'product_stay_room_accessibility', 'product_stay_room_accessibility_photos', 'media_placements']
       const authored = preservedTables.map(table => source.prepare(`SELECT * FROM ${table}`).all())
       source.close()
 
@@ -131,19 +192,20 @@ test('interleaved branch migration ledgers preserve authored rooms and location 
       const target = new Database(targetPath, { readonly: true })
       try {
         assert.deepEqual(preservedTables.map(table => target.prepare(`SELECT * FROM ${table}`).all()), authored)
-        assert.deepEqual(target.prepare("SELECT organization_id, product_id, beds, amenities FROM product_stay_configs WHERE product_id = 'home'").get(), { organization_id: 'host', product_id: 'home', beds: 2, amenities: '["smoke_detector"]' })
+        assert.deepEqual(target.prepare("SELECT organization_id, product_id, beds, amenities FROM product_stay_configs WHERE product_id = 'home'").get(), { organization_id: 'host', product_id: 'home', beds: 2, amenities: '[{"code":"smoke_detector","available":true}]' })
         assert.deepEqual(target.prepare("SELECT organization_id, stay_map_sharing FROM business_locations WHERE id = 'cabin'").get(), { organization_id: 'host', stay_map_sharing: 'specific' })
         assert.deepEqual(target.prepare("SELECT theme_id, json_extract(settings_json, '$.config.font_preset') AS font, json_extract(settings_json, '$.config.button_casing') AS casing FROM organization WHERE id = 'legal'").get(), { theme_id: 'tenant-theme-v1', font: 'marcellus', casing: 'uppercase' })
         assert.deepEqual(target.prepare("SELECT level, data_json FROM content_blocks WHERE id = 'legal-heading'").get(), { level: 3, data_json: '{"text":"Recorded legal heading"}' })
+        assert.deepEqual(target.prepare('SELECT * FROM product_stay_accessibility').all(), [])
         assert.deepEqual(target.pragma('foreign_key_check'), [])
       } finally { target.close() }
     }
-    for (const invalid of ['unknown-migration', 'schema-mismatch'] as const) {
+    for (const invalid of ['unknown-migration', 'room-schema-mismatch', 'location-schema-mismatch'] as const) {
       const sourcePath = join(directory, `${invalid}.sqlite`)
       copyFileSync(join(directory, 'staging-pending.sqlite'), sourcePath)
       const source = new Database(sourcePath)
       if (invalid === 'unknown-migration') source.prepare("INSERT INTO d1_migrations (name) VALUES ('9999_unrecorded_migration.sql')").run()
-      else source.exec('ALTER TABLE business_locations ADD COLUMN unrecorded_fact TEXT')
+      else source.exec(`ALTER TABLE ${invalid === 'room-schema-mismatch' ? 'product_stay_photo_rooms' : 'business_locations'} ADD COLUMN unrecorded_fact TEXT`)
       source.close()
       const targetPath = join(directory, `${invalid}-refused.sqlite`)
       await assert.rejects(() => transferDatabaseExport(sourcePath, targetPath), /Source schema differs from every recorded migration chain; no rows were copied/)
@@ -153,7 +215,6 @@ test('interleaved branch migration ledgers preserve authored rooms and location 
     }
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
-
 
 test('a v7 export transfers into the current baseline, its connections into organization_integrations', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')

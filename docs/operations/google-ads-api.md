@@ -69,10 +69,21 @@ Google's form asks for the use case, a design document and a demo. State:
   with budget, status and keywords; reporting with spend, clicks, impressions
   and conversions). Tokens are the customer's, handled by Better Auth. No
   scraping, no automated bidding beyond the customer's explicit request.
-- **Demo:** a recording of Integrations → Google Ads (connect and account
-  pick), Insights → Google Ads, a campaign created from ChatGPT and shown in the
-  Google Ads UI, and Today's card. Record on production with the owner's test
-  business and a test-mode account; do not record a customer's account.
+- **Demo:** the OAuth verification recording for the `adwords` scope,
+  https://youtu.be/-ItMxoHlCus (unlisted on the KrabiClaw YouTube channel,
+  2026-10-21; it replaces the rejected slideshow https://www.youtube.com/watch?v=H1g2bU4jbkY).
+  Recorded on production in the owner's Chrome and cut with HyperFrames:
+  NCLS Integrations → Google Ads disconnect and connect, Google's consent
+  screen with the client ID and the adwords scope, the account pick
+  (649-529-3607); Insights → Google Ads with a range change; Today's card;
+  writes from ChatGPT through the KrabiClaw app on Cedar Legal (Business)
+  connected to the same account — a Search campaign created PAUSED at $1/day,
+  shown in ads.google.com, its budget changed to $2/day from KrabiClaw and
+  shown again, then removed in ads.google.com; Plan and billing → Managed ads.
+  A Google Ads account connects to one KrabiClaw site at a time, so NCLS was
+  disconnected while Cedar Legal held the account and reconnected afterwards.
+  New campaigns need the advertiser's EU political advertising declaration
+  (`contains_eu_political_advertising` on the create and clone tools).
 
 Submit from Cloud Console → Google Ads API → Access levels → Apply for Basic
 access, signed in as the owner.

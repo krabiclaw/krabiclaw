@@ -127,6 +127,41 @@
       "when": 1792496692654,
       "tag": "0015_stay_room_details",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792500691249,
+      "tag": "0016_stay_room_amenities",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1792504562249,
+      "tag": "0017_stay_room_accessibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1792551501364,
+      "tag": "0018_stay_amenity_answers",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1792552731587,
+      "tag": "0019_stay_accessibility",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1792662614750,
+      "tag": "0022_airbnb_import_content",
+      "breakpoints": true
     }
   ]
 }

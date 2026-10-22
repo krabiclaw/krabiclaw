@@ -2,7 +2,7 @@
   <DashboardLeafPanel
     id="product-name"
     :title="stayTitle ? 'Title' : p.sectionLabels['name']"
-    :desktop-cancel="stayTitle"
+    :desktop-cancel="!p.isNew.value"
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
     :save-label="p.saveLabel.value"

@@ -177,9 +177,9 @@ menu; every other offering is its own card, opening the one Product editor.
 Because the menus are already per location, Catalog has no location filter.
 Dishes without a section are listed on the Menu page under its sections.
 
-Every level that narrows its rows does it the same way:
-`DashboardFilterPills`, one row of round pills under the title with the chosen
-one solid, 32px from the title and from the rows — Catalog's kinds, Today's
+Discrete views that narrow a list use `DashboardFilterPills`, one row of round
+pills under the title with the chosen one solid, 32px from the title and from
+the rows — Catalog's kinds, Today's
 range, Insights views, the blog's and posts' states, a
 category collection, a photo category. A list carries no sentence explaining
 itself under its title.
@@ -318,9 +318,10 @@ guests arrive and the day they leave, and open at the booking route as
 is cancelled there, and is not refused by closed nights or minimum stays —
 those are what guests and channels are offered; a stay from Airbnb or another channel is read-only and
 changes on that channel. A published place to stay is booked on the website:
-it has no external link, and it can be published only once it has a nightly
-price and online payments are set up. Guests choose nights on its page and pay
-the full amount on the site's pay page; while they pay, a checkout hold claims
+it has no external link, and publication requires its home and nightly price.
+Without online payments the listing takes enquiries; with payments ready,
+guests choose nights on its page and pay the full amount on the site's pay page.
+While they pay, a checkout hold claims
 those nights (and closes them on a connected channel), and the captured payment
 becomes a confirmed direct stay with its guest conversation. A lapsed hold gives
 its nights back.
@@ -332,8 +333,9 @@ its page and in its `Accommodation` data. Its address and map pin are its
 location's. Its arrival guide (check-in method and instructions, wifi,
 directions, house manual and checkout instructions) is private: only managers
 and the home's assigned members read it, and no public page carries it. The
-iPhone listing editor and MCP edit these; the web Product editor does not show
-them yet.
+iPhone listing editor, MCP and web Product editor edit the same facts. The web
+listing index separates Your space from Arrival guide and previews their saved
+values; it does not combine the private guide with the public listing preview.
 
 ### Organizations
 
@@ -348,42 +350,39 @@ businesses — keep their natural wording.
 
 ## Leaf size
 
-**A leaf edits one concern.** One field, or one small set of controls that
-answer a single question. If a screen needs more than about three controls, it
-is not a leaf — it is an index, and its fields belong one level deeper.
+**A leaf edits one concern.** Its controls support one named decision and
+commit together. Control count does not decide its depth: selecting amenities
+can need a long searchable list, and describing an accessibility feature can
+need an answer, photo evidence and guidelines. Splitting either into arbitrary
+levels would scatter the decision.
 
-This is the rule the CMS kept breaking. It is measured, not felt: count the
-controls. Airbnb's own leaves, at 1440px, are
+The lodging reference distinguishes focused decisions from indexes:
 
 | Screen | The entire detail pane |
 | --- | --- |
 | Title | one input and a `44/50` counter |
 | Listing description | one textarea and a `482/500` counter |
-| House rules | four rows, each an ✕/✓ pair — no fields at all |
+| Amenities | a searchable selection list, with filters that narrow the choices |
 | Pricing | one value row, one toggle, one link |
 | Hours by day | an index: one row per weekday previewing its hours; the day leaf is one switch and two time pickers |
 | Schedule | an index: one row per day previewing its start times; the day leaf is a list of times |
 
-**A pane that would need many fields becomes an index instead.** Airbnb's
+**Independent concerns belong behind their own saved summaries.** Airbnb's
 Description screen is not a form with five textareas; it is five rows —
 Listing description, Your property, Guest access, Interaction with guests,
 Other details to note — each previewing its current value in two lines, each
 opening its own leaf.
 
-So when a form grows, the answer is never a smaller control or a tighter
-column. It is another level.
-
-**A compound control is one concern, and stays one.** A palette, a logo's
-presentation, a media grid and a day's list of times each answer one question
-with several inputs. Splitting them into levels to satisfy a count would
-scatter one decision, so each renders inside one leaf and commits with its Save.
-The article canvas, below, is the only other exception.
+Split a form when its decisions can be named and edited independently, rather
+than making controls smaller or adding a navigation layer to satisfy a count.
+A palette, a logo's presentation, a media grid and a day's list of times each
+remain one concern. The article canvas, below, edits one whole artifact.
 
 ## Controls
 
 **One header rule for every list screen.** The panel's navbar carries Back, the
 title and what you can do to the list — Edit, Add, Manage — and the body
-carries the list, its one-line description and its rows. `DashboardListEditor`
+carries its rows and factual scope or status. `DashboardListEditor`
 and `DashboardGridEditor` teleport their controls into the navbar of the index
 panel they are mounted in (`dashboardPanelActionsKey`); a page never draws a
 second header in the body, and never puts Add in one place on one screen and
@@ -395,23 +394,43 @@ The inside of a leaf, measured against Airbnb's host tools (see
 `app.config.ts` and the two shells carry most of this; a page states the
 control and nothing about its size, radius or width.
 
-**A yes/no is never a checkbox.** A rule — something guests are held to — is a
-✕/✓ pair, as Airbnb's house rules are. A setting is a switch (`SettingRow`). A one-of-N is a
-set of cards: `URadioGroup variant="card"`, which the theme draws as Airbnb's
-selectable cards, so it needs no wrapper of its own. A checkbox exists
-only in a list's *Select* mode, which `DashboardListEditor` already draws.
+**The control follows the decision.** A setting uses a switch (`SettingRow`);
+an explicit reported fact must preserve unanswered separately from No. A
+one-of-N choice uses `URadioGroup variant="card"`, with no wrapper of its own.
+Checkboxes select several amenities or existing dishes, or records for a list
+action in `DashboardListEditor`'s *Select* mode. They do not imply that every
+unselected or unanswered fact is false.
+
+Filters narrow what is visible; selection changes membership. Amenities use
+All/Suggested pills and search to find choices while keeping selected facts
+across those views. Add dishes selects actual existing records. Neither a
+filter pill nor a search result creates a new catalog value or section.
 
 **A box means "choose me" or "open me".** Rows are separated by a 1px
 hairline with 24px of padding. A bordered card is a selectable choice or a
 value that opens a leaf. It is never a container for a control: a checkbox in
 a card, a switch in a card, a field in a card are each a row.
 
-**One explanation per leaf, under the title.** `DashboardLeafPanel` takes a
-single `lead` sentence and that is the only place a leaf explains itself. A
-field never carries a sentence: no `description`, no `help`, no paragraph
-above or below it. A row carries one line of sub-label. A counter
+**Explain the decision once.** `DashboardLeafPanel` takes its introduction as a
+single `lead` under the title. Do not repeat it around each field. Definitions,
+photo guidelines and validation belong beside the choice they clarify when
+they are needed to answer accurately. A row carries a concise factual sub-label.
+A counter
 (`44/50 available`) sits above the field in `text-sm`. `hint` exists only for
 `Optional`.
+
+**The index shows saved facts; the leaf owns the draft.** The lodging listing
+and Restaurant dish editors use saved-summary cards in `EditorNavigationList`;
+menu sections use the same component for their saved name, description and
+photo. Show the actual image, price, membership and state, including No photo,
+No price set, unavailable and unpublished. For a saved record, a draft must not
+relabel the index or guest preview before it is committed and read back.
+
+Cancel discards the local draft. A failed save keeps the submitted values and
+the version they were based on, shows the failure, and reads the saved record
+again without silently rebasing the draft. Conflict recovery is an explicit
+choice to use the current saved facts. A successful write whose required read
+failed remains a visible failure.
 
 **Icons identify destinations and meaningful choices.** Follow the captured
 Airbnb host editor's restraint: amenities have recognizable pictograms;
@@ -471,9 +490,11 @@ title large. Back, ✕ and every action are the same round button. Pages
 supply `title`, `lead` and `#right`; they never place a title or an action
 themselves.
 
-**One card, one empty state, one status banner.** A card is `UCard
-variant="subtle"`; its padding and corner come from `app.config.ts`, and a
-card that links is the same card rendered `as` the link. An empty list or
+**Reuse the card that owns the job.** Saved editor summaries use
+`EditorNavigationList`'s cards; selectable choices use the native radio or
+checkbox control. Other content cards use `UCard variant="subtle"`, with their
+padding and corner from `app.config.ts`; a content card that links renders as
+that link. An empty list or
 record is `UEmpty`. Status that belongs to the whole dashboard — the live
 connection, a failed background refresh — is the shell's one banner above the
 navigation, never a box repeated inside each screen; a screen shows only its
@@ -701,6 +722,9 @@ belong to the drawer the leaf becomes below `lg`, where its parent remains
 visible behind the backdrop and it needs its own way back.
 
 One shell owns that, so a leaf states what it commits and nothing about width.
+There is one visible Back or Close for the active level at each viewport; a
+page never adds a second one inside its content. The parent remains the same
+when the pane becomes a drawer.
 
 ### Where a level goes when it closes
 
@@ -817,18 +841,43 @@ per-press commit plus full reload is what made ordering feel broken. Order
 endpoints therefore take the *whole intended order* and reject a partial one —
 there is no insert-before arithmetic anywhere.
 
-**Move is a separate action from Reorder.** Move changes which parent a record
-belongs to and takes a multi-selection. Reorder changes sequence within one
-parent. Overloading one control with both is what forced single-item moves.
+**Move is a separate action from Reorder.** Move transfers selected membership
+from an explicit source to an explicit destination. Reorder changes sequence
+within one section. Overloading one control with both is what forced
+single-item moves.
 
 Airbnb has Move and no Reorder at all — room order is fixed by room type. Menu
 sections must be orderable, so Reorder is a deliberate addition, not parity.
 
-**Membership is a navigable row, not a field.** A Product's menu sections render
-as rows and open the same Move flow used for bulk selection. The free-text box
-they replaced silently forked a new grouping on a typo. Membership is plural:
-one Product can sit in several sections, so the row states which ones rather
-than implying a single parent.
+**Menu membership is plural and explicit.** A dish's Menu sections screen lists its
+saved memberships as links to those sections. Add to section keeps its existing
+memberships; Remove from section changes only the named membership; Move from
+a section opens the same `CollectionMoveDialog` used by bulk selection. The
+free-text box they replaced silently forked a new grouping on a typo. A
+location-owned section names its location, including inactive state; a shared
+section says Shared by every location. Moving membership does not change where
+the dish is offered or whether it is published.
+
+Move is one canonical operation, never a source removal followed by a second
+client save. It carries the complete expected source and destination orders,
+keeps the destination's existing order and appends moved items in source order
+without duplicates. Reorder and removal also carry the source snapshot. A stale
+snapshot leaves both sections unchanged, shows the conflict and offers Use
+current items; completion reads both saved orders through the full organization
+catalog. Visible location scope never replaces that membership owner.
+
+**Preview is the saved guest surface.** The lodging listing and Restaurant dish
+View action opens the real tenant page with its authorized preview token;
+Desktop and Mobile change the viewport of that same page. It is not a second
+rendering of the form draft, and opening it does not publish the record or
+change its availability.
+
+A dish preview needs an explicit active location where that dish is offered.
+Keep a location already targeted by the editor; otherwise ask the owner to
+choose from its actual assigned locations. Never substitute the first
+candidate. Inactive locations retain their name and state, and an invalid
+location or unreadable page produces a visible failure. Closing preview returns
+to the same editor concern and restores its View control.
 
 **A control must not be able to build an invalid state.** If the server rejects
 a combination, the form should make it unrepresentable rather than allow it and
@@ -894,9 +943,11 @@ same screen with no visit. If a new file under `pages/` contains markup for a
 list or a record, that is the smell: the markup belongs in the component the
 tenant already uses, and the page is a one-line mount.
 
-**One control per job.** Filters are one `AgendaFilters` popover, wherever
-filtering happens. Money words come from `paymentStateLabel`. The record screen
-is one `BookingDetails`. Two implementations of a thing means one is wrong.
+**One control per job.** Agenda and calendar filters use `AgendaFilters`;
+discrete list views use `DashboardFilterPills`, and choice pickers keep search
+and selection in the component that owns that decision. Money words come from
+`paymentStateLabel`. The record screen is one `BookingDetails`. Reuse the
+existing owner rather than introducing another implementation of its job.
 
 **Customer words, not system words.** "Paid", "Refunded", "On its way",
 "Amount paid", "Get receipt", "Send a refund", "Who's coming". Never

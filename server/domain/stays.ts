@@ -13,7 +13,8 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { parseStayMapSharing, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { validateProductDetails, validateStayAlarmDetails } from '~/shared/product-details'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -27,12 +28,13 @@ import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import { toE164 } from '~/utils/phone'
-import { arrangeProductPhotos, isStayBedAllocationConflict, readProductPhotos, readStayPhotoRooms, stayBedAllocationGuardQuery, type MediaPlacementItem } from '~/server/utils/media-placement'
+import { arrangeProductPhotos, readProductPhotos, readStayHomeAccessibility, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
-import { isStayPhotoRoomType, isStaySleepingArrangements, MAX_STAY_BEDS_PER_TYPE, parseStaySleepingArrangements, type StayPhotoRoom, type StayPhotoRoomType } from '~/shared/stay-photos'
+import { isStayPhotoRoomType, isStaySleepingArrangements, MAX_STAY_BEDS_PER_TYPE, type StayPhotoRoom, type StayPhotoRoomType } from '~/shared/stay-photos'
+import { isStayHomeAccessibility, isStayRoomAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 
 /**
@@ -139,6 +141,8 @@ export interface StayDetail extends Stay {
 
 export interface StayHome {
   product_id: string
+  /** The Product version used when saving listing accessibility. */
+  product_updated_at: string
   name: string
   location_id: string
   timezone: string
@@ -171,6 +175,9 @@ export interface StayHome {
   beds: number | null
   bathrooms: number | null
   amenities: StayAmenity[]
+  amenity_answers: StayAmenityAnswer[]
+  smoke_detector_details: string | null
+  carbon_monoxide_detector_details: string | null
   cancellation_policy: StayCancellationPolicy | null
   long_term_cancellation_policy: StayLongTermCancellationPolicy | null
   /**
@@ -199,6 +206,7 @@ export interface StayHome {
    */
   photos: StayPhoto[]
   photo_rooms: StayPhotoRoom[]
+  accessibility: StayHomeAccessibility[]
 }
 
 /** A home's address as a home is added with it: street, city, state, ISO country and postal code. */
@@ -344,7 +352,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
+    SELECT p.id AS product_id, p.updated_at AS product_updated_at, p.name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
            c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
@@ -366,16 +374,20 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
      WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1
      ORDER BY v.sort_order, v.id`, [organizationId, ...(productId ? [productId] : [])])
   const productIds = rows.map(row => String(row.product_id))
-  const [photos, photoRooms] = await Promise.all([
+  const [photos, photoRooms, accessibility] = await Promise.all([
     readProductPhotos(db, { organizationId, productIds }),
     readStayPhotoRooms(db, organizationId, productIds),
+    readStayHomeAccessibility(db, organizationId, productIds),
   ])
   return rows.map((row) => {
+    const amenityAnswers = parseStayAmenityAnswers(JSON.parse(String(row.amenities)))
+    const details = validateProductDetails('stay', JSON.parse(String(row.details_json)))
+    validateStayAlarmDetails(details, amenityAnswers)
     if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
     const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
     const base = selectPrice(own, { currency: row.default_currency, location_id: String(row.location_id) })
     return {
-      product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
+      product_id: String(row.product_id), product_updated_at: String(row.product_updated_at), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       description: String(row.description), published: Number(row.published) === 1,
@@ -386,7 +398,9 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       total_floors: nullableNumber(row.total_floors), listing_floor: nullableNumber(row.listing_floor), year_built: nullableNumber(row.year_built),
       property_size: nullableNumber(row.property_size), property_size_unit: nullableText(row.property_size_unit) as StayPropertySizeUnit | null,
       bedrooms: nullableNumber(row.bedrooms), beds: nullableNumber(row.beds), bathrooms: nullableNumber(row.bathrooms),
-      amenities: JSON.parse(String(row.amenities)) as StayAmenity[],
+      amenities: amenityAnswers.filter(answer => answer.available).map(answer => answer.code), amenity_answers: amenityAnswers,
+      smoke_detector_details: typeof details.smoke_detector_details === 'string' ? details.smoke_detector_details : null,
+      carbon_monoxide_detector_details: typeof details.carbon_monoxide_detector_details === 'string' ? details.carbon_monoxide_detector_details : null,
       cancellation_policy: nullableText(row.cancellation_policy) as StayCancellationPolicy | null,
       long_term_cancellation_policy: nullableText(row.long_term_cancellation_policy) as StayLongTermCancellationPolicy | null,
       check_in_method: nullableText(row.check_in_method) as StayCheckInMethod | null,
@@ -398,10 +412,11 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       channel: row.channel_stage === null ? null : {
         provider: 'channex',
-        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
+        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'content' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
       },
       photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
       photo_rooms: photoRooms.get(String(row.product_id)) ?? [],
+      accessibility: accessibility.get(String(row.product_id))!,
     }
   })
 }
@@ -525,12 +540,12 @@ function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewSta
 }
 
 /** What the home is and offers: product stay settings, checked by the product writer. */
-const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
+const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'amenity_answers', 'cancellation_policy', 'long_term_cancellation_policy'] as const
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude', 'stay_map_sharing'] as const
 const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
-  'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
+  'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
 
 /** The arrival guide fields a request names, checked; each problem names its field. */
 function arrivalPatch(body: Record<string, unknown>): Record<string, string | null> {
@@ -634,7 +649,10 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     }
     stay[key] = value as string | null
   }
-  const patch: UpdateProductInput = {}
+  const alarmDetails = Object.fromEntries(Object.values(STAY_ALARM_DETAIL_KEYS).filter(key => Object.hasOwn(body, key)).map(key => [key, body[key]]))
+  const patch: UpdateProductInput = Object.keys(alarmDetails).length
+    ? { details_mode: 'merge', details: alarmDetails as NonNullable<UpdateProductInput['details']> }
+    : {}
   const renamed = name(false)
   if (renamed !== null) patch.name = renamed
   if ('description' in body) patch.description = (body.description as string).trim()
@@ -924,6 +942,22 @@ export async function updateStayHomePhoto(db: DbClient, env: GuestInboxPublicati
   return updated
 }
 
+/**
+ * Put these library assets first, in this order, ahead of the home's other
+ * photos; the first becomes the cover. A channel import places the photos it
+ * stored this way: an asset already on the home moves, one not yet on it is
+ * added, and the host's own photos follow. Each asset must be an active image
+ * of this organization.
+ */
+export async function placeStayHomePhotosFirst(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, assetIds: readonly string[]): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  if (new Set(assetIds).size !== assetIds.length) fail(422, 'INVALID_PHOTO_ORDER', 'Each photo is placed once', 'photo_ids')
+  const order = [...assetIds, ...home.photos.map(photo => photo.id).filter(id => !assetIds.includes(id))]
+  if (order.length > MAX_ORDERED_MEDIA_ASSETS) fail(422, 'PHOTO_LIMIT', `A home holds at most ${MAX_ORDERED_MEDIA_ASSETS} photos`, 'photo_ids')
+  if (order.length === home.photos.length && order.every((id, index) => home.photos[index]!.id === id)) return home
+  return await arrangeHomePhotos(db, env, access, principal, home, order)
+}
+
 /** Take a photo off the home. The file stays in the organization's media library; when the cover goes, the next photo becomes the cover. */
 export async function removeStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, photoId: string): Promise<StayHome> {
   const home = await managedHome(db, access, productId)
@@ -964,48 +998,52 @@ export async function createStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
   return { home: updated, room }
 }
 
+/** Listing-level answers belong to the Product; no authored room is created or inferred. */
+export async function updateStayHomeAccessibility(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, body: unknown): Promise<{ home: StayHome }> {
+  const home = await managedHome(db, access, productId)
+  if (!isRecord(body)) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Provide the accessibility answer to change', 'accessibility')
+  const unknown = Object.keys(body).find(key => !['expected_updated_at', 'accessibility'].includes(key))
+  if (unknown) fail(422, 'INVALID_STAY_ACCESSIBILITY', `${unknown} cannot be changed here`, unknown)
+  if (typeof body.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(body.expected_updated_at))) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Provide the Product updated_at value from the latest read', 'expected_updated_at')
+  if (!isStayHomeAccessibility(body.accessibility)) fail(422, 'INVALID_STAY_ACCESSIBILITY', 'Choose a listing accessibility feature and true, false or null. A true answer needs unique photo IDs; false or null needs an empty photo list.', 'accessibility')
+  if (body.expected_updated_at !== home.product_updated_at) fail(409, 'STAY_ACCESSIBILITY_CHANGED', 'The listing changed while you were editing. Reload the accessibility information and try again.', 'expected_updated_at')
+  await updateProduct(db, {
+    organizationId: access.organizationId, productId, patch: {}, actor: { actorId: access.actorId }, env,
+    stayAccessibilityUpdate: { expectedUpdatedAt: body.expected_updated_at, accessibility: body.accessibility },
+  })
+  return { home: await readStayHome(db, access, productId) }
+}
+
 /** Room bed quantities allocate the declared listing inventory; they never replace its total. */
 export async function updateStayPhotoRoom(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, roomId: string, body: unknown): Promise<{ home: StayHome; room: StayPhotoRoom }> {
   const home = await managedHome(db, access, productId)
   const current = home.photo_rooms.find(room => room.id === roomId)
   if (!current) fail(404, 'PHOTO_ROOM_NOT_FOUND', 'That room is not on this home', 'room_id')
   if (!isRecord(body)) fail(422, 'INVALID_ROOM_DETAILS', 'Provide the room details to change', 'room')
-  const unknown = Object.keys(body).find(key => !['expected_details_version', 'sleeping_arrangements', 'private_attached_bathroom'].includes(key))
+  const unknown = Object.keys(body).find(key => !['expected_details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities', 'accessibility'].includes(key))
   if (unknown) fail(422, 'INVALID_ROOM_DETAILS', `${unknown} cannot be changed here`, unknown)
   if (!Number.isInteger(body.expected_details_version) || (body.expected_details_version as number) < 1) fail(422, 'INVALID_ROOM_DETAILS', 'Provide the room details_version from the latest read', 'expected_details_version')
   const sleeping = Object.hasOwn(body, 'sleeping_arrangements')
   const privacy = Object.hasOwn(body, 'private_attached_bathroom')
-  if (!sleeping && !privacy) fail(422, 'INVALID_ROOM_DETAILS', 'Provide sleeping arrangements or private bathroom information', 'room')
+  const amenities = Object.hasOwn(body, 'amenities')
+  const accessibility = Object.hasOwn(body, 'accessibility')
+  if (!sleeping && !privacy && !amenities && !accessibility) fail(422, 'INVALID_ROOM_DETAILS', 'Provide room details to change', 'room')
   if (sleeping && !isStaySleepingArrangements(body.sleeping_arrangements)) fail(422, 'INVALID_ROOM_DETAILS', `Sleeping arrangements must be null or a list of unique bed types with whole counts from 1 to ${MAX_STAY_BEDS_PER_TYPE}`, 'sleeping_arrangements')
   if (privacy && (current.type !== 'bedroom' || (body.private_attached_bathroom !== null && typeof body.private_attached_bathroom !== 'boolean'))) fail(422, 'INVALID_ROOM_DETAILS', 'Only a bedroom can state whether it has a private attached bathroom, as true, false or null', 'private_attached_bathroom')
+  if (amenities && (!Array.isArray(body.amenities) || !body.amenities.every(isStayAmenity) || new Set(body.amenities).size !== body.amenities.length)) fail(422, 'INVALID_ROOM_DETAILS', 'Room amenities must list amenity codes from the catalog, each once', 'amenities')
+  if (accessibility && (current.type !== 'bedroom' || !isStayRoomAccessibility(body.accessibility))) fail(422, 'INVALID_ROOM_DETAILS', 'Choose a bedroom accessibility feature and true, false or null. A true answer needs unique photo IDs; false or null needs an empty photo list.', 'accessibility')
   if (current.details_version !== body.expected_details_version) fail(409, 'ROOM_DETAILS_CHANGED', 'The room details changed while you were editing. Reload the room and try again.', 'expected_details_version')
-  const assignments: string[] = ['details_version = details_version + 1']
-  const params: unknown[] = []
-  if (sleeping) {
-    const arrangements = parseStaySleepingArrangements(body.sleeping_arrangements)
-    assignments.push('sleeping_arrangements = ?')
-    params.push(arrangements === null ? null : JSON.stringify(arrangements))
-  }
-  if (privacy) {
-    assignments.push('private_attached_bathroom = ?')
-    params.push(body.private_attached_bathroom === null ? null : body.private_attached_bathroom ? 1 : 0)
-  }
-  try {
-    await executeBatch(db, [
-      // Check the room's version at the actual commit, including deletion.
-      { query: `UPDATE products SET updated_at = NULL WHERE organization_id = ? AND id = ? AND NOT EXISTS (
-          SELECT 1 FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ? AND details_version = ?)`,
-      params: [access.organizationId, productId, access.organizationId, productId, roomId, body.expected_details_version] },
-      { query: `UPDATE product_stay_photo_rooms SET ${assignments.join(', ')} WHERE organization_id = ? AND product_id = ? AND id = ?`, params: [...params, access.organizationId, productId, roomId] },
-      stayBedAllocationGuardQuery(access.organizationId, productId),
-      publicResourceCacheInvalidationQuery(access.organizationId, 'stay-photo-room-details'),
-    ], { operation: 'Update stay photo room details' })
-  } catch (error) {
-    if (isStayBedAllocationConflict(error)) fail(409, 'STAY_BED_ALLOCATION_EXCEEDED', 'Room beds need a declared listing bed total that covers all assigned beds. Update the listing total or reduce the room quantities.', 'sleeping_arrangements')
-    if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) fail(409, 'ROOM_DETAILS_CHANGED', 'The room details changed while you were editing. Nothing was changed; reload the room and try again.', 'expected_details_version')
-    throw error
-  }
-  const updated = await changedStayPhotoRooms(db, env, access, home)
+  await updateProduct(db, {
+    organizationId: access.organizationId, productId, patch: {}, actor: { actorId: access.actorId }, env,
+    stayRoomUpdate: {
+      roomId, expectedDetailsVersion: body.expected_details_version as number,
+      ...(sleeping ? { sleeping_arrangements: body.sleeping_arrangements as StayPhotoRoom['sleeping_arrangements'] } : {}),
+      ...(privacy ? { private_attached_bathroom: body.private_attached_bathroom as boolean | null } : {}),
+      ...(amenities ? { amenities: body.amenities as StayAmenity[] } : {}),
+      ...(accessibility ? { accessibility: body.accessibility as StayRoomAccessibility } : {}),
+    },
+  })
+  const updated = await readStayHome(db, access, productId)
   const room = updated.photo_rooms.find(entry => entry.id === roomId)
   if (!room) fail(409, 'ROOM_DETAILS_CHANGED', 'The room was removed after its details were saved; reload the photo tour', 'room_id')
   return { home: updated, room }
@@ -1306,6 +1344,8 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
   const home = await readStayHome(db, access, input.product_id)
   const fields = stayFields(input, home)
+  // A payment the guest already made is written with the stay, so a stay never exists without it.
+  const payment = input.payment === undefined || input.payment === null ? null : stayPaymentFields(input.payment, 'payment.', false)
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const replay = async () => {
     const existing = await queryFirst<{ id: string; product_id: string; check_in_date: string; check_out_date: string; guest_name: string; total_minor: number }>(db,
@@ -1340,6 +1380,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
       ...reconcileNightsQueries(access.organizationId, id),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId: id, now, openedBy: { userId: access.actorId } }),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id }),
+      ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
     ], { operation: 'Create stay' })
   } catch (error) {
     if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
@@ -1567,14 +1608,50 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
 }
 
 /** Record money the host received (or, negative, refunded) outside Stripe for a stay they took. */
+interface StayPaymentFields {
+  amount_minor: number
+  method: StayPaymentMethod
+  paid_on: string
+  reference: string | null
+  note: string | null
+}
+
+/**
+ * A payment the host records against a stay. `prefix` names the fields in
+ * errors when the payment rides inside another body, as `payment.` does on a
+ * create. A refund (a negative amount) is allowed only on its own.
+ */
+function stayPaymentFields(input: unknown, prefix: string, allowRefund: boolean): StayPaymentFields {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail(422, 'INVALID_STAY_FIELD', `${prefix || 'payment'} must be an object`, prefix.replace(/\.$/, '') || 'payment')
+  const body = input as Record<string, unknown>
+  const amountMinor = amount(body.amount_minor, `${prefix}amount_minor`, allowRefund)
+  if (amountMinor === 0) fail(422, 'INVALID_AMOUNT', `${prefix}amount_minor must not be zero`, `${prefix}amount_minor`)
+  if (!STAY_PAYMENT_METHODS.includes(body.method as StayPaymentMethod)) fail(422, 'INVALID_STAY_FIELD', `${prefix}method must be one of ${STAY_PAYMENT_METHODS.join(', ')}`, `${prefix}method`)
+  return {
+    amount_minor: amountMinor, method: body.method as StayPaymentMethod, paid_on: date(body.paid_on, `${prefix}paid_on`),
+    reference: optionalText(body.reference, `${prefix}reference`, 200), note: optionalText(body.note, `${prefix}note`, 1000),
+  }
+}
+
+function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: string; location_id: string }, payment: StayPaymentFields, key: string, now: string): BatchQuery[] {
+  const id = crypto.randomUUID()
+  return [
+    {
+      query: `INSERT INTO stay_payments (id, organization_id, stay_id, amount_minor, currency, method, paid_on, reference, note, idempotency_key, created_at, created_by)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      params: [id, access.organizationId, stay.id, payment.amount_minor, stay.currency, payment.method, payment.paid_on, payment.reference, payment.note, key, now, access.actorId],
+    },
+    organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_recorded', entityType: 'stay', entityId: stay.id, metadata: { payment_id: id, amount_minor: payment.amount_minor } }),
+  ]
+}
+
 export async function recordStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<StayDetail> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
   if (stay.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay is paid through its channel')
-  const amountMinor = amount(input.amount_minor, 'amount_minor', true)
-  if (amountMinor === 0) fail(422, 'INVALID_AMOUNT', 'amount_minor must not be zero', 'amount_minor')
-  if (!STAY_PAYMENT_METHODS.includes(input.method as StayPaymentMethod)) fail(422, 'INVALID_STAY_FIELD', `method must be one of ${STAY_PAYMENT_METHODS.join(', ')}`, 'method')
-  const paidOn = date(input.paid_on, 'paid_on')
+  const payment = stayPaymentFields(input, '', true)
+  const amountMinor = payment.amount_minor
+  const paidOn = payment.paid_on
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
   // A retry of a payment that was recorded returns the stay as it is; the same key for a different payment is refused.
@@ -1588,17 +1665,8 @@ export async function recordStayPayment(db: DbClient, env: GuestInboxPublication
   }
   const earlier = await replay()
   if (earlier) return earlier
-  const id = crypto.randomUUID()
   try {
-    await executeBatch(db, [
-      {
-        query: `INSERT INTO stay_payments (id, organization_id, stay_id, amount_minor, currency, method, paid_on, reference, note, idempotency_key, created_at, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [id, access.organizationId, stayId, amountMinor, stay.currency, input.method, paidOn,
-          optionalText(input.reference, 'reference', 200), optionalText(input.note, 'note', 1000), key, new Date().toISOString(), access.actorId],
-      },
-      organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_recorded', entityType: 'stay', entityId: stayId, metadata: { payment_id: id, amount_minor: amountMinor } }),
-    ], { operation: 'Record stay payment' })
+    await executeBatch(db, stayPaymentInsert(access, stay, payment, key, new Date().toISOString()), { operation: 'Record stay payment' })
   } catch (error) {
     if (/UNIQUE constraint failed: stay_payments\.organization_id, stay_payments\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
       const concurrent = await replay()

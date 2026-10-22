@@ -1,5 +1,7 @@
 import type { Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
+import { groupProductsByCollection } from '~/utils/product-presentation'
+import { getErrorMessage } from '~/utils/errors'
 
 /**
  * The organization's catalog, fetched once. A location is a projection of its
@@ -47,5 +49,35 @@ export function useProductCatalog(organizationId: string, locationId: Ref<string
     if (error.value) throw error.value
   }
 
-  return { load, collections, products, pending, error, refresh }
+  /** Membership always reads the complete organization catalog, regardless of price scope. */
+  function collectionProductIds(collectionId: string): string[] {
+    if (error.value) throw error.value
+    if (!data.value) throw new Error('The catalog has not been loaded')
+    if (!data.value.collections.some(collection => collection.id === collectionId)) throw new Error('This section no longer exists.')
+    return groupProductsByCollection(data.value.products, data.value.collections).find(group => group.id === collectionId)?.products.map(product => product.id) ?? []
+  }
+
+  /** One full-state write and independent read for add, remove, reorder and atomic moves. */
+  async function setCollectionProducts(collectionId: string, productIds: string[], expected: string[], move?: { collection_id: string; expected_product_ids: string[] }) {
+    let failure: unknown = null
+    try {
+      await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${collectionId}/products`, {
+        method: 'PUT', body: { product_ids: productIds, expected_product_ids: expected, ...(move ? { move_to: move } : {}) },
+        validate: (value: unknown): value is { success: true; products: Product[] } => isRecord(value) && value.success === true && Array.isArray(value.products),
+      })
+    } catch (error) { failure = error }
+    try { await refresh() }
+    catch (error) {
+      throw new Error(`${failure ? getErrorMessage(failure, 'The section could not be saved') : 'The changes were saved.'} The section could not be read again: ${getErrorMessage(error, 'Read failed')}`, { cause: error })
+    }
+    if (failure) throw failure
+    if (JSON.stringify(collectionProductIds(collectionId)) !== JSON.stringify(productIds)) throw new Error('The section changed. Review its current items before editing again.')
+    if (move) {
+      const removed = expected.filter(id => !productIds.includes(id))
+      const target = move.expected_product_ids.concat(removed.filter(id => !move.expected_product_ids.includes(id)))
+      if (JSON.stringify(collectionProductIds(move.collection_id)) !== JSON.stringify(target)) throw new Error('The destination section changed. Review its current items before moving again.')
+    }
+  }
+
+  return { load, collections, products, pending, error, refresh, collectionProductIds, setCollectionProducts }
 }

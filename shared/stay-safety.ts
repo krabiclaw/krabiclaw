@@ -1,3 +1,5 @@
+import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAILS, STAY_ALARM_DETAIL_KEYS, STAY_AMENITIES, stayAmenityAvailability, type StayAmenityAnswer } from './stay-listing.ts'
+
 /** Public disclosures authored by a host. Unanswered choices are not a No. */
 export const STAY_SAFETY_DETAILS_LIMIT = 300
 export const STAY_SAFETY_FIELDS = {
@@ -24,7 +26,7 @@ export const STAY_SAFETY_SECTIONS = {
 } as const
 export type StaySafetySection = keyof typeof STAY_SAFETY_SECTIONS
 export type StaySafetyFlag = keyof typeof STAY_SAFETY_FIELDS
-export type StaySafetyDetailKey = typeof STAY_SAFETY_FIELDS[StaySafetyFlag]['detailsKey'] | 'special_safety_considerations'
+export type StaySafetyDetailKey = typeof STAY_SAFETY_FIELDS[StaySafetyFlag]['detailsKey'] | 'special_safety_considerations' | typeof STAY_ALARM_DETAIL_KEYS[keyof typeof STAY_ALARM_DETAIL_KEYS]
 export type StaySafetyKey = StaySafetyFlag | StaySafetyDetailKey
 
 /** The registry consumed by the one Product details validator and schema. */
@@ -32,16 +34,17 @@ export const STAY_SAFETY_DETAIL_FIELDS = {
   ...Object.fromEntries(Object.entries(STAY_SAFETY_FIELDS).flatMap(([key, field]) => [
     [key, { name: field.name, description: field.description, value_type: 'boolean', kinds: ['stay'], localizable: false, validations: {} }],
     [field.detailsKey, { name: `${field.name}: details`, description: `Host-authored details about ${field.name.toLowerCase()}. Requires its disclosure to be Yes.`, value_type: 'multi_line_text', kinds: ['stay'], localizable: true, validations: { max_length: STAY_SAFETY_DETAILS_LIMIT } }],
-  ])) as Record<Exclude<StaySafetyKey, 'special_safety_considerations'>, { name: string; description: string; value_type: 'boolean' | 'multi_line_text'; kinds: readonly ['stay']; localizable: boolean; validations: { max_length?: number } }>,
+  ])) as Record<StaySafetyFlag | typeof STAY_SAFETY_FIELDS[StaySafetyFlag]['detailsKey'], { name: string; description: string; value_type: 'boolean' | 'multi_line_text'; kinds: readonly ['stay']; localizable: boolean; validations: { max_length?: number } }>,
+  [STAY_ALARM_DETAIL_KEYS.carbon_monoxide_detector]: { name: STAY_ALARM_DETAILS.carbon_monoxide_detector.name, description: STAY_ALARM_DETAILS.carbon_monoxide_detector.description, value_type: 'multi_line_text', kinds: ['stay'], localizable: true, validations: { max_length: STAY_SAFETY_DETAILS_LIMIT } },
+  [STAY_ALARM_DETAIL_KEYS.smoke_detector]: { name: STAY_ALARM_DETAILS.smoke_detector.name, description: STAY_ALARM_DETAILS.smoke_detector.description, value_type: 'multi_line_text', kinds: ['stay'], localizable: true, validations: { max_length: STAY_SAFETY_DETAILS_LIMIT } },
   special_safety_considerations: { name: 'Special safety considerations', description: 'Other property features that guests should know could be unsafe, and why.', value_type: 'multi_line_text', kinds: ['stay'], localizable: true, validations: { max_length: STAY_SAFETY_DETAILS_LIMIT } },
 } as const
 export const STAY_SAFETY_DETAIL_KEYS = Object.keys(STAY_SAFETY_DETAIL_FIELDS) as StaySafetyKey[]
 
 export function staySafetySectionKeys(section: StaySafetySection): StaySafetyKey[] {
   const group = STAY_SAFETY_SECTIONS[section]
-  return [...group.fields.flatMap(key => [key, STAY_SAFETY_FIELDS[key].detailsKey]), ...('textKey' in group ? [group.textKey] : [])]
+  return [...group.fields.flatMap(key => [key, STAY_SAFETY_FIELDS[key].detailsKey]), ...('textKey' in group ? [group.textKey] : []), ...(section === 'devices' ? Object.values(STAY_ALARM_DETAIL_KEYS) : [])]
 }
-
 /** One projection for saved summaries, the guest listing and the team guide. */
 export function staySafetyLines(details: Readonly<Record<string, unknown>>, options: { section?: StaySafetySection; includeNo?: boolean } = {}): string[] {
   const sections = options.section ? [options.section] : Object.keys(STAY_SAFETY_SECTIONS) as StaySafetySection[]
@@ -59,5 +62,18 @@ export function staySafetyLines(details: Readonly<Record<string, unknown>>, opti
     }
     if ('textKey' in group && typeof details[group.textKey] === 'string') lines.push(details[group.textKey] as string)
     return lines
+  })
+}
+/** The same authored alarm facts in host summaries and the guest listing. */
+export function stayAlarmLines(answers: readonly StayAmenityAnswer[], details: Readonly<Record<string, unknown>>, options: { includeUnknown?: boolean; absent?: (label: string) => string; unknown?: (label: string) => string } = {}): string[] {
+  return STAY_ALARM_AMENITIES.flatMap(code => {
+    const available = stayAmenityAvailability(answers, code)
+    const label = STAY_AMENITIES[code].label
+    if (available === true) {
+      const extra = details[STAY_ALARM_DETAIL_KEYS[code]]
+      return [`${label}${typeof extra === 'string' ? `\n${extra}` : ''}`]
+    }
+    if (available === false) return [options.absent?.(label) ?? `${label}: Not installed`]
+    return options.includeUnknown ? [options.unknown?.(label) ?? `${label} not reported`] : []
   })
 }

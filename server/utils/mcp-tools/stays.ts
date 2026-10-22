@@ -5,9 +5,10 @@ import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
 import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
 import { STAY_MAP_SHARING_MODES, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { MAX_STAY_BEDS_PER_TYPE, STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES } from '~/shared/stay-photos'
+import { STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
-import { cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayPhotoRoom, STAY_CHANNELS, STAY_PAYMENT_METHODS, STAY_STATUSES } from '~/server/domain/stays'
+import { cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_CHANNELS, STAY_PAYMENT_METHODS, STAY_STATUSES } from '~/server/domain/stays'
 
 const text = { type: 'string', minLength: 1 }
 const nullableText = { type: ['string', 'null'] }
@@ -52,9 +53,14 @@ export const STAY_LISTING_SCHEMA = {
   beds: { type: ['integer', 'null'], minimum: 1, maximum: 50 },
   bathrooms: { type: ['number', 'null'], minimum: 0, maximum: 50, multipleOf: 0.5, description: 'Whole and half baths, such as 1.5.' },
   amenities: { type: 'array', uniqueItems: true, items: { type: 'string', enum: Object.keys(STAY_AMENITIES) }, description: 'Amenity codes the home offers; replaces the whole list. Empty offers none.' },
+  amenity_answers: { type: 'array', items: { type: 'object', properties: { code: { type: 'string', enum: Object.keys(STAY_AMENITIES) }, available: { type: 'boolean' } }, required: ['code', 'available'], additionalProperties: false }, description: 'Explicit amenity reports, each code once, in catalog order. Missing codes are unknown. amenities is the true-only projection.' },
   cancellation_policy: nullableCode(STAY_CANCELLATION_POLICIES, 'Policy shown to guests for stays under 28 nights. It does not refund by itself.'),
   long_term_cancellation_policy: nullableCode(STAY_LONG_TERM_CANCELLATION_POLICIES, 'Policy shown to guests for stays of 28 nights or more.'),
 }
+export const STAY_LISTING_WRITE_SCHEMA = { ...STAY_LISTING_SCHEMA, amenity_answers: { ...STAY_LISTING_SCHEMA.amenity_answers,
+  items: { ...STAY_LISTING_SCHEMA.amenity_answers.items, properties: { ...STAY_LISTING_SCHEMA.amenity_answers.items.properties, available: { type: ['boolean', 'null'] } } },
+  description: 'Sparse amenity answer patch: true offers it, false explicitly reports absence, null clears to unknown. Omitted codes remain. Positive-list edits preserve false reports and remove omitted positive reports to unknown. Contradictions between amenities and amenity_answers are refused.',
+} }
 const checkoutInstruction = { type: 'object', properties: { task: { type: 'string', enum: Object.keys(STAY_CHECKOUT_TASKS) }, details: { type: ['string', 'null'], minLength: 1, maxLength: STAY_CHECKOUT_DETAILS_LIMIT, description: 'Required for additional.' } }, required: ['task', 'details'], additionalProperties: false }
 /** The private arrival guide: managers and assigned members read it; no public page carries it. */
 export const STAY_ARRIVAL_SCHEMA = {
@@ -75,21 +81,33 @@ const sleepingArrangements = { type: ['array', 'null'], maxItems: Object.keys(ST
 } }
 const roomDetailsVersion = { type: 'integer', minimum: 1, description: 'The room details_version from the latest photo_rooms read. A stale version refuses the entire edit.' }
 const privateBathroom = { type: ['boolean', 'null'], description: 'Whether this bedroom has a private attached bathroom. Null is unanswered. Only bedrooms may author this fact.' }
-export const STAY_PHOTO_ROOM_SCHEMA = { type: 'object', properties: { id: text, type: roomType, photo_ids: { type: 'array', items: text, uniqueItems: true }, details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom }, required: ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom'], additionalProperties: false }
+const roomAmenities = { ...STAY_LISTING_SCHEMA.amenities, description: 'Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.' }
+const accessibilityAnswerSchema = (features: object) => ({ type: 'object', properties: {
+  feature: { type: 'string', enum: Object.keys(features) },
+  available: { type: ['boolean', 'null'], description: 'The host’s answer, without a review or approval status. Null clears the answer to unknown.' },
+  photo_ids: { type: 'array', items: text, uniqueItems: true, maxItems: MAX_ORDERED_MEDIA_ASSETS, description: 'Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.' },
+}, required: ['feature', 'available', 'photo_ids'], additionalProperties: false,
+oneOf: [{ properties: { available: { const: true }, photo_ids: { minItems: 1 } } }, { properties: { available: { enum: [false, null] }, photo_ids: { maxItems: 0 } } }] })
+const accessibilityAnswer = accessibilityAnswerSchema(STAY_ROOM_ACCESSIBILITY_FEATURES)
+const homeAccessibilityAnswer = accessibilityAnswerSchema(STAY_HOME_ACCESSIBILITY_FEATURES)
+export const STAY_HOME_ACCESSIBILITY_SCHEMA = { type: 'array', minItems: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).length, maxItems: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).length, items: homeAccessibilityAnswer, description: 'All six listing accessibility features in catalog order, including unknown null answers. Written only through update_stay_accessibility; separate from authored room features.' }
+export const STAY_PHOTO_ROOM_SCHEMA = { type: 'object', properties: { id: text, type: roomType, photo_ids: { type: 'array', items: text, uniqueItems: true }, details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom, amenities: roomAmenities, accessibility: { type: 'array', maxItems: Object.keys(STAY_ROOM_ACCESSIBILITY_FEATURES).length, items: accessibilityAnswer, description: 'Both bedroom features in catalog order, including unanswered null rows; [] for other room types.' } }, required: ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities', 'accessibility'], additionalProperties: false }
 const movePhotos = { type: 'array', minItems: 1, maxItems: MAX_ORDERED_MEDIA_ASSETS, items: { type: 'object', properties: {
   photo_id: text, expected_room_id: { ...nullableText, description: 'The room from the latest photo_rooms read; null only when the photo is unassigned. A changed membership refuses the whole move.' },
 }, required: ['photo_id', 'expected_room_id'], additionalProperties: false } }
-export const stayHomeObject = { type: 'object', properties: { product_id: text, name: text, location_id: text, timezone: text, currency: text, base_price_minor: { type: ['integer', 'null'] }, base_price_tax_behavior: { type: ['string', 'null'], enum: ['unspecified', 'inclusive', 'exclusive', null] }, check_in_time: text, check_out_time: text, max_guests: { type: 'integer' }, min_nights: { type: 'integer' },
+export const stayHomeObject = { type: 'object', properties: { product_id: text, product_updated_at: { ...text, description: 'The Product updated_at value to supply as expected_updated_at when saving listing accessibility.' }, name: text, location_id: text, timezone: text, currency: text, base_price_minor: { type: ['integer', 'null'] }, base_price_tax_behavior: { type: ['string', 'null'], enum: ['unspecified', 'inclusive', 'exclusive', null] }, check_in_time: text, check_out_time: text, max_guests: { type: 'integer' }, min_nights: { type: 'integer' },
   description: { type: 'string', description: 'The listing description; empty when none is written.' }, published: { type: 'boolean', description: 'Whether the home is listed on the site.' },
   address: { ...homeAddress, description: "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one." }, latitude: { type: ['number', 'null'] }, longitude: { type: ['number', 'null'] },
   stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.' },
   ...STAY_LISTING_SCHEMA, ...STAY_ARRIVAL_SCHEMA,
+  smoke_detector_details: { ...nullableText, maxLength: 300, description: 'Where each smoke alarm is located; a projection of Product.details, present only while the amenity is true.' },
+  carbon_monoxide_detector_details: { ...nullableText, maxLength: 300, description: 'Where each carbon monoxide alarm is located; a projection of Product.details, present only while the amenity is true.' },
   assigned_member_id: { ...nullableText, description: 'The member (member id) who looks after this home.' }, assigned_team_id: { ...nullableText, description: 'The team that looks after this home.' },
   channel: { type: ['object', 'null'], description: 'The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.', properties: { provider: { type: 'string', enum: ['channex'] }, status: { type: 'string', enum: ['importing', 'connected', 'disconnected'] } }, required: ['provider', 'status'] },
   photos: { type: 'array', description: "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.", items: photo },
-  photo_rooms: { type: 'array', description: 'Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.', items: STAY_PHOTO_ROOM_SCHEMA } },
-  required: ['product_id', 'name', 'location_id', 'timezone', 'currency', 'base_price_minor', 'base_price_tax_behavior', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights',
-    'description', 'published', 'address', 'latitude', 'longitude', 'stay_map_sharing', ...Object.keys(STAY_LISTING_SCHEMA), ...Object.keys(STAY_ARRIVAL_SCHEMA), 'assigned_member_id', 'assigned_team_id', 'channel', 'photos', 'photo_rooms'] }
+  photo_rooms: { type: 'array', description: 'Authored photo-tour rooms and spaces. photo_ids follow the Product photo order; unassigned photos are Additional photos. Counts and amenities never create rooms.', items: STAY_PHOTO_ROOM_SCHEMA }, accessibility: STAY_HOME_ACCESSIBILITY_SCHEMA },
+  required: ['product_id', 'product_updated_at', 'name', 'location_id', 'timezone', 'currency', 'base_price_minor', 'base_price_tax_behavior', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights',
+    'description', 'published', 'address', 'latitude', 'longitude', 'stay_map_sharing', ...Object.keys(STAY_LISTING_SCHEMA), ...Object.keys(STAY_ARRIVAL_SCHEMA), 'smoke_detector_details', 'carbon_monoxide_detector_details', 'assigned_member_id', 'assigned_team_id', 'channel', 'photos', 'photo_rooms', 'accessibility'] }
 const night = { type: 'object', properties: { date: day, available: { type: 'boolean' }, stay_id: nullableText, held_until: { ...nullableText, description: 'When a guest checkout hold on this night lapses; null when no guest is paying for it. A held night is not available.' }, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'] }, min_stay_arrival: { type: ['integer', 'null'] }, min_stay_through: { type: ['integer', 'null'] }, max_stay: { type: ['integer', 'null'] }, closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, source: { type: ['string', 'null'], enum: ['host', 'import', null] },
   channel: { type: ['object', 'null'], properties: { state: { type: 'string', enum: ['pending', 'pushed', 'needs_review'] }, detail: nullableText }, required: ['state', 'detail'] } },
   required: ['date', 'available', 'stay_id', 'closed', 'price_minor', 'min_stay_arrival', 'min_stay_through', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'source', 'held_until', 'channel'] }
@@ -112,9 +130,12 @@ export const STAYS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'add_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Add an authored room or space to a home’s photo tour. Does not change bedrooms, beds, bathrooms or amenities. Returns the created room’s authoritative ID and the updated home.',
     inputSchema: { product_id: productId, type: roomType }, required: ['product_id', 'type'],
     outputSchema: { type: 'object', properties: { home: stayHomeObject, room: STAY_PHOTO_ROOM_SCHEMA }, required: ['home', 'room'] } }),
-  organizationTool({ name: 'update_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Update sleeping arrangements or bedroom private-bathroom information on one authored room under its details_version. Fields omitted are retained, null clears an answer, and [] explicitly states no sleeping arrangements. Room bed quantities allocate the listing’s declared beds total, which must be known and cover every room’s allocations. Does not change listing totals, photos or amenities.',
-    inputSchema: { product_id: productId, room_id: text, expected_details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom,
-      anyOf: [{ required: ['sleeping_arrangements'] }, { required: ['private_attached_bathroom'] }] }, required: ['product_id', 'room_id', 'expected_details_version'],
+  organizationTool({ name: 'update_stay_accessibility', domain: 'stays', minimumRole: 'admin', description: 'Save one listing accessibility answer under the Product updated_at value from the latest read. Other feature answers and authored rooms are retained. True requires active same-organization image evidence and atomically appends selected library images to Product photos, preserving existing cover/order and room groups. False/null requires []; null clears to unknown. Evidence photos cannot be removed until replaced or the answer cleared. No review or approval is implied. A stale Product or photo order refuses every change.',
+    inputSchema: { product_id: productId, expected_updated_at: { ...text, description: 'Product updated_at from list_products, or product_updated_at from the Home. A stale value refuses the entire edit.' }, accessibility: homeAccessibilityAnswer }, required: ['product_id', 'expected_updated_at', 'accessibility'],
+    outputSchema: { type: 'object', properties: { home: stayHomeObject }, required: ['home'] } }),
+  organizationTool({ name: 'update_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Update one authored room under its details_version: sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer. Omitted concerns and other feature answers are retained. Beds allocate the declared listing total; selected amenities join the global listing set while deselection only unassigns. Accessibility true requires image evidence and atomically appends selected library images to Product photos without changing existing cover/order or tour groups. False/null requires no evidence; null clears to unknown. Referenced photos cannot be removed until evidence is replaced or the answer cleared. No review or approval is implied. A stale version or invalid combination refuses every change.',
+    inputSchema: { product_id: productId, room_id: text, expected_details_version: roomDetailsVersion, sleeping_arrangements: sleepingArrangements, private_attached_bathroom: privateBathroom, amenities: roomAmenities, accessibility: accessibilityAnswer,
+      anyOf: [{ required: ['sleeping_arrangements'] }, { required: ['private_attached_bathroom'] }, { required: ['amenities'] }, { required: ['accessibility'] }] }, required: ['product_id', 'room_id', 'expected_details_version'],
     outputSchema: { type: 'object', properties: { home: stayHomeObject, room: STAY_PHOTO_ROOM_SCHEMA }, required: ['home', 'room'] } }),
   organizationTool({ name: 'remove_stay_photo_room', domain: 'stays', minimumRole: 'admin', description: 'Delete one authored photo-tour room. Its photos return to Additional photos; the Product’s cover/gallery and library files are retained.',
     inputSchema: { product_id: productId, room_id: text }, required: ['product_id', 'room_id'],
@@ -152,10 +173,13 @@ export async function handleStaysTools(ctx: McpExecutorContext): Promise<unknown
     case 'get_stay': return { stay: await getStay(db, access, requiredString(args, 'stay_id')) }
     case 'get_stay_calendar': return readStayCalendar(db, access, { productId: requiredString(args, 'product_id'), from: args.from, to: args.to })
     case 'add_stay_photo_room': return createStayPhotoRoom(db, env, access, requiredString(args, 'product_id'), { type: args.type })
+    case 'update_stay_accessibility': return updateStayHomeAccessibility(db, env, access, requiredString(args, 'product_id'), { expected_updated_at: args.expected_updated_at, accessibility: args.accessibility })
     case 'update_stay_photo_room': return updateStayPhotoRoom(db, env, access, requiredString(args, 'product_id'), requiredString(args, 'room_id'), {
       expected_details_version: args.expected_details_version,
       ...(Object.hasOwn(args, 'sleeping_arrangements') ? { sleeping_arrangements: args.sleeping_arrangements } : {}),
       ...(Object.hasOwn(args, 'private_attached_bathroom') ? { private_attached_bathroom: args.private_attached_bathroom } : {}),
+      ...(Object.hasOwn(args, 'amenities') ? { amenities: args.amenities } : {}),
+      ...(Object.hasOwn(args, 'accessibility') ? { accessibility: args.accessibility } : {}),
     })
     case 'remove_stay_photo_room': return { home: await removeStayPhotoRoom(db, env, access, requiredString(args, 'product_id'), requiredString(args, 'room_id')) }
     case 'move_stay_photos': return { home: await moveStayPhotos(db, env, access, requiredString(args, 'product_id'), { ...(Object.hasOwn(args, 'room_id') ? { room_id: args.room_id } : {}), ...(Object.hasOwn(args, 'new_room_type') ? { new_room_type: args.new_room_type } : {}), photos: args.photos }) }

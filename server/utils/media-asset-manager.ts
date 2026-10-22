@@ -305,6 +305,40 @@ export function pruneStayPhotoRoomMembershipsQuery(organizationId: string, produ
   }
 }
 
+/** Run after the complete proposed state, before any provider storage deletion. */
+export function stayAccessibilityEvidenceGuardQueries(organizationId: string, scope: { productId: string } | { assetId: string }): BatchQuery[] {
+  return ['product_stay_room_accessibility', 'product_stay_accessibility'].map(table => {
+    const room = table === 'product_stay_room_accessibility'
+    const ownerMatch = room ? 'AND proof.room_id = a.room_id' : ''
+    const evidence = `SELECT 1 FROM ${table}_photos proof
+      WHERE proof.organization_id = a.organization_id AND proof.product_id = a.product_id ${ownerMatch} AND proof.feature_code = a.feature_code`
+    const scoped = 'productId' in scope ? 'a.product_id = ?' : `EXISTS (${evidence} AND proof.asset_id = ?)`
+    const owner = room
+      ? "SELECT 1 FROM product_stay_photo_rooms room WHERE room.organization_id = a.organization_id AND room.product_id = a.product_id AND room.id = a.room_id AND room.type = 'bedroom'"
+      : "SELECT 1 FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = a.organization_id AND p.id = a.product_id AND p.kind = 'stay'"
+    return {
+    query: `UPDATE ${table} AS a SET available = NULL WHERE a.organization_id = ? AND ${scoped} AND (
+      NOT EXISTS (${owner})
+      OR (a.available = 1 AND NOT EXISTS (${evidence})) OR (a.available = 0 AND EXISTS (${evidence}))
+      OR EXISTS (${evidence} AND NOT EXISTS (
+        SELECT 1 FROM media_assets ma JOIN media_placements mp ON mp.organization_id = ma.organization_id AND mp.asset_id = ma.id
+        WHERE ma.organization_id = proof.organization_id AND ma.id = proof.asset_id AND ma.status = 'active' AND ma.kind = 'image'
+          AND ma.generation_key IS NULL AND length(trim(ma.public_url)) > 0
+          AND mp.owner_type = 'product' AND mp.owner_id = proof.product_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'))
+    )`,
+    params: [organizationId, 'productId' in scope ? scope.productId : scope.assetId],
+    }
+  })
+}
+
+/** A failed evidence predicate aborts its whole D1 batch through this required column. */
+export function stayAccessibilityEvidenceWriteError(error: unknown): unknown {
+  if (/NOT NULL constraint failed: product_stay_(?:room_)?accessibility\.available/.test(error instanceof Error ? error.message : String(error))) {
+    return new HTTPError({ statusCode: 409, statusMessage: 'A photo is required by accessibility information. Replace its evidence or clear the feature answer before removing the photo.', data: { code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' }, cause: error })
+  }
+  return error
+}
+
 export function toResolvedMediaAsset(row: MediaAsset): ResolvedMediaAsset {
   if (!row.public_url) {
     throw new HTTPError({ statusCode: 400, statusMessage: `Media asset ${row.id} does not have a public URL` })
@@ -602,6 +636,8 @@ export async function updateMediaAssetMetadata(
   updates: { alt_text?: string | null; category?: MediaAsset['category'] },
   /** Update it only while it is still placed on this owner, in one of these slots. */
   placedOn?: { owner_type: string; owner_id: string; slots: string[] },
+  /** Write the description only while the asset has none, so one a person wrote meanwhile is kept; false then means it already has one. */
+  onlyWhileUndescribed = false,
 ): Promise<boolean> {
   await assertNotPinnedByPublication(db, organizationId, id)
   const sets: string[] = ['updated_at = ?']
@@ -623,7 +659,7 @@ export async function updateMediaAssetMetadata(
   if (placedOn) params.push(placedOn.owner_type, placedOn.owner_id, d1JsonStringSet(placedOn.slots))
   const [, result] = await executeBatch(db, [
     publicationPinGuardQuery(organizationId, id),
-    { query: `UPDATE media_assets SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?${placement}`, params },
+    { query: `UPDATE media_assets SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?${placement}${onlyWhileUndescribed ? ' AND alt_text IS NULL' : ''}`, params },
     publicResourceCacheInvalidationQuery(organizationId, 'media-update'),
   ])
   return Number(result?.meta?.changes ?? 0) > 0
@@ -751,7 +787,7 @@ export async function deleteMediaAsset(db: DbClient, env: MediaProviderEnv, id: 
     }, {
       query: 'DELETE FROM product_stay_photo_room_memberships WHERE organization_id = ? AND asset_id = ?',
       params: [organizationId, pendingAsset.id],
-    }, publicResourceCacheInvalidationQuery(organizationId, 'media-delete')])
+    }, ...stayAccessibilityEvidenceGuardQueries(organizationId, { assetId: pendingAsset.id }), publicResourceCacheInvalidationQuery(organizationId, 'media-delete')]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
     if (Number(result?.meta?.changes ?? 0) !== 1) {
       throw new Error(`Media asset ${pendingAsset.id} changed during deletion`)
     }
