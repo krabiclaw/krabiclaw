@@ -4,6 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { AirbnbConnection } from '../../server/integrations/channex/airbnb-connection.ts'
+import { createStayHome, stayHomeInput } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 // An Airbnb listing imported as a home, through every stage, against a fake
@@ -220,3 +221,36 @@ test('a listing priced in another currency stops before anything is created', { 
     await runtime.dispose()
   }
 })
+
+test('a third home on Basic is refused as a home, nothing is saved, and the same form imports after a plan is chosen', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const access = { organizationId: ORG, actorId: OWNER, manage: true }
+    const homeEnv = { ...env, DB: db, STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth' } as unknown as CloudflareEnv
+    for (const name of ['Dune Hut', 'Reef Hut']) {
+      await createStayHome(homeEnv, db, access, stayHomeInput({ name, timezone: TZ, address: `1 ${name} Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, base_price_minor: 100_00 }), name)
+    }
+    // Basic includes two homes: the import is refused as a home before anything is made, and the contact the host typed is not kept.
+    await assert.rejects(connection.prepare(LISTING, form), { status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } } })
+    assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [2, 2, 0])
+    assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: null, contact_phone: null })
+    assert.deepEqual((await connection.details(LISTING)).missingFields, ['email', 'phone', 'childBeds', 'infantCots'])
+    // On Growth the same form, with the same details, imports; the contact is kept once the home is made.
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-org', 'growth', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
+    const started = await connection.prepare(LISTING, form)
+    assert.equal(started.stage, 'property')
+    assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [3, 3, 1])
+    assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0100' })
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+async function count(db: D1Database, table: string): Promise<number> {
+  return (await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())!.n
+}

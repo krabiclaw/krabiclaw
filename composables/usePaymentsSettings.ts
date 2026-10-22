@@ -9,7 +9,7 @@ import type { PaymentMethodRow } from '~/server/utils/billing-customer'
  * serves both and a leaf's refresh updates the row it came from.
  */
 
-export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year' }; usage: { locations: number; homes: number }; scheduledPlan?: { plan: string; at: string } | null }
+export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year'; meters: string[] }; usage: { locations: number; homes: number }; scheduledPlan?: { plan: string; at: string } | null }
 const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
   && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.locations)

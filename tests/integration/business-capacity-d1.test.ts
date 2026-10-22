@@ -134,6 +134,8 @@ test('active locations and homes are reported to their Stripe meters, and only B
     assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
     const homeLimit = { status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } } }
     await assert.rejects(home('starter', 'starter-villa-3'), homeLimit)
+    // A key that already made its home replays it; it is not a third home.
+    assert.deepEqual(await home('starter', 'starter-villa-2'), starterHomes[1])
     // The refusal wrote nothing: no third location was made for the refused home.
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM business_locations WHERE organization_id = 'starter'").first('n'), 4)
     // A stay product at one of the plain locations would be a third home too.

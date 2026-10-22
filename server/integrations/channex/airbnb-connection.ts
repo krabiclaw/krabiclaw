@@ -393,8 +393,6 @@ export class AirbnbConnection {
       }
       if (!isValidTimezone(values.timezone)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone')
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
-      // Every check has passed, so what the host typed becomes the organization's contact.
-      await this.saveOrganizationContact(details, values)
       // The home itself is checked and made as a home added by hand is: billed as a home, and refused past the homes Basic includes.
       const home = await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
@@ -413,6 +411,10 @@ export class AirbnbConnection {
       await execute(this.db, `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_calendar)
         VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
       [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)])
+      // The import is made, so what the host typed becomes the organization's
+      // contact. Saved last: a refused or failed import leaves the details
+      // missing, so the same form is accepted again on retry.
+      await this.saveOrganizationContact(details, values)
       return { product_id: home.product_id, stage: 'property', waiting: false }
     })
   }

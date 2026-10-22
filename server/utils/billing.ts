@@ -6,7 +6,7 @@ import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 import { getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
-import { BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
+import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
@@ -28,7 +28,8 @@ export interface OrganizationBillingStatus {
   /** Better Auth's subscription schedule for a plan change at the end of the period. */
   stripeScheduleId?: string
   billingInterval?: 'month' | 'year'
-  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month' | 'year' }
+  /** The plan item's own charge, and the metered prices the subscription carries: an earlier contract may lack one added since. */
+  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month' | 'year'; meters: BillingMeterKey[] }
   /** What the plan bills by count: its active locations and homes. */
   usage: BillingCapacity
   entitlements: EntitlementsMap
@@ -106,7 +107,8 @@ export async function getOrganizationSubscriptionPrice(
   if (!interval || item.price.recurring?.interval_count !== 1) throw new Error('Stripe subscription has an unsupported billing interval')
   const currency = item.price.currency.toUpperCase()
   if (!isCurrencyCode(currency)) throw new Error(`Stripe subscription has unsupported currency ${item.price.currency}`)
-  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency, interval }
+  const meters = BILLING_METER_KEYS.filter(key => native.items.data.some(row => typeof row.price.product !== 'string' && !row.price.product.deleted && row.price.product.metadata.product_family === key))
+  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency, interval, meters }
 }
 
 function billingInterval(value: string | undefined): 'month' | 'year' | undefined {

@@ -122,11 +122,18 @@ const locationsRow = computed<EditorNavigationItem | null>(() => {
   if (used === undefined) return null
   return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
 })
-// Homes the same way: a home is a place to stay, counted as a home and not as a location.
+// Homes the same way: a home is a place to stay, counted as a home and not as a
+// location. A subscription from before homes were priced carries no homes
+// price and is charged nothing for them, so the row says so instead.
 const homesRow = computed<EditorNavigationItem | null>(() => {
   const used = billing.value?.usage.homes
   if (used === undefined) return null
-  return { id: 'homes', label: 'Homes', summary: onStarter.value ? `${used} in use · ${INCLUDED_HOMES} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_HOMES}` : `${used} in use · ${INCLUDED_HOMES} included, then ${additionalHomePrice()}` }
+  const summary = onStarter.value
+    ? `${used} in use · ${INCLUDED_HOMES} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_HOMES}`
+    : billing.value?.subscriptionPrice?.meters.includes('homes')
+      ? `${used} in use · ${INCLUDED_HOMES} included, then ${additionalHomePrice()}`
+      : `${used} in use · not billed on this subscription`
+  return { id: 'homes', label: 'Homes', summary }
 })
 
 const serviceRows = computed<EditorNavigationItem[]>(() => {
