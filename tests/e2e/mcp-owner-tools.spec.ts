@@ -853,7 +853,7 @@ test.describe('stateless MCP server', () => {
       }
     })
 
-    test('booked session authority survives CMS clear and MCP re-add', async ({ request, page, baseURL }) => {
+    test('booked session authority survives CMS clear and MCP re-add', async ({ request, page, baseURL }, testInfo) => {
       await loginAs(request, baseURL!)
       const organizationId = MCP_ORGANIZATION_ID
       const call = async (toolName: string, args: Record<string, unknown>) => {
@@ -864,8 +864,9 @@ test.describe('stateless MCP server', () => {
         return body
       }
       const { settings } = mcpData<{ settings: { default_currency: string } }>(await call('get_organization_settings', {}))
-      const { location } = mcpData<{ location: { id: string; title: string } }>(await call('get_location', { location_id: 'loc-demo' }))
+      const { location } = mcpData<{ location: { id: string; title: string; timezone: string } }>(await call('get_location', { location_id: 'loc-demo' }))
       expect(location.id).toBe('loc-demo')
+      expect(location.timezone).toBe('America/New_York')
       const cleanupRequest = await playwrightRequest.newContext({ baseURL })
       const restore = { cleanupRequest, page, baseURL: baseURL!, organizationId, productId: null as string | null, locationId: location.id }
       bookedSessionRestore = restore
@@ -922,6 +923,84 @@ test.describe('stateless MCP server', () => {
       const publicRead = await request.get(`${baseURL}/api/public/products/${created.slug}/sessions`, { headers: tenantTestExtraHeaders() })
       expect(publicRead.status(), await publicRead.text()).toBe(200)
       expect((await publicRead.json()).sessions.find((row: { id: string }) => row.id === target!.id)).toMatchObject({ remaining: 4, is_full: false, starts_at: target!.starts_at, ends_at: target!.ends_at, timezone: target!.timezone })
+
+      const sessionsBeforeDraft = await read()
+      const createRequests: string[] = []
+      page.on('request', entry => {
+        if (new URL(entry.url()).pathname === new URL(`${url}/sessions`).pathname && entry.method() === 'POST') createRequests.push(entry.url())
+      })
+      const calendarPath = '/dashboard/ember-slice-demo/calendar'
+      const gapDate = '2027-03-14'
+      expect((await page.goto(`${calendarPath}/sessions/new?product_id=${created.id}&locationId=${location.id}&month=${gapDate.slice(0, 7)}&date=${gapDate}`))?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const draft = page.locator('#dashboard-panel-product-session')
+      const starts = draft.getByLabel('Starts', { exact: true })
+      const ends = draft.getByLabel('Ends', { exact: true })
+      const add = draft.getByRole('button', { name: 'Add to calendar', exact: true })
+      await expect(draft).toContainText(`Times are in ${location.timezone}.`)
+      await expect(draft.getByLabel('Date', { exact: true })).toHaveValue(gapDate)
+      await starts.fill('02:30')
+      const startGap = `This time does not exist because the clocks move forward. Choose another start time in ${location.timezone}.`
+      await expect(draft.getByText(startGap, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(startGap)
+      await expect(starts).toHaveValue('02:30')
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await page.screenshot({ path: testInfo.outputPath('experience-validation-desktop.jpg') })
+
+      await starts.fill('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T04:00`)
+      await ends.fill(`${gapDate}T04:30`)
+      await expect(draft.getByText(startGap, { exact: true })).toHaveCount(0)
+      await expect(add).toBeEnabled()
+      await ends.fill(`${gapDate}T02:30`)
+      const endGap = `This time does not exist because the clocks move forward. Choose another end time in ${location.timezone}.`
+      await expect(draft.getByText(endGap, { exact: true })).toBeVisible()
+      await expect(ends).toHaveAccessibleDescription(endGap)
+      await expect(draft.getByLabel('Date', { exact: true })).toHaveValue(gapDate)
+      await expect(starts).toHaveValue('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T02:30`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+
+      await ends.fill(`${gapDate}T03:00`)
+      const orderingError = 'End time must be after the start time.'
+      await expect(draft.getByText(orderingError, { exact: true })).toBeVisible()
+      await expect(ends).toHaveAccessibleDescription(orderingError)
+      await expect(starts).toHaveValue('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T03:00`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+
+      await ends.fill(`${gapDate}T04:30`)
+      await expect(draft.getByText(orderingError, { exact: true })).toHaveCount(0)
+      await expect(add).toBeEnabled()
+      await draft.getByLabel('Date', { exact: true }).fill('2026-11-01')
+      await starts.fill('01:30')
+      const foldError = `This time occurs twice because the clocks move back. Choose another start time in ${location.timezone}.`
+      await expect(draft.getByText(foldError, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(foldError)
+      await expect(starts).toHaveValue('01:30')
+      await expect(ends).toHaveValue(`${gapDate}T04:30`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(draft.getByText(foldError, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(foldError)
+      await expect(draft.getByText(foldError, { exact: true })).toBeInViewport({ ratio: 1 })
+      await page.screenshot({ path: testInfo.outputPath('experience-validation-phone.jpg') })
+      await draft.getByLabel('Date', { exact: true }).fill(gapDate)
+      await starts.fill('03:30')
+      await expect(draft.getByText(foldError, { exact: true })).toHaveCount(0)
+      await expect(ends).toHaveValue(`${gapDate}T04:30`)
+      await expect(add).toBeEnabled()
+      await draft.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === created.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: created.id, locationId: location.id, month: gapDate.slice(0, 7), date: gapDate })
+      expect(createRequests).toEqual([])
+      const sessionsAfterDraft = await read()
+      expect(sessionsAfterDraft.map(session => session.id)).toEqual(sessionsBeforeDraft.map(session => session.id))
+      expect(sessionsAfterDraft.find(session => session.id === target!.id)).toEqual(after)
     })
 
     test('MCP finishes the public menu and creates a separately bookable experience', async ({ request, page, baseURL }) => {

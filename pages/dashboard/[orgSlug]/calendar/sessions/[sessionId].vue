@@ -1,6 +1,6 @@
 <template>
   <DashboardLeafPanel id="product-session" :title="isNew ? 'Add availability' : 'Edit availability'" :lead="timezone ? `Times are in ${timezone}.` : p.product.value?.kind === 'service' ? 'Choose the office for this consultation.' : 'Choose where this experience takes place.'" :saving="saving" :disabled="pending || !valid || (!isNew && !form?.dirty && !saveError)" :error="saveError ?? scopeError ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add to calendar' : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
-    <UForm v-if="!scopeError" ref="form" :key="revision" :state="{ startsAt, endsAt, capacity, sessionStatus }" class="space-y-6" @submit="save">
+    <UForm v-if="!scopeError" ref="form" :key="revision" :state="{ startsAt, endsAt, capacity, sessionStatus }" :validate="() => validation.errors" class="space-y-6" @submit="save">
       <UFormField v-if="isNew" name="location" label="Location" required><USelect :model-value="p.locationId.value ?? undefined" :items="locationItems" placeholder="Choose a location" class="w-full" @update:model-value="chooseLocation" /></UFormField>
       <p v-else class="text-sm text-muted">{{ savedLocation?.title ?? 'Online' }}</p>
       <UFormField v-if="isNew" name="startDate" label="Date" required><UInput v-model="startDate" type="date" class="w-full" /></UFormField>
@@ -17,6 +17,7 @@
 </template>
 
 <script setup lang="ts">
+import type { FormError } from '@nuxt/ui'
 import { calendarSessionsKey } from '~/components/dashboard/CalendarPage.vue'
 import { isSessionResponse, isSessionsResponse } from '~/utils/session-contract'
 import { isValidCalendarDate, isValidTimezone, localDateTimeToInstant, localNow } from '~/utils/timezone'
@@ -80,30 +81,50 @@ function reset() {
 watch([data, error, p.product, sessionId], ([,,, nextId], [,,, previousId]) => {
   if (nextId !== previousId || !saving.value && !recovering.value && !saveError.value && !error.value) reset()
 }, { immediate: true })
-function instant(value: string, original?: string): string {
+function instant(value: string, original?: string): string | undefined {
   if (original && timezone.value && value === localInput(original, timezone.value)) return original
   const [date, time] = value.split('T')
-  if (!date || !time || !isValidTimezone(timezone.value)) throw new Error('Choose valid start and end times in the offering’s time zone')
+  if (!date || !time) return undefined
+  if (!isValidTimezone(timezone.value)) throw new Error('Choose a location with a valid time zone.')
   return localDateTimeToInstant(date, time, timezone.value).toISOString()
 }
-// A chosen start uses the offering's authored duration, while a custom end is retained.
-watch([startsAt, timezone], ([value, zone], [previous, previousZone]) => {
-  const duration = p.product.value?.booking?.duration_minutes
-  if (!isNew.value || !duration || !zone) return
-  const endFor = (start: string, startZone: string | undefined) => {
-    const [date, time] = start.split('T')
-    if (!date || !time || !isValidTimezone(startZone)) return null
-    try { return localInput(new Date(localDateTimeToInstant(date, time, startZone).getTime() + duration * 60_000).toISOString(), startZone) }
-    catch { return null }
+const validation = computed(() => {
+  const errors: FormError[] = []
+  const instants: Partial<Record<'startsAt' | 'endsAt', string>> = {}
+  for (const [name, value, original] of [
+    ['startsAt', startsAt.value, data.value?.session.starts_at],
+    ['endsAt', endsAt.value, data.value?.session.ends_at],
+  ] as const) {
+    try { instants[name] = instant(value, original) }
+    catch (failure) {
+      const cause = getErrorMessage(failure, 'This local time could not be converted.')
+      const reason = cause === 'No such absolute time found' ? 'This time does not exist because the clocks move forward.'
+        : cause === 'Multiple possible absolute times found' ? 'This time occurs twice because the clocks move back.' : cause
+      errors.push({ name, message: `${reason} Choose another ${name === 'startsAt' ? 'start' : 'end'} time${timezone.value ? ` in ${timezone.value}` : ''}.` })
+    }
   }
-  const nextEnd = endFor(value, zone)
-  if (nextEnd && (!endsAt.value || endsAt.value === endFor(previous, previousZone))) endsAt.value = nextEnd
+  if (instants.startsAt && instants.endsAt && instants.endsAt <= instants.startsAt) errors.push({ name: 'endsAt', message: 'End time must be after the start time.' })
+  if (capacity.value !== undefined && (!Number.isSafeInteger(capacity.value) || capacity.value < (data.value?.session.claimed ?? 0))) {
+    errors.push({ name: 'capacity', message: `Enter a whole guest limit of ${data.value?.session.claimed ?? 0} or more, or leave it blank for no limit.` })
+  }
+  return { errors, ...instants }
 })
-const valid = computed(() => {
-  try { return Boolean(p.product.value?.booking) && (!isNew.value || canCreate.value) && !scopeError.value && !error.value && instant(endsAt.value, data.value?.session.ends_at) > instant(startsAt.value, data.value?.session.starts_at) && (capacity.value === undefined || (Number.isSafeInteger(capacity.value) && capacity.value >= (data.value?.session.claimed ?? 0))) }
-  catch { return false }
+const suggestedEnd = computed(() => {
+  const duration = p.product.value?.booking?.duration_minutes
+  const start = validation.value.startsAt
+  const zone = timezone.value
+  return isNew.value && duration && start && zone ? localInput(new Date(Date.parse(start) + duration * 60_000).toISOString(), zone) : undefined
 })
+// Keep the last generated end through an invalid start; an authored end stays untouched.
+let previousSuggestedEnd: string | undefined
+watch(suggestedEnd, (next) => {
+  if (!next) return
+  if (!endsAt.value || endsAt.value === previousSuggestedEnd) endsAt.value = next
+  previousSuggestedEnd = next
+})
+const valid = computed(() => Boolean(p.product.value?.booking) && (!isNew.value || canCreate.value) && !scopeError.value && !error.value && Boolean(validation.value.startsAt && validation.value.endsAt) && !validation.value.errors.length)
 const form = useTemplateRef('form')
+watch([form, validation], ([current, result]) => { current?.setErrors(result.errors) }, { immediate: true, flush: 'post' })
 // Cancel restores the draft; a new revision is a fresh form, so nothing reads as changed.
 const revision = ref(0)
 async function useSavedSession() {
@@ -117,12 +138,13 @@ async function useSavedSession() {
   finally { recovering.value = false }
 }
 async function save() {
-  if (!valid.value) return
+  const { startsAt: start, endsAt: end } = validation.value
+  if (!valid.value || !start || !end) return
   const creating = isNew.value
   saving.value = true
   saveError.value = null
   try {
-    const times = { starts_at: instant(startsAt.value, data.value?.session.starts_at), ends_at: instant(endsAt.value, data.value?.session.ends_at), capacity: capacity.value ?? null }
+    const times = { starts_at: start, ends_at: end, capacity: capacity.value ?? null }
     if (isNew.value) {
       const fingerprint = JSON.stringify({ ...times, location_id: p.locationId.value })
       if (creationIntent.value.fingerprint && creationIntent.value.fingerprint !== fingerprint) creationIntent.value.key = crypto.randomUUID()
