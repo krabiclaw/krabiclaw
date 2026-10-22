@@ -1,6 +1,6 @@
 import { getPlanEntitlements } from '../server/utils/billing-entitlements'
 import { PLATFORM_LOCALES } from './platform-locales'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan, PAYMENTS_FEE } from './billing-model'
+import { additionalHomePrice, additionalLocationPrice, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan, PAYMENTS_FEE } from './billing-model'
 
 const ADDITIONAL_LANGUAGE_NAMES = new Intl.ListFormat('en', { type: 'conjunction' }).format(
   PLATFORM_LOCALES.filter(({ locale }) => locale !== 'en')
@@ -37,6 +37,9 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'locations.included', label: 'Locations', detail: `${INCLUDED_LOCATIONS} locations included on every plan. Growth and Business add more at ${additionalLocationPrice()}.`, planValue: planId => isKnownRecurringPlan(planId)
       ? `${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}`
       : `${INCLUDED_LOCATIONS} included` },
+    { id: 'homes.included', label: 'Homes', detail: `${INCLUDED_HOMES} homes included on every plan. Growth and Business add more at ${additionalHomePrice()}. A home is a place to stay, counted as a home and not as a location.`, planValue: planId => isKnownRecurringPlan(planId)
+      ? `${INCLUDED_HOMES} included, then ${additionalHomePrice()}`
+      : `${INCLUDED_HOMES} included` },
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
     { id: 'posts.website', label: 'Website posts', detail: 'Create and publish posts on your website.', included: 'Included' },
     { id: 'social.external-channels', label: 'Facebook, Instagram and Discord publishing', detail: 'Explicit publishing to connected channels requires provider permissions and valid media.', entitlement: 'managed_service' },

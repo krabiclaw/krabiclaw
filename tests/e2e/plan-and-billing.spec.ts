@@ -101,7 +101,7 @@ test.describe('Plan and billing', () => {
         await page.setViewportSize({ width, height: 1200 })
         const wide = width >= 1024
 
-        // The index: the plan as its one card, then the locations it bills and the two services. No portal without a Stripe customer.
+        // The index: the plan as its one card, then the locations and homes it bills and the two services. No portal without a Stripe customer.
         await open(page, `${BASIC}/billing`)
         const index = page.locator('#dashboard-panel-organization-billing')
         await expect(index.getByRole('heading', { name: 'Plan and billing', exact: true })).toBeVisible()
@@ -109,8 +109,11 @@ test.describe('Plan and billing', () => {
         await expect(card).toContainText('Basic')
         await expect(card).toContainText('Free')
         await expect(card.getByRole('link', { name: 'Choose a plan', exact: true })).toBeVisible()
-        await expect(index.locator('[data-testid^="editor-row-"]')).toHaveCount(3)
+        await expect(index.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
         await expect(index.getByTestId('editor-row-locations')).toContainText('in use · 2 included · Basic stops at 2')
+        // Homes are counted apart from locations, with their own allowance.
+        await expect(index.getByTestId('editor-row-homes')).toContainText('Homes')
+        await expect(index.getByTestId('editor-row-homes')).toContainText(/\d+ in use · 2 included · Basic stops at 2/)
         await expect(index.getByTestId('editor-row-portal')).toHaveCount(0)
         await expect(index.getByTestId('editor-row-managed-ads')).toContainText('Off10% of monthly ad spend')
         await expect(index.getByTestId('editor-row-strategy')).toContainText('Off$2,000/mo')

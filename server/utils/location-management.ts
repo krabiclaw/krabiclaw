@@ -224,7 +224,8 @@ export async function createLocation(
   organizationId: string,
   input: CreateLocationInput,
   userId: string,
-  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string } = {},
+  /** `home`: the location a place to stay is being made at. It is the home's, so it is billed and guarded as a home, not a location. */
+  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string; home?: boolean } = {},
 ) {
   try { parseMapUrl(input.maps_url); }
   catch (cause) { return locationValidationFailure(cause, 'maps_url'); }
@@ -400,7 +401,7 @@ export async function createLocation(
       }));
       statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_created'));
 
-      await executeWithinCapacity(env, db, organizationId, statements, { action: 'create it' });
+      await executeWithinCapacity(env, db, organizationId, statements, { action: 'create it', ...(options.home ? { home: true } : {}) });
       created = await loadLocation(db, organizationId, id, true);
       if (!created) throw new HTTPError({ statusCode: 500, statusMessage: 'Created location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
       break;
@@ -649,7 +650,8 @@ export async function updateLocation(
     statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'));
 
     // An inactive location is off the site and is not counted; making it
-    // active again is refused past the locations Basic includes.
+    // active again is refused past the locations, or for a home's location
+    // the homes, Basic includes.
     const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active' });
     const changed = (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
     // The saved privacy mode must be visible even if readback or card work fails.
