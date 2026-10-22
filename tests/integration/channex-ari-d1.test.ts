@@ -62,6 +62,8 @@ async function boot() {
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'o@example.test', 1, 0, 0)").bind(OWNER).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
+    // A connected host is on a paid plan: three homes are past what Basic includes. No Stripe customer is attached, so nothing is reported.
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-org', 'growth', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('site', ?, 'site', 'Site', 'active', ?, '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG, TZ).run()
     const home = async (name: string, price: number | null) => (await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
@@ -331,8 +333,9 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     assert.deepEqual(replay.channel_push, { state: 'pushed', detail: null })
     assert.deepEqual(channex.take().map(request => request.values.length), [500, 500])
 
+    const { photo_rooms: _photoRooms, accessibility: _accessibility, ...stayInput } = saved.stay!
     const reconciled = await reconcileProducts(db, { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'catalog-minimum', products: [{
-      product_id: connected, name: 'Cabin', kind: 'stay', stay: { ...saved.stay!, min_nights: 3 },
+      product_id: connected, name: 'Cabin', kind: 'stay', stay: { ...stayInput, min_nights: 3 },
       variants: [{ id: variant.id, name: variant.name, prices: [{ id: price.id, unit_amount: 180_00, currency: 'USD' }] }],
     }] })
     assert.deepEqual(reconciled[0]!.channel_push, { state: 'pushed', detail: null })
@@ -345,7 +348,7 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     // Every affected home is preflighted before any row in the atomic catalog changes.
     await assert.rejects(reconcileProducts(db, { env: unavailable, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'unavailable-batch', products: [
       { product_id: local, kind: 'stay', name: 'Must remain Barn' },
-      { product_id: connected, kind: 'stay', name: 'Must remain Cabin', stay: { ...saved.stay!, min_nights: 4 } },
+      { product_id: connected, kind: 'stay', name: 'Must remain Cabin', stay: { ...stayInput, min_nights: 4 } },
     ] }), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_CONFIGURATION_REQUIRED' && !Object.hasOwn(error.data, 'committed'))
     assert.equal((await getProduct(db, ORG, local)).name, 'Barn')
     assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 3)

@@ -50,15 +50,25 @@
         <p v-if="typeof p.form.details[textKey] === 'string'" class="mt-2 whitespace-pre-wrap break-words text-sm text-muted">{{ p.form.details[textKey] }}</p>
         <UButton :to="p.sectionPath(`guest-safety/${section}/${textKey}`)" :label="p.form.details[textKey] ? 'Edit details' : 'Add details'" :aria-label="STAY_SAFETY_DETAIL_FIELDS[textKey].name" color="neutral" variant="link" :disabled="p.saving.value" class="mt-2 px-0 underline" />
       </div>
-      <div v-if="section === 'devices'" class="space-y-5 py-6">
-        <dl class="space-y-4">
-          <div v-for="alarm in alarms" :key="alarm.code" class="flex items-center justify-between gap-6">
-            <dt class="text-base text-highlighted">{{ alarm.label }}</dt>
-            <dd class="text-sm text-muted">{{ alarm.reported ? 'Reported' : 'Not reported' }}</dd>
+      <template v-if="section === 'devices'">
+        <div v-for="alarm in alarms" :key="alarm.code" class="py-6">
+          <div class="flex items-center justify-between gap-6">
+            <div class="min-w-0">
+              <p class="text-base text-highlighted">{{ alarm.label }}</p>
+              <p class="mt-2 text-sm text-muted">{{ alarm.description }}</p>
+              <p v-if="alarm.available === null" class="mt-2 text-sm text-muted">Not specified</p>
+            </div>
+            <ToggleGroupRoot type="single" :model-value="alarm.available === null ? undefined : alarm.available ? 'yes' : 'no'" :disabled="p.saving.value" :aria-label="alarm.label" class="flex shrink-0 gap-3" @update:model-value="setAlarm(alarm.code, $event)">
+              <ToggleGroupItem value="no" as-child><UButton icon="i-lucide-x" aria-label="No" color="neutral" variant="outline" square class="size-12 justify-center rounded-full data-[state=on]:bg-inverted data-[state=on]:text-inverted" /></ToggleGroupItem>
+              <ToggleGroupItem value="yes" as-child><UButton icon="i-lucide-check" aria-label="Yes" color="neutral" variant="outline" square class="size-12 justify-center rounded-full data-[state=on]:bg-inverted data-[state=on]:text-inverted" /></ToggleGroupItem>
+            </ToggleGroupRoot>
           </div>
-        </dl>
-        <UButton :to="alarmsTo" label="Edit alarms in Amenities" color="neutral" variant="link" :disabled="p.saving.value" class="px-0 underline" />
-      </div>
+          <div v-if="alarm.available === true" class="mt-4">
+            <p v-if="typeof p.form.details[alarm.detailsKey] === 'string'" class="mb-2 whitespace-pre-wrap break-words text-sm text-muted">{{ p.form.details[alarm.detailsKey] }}</p>
+            <UButton :to="p.sectionPath(`guest-safety/devices/${alarm.detailsKey}`)" :label="p.form.details[alarm.detailsKey] ? 'Edit details' : 'Add details'" :aria-label="`${alarm.label} details`" color="neutral" variant="link" :disabled="p.saving.value" class="px-0 underline" />
+          </div>
+        </div>
+      </template>
     </div>
   </DashboardLeafPanel>
 </template>
@@ -68,7 +78,7 @@ import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { STAY_SAFETY_SECTIONS, STAY_SAFETY_FIELDS, STAY_SAFETY_DETAIL_FIELDS, STAY_SAFETY_DETAILS_LIMIT, staySafetySectionKeys, type StaySafetyFlag, type StaySafetySection } from '~/shared/stay-safety'
-import { STAY_AMENITIES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability } from '~/shared/stay-listing'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -84,11 +94,7 @@ const detailsError = computed(() => section.value && staySafetySectionKeys(secti
   return typeof value === 'string' && value.length > STAY_SAFETY_DETAILS_LIMIT
 })
   ? `Safety details must be ${STAY_SAFETY_DETAILS_LIMIT} characters or fewer.` : '')
-const alarms = computed(() => (['smoke_detector', 'carbon_monoxide_detector'] as const).map(code => ({ code, label: STAY_AMENITIES[code].label, reported: p.product.value?.stay?.amenities.includes(code) === true })))
-const alarmsTo = computed(() => {
-  const target = router.resolve(p.sectionPath('amenities/add'))
-  return { path: target.path, query: { ...target.query, amenity_group: 'home_safety' } }
-})
+const alarms = computed(() => STAY_ALARM_AMENITIES.map(code => ({ code, ...STAY_AMENITIES[code], detailsKey: STAY_ALARM_DETAIL_KEYS[code], available: stayAmenityAvailability(p.form.stay_amenity_answers, code) })))
 const detailGroups = computed<EditorNavigationGroup[]>(() => {
   const items: EditorNavigationGroup['items'] = fields.value.filter(field => p.form.details[field.key] === true).map((field) => {
     const value = p.form.details[field.detailsKey]
@@ -99,6 +105,10 @@ const detailGroups = computed<EditorNavigationGroup[]>(() => {
     const value = p.form.details[key]
     items.push({ id: key, label: STAY_SAFETY_DETAIL_FIELDS[key].name, summary: typeof value === 'string' ? value : 'Add details', to: p.sectionPath(`guest-safety/${section.value}/${key}`) })
   }
+  if (section.value === 'devices') for (const alarm of alarms.value.filter(alarm => alarm.available === true)) {
+    const value = p.form.details[alarm.detailsKey]
+    items.push({ id: alarm.detailsKey, label: alarm.label, summary: typeof value === 'string' ? value : 'Add details', to: p.sectionPath(`guest-safety/devices/${alarm.detailsKey}`) })
+  }
   return [{ id: 'safety-details', items }]
 })
 
@@ -106,6 +116,11 @@ function setFlag(key: StaySafetyFlag, value: unknown) {
   if (value === 'yes' || value === 'no') p.form.details[key] = value === 'yes'
   else Reflect.deleteProperty(p.form.details, key)
   if (value !== 'yes') Reflect.deleteProperty(p.form.details, STAY_SAFETY_FIELDS[key].detailsKey)
+}
+function setAlarm(code: typeof STAY_ALARM_AMENITIES[number], value: unknown) {
+  p.form.stay_amenity_answers = p.form.stay_amenity_answers.filter(answer => answer.code !== code)
+  if (value === 'yes' || value === 'no') p.form.stay_amenity_answers.push({ code, available: value === 'yes' })
+  if (value !== 'yes') Reflect.deleteProperty(p.form.details, STAY_ALARM_DETAIL_KEYS[code])
 }
 function revert() {
   if (section.value) p.revert(section.value)

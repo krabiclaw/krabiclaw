@@ -37,10 +37,30 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 | Homes, stays, nights | `/api/dashboard/stay-homes[/:productId]`, `/api/dashboard/stays[/:stayId]` | |
 | Guest messaging | `/api/dashboard/guest-threads`, `/api/dashboard/message-templates`, `/api/dashboard/scheduled-guest-messages` | Airbnb conversations through Channex. |
 | Airbnb connection | `/api/organizations/:id/integrations/airbnb/*` | Disconnect is separate from account and organization deletion. |
+| Homes quote | `GET /api/organizations/:id/billing/homes?adding=N` | What adding homes costs before they are added; §3.1. The write that then adds them answers by the same rule, so a quote that allows them is one the write allows. A refused write is 402 `HOME_LIMIT` with `homes: {used, covered}`; the app hands it to the dashboard billing page. |
 | Push | `POST/DELETE /api/dashboard/devices`, `/api/user/notification-preferences` | A device token belongs to a Better Auth session and cascades with it. |
 | Support impersonation | `POST /api/auth/admin/impersonate-user`, `/stop-impersonating` | Platform `admin` only, 900 s (D8). |
 | Delete account | `POST /api/auth/delete-user` with `x-apple-authorization-code` when Apple is linked | §4. |
 | Delete organization | `POST /api/auth/organization/delete` | Owner only; §4. |
+
+### 3.1 Homes quote
+
+`GET /api/organizations/:id/billing/homes?adding=N`, owner or admin. `adding` is optional, default 1, an integer from 0 to 500; anything else is 422 `INVALID_QUERY` with `field: "adding"`. Growth and Business include 2 homes and bill $9 for each further active home at the end of the period, never prorated; Basic includes 2 and refuses a third.
+
+```json
+{
+  "plan": "growth",
+  "currency": "USD",
+  "homes": { "used": 2, "included": 2, "additional_price_minor": 900, "amount_minor": 0 },
+  "adding": { "count": 1, "additional_homes": 1, "amount_minor": 900, "allowed": true },
+  "billing": { "period_end": "2026-11-21T00:00:00.000Z", "prorated": false }
+}
+```
+
+- `plan`: the plan id (`free`, `growth`, `business`), derived the way the capacity check derives it.
+- `homes.used`: active homes now; `homes.included`: homes the plan includes; `homes.additional_price_minor`: USD cents per month for each home beyond those, 900, except `0` on a paid subscription from before homes were priced, which is charged nothing for them; `homes.amount_minor`: what the homes in use now add to the month, `max(0, used − included) × additional_price_minor`.
+- `adding.count`: `N`; `adding.additional_homes`: the homes among the `N` that fall beyond the included ones; `adding.amount_minor`: `additional_homes × additional_price_minor`; `adding.allowed`: `false` only when the plan refuses, that is Basic with `used + N > included`.
+- `billing.period_end`: ISO instant of the current subscription period's end, when the invoice bills the homes, or `null` on Basic; `billing.prorated` is always `false`.
 
 ## 4. Deletion and membership changes
 

@@ -855,6 +855,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   get_stay_calendar: R,
   add_stay_photo_room: { ...W, openWorldHint: true },
   update_stay_photo_room: { ...D, openWorldHint: true },
+  update_stay_accessibility: { ...D, openWorldHint: true },
   remove_stay_photo_room: { ...D, openWorldHint: true },
   move_stay_photos: { ...D, openWorldHint: true },
   create_stay: { ...W, idempotentHint: true },

@@ -331,7 +331,7 @@ export function groupProductsByCollection<T extends Pick<Product, 'id' | 'name' 
         products: positions
           ? products
               .filter(product => positions.has(product.id))
-              .sort((left, right) => (positions.get(left.id)! - positions.get(right.id)!) || left.name.localeCompare(right.name))
+              .sort((left, right) => (positions.get(left.id)! - positions.get(right.id)!) || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))
           : [],
       }
     })

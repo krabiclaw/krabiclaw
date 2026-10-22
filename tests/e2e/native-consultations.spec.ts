@@ -91,21 +91,22 @@ test('native online review uses canonical Products, holds capacity, and releases
   expect((await (await page.request.get(`${editor}/consultation`)).json()).mode).toBe('native')
     await page.goto(`/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`)
     const bookingPath = `/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`
-    await expect(page.getByRole('link', { name: 'Guest limit One guest per session' })).toBeVisible()
-    await expect(page.getByRole('link', { name: `Host ${self.name}`, exact: true })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Meeting location Online', exact: true })).toBeVisible()
+    const bookingPanel = page.locator('#dashboard-panel-product-booking')
+    await expect(bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: `Host ${self.name}`, exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: 'Meeting location Online', exact: true })).toBeVisible()
     // Online, the times are the provider's own hours; the offering has no weekly list of its own.
-    await expect(page.getByRole('link', { name: "Bookable times Your provider's working hours", exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
-    await expect(page.getByRole('link', { name: /^Weekly schedule/ })).toHaveCount(0)
+    await expect(bookingPanel.getByRole('link', { name: "Bookable times Your provider's working hours", exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
+    await expect(bookingPanel.getByRole('link', { name: /^Weekly schedule/ })).toHaveCount(0)
     const assigned = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: org, product_id: products[0]!.id } })
     expect(assigned.status(), await assigned.text()).toBe(200)
     expect(mcpData<{ product: { booking: Record<string, unknown> } }>(await assigned.json()).product.booking).toMatchObject({ scheduling_mode: 'provider', assigned_member_id: self.id, held_online: true })
 
-    await page.getByRole('link', { name: 'Duration 45 minutes', exact: true }).click()
+    await bookingPanel.getByRole('link', { name: 'Duration 45 minutes', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     await page.getByLabel('Duration in minutes', { exact: true }).fill('50')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByRole('link', { name: 'Duration 50 minutes', exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: 'Duration 50 minutes', exact: true })).toBeVisible()
     const readConfig = async () => {
       const result = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: org, product_id: products[0]!.id } })
       expect(result.status()).toBe(200)
@@ -113,10 +114,10 @@ test('native online review uses canonical Products, holds capacity, and releases
     }
     expect(await readConfig()).toMatchObject({ duration_minutes: 50, default_capacity: 1, confirmation_mode: 'review', online_payment_required: false, held_online: true })
     expect((await (await page.request.get(`${editor}/consultation`)).json()).mode).toBe('native')
-    await page.getByRole('link', { name: 'Duration 50 minutes', exact: true }).click()
+    await bookingPanel.getByRole('link', { name: 'Duration 50 minutes', exact: true }).click()
     await page.getByLabel('Duration in minutes', { exact: true }).fill('45')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByRole('link', { name: 'Duration 45 minutes', exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: 'Duration 45 minutes', exact: true })).toBeVisible()
     expect(await readConfig()).toMatchObject({ held_online: true, duration_minutes: 45 })
     await page.goto(`${bookingPath}/capacity`)
     await expect(page.getByRole('radio', { name: 'One guest', exact: true })).toBeChecked()
@@ -124,27 +125,25 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     await page.getByLabel('Maximum guests per session', { exact: true }).fill('2')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByRole('link', { name: 'Guest limit Up to 2 guests per session', exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: 'Guest limit Up to 2 guests per session', exact: true })).toBeVisible()
     expect(await readConfig()).toMatchObject({ default_capacity: 2, duration_minutes: 45, held_online: true, online_payment_required: false })
-    await page.getByRole('link', { name: 'Guest limit Up to 2 guests per session', exact: true }).click()
+    await bookingPanel.getByRole('link', { name: 'Guest limit Up to 2 guests per session', exact: true }).click()
     await page.getByRole('radio', { name: 'One guest', exact: true }).click()
     await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByRole('link', { name: 'Guest limit One guest per session', exact: true })).toBeVisible()
-    await page.getByRole('link', { name: 'Guest limit One guest per session', exact: true }).click()
+    await expect(bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true })).toBeVisible()
+    await bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await page.screenshot({ path: '/tmp/pr1211-booking-setup.png', fullPage: true })
     const desktopViewport = page.viewportSize()!
     await page.setViewportSize({ width: 390, height: 844 })
     await page.getByRole('radio', { name: 'A group of guests', exact: true }).click()
     await page.getByLabel('Maximum guests per session', { exact: true }).fill('3')
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${bookingPath}`)
-    await expect(page.getByRole('link', { name: 'Guest limit One guest per session', exact: true })).toBeVisible()
-    await page.getByRole('link', { name: 'Guest limit One guest per session', exact: true }).click()
+    await expect(bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true })).toBeVisible()
+    await bookingPanel.getByRole('link', { name: 'Guest limit One guest per session', exact: true }).click()
     await expect(page.getByRole('radio', { name: 'One guest', exact: true })).toBeChecked()
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     expect(await readConfig()).toMatchObject({ default_capacity: 1 })
-    await page.screenshot({ path: '/tmp/pr1211-booking-mobile.png', fullPage: true })
     await page.setViewportSize(desktopViewport)
     const bindViaMcp = async (productId?: string | null) => {
       const current = (await (await page.request.get(`${editor}/pages/${service.id}`)).json()).page
@@ -218,10 +217,20 @@ test('native online review uses canonical Products, holds capacity, and releases
       }
     }
     await expect(page.locator('#consultations')).toHaveCount(1)
-    expect(await scheduleArticle.evaluate(article => {
-      const form = document.getElementById('consultations')!
-      return Boolean(article.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING)
-        && article.getBoundingClientRect().bottom <= form.getBoundingClientRect().top
+    expect(authoredSchedule.recipe).toBe('schedule')
+    const heroIndex = authoredSchedule.blocks.findIndex(block => block.type === 'hero')
+    expect(heroIndex).toBeGreaterThanOrEqual(0)
+    const scheduleHero = scheduleBlocks.nth(heroIndex)
+    await expect(scheduleHero.locator('[data-parity-section="page-hero"]')).toHaveCount(1)
+    await expect(scheduleHero.locator('#consultations')).toHaveCount(1)
+    // The schedule's native directory follows its hero band within that
+    // authored block; it is not appended after the whole page document.
+    expect(await scheduleHero.evaluate(block => {
+      const hero = block.querySelector('[data-parity-section="page-hero"]')!
+      const directory = block.querySelector('#consultations')!
+      return hero.parentElement === directory.parentElement
+        && Boolean(hero.compareDocumentPosition(directory) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && hero.getBoundingClientRect().bottom <= directory.getBoundingClientRect().top
     })).toBe(true)
     // /schedule lists each consultation; it is booked on its own page.
     const consultationCard = page.locator('#consultations').getByRole('link').filter({ hasText: products[0]!.name })
@@ -238,7 +247,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByRole('heading', { name: products[0]!.name, exact: true, level: 1 })).toBeVisible()
     await expect(page.getByText('Free', { exact: true }).filter({ visible: true }).first()).toBeVisible()
     await expect(page.getByText('Staff review', { exact: true }).first()).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'Upcoming availability', exact: true })).toBeVisible()
+    const availableTimes = page.getByRole('button', { name: /^Select a time / })
+    await expect(availableTimes).toHaveCount(4)
+    for (const choice of await availableTimes.all()) await expect(choice).toBeVisible()
     const pageTimezone = page.getByRole('button', { name: 'Time zone', exact: true })
     await expect(pageTimezone).toContainText('(America/New_York)')
     await pageTimezone.click()
@@ -268,12 +279,11 @@ test('native online review uses canonical Products, holds capacity, and releases
     const providerSection=page.locator('section[aria-label="Meet your host"]')
     await waitForNuxtHydration(page)
     const failedProvider=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
-    await page.getByRole('button',{name:/^Select a time /}).first().click()
+    await availableTimes.first().click()
     expect((await failedProvider).status()).toBe(503)
     await page.getByRole('button',{name:'Close booking form',exact:true}).click()
     await expect(providerSection.getByText('Profile could not be loaded',{exact:true})).toBeVisible()
     await expect(providerSection.getByText('North Carolina Legal Services',{exact:true})).toHaveCount(0)
-    await providerSection.screenshot({path:'/tmp/pr1240-provider-error.png'})
     await page.unroute(providerRoute)
     const providerRetry=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
     await providerSection.getByRole('button',{name:'Try again',exact:true}).click()
@@ -283,7 +293,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(providerSection.getByText(host.name,{exact:true})).toBeVisible()
     await expect(providerSection.getByText(host.bio,{exact:true})).toBeVisible()
     await expect(page.getByRole('button',{name:'Try again',exact:true})).toHaveCount(0)
-    await page.locator('main').screenshot({path:'/tmp/pr1240-provider-recovered.png'})
     await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: /where.*meet/i })).toHaveCount(0)
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', new URL(service.path, baseURL).href)
@@ -292,12 +301,13 @@ test('native online review uses canonical Products, holds capacity, and releases
     // This existing fixture has one cover and seven authored gallery placements.
     expect(gallery).toHaveLength(8)
     expect(gallery.map((media: { public_url: string; kind: string; thumbnail_url: string | null }) => ({ url: media.public_url, kind: media.kind, poster: media.thumbnail_url }))).toEqual(storedGallery.map(media => ({ url: media.public_url, kind: media.kind, poster: media.thumbnail_url })))
-    const visibleTiles = page.locator('[data-media-gallery] button')
-    await expect(visibleTiles).toHaveCount(4)
+    const visibleTiles = page.locator('[data-media-gallery]').getByRole('button', { name: `Open media, ${products[0]!.name}`, exact: true })
+    await expect(visibleTiles).toHaveCount(5)
+    await expect(page.locator('[data-media-gallery]').getByRole('button', { name: 'Show all 8 photos', exact: true })).toBeVisible()
     const tileBounds = await visibleTiles.evaluateAll(tiles => tiles.map(tile => { const box = tile.getBoundingClientRect(); const frame = tile.closest('[data-media-gallery]')!.getBoundingClientRect(); return { top: box.top - frame.top, bottom: box.bottom - frame.top, height: frame.height } }))
     expect(tileBounds.every(tile => tile.top >= 0 && tile.bottom <= tile.height + 1)).toBe(true)
     const lightbox = page.getByRole('dialog', { name: products[0]!.name, exact: true })
-    for (let index = 0; index < 4; index++) {
+    for (let index = 0; index < 5; index++) {
       await visibleTiles.nth(index).click()
       await expect(lightbox.locator('section').nth(index).locator('img').last()).toBeInViewport()
       await lightbox.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
@@ -309,7 +319,7 @@ test('native online review uses canonical Products, holds capacity, and releases
       await expect(image).toHaveAttribute('alt', gallery[index].alt_text ?? '')
       await expect(image).toBeInViewport()
       await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0), { timeout: 30_000 }).toBe(true)
-      if (index < gallery.length - 1) await lightbox.getByRole('button', { name: 'Next media', exact: true }).click()
+      if (index < gallery.length - 1) await lightbox.getByRole('button', { name: 'Next photo or video', exact: true }).click()
     }
     await lightbox.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
     const placement = await page.locator('#consultations, [data-tenant-page]').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top))
@@ -392,7 +402,6 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(bookingDialog.getByText('Party size', { exact: true })).toHaveCount(0)
     await expect(bookingDialog.getByRole('button', { name: /more guests|fewer guests/i })).toHaveCount(0)
     await bookingDialog.getByRole('button', { name: /2:00 PM/ }).first().click()
-    await page.setViewportSize({ width: 1280, height: 720 })
     await page.setViewportSize({ width: 390, height: 844 })
     const sessions = await Promise.all(products.map(async product => {
       const response = await request.get(`/api/public/products/${product.slug}/sessions?location_id=online&from=${day}&to=${day}`, { headers })
@@ -459,7 +468,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await policyDialog.getByRole('button', { name: `Close ${browserBooking.policy_summary.heading}`, exact: true }).click()
     await page.getByRole('link', { name: `Team member ${self.name}`, exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Team member', exact: true })).toBeVisible()
-    await expect(page.getByRole('radio', { name: self.name, exact: true })).toBeChecked()
+    await expect(page.getByRole('radio', { name: `${host.name} Current`, exact: true })).toBeChecked()
     await expect(page.getByText('Current', { exact: true })).toBeVisible()
     await expect(page.getByText('Add working hours for a team member before moving this booking.', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
@@ -478,15 +487,21 @@ test('native online review uses canonical Products, holds capacity, and releases
       await expect(page.locator('[data-media-gallery]')).toHaveCount(1)
       await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
       await page.goto('/schedule')
-      await expect(page.getByRole('combobox', { name: 'Service', exact: true })).toHaveCount(mode === 'native' ? 1 : 0)
+      await expect(page.getByRole('combobox', { name: 'Service', exact: true })).toHaveCount(0)
       await expect(page.locator('#consultations')).toHaveCount(mode === 'native' ? 1 : 0)
       expect(await scheduleBlocks.evaluateAll(elements => elements.map(element => element.getAttribute('data-block-type')))).toEqual(authoredSchedule.blocks.map(block => block.type))
-      if (mode === 'external_url') {
-        const externalAction = page.locator('main > div').getByRole('link', { name: modeShell.consultation!.cta_label, exact: true })
+      if (mode === 'native') {
+        await expect(consultationCard).toBeVisible()
+        await expect(consultationCard).toHaveAttribute('href', service.path)
+      } else if (mode === 'external_url') {
+        const authoredLabel = authoredSchedule.blocks[heroIndex]!.data.cta_label
+        const expectedLabel = typeof authoredLabel === 'string' && authoredLabel.trim() ? authoredLabel.trim() : modeShell.consultation!.cta_label
+        expect(expectedLabel).toBeTruthy()
+        const externalAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: expectedLabel, exact: true })
         await expect(externalAction).toHaveCount(1)
         await expect(externalAction).toHaveAttribute('href', modeShell.consultation!.external_url!)
       } else if (mode === 'native_disabled') {
-        const contactAction = page.locator('main > div').getByRole('link', { name: 'Contact', exact: true })
+        const contactAction = scheduleHero.locator('[data-parity-section="page-hero"]').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)
         await expect(contactAction).toHaveAttribute('href', '/contact')
       }

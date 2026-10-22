@@ -1,4 +1,4 @@
-import { STAY_LISTING_SCHEMA, STAY_PHOTO_ROOM_SCHEMA } from './stays'
+import { STAY_HOME_ACCESSIBILITY_SCHEMA, STAY_LISTING_SCHEMA, STAY_LISTING_WRITE_SCHEMA, STAY_PHOTO_ROOM_SCHEMA } from './stays'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
@@ -11,7 +11,7 @@ import { SUPPORTED_CURRENCIES } from '~/shared/currencies'
 import { PRODUCT_KINDS, productDetailsSchema } from '~/shared/product-details'
 import { selectPrice, PRICE_RECURRING_INTERVALS, PRICE_TAX_BEHAVIORS, PRICE_TYPES, type PriceBilling } from '~/shared/prices'
 import { setProductBookingConfig, deleteProductBookingConfig, replaceWeeklySchedule, type ProductBookingSetupInput } from '~/server/utils/availability'
-import type { CreateProductInput, Product, ReconcileProductInput, UpdateProductInput } from '~/server/types/products'
+import type { CreateProductInput, Product, ReconcileProductInput, SetCollectionProductsInput, UpdateProductInput } from '~/server/types/products'
 import {
   createCollection,
   createProduct,
@@ -217,11 +217,11 @@ const stayRules = {
   assigned_team_id: { type: ['string', 'null'], description: 'Team who look after the home, such as cleaners.' },
   ...STAY_LISTING_SCHEMA,
 }
-const stayObject = { type: ['object', 'null'], description: 'Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms are read-only here and written through the stay photo-tour operations.', properties: { location_id: { type: 'string' }, ...stayRules, photo_rooms: { type: 'array', items: STAY_PHOTO_ROOM_SCHEMA } },
-  required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', ...Object.keys(STAY_LISTING_SCHEMA)] }
+const stayObject = { type: ['object', 'null'], description: 'Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail. Authored photo_rooms and listing accessibility are read-only here and use their stay operations.', properties: { location_id: { type: 'string' }, ...stayRules, photo_rooms: { type: 'array', items: STAY_PHOTO_ROOM_SCHEMA }, accessibility: STAY_HOME_ACCESSIBILITY_SCHEMA },
+  required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id', 'photo_rooms', 'accessibility', ...Object.keys(STAY_LISTING_SCHEMA)] }
 const staySetup = { type: 'object', description: 'Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.',
-  properties: { location_id: { type: 'string' }, ...stayRules }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests'], additionalProperties: false }
-const stayPatch = { type: 'object', description: 'Stay settings to change on a place to stay. Its location is fixed.', properties: stayRules, additionalProperties: false }
+  properties: { location_id: { type: 'string' }, ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests'], additionalProperties: false }
+const stayPatch = { type: 'object', description: 'Stay settings to change on a place to stay. Its location is fixed.', properties: { ...stayRules, ...STAY_LISTING_WRITE_SCHEMA }, additionalProperties: false }
 
 const productObject = {
   type: 'object',
@@ -325,6 +325,7 @@ const variantPatch = {
 } as const
 const productPatch = {
   ...productWrite,
+  expected_updated_at: { type: 'string', minLength: 1, description: 'The Product updated_at from the read being edited. A stale value refuses the entire update, including options, variants and prices. Omit only for a deliberate update based on current state.' },
   details: { ...productDetailsSchema(undefined, false, true), description: 'Named customer-facing facts for the product kind. Omitted details stay unchanged. Supplied details replace their map by default, retaining featured unless supplied. With details_mode merge, only supplied facts change and null removes a named fact. pricing_note requires empty numeric prices.' },
   details_mode: { type: 'string', enum: ['merge', 'replace'], default: 'replace', description: 'Requires details. replace is the default complete replacement map, retaining featured unless supplied; null is refused. merge preserves unmentioned facts and null explicitly removes a named fact. Unknown keys are refused in either mode.' },
   variants: { ...productWrite.variants, items: variantPatch, description: 'Partial existing variants by id or new variants. Omitted variants and their prices/options remain unless variants_mode is replace. Existing variant and price IDs retain their identities.' },
@@ -356,8 +357,12 @@ export const PRODUCTS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'create_collection', description: 'Create an empty product collection, such as a menu section, site-wide or at the named location. Returns the saved collection and its ID. Add products separately with set_collection_products; existing products and collections stay unchanged.', domain: 'products', minimumRole: 'admin', inputSchema: { name: { type: 'string' }, description: { type: ['string', 'null'] }, location_id: { type: ['string', 'null'], description: 'Narrow this collection to one location, or omit for site-wide.' }, sort_order: { type: 'integer' } }, required: ['name'], outputSchema: { type: 'object', properties: { collection: collectionObject }, required: ['collection'] } }),
   organizationTool({ name: 'update_collection', description: 'Change the selected product collection’s name, description or display position and return the saved collection. Only supplied fields change; membership uses set_collection_products and ordering several collections uses reorder_collections.', domain: 'products', minimumRole: 'admin', inputSchema: { collection_id: { type: 'string' }, name: { type: 'string' }, description: { type: ['string', 'null'] }, sort_order: { type: 'integer' } }, required: ['collection_id'], outputSchema: { type: 'object', properties: { collection: collectionObject }, required: ['collection'] } }),
   organizationTool({ name: 'delete_collection', description: 'Permanently delete the selected product collection and its memberships when the user asks to remove that group. Returns deleted status; its products remain in the catalog and other collections.', domain: 'products', minimumRole: 'admin', inputSchema: { collection_id: { type: 'string' } }, required: ['collection_id'], outputSchema: { type: 'object', properties: { deleted: { type: 'boolean' } }, required: ['deleted'] } }),
-  organizationTool({ name: 'set_collection_products', description: "Replace a product collection’s membership and display order when the user wants to change which items it contains. Supply every product ID to retain, in the intended order. Omitted products are removed from this collection but remain in the catalog.", domain: 'products', minimumRole: 'admin', inputSchema: { collection_id: { type: 'string' }, product_ids: { type: 'array', items: { type: 'string' }, maxItems: PRODUCT_LIMITS.collectionProducts } }, required: ['collection_id', 'product_ids'], outputSchema: { type: 'object', properties: { products: { type: 'array', items: productListItemObject } }, required: ['products'] } }),
-  organizationTool({ name: 'reorder_collections', description: 'Set the display order of product collections for the whole site or one explicit location. Supply every collection ID in that scope exactly once; a partial list is rejected. Returns the ordered collections without changing their products.', domain: 'products', minimumRole: 'admin', inputSchema: { collection_ids: { type: 'array', items: { type: 'string' }, minItems: 1 }, location_id: { type: ['string', 'null'] } }, required: ['collection_ids'], outputSchema: { type: 'object', properties: { collections: { type: 'array', items: collectionObject } }, required: ['collections'] } }),
+  organizationTool({ name: 'set_collection_products', description: "Set a collection’s complete product membership and order. Supply every product ID to retain. expected_product_ids is the full ordered snapshot being edited; a stale snapshot refuses every change. To move removed products into another explicitly named same-organization collection, also supply move_to with its complete expected_product_ids. A move requires both snapshots, keeps the destination’s current order, and appends source removals in source order without duplicate memberships. Products, location offerings and other collections remain unchanged. Returns the source products; read the catalog to verify both sections.", domain: 'products', minimumRole: 'admin', inputSchema: {
+    collection_id: { type: 'string' }, product_ids: { type: 'array', items: { type: 'string', minLength: 1 }, uniqueItems: true, maxItems: PRODUCT_LIMITS.collectionProducts },
+    expected_product_ids: { type: 'array', items: { type: 'string', minLength: 1 }, uniqueItems: true, maxItems: PRODUCT_LIMITS.collectionProducts },
+    move_to: { type: 'object', properties: { collection_id: { type: 'string', minLength: 1 }, expected_product_ids: { type: 'array', items: { type: 'string', minLength: 1 }, uniqueItems: true, maxItems: PRODUCT_LIMITS.collectionProducts } }, required: ['collection_id', 'expected_product_ids'], additionalProperties: false },
+  }, required: ['collection_id', 'product_ids'], outputSchema: { type: 'object', properties: { products: { type: 'array', items: productListItemObject } }, required: ['products'] } }),
+  organizationTool({ name: 'reorder_collections', description: 'Set the display order of product collections for the whole site or one explicit location. Supply every collection ID in that scope exactly once; a partial list is rejected. Supply expected_collection_ids from the full ordered read to reject a stale edit. A concurrent change refuses the complete reorder. Returns the ordered collections without changing their products.', domain: 'products', minimumRole: 'admin', inputSchema: { collection_ids: { type: 'array', items: { type: 'string' }, uniqueItems: true, minItems: 1 }, expected_collection_ids: { type: 'array', items: { type: 'string' }, uniqueItems: true }, location_id: { type: ['string', 'null'] } }, required: ['collection_ids'], outputSchema: { type: 'object', properties: { collections: { type: 'array', items: collectionObject } }, required: ['collections'] } }),
 
 ]
 
@@ -655,6 +660,8 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
       await setCollectionProducts(organization.db, {
         organizationId: organization.organizationId, collectionId,
         productIds: requiredStringArray(args.product_ids, 'product_ids'), actor,
+        ...(Object.hasOwn(args, 'expected_product_ids') ? { expectedProductIds: requiredStringArray(args.expected_product_ids, 'expected_product_ids') } : {}),
+        ...(Object.hasOwn(args, 'move_to') ? { moveTo: args.move_to as SetCollectionProductsInput['move_to'] } : {}),
       })
       const products = await listCollectionProducts(organization.db, { organizationId: organization.organizationId, collectionId })
       return { products: products.map(product => productListItem(product)) }
@@ -663,6 +670,7 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
       const locationId = args.location_id === undefined || args.location_id === null ? null : requiredString(args, 'location_id')
       await reorderCollections(organization.db, {
         ...scope, locationId, collectionIds: requiredStringArray(args.collection_ids, 'collection_ids'), actor,
+        ...(Object.hasOwn(args, 'expected_collection_ids') ? { expectedCollectionIds: requiredStringArray(args.expected_collection_ids, 'expected_collection_ids') } : {}),
       })
       return { collections: await listCollections(organization.db, { ...scope, locationId }) }
     }

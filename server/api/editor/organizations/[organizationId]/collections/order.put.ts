@@ -9,7 +9,7 @@ export default defineHandler(async (event) => {
   if (!organizationId) return jsonResponse({ error: 'Organization ID is required' }, { status: 400 })
   try {
     const { db, session, organization } = await requireOrganizationAccess(event, organizationId)
-    const body = await readStrictBody<{ collection_ids: unknown; location_id?: unknown }>(event, { collection_ids: 'unknown', location_id: 'unknown' })
+    const body = await readStrictBody<{ collection_ids: unknown; location_id?: unknown; expected_collection_ids?: string[] }>(event, { collection_ids: 'unknown', location_id: 'unknown', expected_collection_ids: 'unknown' })
     if (!Array.isArray(body.collection_ids) || body.collection_ids.some(id => typeof id !== 'string' || !id.trim())) {
       return jsonResponse({ error: 'collection_ids must contain non-empty collection IDs' }, { status: 400 })
     }
@@ -17,6 +17,7 @@ export default defineHandler(async (event) => {
     await reorderCollections(db, {
       organizationId: organization.id, locationId,
       collectionIds: body.collection_ids.map(id => String(id).trim()), actor: { actorId: session.user.id },
+      ...(Object.hasOwn(body, 'expected_collection_ids') ? { expectedCollectionIds: body.expected_collection_ids } : {}),
     })
     return jsonResponse({ success: true, collections: await listCollections(db, { organizationId: organization.id, locationId }) })
   } catch (error) {

@@ -6,7 +6,8 @@ import {
   type LocalizedResourceType,
   type LocalizedValues,
 } from '~/server/utils/localization-registry'
-import { PRODUCT_DETAIL_FIELDS, type ProductKind } from '~/shared/product-details'
+import { PRODUCT_DETAIL_FIELDS, projectStayAlarmDetails, type ProductKind } from '~/shared/product-details'
+import { isStayAmenityAnswers } from '~/shared/stay-listing'
 import { HTTPError } from 'nitro'
 import { queryAll, type DbClient } from '~/server/db'
 import { assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
@@ -98,6 +99,11 @@ export function projectExactLocalizedResource<T extends { id: string }>(
   )
   const projectedValues = { ...localization.values }
   if (isRecord(projectedValues.details)) projectedValues.details = { ...unlocalizedDetails, ...projectedValues.details }
+  if (resourceType === 'product' && (canonical as { kind?: unknown }).kind === 'stay' && isRecord(projectedValues.details)) {
+    const stay = (canonical as { stay?: unknown }).stay
+    if (!isRecord(stay) || !isStayAmenityAnswers(stay.amenity_answers) || !isRecord(canonicalDetails)) throw new Error('The source home has no valid amenity answers or details')
+    projectedValues.details = projectStayAlarmDetails(projectedValues.details, canonicalDetails, stay.amenity_answers)
+  }
   const titleField: Partial<Record<LocalizedResourceType, string>> = {
     organization: 'name',
     business_location: 'title',

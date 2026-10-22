@@ -2,18 +2,35 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
+import { H3 } from 'nitro/h3'
+import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
-import { AirbnbConnection } from '../../server/integrations/channex/airbnb-connection.ts'
-import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { AirbnbConnection, type ImportContentReport } from '../../server/integrations/channex/airbnb-connection.ts'
+import { createStayHome, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
+import { deleteMediaAsset } from '../../server/utils/media-asset-manager.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import contentRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/content.post.ts'
+import listingsRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/listings.get.ts'
 
 // An Airbnb listing imported as a home, through every stage, against a fake
-// Channex: the location, the stay product and its price, the imported nights
-// and the Channex ids all land, and Channex holds exactly the calendar pushed.
+// Channex: the location, the stay product and its price, the imported nights,
+// the listing's content (photos, texts, counts, amenities) and the Channex ids
+// all land, and Channex holds exactly the calendar pushed.
 
 const ORG = 'org'
 const OWNER = 'owner-user'
 const LISTING = 'listing-77'
 const TZ = 'America/Denver'
+const BASE = 'https://proof.example'
+const PASSWORD = 'AirbnbImport123!'
+const CDN = 'https://cdn.airbnb.test'
+// A 1×1 PNG; what Airbnb's CDN serves for every photo here.
+const PNG = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64'))
+const PHOTOS = [
+  { id: `${LISTING}_1`, caption: 'The deck at sunset', sort_order: 1 },
+  { id: `${LISTING}_2`, caption: null, sort_order: 2 },
+  { id: `${LISTING}_3`, caption: 'Bedroom one', sort_order: 3 },
+]
 
 function today(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
@@ -40,12 +57,25 @@ class FakeChannex {
   token = ''
   messagesProperty: string | null = null
   failMessages = false
+  /** Whether listing_details carries the listing's content; off, it is the record as the import read it before the content stage existed. */
+  content = true
+  /** An Airbnb image id whose CDN fetch answers 503. */
+  failPhoto: string | null = null
+  /** Extra uncaptioned photos after PHOTOS, for a listing with more photos than a home holds. */
+  extraPhotos = 0
+  photoFetches = 0
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
     const method = (init.method ?? 'GET').toUpperCase()
     const path = url.pathname.replace('/api/v1', '')
     const body = typeof init.body === 'string' ? JSON.parse(init.body) as FakeBody : null
+    if (url.origin === CDN) {
+      const id = url.pathname.slice('/photos/'.length).replace(/\.jpg$/, '')
+      this.photoFetches += 1
+      if (this.failPhoto === id) return new Response('upstream unavailable', { status: 503 })
+      return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } })
+    }
     this.seen.push({ method, path })
     const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200 })
     const resource = (type: string, attributes: Record<string, unknown> = {}) => json({ data: { id: `${type}-${++this.ids}`, type, attributes } })
@@ -66,7 +96,16 @@ class FakeChannex {
     }
     if (method === 'GET' && path === '/channels/chan-1/action/listings') return json({ data: { listing_id_dictionary: { values: [{ id: LISTING, title: 'Cliff Cabin', city: 'Moab', country_code: 'US' }] } } })
     if (method === 'GET' && path === '/channels/chan-1/action/listing_details') {
-      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 } } } })
+      const content = this.content ? {
+        images: [...PHOTOS, ...Array.from({ length: this.extraPhotos }, (_, i) => ({ id: `${LISTING}_x${i + 1}`, caption: null, sort_order: PHOTOS.length + i + 1 }))].map(photo => ({ ...photo, listing_id: LISTING, category: 'LISTING', thumbnail_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_small`, small_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=small`, extra_medium_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_medium` })),
+        descriptions: { summary: 'A cabin on the cliff.', description: 'A cabin on the cliff.\n\nTwo bedrooms.', space: 'Two bedrooms and a deck.', access: 'The whole cabin is yours.', interaction: 'We live next door.', neighborhood_overview: 'Quiet, ten minutes from town.', transit: 'Bus 4 stops outside.', notes: 'No parties.', house_rules: 'No smoking inside.', name: 'Cliff Cabin', locale: 'en' },
+        amenities: { WIRELESS_INTERNET: { instruction: '', is_present: true }, SMOKE_DETECTOR: { instruction: '', is_present: true }, HOVERBOARD_DOCK: { instruction: '', is_present: true }, CRIB: { instruction: '', is_present: false } },
+        listing_views: ['MOUNTAIN_VIEW'],
+        rooms: [{ id: 'r1', listing_id: LISTING, room_type: 'bedroom', is_private: true, beds: [{ quantity: 1, type: 'queen_bed' }], accessibility_features: [] }, { id: 'r2', listing_id: LISTING, room_type: 'bedroom', is_private: true, beds: [{ quantity: 2, type: 'queen_bed' }], accessibility_features: [] }],
+        bedrooms: 2, beds: 3, bathrooms: 1, house_manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi_network: '5 Star', wifi_password: 'open sesame',
+        check_in_option: { category: 'smartlock', instruction: 'Door code 0126' },
+      } : { rooms: [] }
+      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
     }
     if (method === 'GET' && path === '/channels/chan-1/action/get_listing_calendar') {
       const from = url.searchParams.get('date_from')!
@@ -111,17 +150,22 @@ async function boot() {
     name: 'airbnb-import-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'airbnb-import-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'airbnb-import-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = await runtime.getBindings<CloudflareEnv>()
+    const env = {
+      ...await runtime.getBindings<CloudflareEnv>(), DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
+      BETTER_AUTH_URL: BASE, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client',
+      GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app', MEDIA_BASE_URL: 'https://media.proof.example', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+    } as unknown as CloudflareEnv
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@example.test', 1, 0, 0)").bind(OWNER).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
+    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('a-owner', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(PASSWORD)).run()
     return { runtime, db, env }
   } catch (error) {
     await runtime.dispose()
@@ -130,13 +174,24 @@ async function boot() {
 }
 
 async function connected(db: D1Database, env: CloudflareEnv, channex: FakeChannex) {
-  const connection = new AirbnbConnection(db, { ...env, DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client', GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app' } as unknown as CloudflareEnv, ORG, OWNER)
+  const connection = new AirbnbConnection(db, env, ORG, OWNER)
   await connection.start()
   await connection.complete(channex.token, 'chan-1')
   return connection
 }
 
 const form = { missingDetails: { email: 'Stay@Example.test', phone: '+1 435 555 0100', childBeds: '1', infantCots: '0' }, checkInTime: '15:00', checkOutTime: '11:00' }
+const manager = { organizationId: ORG, actorId: OWNER, manage: true } as const
+
+async function importAll(connection: AirbnbConnection, db: D1Database, channex: FakeChannex, productId: string): Promise<void> {
+  for (let step = 0; step < 14; step++) {
+    const mapping = await db.prepare('SELECT room_type_id, rate_plan_id FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<{ room_type_id: string | null; rate_plan_id: string | null }>()
+    channex.roomType = mapping?.room_type_id ?? ''
+    channex.ratePlan = mapping?.rate_plan_id ?? ''
+    if ((await connection.advance(productId)).stage === 'complete') return
+  }
+  throw new Error('The import did not complete')
+}
 
 test('a listing imports through every stage into a home Channex and KrabiClaw agree on', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
@@ -169,13 +224,26 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.deepEqual(first, { date: today(), price_minor: 21_000, max_stay: 30 })
 
     const stages: string[] = []
-    for (let step = 0; step < 12; step++) {
+    for (let step = 0; step < 14; step++) {
       const mapping = await db.prepare('SELECT room_type_id, rate_plan_id FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<{ room_type_id: string | null; rate_plan_id: string | null }>()
       channex.roomType = mapping?.room_type_id ?? ''
       channex.ratePlan = mapping?.rate_plan_id ?? ''
       const result = await connection.advance(productId)
       stages.push(result.stage)
+      if (result.stage === 'content') {
+        // A photo Airbnb cannot serve stops the stage naming the image; the retry keeps the photo already stored.
+        channex.failPhoto = PHOTOS[1]!.id
+        await assert.rejects(connection.advance(productId), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 502 && error.data?.code === 'PHOTO_FETCH_FAILED' && error.data.image_id === PHOTOS[1]!.id)
+        assert.deepEqual(await db.prepare('SELECT import_stage, import_content FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'content', import_content: null })
+        assert.equal((await readStayHome(db, manager, productId)).photos.length, 0)
+        channex.failPhoto = null
+      }
       if (result.stage === 'messages') {
+        const report = result.content!
+        assert.deepEqual(report, {
+          photos_imported: [PHOTOS[1]!.id, PHOTOS[2]!.id], photos_skipped: [PHOTOS[0]!.id], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'],
+          unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2,
+        } satisfies ImportContentReport)
         channex.failMessages = true
         await assert.rejects(connection.advance(productId), /503/)
         assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('import_stage'), 'messages')
@@ -184,18 +252,29 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       }
       if (result.stage === 'complete') break
     }
-    assert.deepEqual(stages, ['room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'messages', 'complete'])
+    assert.deepEqual(stages, ['room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'content', 'messages', 'complete'])
+    const filled = await readStayHome(db, manager, productId)
+    assert.deepEqual(filled.photos.map(photo => ({ kind: photo.kind, alt_text: photo.alt_text, position: photo.position, hosted: photo.url.startsWith('https://media.proof.example/') })), [
+      { kind: 'image', alt_text: 'The deck at sunset', position: 0, hosted: true }, { kind: 'image', alt_text: null, position: 1, hosted: true }, { kind: 'image', alt_text: 'Bedroom one', position: 2, hosted: true },
+    ])
+    assert.deepEqual(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND source = 'external' AND provider = 'cloudflare_r2' AND status = 'active'").bind(ORG).first(), { n: 3 })
+    assert.equal(filled.description, 'A cabin on the cliff.\n\nTwo bedrooms and a deck.\n\nQuiet, ten minutes from town.\n\nNo smoking inside.')
+    assert.deepEqual({ bedrooms: filled.bedrooms, beds: filled.beds, bathrooms: filled.bathrooms, amenities: filled.amenities }, { bedrooms: 2, beds: 3, bathrooms: 1, amenities: ['wireless_internet', 'smoke_detector', 'mountain_view'] })
+    assert.deepEqual({ method: filled.check_in_method, check_in: filled.check_in_instructions, manual: filled.house_manual, directions: filled.directions, wifi: filled.wifi_network, password: filled.wifi_password, rooms: filled.photo_rooms }, {
+      method: 'smart_lock', check_in: 'Door code 0126\n\nThe whole cabin is yours.\n\nWe live next door.', manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi: '5 Star', password: 'open sesame', rooms: [],
+    })
     assert.equal(channex.seen.filter(request => request.path === '/channels/chan-1/execute/load_future_reservations').length, 1)
-    const mapping = await db.prepare('SELECT property_id, room_type_id, rate_plan_id, enabled, import_property, import_calendar FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<Record<string, unknown>>()
+    const mapping = await db.prepare('SELECT property_id, room_type_id, rate_plan_id, enabled, import_property, import_calendar, import_content FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<Record<string, unknown>>()
     assert.ok(mapping!.property_id && mapping!.room_type_id && mapping!.rate_plan_id)
     assert.deepEqual([mapping!.enabled, mapping!.import_property, mapping!.import_calendar], [1, null, null])
+    assert.deepEqual((JSON.parse(String(mapping!.import_content)) as ImportContentReport).photos_skipped, [PHOTOS[0]!.id])
     assert.equal(Object.keys(channex.availability).length, 500)
     assert.equal(channex.availability[addDays(today(), 3)], 0)
     assert.deepEqual(channex.channel.properties, [mapping!.property_id])
     assert.equal(channex.channel.active, true)
     const connectionRow = await db.prepare('SELECT setup_property_id, operation_id, pending_step FROM channex_connections').first()
     assert.deepEqual(connectionRow, { setup_property_id: null, operation_id: null, pending_step: null })
-    assert.deepEqual((await connection.listings())[0]!.import, { status: 'imported', product_id: productId, stage: 'complete' })
+    assert.deepEqual((await connection.listings())[0]!.import, { status: 'imported', product_id: productId, stage: 'complete', content: JSON.parse(String(mapping!.import_content)) as ImportContentReport })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
@@ -220,3 +299,113 @@ test('a listing priced in another currency stops before anything is created', { 
     await runtime.dispose()
   }
 })
+
+test('the backfill route fills a home imported without content and the listings report it', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  channex.content = false
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const productId = (await connection.prepare(LISTING, form)).product_id
+    await importAll(connection, db, channex, productId)
+    // Imported before Airbnb's content was read: a home with no photos, texts or counts, as the two existing imports are.
+    await db.prepare('UPDATE product_channel_mappings SET import_content = NULL WHERE product_id = ?').bind(productId).run()
+    const before = await readStayHome(db, manager, productId)
+    assert.deepEqual({ photos: before.photos, description: before.description, bedrooms: before.bedrooms, amenities: before.amenities, method: before.check_in_method }, { photos: [], description: '', bedrooms: null, amenities: [], method: null })
+
+    const app = new H3()
+    app.get('/api/organizations/:organizationId/integrations/airbnb/listings', listingsRoute)
+    app.post('/api/organizations/:organizationId/integrations/airbnb/imports/:productId/content', contentRoute)
+    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: PASSWORD }, asResponse: true })
+    assert.equal(login.status, 200)
+    const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const call = async (method: string, path: string) => {
+      const response = await app.request(Object.assign(new Request(`${BASE}/api/organizations/${ORG}/integrations/airbnb${path}`, { method, headers: { cookie, origin: BASE } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      return { status: response.status, body: await response.json() as Record<string, unknown> }
+    }
+    const listedBefore = await call('GET', '/listings')
+    assert.deepEqual((listedBefore.body.listings as Array<{ import: unknown }>)[0]!.import, { status: 'imported', product_id: productId, stage: 'complete', content: null })
+
+    channex.content = true
+    const filled = await call('POST', `/imports/${productId}/content`)
+    assert.equal(filled.status, 200)
+    assert.deepEqual(filled.body, { product_id: productId, stage: 'complete', content: {
+      photos_imported: PHOTOS.map(photo => photo.id), photos_skipped: [], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2,
+    } satisfies ImportContentReport })
+    const after = await readStayHome(db, manager, productId)
+    assert.deepEqual({ captions: after.photos.map(photo => photo.alt_text), bedrooms: after.bedrooms, beds: after.beds, bathrooms: after.bathrooms, amenities: after.amenities, method: after.check_in_method, manual: after.house_manual },
+      { captions: ['The deck at sunset', null, 'Bedroom one'], bedrooms: 2, beds: 3, bathrooms: 1, amenities: ['wireless_internet', 'smoke_detector', 'mountain_view'], method: 'smart_lock', manual: 'Unit 63A. Shoes off, please.' })
+    assert.equal(after.description, 'A cabin on the cliff.\n\nTwo bedrooms and a deck.\n\nQuiet, ten minutes from town.\n\nNo smoking inside.')
+    // Run again: every photo is already stored, nothing is stored twice, and the listings carry the report.
+    const again = await call('POST', `/imports/${productId}/content`)
+    assert.deepEqual((again.body.content as ImportContentReport).photos_skipped, PHOTOS.map(photo => photo.id))
+    assert.equal((await readStayHome(db, manager, productId)).photos.length, 3)
+    assert.deepEqual(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first(), { n: 3 })
+    const listedAfter = await call('GET', '/listings')
+    assert.deepEqual(((listedAfter.body.listings as Array<{ import: { content: ImportContentReport } }>)[0]!.import.content).photos_skipped, PHOTOS.map(photo => photo.id))
+    // A caption write that did not land is resumed; a caption the host edited is kept.
+    await db.prepare('UPDATE media_assets SET alt_text = NULL WHERE id = ?').bind(after.photos[0]!.id).run()
+    await db.prepare("UPDATE media_assets SET alt_text = 'Our bedroom' WHERE id = ?").bind(after.photos[2]!.id).run()
+    await call('POST', `/imports/${productId}/content`)
+    assert.deepEqual((await readStayHome(db, manager, productId)).photos.map(photo => photo.alt_text), ['The deck at sunset', null, 'Our bedroom'])
+    // The host deleted one imported photo from the library and Airbnb now has more photos than a home holds:
+    // the deleted one stays out, the photos past the limit are never fetched, and both are reported.
+    await deleteMediaAsset(db, env, after.photos[1]!.id, ORG, OWNER)
+    channex.extraPhotos = 49
+    // The run is interrupted after it stored photo x40, so that asset exists without a place on the home.
+    channex.failPhoto = `${LISTING}_x41`
+    await assert.rejects(call('POST', `/imports/${productId}/content`).then(result => { if (result.status !== 200) throw Object.assign(new Error('refused'), result.body.data) }), (error: { code?: string; image_id?: string }) => error.code === 'PHOTO_FETCH_FAILED' && error.image_id === `${LISTING}_x41`)
+    assert.equal((await readStayHome(db, manager, productId)).photos.length, 2)
+    channex.failPhoto = null
+    const fetchedBefore = channex.photoFetches
+    const crowded = await call('POST', `/imports/${productId}/content`)
+    assert.equal(crowded.status, 200)
+    const crowdedReport = crowded.body.content as ImportContentReport
+    assert.deepEqual({ removed: crowdedReport.photos_removed, unplaced: crowdedReport.photos_unplaced, skipped: crowdedReport.photos_skipped.length, imported: crowdedReport.photos_imported.length },
+      { removed: [PHOTOS[1]!.id], unplaced: [`${LISTING}_x49`], skipped: 42, imported: 8 })
+    assert.equal((await readStayHome(db, manager, productId)).photos.length, 50)
+    assert.equal(channex.photoFetches - fetchedBefore, 8)
+    assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a third home on Basic is refused as a home, nothing is saved, and the same form imports after a plan is chosen', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const access = { organizationId: ORG, actorId: OWNER, manage: true }
+    const homeEnv = { ...env, DB: db, STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth' } as unknown as CloudflareEnv
+    for (const name of ['Dune Hut', 'Reef Hut']) {
+      await createStayHome(homeEnv, db, access, stayHomeInput({ name, timezone: TZ, address: `1 ${name} Rd`, city: 'Moab', country: 'US', check_in_time: '15:00', check_out_time: '11:00', max_guests: 2, min_nights: 1, base_price_minor: 100_00 }), name)
+    }
+    // Basic includes two homes: the import is refused as a home before anything is made, and the contact the host typed is not kept.
+    await assert.rejects(connection.prepare(LISTING, form), { status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } } })
+    assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [2, 2, 0])
+    assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: null, contact_phone: null })
+    assert.deepEqual((await connection.details(LISTING)).missingFields, ['email', 'phone', 'childBeds', 'infantCots'])
+    // On Growth the same form, with the same details, imports; the contact is kept once the home is made.
+    // A phone set in Brand › Contact meanwhile is no longer missing: the form no longer carries it, and the import keeps it.
+    await db.prepare("UPDATE organization SET contact_phone = '+1 435 555 0199' WHERE id = ?").bind(ORG).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-org', 'growth', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
+    const { phone: _phone, ...withoutPhone } = form.missingDetails
+    const started = await connection.prepare(LISTING, { ...form, missingDetails: withoutPhone })
+    assert.equal(started.stage, 'property')
+    assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [3, 3, 1])
+    assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0199' })
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+async function count(db: D1Database, table: string): Promise<number> {
+  return (await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())!.n
+}

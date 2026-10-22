@@ -40,6 +40,35 @@
 
       <div v-if="tab === 'views' && analytics && !loadError" class="space-y-8">
 
+        <section class="border-b border-default pb-8 last:border-b-0" data-testid="insights-funnel">
+          <header class="mb-4"><h2 class="font-semibold text-highlighted">Funnel</h2></header>
+          <div class="space-y-4">
+            <DashboardAnalyticsRow
+              v-for="step in funnelSteps"
+              :key="step.key"
+              :label="step.label"
+              :value="step.value"
+              :percent="step.percent"
+              :data-testid="`insights-funnel-${step.key}`"
+            />
+            <p class="text-xs text-muted">Each percentage is of the step before it. Visits are sessions; confirmed is a request whose {{ funnelWords.confirmedNoun }} stands confirmed now.</p>
+          </div>
+          <div v-for="breakdown in funnelBreakdowns" :key="breakdown.title" class="mt-6 overflow-x-auto">
+            <table class="w-full text-left text-sm" :data-testid="breakdown.testId">
+              <thead class="text-xs text-muted"><tr>
+                <th scope="col" class="pb-3 font-medium">{{ breakdown.title }}</th>
+                <th v-for="column in funnelWords.short" :key="column" scope="col" class="pb-3 pl-4 text-right font-medium">{{ column }}</th>
+              </tr></thead>
+              <tbody class="divide-y divide-default">
+                <tr v-for="row in breakdown.rows" :key="row.label">
+                  <td class="py-3 pr-4 font-medium text-highlighted">{{ row.label }}</td>
+                  <td v-for="(cell, index) in row.cells" :key="index" class="py-3 pl-4 text-right tabular-nums">{{ cell }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         <section class="border-b border-default pb-8 last:border-b-0">
           <div class="grid grid-cols-2 gap-x-6 gap-y-6">
             <div v-for="metric in metricCards" :key="metric.label">
@@ -93,17 +122,6 @@
             <p v-else class="text-sm text-muted">No attribution data yet.</p>
           </section>
           <section class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4"><h2 class="font-semibold text-highlighted">Conversions</h2></header>
-            <p class="mb-4 text-3xl font-semibold tabular-nums text-highlighted">{{ formatCount(analytics.dailyConversions.reduce((total, day) => total + day.events, 0)) }}</p>
-            <AnalyticsTrendChart label="Daily conversions" :dates="analytics.dailyConversions.map(day => day.date)" :series="conversionSeries" />
-            <div v-if="outcomes.length" class="mt-5 divide-y divide-default text-sm">
-              <div v-for="row in outcomes" :key="`${row.eventName}-${row.stage}`" class="flex justify-between gap-4 py-3">
-                <span class="text-muted">{{ row.eventName.replaceAll('_', ' ') }}</span>
-                <span class="tabular-nums">{{ formatCount(row.events) }}</span>
-              </div>
-            </div>
-          </section>
-          <section class="border-b border-default pb-8 last:border-b-0">
             <header class="mb-4"><h2 class="font-semibold text-highlighted">Pageviews by language</h2></header>
             <div class="space-y-4">
               <DashboardAnalyticsRow
@@ -117,40 +135,6 @@
               <p v-else-if="!languageRows.length" class="text-sm text-muted">No pageviews recorded in this range.</p>
               <p v-if="languageRows.length && languages" class="text-xs text-muted">{{ formatCount(languages.totalSessions) }} distinct sessions across all languages (not the sum of the rows).</p>
               <UButton v-if="languages?.cursor" size="sm" variant="soft" :loading="languagesPending" @click="languagesAfter = { period: languagePeriod, cursor: languages.cursor }">Show more</UButton>
-            </div>
-          </section>
-          <section v-if="analytics.values.length || analytics.bookingValue.length" class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4"><h2 class="font-semibold text-highlighted">Value</h2></header>
-            <div class="space-y-4">
-              <DashboardAnalyticsRow
-                v-for="row in analytics.values"
-                :key="`${row.eventName}-${row.basis}-${row.currency}`"
-                :label="`${row.eventName.replaceAll('_', ' ')} · ${row.basis}`"
-                :value="`${formatMoney(row.valueMinor, row.currency)}${row.collectedMinor !== null ? ` (${formatMoney(row.collectedMinor, row.currency)} collected)` : ''} · ${formatCount(row.events)} events`"
-                :percent="0"
-              />
-              <DashboardAnalyticsRow
-                v-for="row in analytics.net"
-                :key="`net-${row.currency}`"
-                :label="`Net collected · ${row.currency}`"
-                :value="`${formatMoney(row.netMinor, row.currency)} (${formatMoney(row.collectedMinor, row.currency)} − ${formatMoney(row.refundedMinor, row.currency)} refunded)`"
-                :percent="0"
-              />
-              <DashboardAnalyticsRow
-                v-for="row in analytics.attributedValue"
-                :key="`attributed-${row.source}-${row.medium}-${row.campaign}-${row.content}-${row.currency}`"
-                :label="`Revenue · ${row.source || 'unattributed'} / ${row.medium || 'unattributed'}${row.campaign ? ` · ${row.campaign}` : ''}${row.content ? ` · ${row.content}` : ''}`"
-                :value="`${formatMoney(row.netMinor, row.currency)} net (${formatMoney(row.collectedMinor, row.currency)} collected − ${formatMoney(row.refundedMinor, row.currency)} refunded) · ${formatCount(row.purchases)} purchases`"
-                :percent="0"
-              />
-              <DashboardAnalyticsRow
-                v-for="row in analytics.bookingValue"
-                :key="`booking-${row.productId}-${row.locationId}-${row.currency}`"
-                :label="`Quoted booking value · ${row.productName || 'price unknown'}`"
-                :value="`${row.currency ? formatMoney(row.quotedValueMinor, row.currency) : 'value unknown'} · ${formatCount(row.valuedBookings)} of ${formatCount(row.bookings)} bookings valued`"
-                :percent="0"
-              />
-              <p class="text-xs text-muted">Quoted booking value is the price shown when a booking was made, not revenue. Currencies are never added together.</p>
             </div>
           </section>
           <section v-if="analytics.signupCohort.signups" class="border-b border-default pb-8 last:border-b-0">
@@ -428,7 +412,6 @@
 <script setup lang="ts">
 import ActivityFeed from '~/components/dashboard/ActivityFeed.vue'
 import AnalyticsTrendChart from '~/components/dashboard/AnalyticsTrendChart.vue'
-import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES } from '~/utils/organization-conversion-events'
 const dashboardApi = useDashboardApi()
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 
@@ -603,11 +586,46 @@ const trafficSeries = computed(() => [
   { label: 'Pageviews', values: dailyData.value.map(day => day.pageViews), color: 'var(--ui-primary)' },
   { label: 'Sessions', values: dailyData.value.map(day => day.sessions), color: 'var(--ui-info)' },
 ])
-const conversionSeries = computed(() => [
-  { label: 'Conversions', values: analytics.value?.dailyConversions.map(day => day.events) ?? [], color: 'var(--ui-primary)' },
-])
-const outcomeNames = new Set<string>(ORGANIZATION_CONVERSION_EVENT_NAMES.filter(name => CONVERSION_EVENT_CATALOG[name].outcome))
-const outcomes = computed(() => analytics.value?.conversions.filter(row => outcomeNames.has(row.eventName)) ?? [])
+
+// The funnel in the business's own words. Steps are counted by the report; only their names vary.
+type FunnelCounts = Omit<AnalyticsReport['funnel'], 'bySource' | 'byLocation'>
+const FUNNEL_KEYS = ['visits', 'viewed', 'intent', 'submitted', 'confirmed', 'paid'] as const
+const FUNNEL_WORDS = {
+  service: { long: ['Visits', 'Viewed a practice area', 'Clicked Book a consultation', 'Requested a consultation', 'Scheduled', 'Paid'], short: ['Visits', 'Viewed', 'Clicked', 'Requested', 'Scheduled', 'Paid'], confirmedNoun: 'consultation' },
+  restaurant: { long: ['Visits', 'Viewed a dish', 'Started a reservation', 'Reserved', 'Seated', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Reserved', 'Seated', 'Paid'], confirmedNoun: 'reservation' },
+  experience: { long: ['Visits', 'Viewed', 'Started checkout', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
+  lodging: { long: ['Visits', 'Viewed', 'Started checkout', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'stay' },
+  platform: { long: ['Visits', 'Viewed an offering', 'Showed intent', 'Submitted', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Intent', 'Submitted', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
+} as const
+const dashboard = useDashboardOrganization()
+const funnelWords = computed(() => FUNNEL_WORDS[dashboard.organization.value?.vertical ?? 'platform'])
+// A step with nothing recorded reads "—", never 0 or 0%.
+const funnelCell = (counts: FunnelCounts, key: typeof FUNNEL_KEYS[number]) => {
+  if (!counts[key]) return '—'
+  if (key !== 'paid' || !counts.paidCollected.length) return formatCount(counts[key])
+  return `${formatCount(counts.paid)} · ${counts.paidCollected.map(paid => formatMoney(paid.collectedMinor, paid.currency)).join(' · ')}`
+}
+const funnelSteps = computed(() => {
+  const funnel = analytics.value?.funnel
+  if (!funnel) return []
+  return FUNNEL_KEYS.map((key, index) => {
+    const previous = index ? funnel[FUNNEL_KEYS[index - 1]!] : 0
+    const rate = index && previous && funnel[key] ? ` · ${formatNumber(Math.round(funnel[key] / previous * 1000) / 10)}%` : ''
+    return { key, label: funnelWords.value.long[index]!, value: `${funnelCell(funnel, key)}${rate}`, percent: funnel.visits ? funnel[key] / funnel.visits * 100 : 0 }
+  })
+})
+const funnelBreakdowns = computed(() => {
+  const funnel = analytics.value?.funnel
+  if (!funnel) return []
+  const rows = (entries: Array<{ label: string; counts: FunnelCounts }>) => entries.map(({ label, counts }) => ({ label, cells: FUNNEL_KEYS.map(key => funnelCell(counts, key)) }))
+  const locationTitle = (id: string | null) => id ? dashboard.locations.value.find(location => location.id === id)?.title ?? 'Removed location' : 'No location'
+  return [
+    { title: 'Source', testId: 'insights-funnel-by-source', rows: rows(funnel.bySource.map(row => ({ label: row.channel, counts: row }))) },
+    ...(dashboard.locations.value.length > 1
+      ? [{ title: 'Location', testId: 'insights-funnel-by-location', rows: rows(funnel.byLocation.map(row => ({ label: locationTitle(row.locationId), counts: row }))) }]
+      : []),
+  ].filter(breakdown => breakdown.rows.length)
+})
 
 const metricCards = computed(() => {
   const metrics = analytics.value?.metrics

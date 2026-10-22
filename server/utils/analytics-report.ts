@@ -3,7 +3,8 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { localDateBounds, parseAnalyticsRange } from '~/server/utils/analytics-calendar'
 import { addLocalDays, localDateAt } from '~/utils/timezone'
-import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES } from '~/utils/organization-conversion-events'
+import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES, type ConversionEventDefinition, type FunnelStep } from '~/utils/organization-conversion-events'
+import { ATTRIBUTION_CHANNELS, attributionChannel, type AttributionChannel } from '~/utils/analytics-attribution'
 import { readIntegration } from './organization-integrations'
 import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { getGoogleAdsPerformanceSummary } from './google-ads'
@@ -30,6 +31,7 @@ interface DailySlice {
 }
 
 const n = (value: unknown) => Number(value || 0)
+const text = (value: unknown) => value ? String(value) : null
 
 const rate = (count: number, of: number) => of ? Math.round(count / of * 10_000) / 100 : null
 
@@ -246,7 +248,6 @@ async function loadConversionReport(db: DbClient, organizationId: string, window
       WHERE ${inRange} AND ${eventName} IN (${SERVER_DELIVERED_EVENT_SQL_LIST})
       GROUP BY 1,2 ORDER BY event_name, status`, [organizationId, start, end]),
   ])
-  const text = (value: unknown) => value ? String(value) : null
   const cohortRevenue = (row: Record<string, unknown>) => cohortRevenueRows
     .filter(revenue => revenue.source === row.source && revenue.medium === row.medium && revenue.campaign === row.campaign && revenue.content === row.content)
     .map(revenue => ({ currency: String(revenue.currency), collectedMinor: n(revenue.collected), refundedMinor: n(revenue.refunded), netMinor: n(revenue.collected) - n(revenue.refunded) }))
@@ -290,6 +291,78 @@ async function loadConversionReport(db: DbClient, organizationId: string, window
   }
 }
 
+type FunnelCounts = Omit<AnalyticsReport['funnel'], 'bySource' | 'byLocation'>
+const FUNNEL_EVENTS = ORGANIZATION_CONVERSION_EVENT_NAMES.flatMap((name) => {
+  const step: FunnelStep | undefined = (CONVERSION_EVENT_CATALOG[name] as ConversionEventDefinition).funnel
+  return step ? [{ name, step }] : []
+})
+const FUNNEL_STEP_SQL = `CASE (payload_json ->> '$.event_name') ${FUNNEL_EVENTS.map(({ name, step }) => `WHEN '${name}' THEN '${step}'`).join(' ')} END`
+const FUNNEL_EVENT_SQL_LIST = FUNNEL_EVENTS.map(({ name }) => `'${name}'`).join(', ')
+const FUNNEL_SUBMIT_SQL_LIST = FUNNEL_EVENTS.filter(({ step }) => step === 'submitted').map(({ name }) => `'${name}'`).join(', ')
+
+// One business's site funnel over the range. Each step is counted where it is recorded: visits are
+// pageview sessions, viewed and intent are the browser's events, submitted is the request the
+// guest made, confirmed is that request's booking, reservation or stay standing confirmed now,
+// and paid is the payment captured. A request made through checkout has no submit event: its
+// payment is how it was made, so a paid payment whose request was never submitted counts as that
+// request's submission too. Sources are each event's own attribution snapshot; a visit's is its
+// session's last touch, the same population as the attribution table.
+async function loadFunnel(db: DbClient, organizationId: string, start: string, end: string, visits: { total: number; bySource: Array<{ source: string; medium: string; sessions: number }> }) {
+  const [eventRows, locationVisitRows] = await Promise.all([
+    queryAll<Record<string, unknown>>(db, `SELECT location_id, source, medium, step, currency, COUNT(*) events, SUM(submits) submitted,
+        SUM(submits AND (
+          EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = thread_id AND b.organization_id = ? AND b.status = 'confirmed')
+          OR EXISTS (SELECT 1 FROM reservations r WHERE r.request_id = thread_id AND r.organization_id = ? AND r.status = 'confirmed')
+          OR EXISTS (SELECT 1 FROM stays st WHERE st.request_id = thread_id AND st.organization_id = ? AND st.status = 'confirmed'))) confirmed,
+        SUM(collected_minor) collected_minor
+      FROM (SELECT *, step = 'submitted' OR (step = 'paid' AND thread_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM analytics_events s
+            WHERE s.organization_id = ? AND s.kind = 'conversion' AND (s.payload_json ->> '$.event_name') IN (${FUNNEL_SUBMIT_SQL_LIST})
+              AND (s.payload_json ->> '$.entity_type') = 'request' AND (s.payload_json ->> '$.entity_id') = thread_id)) submits
+        FROM (SELECT location_id, (payload_json ->> '$.attribution.source') source, (payload_json ->> '$.attribution.medium') medium,
+            ${FUNNEL_STEP_SQL} step, (payload_json ->> '$.value.currency') currency, (payload_json ->> '$.value.collected_minor') collected_minor,
+            CASE WHEN (payload_json ->> '$.event_name') = 'payment_paid' THEN (SELECT COALESCE(b.request_id, r.request_id, st.request_id) FROM payments p
+                LEFT JOIN bookings b ON p.subject_type = 'booking' AND b.id = p.subject_id AND b.organization_id = p.organization_id
+                LEFT JOIN reservations r ON p.subject_type = 'reservation' AND r.id = p.subject_id AND r.organization_id = p.organization_id
+                LEFT JOIN stays st ON p.subject_type = 'stay' AND st.id = p.subject_id AND st.organization_id = p.organization_id
+                WHERE p.id = (payload_json ->> '$.entity_id') AND p.organization_id = analytics_events.organization_id)
+              ELSE (payload_json ->> '$.entity_id') END thread_id
+          FROM analytics_events WHERE kind IN ('conversion', 'interaction') AND organization_id = ? AND created_at >= ? AND created_at < ?
+            AND (payload_json ->> '$.event_name') IN (${FUNNEL_EVENT_SQL_LIST})))
+      GROUP BY 1,2,3,4,5`, [organizationId, organizationId, organizationId, organizationId, organizationId, start, end]),
+    queryAll<{ location_id: string | null; sessions: number }>(db, `SELECT location_id, COUNT(DISTINCT session_id) sessions FROM analytics_events
+      WHERE organization_id = ? AND kind = 'pageview' AND created_at >= ? AND created_at < ? GROUP BY 1`, [organizationId, start, end]),
+  ])
+  const empty = (): FunnelCounts => ({ visits: 0, viewed: 0, intent: 0, submitted: 0, confirmed: 0, paid: 0, paidCollected: [] })
+  const add = (counts: FunnelCounts, row: Record<string, unknown>) => {
+    const step = row.step as FunnelStep
+    if (step !== 'submitted') counts[step] += n(row.events)
+    counts.submitted += n(row.submitted)
+    counts.confirmed += n(row.confirmed)
+    if (step === 'paid' && row.currency) {
+      const entry = counts.paidCollected.find(paid => paid.currency === row.currency)
+      if (entry) entry.collectedMinor += n(row.collected_minor)
+      else counts.paidCollected.push({ currency: row.currency as FunnelCounts['paidCollected'][number]['currency'], collectedMinor: n(row.collected_minor) })
+    }
+  }
+  const total = { ...empty(), visits: visits.total }
+  const bySource = new Map<AttributionChannel, FunnelCounts>()
+  const byLocation = new Map<string | null, FunnelCounts>()
+  const sourceOf = (channel: AttributionChannel) => bySource.get(channel) ?? bySource.set(channel, empty()).get(channel)!
+  const locationOf = (locationId: string | null) => byLocation.get(locationId) ?? byLocation.set(locationId, empty()).get(locationId)!
+  // The sessions table labels a session without a touch; that is a visit whose source was not recorded.
+  for (const row of visits.bySource) sourceOf(row.medium === '(not recorded)' ? 'Not recorded' : attributionChannel(row.source, row.medium)).visits += row.sessions
+  for (const row of locationVisitRows) locationOf(row.location_id).visits += n(row.sessions)
+  for (const row of eventRows) {
+    add(total, row)
+    add(sourceOf(attributionChannel(text(row.source), text(row.medium))), row)
+    add(locationOf(text(row.location_id)), row)
+  }
+  return {
+    ...total,
+    bySource: ATTRIBUTION_CHANNELS.filter(channel => bySource.has(channel)).map(channel => ({ channel, ...bySource.get(channel)! })),
+    byLocation: Array.from(byLocation, ([locationId, counts]) => ({ locationId, ...counts })).sort((a, b) => b.visits - a.visits),
+  }
+}
 function netByCurrency(valueRows: Array<Record<string, unknown>>) {
   const byCurrency = new Map<string, { collectedMinor: number; refundedMinor: number }>()
   for (const row of valueRows) {
@@ -339,7 +412,10 @@ export async function getAnalyticsReport(db: DbClient, input: {
   ])
   const pageViews = slices.reduce((sum, slice) => sum + slice.pageViews, 0)
   const uniqueSessions = n(sessionStats?.sessions)
-  const conversionReport = await loadConversionReport(db, input.organizationId, { start, end, observedEnd, uniqueSessions, dates: range.dates, timezone: context.timezone })
+  const [conversionReport, funnel] = await Promise.all([
+    loadConversionReport(db, input.organizationId, { start, end, observedEnd, uniqueSessions, dates: range.dates, timezone: context.timezone }),
+    loadFunnel(db, input.organizationId, start, end, { total: uniqueSessions, bySource: attributionRows.map(row => ({ source: String(row.source), medium: String(row.medium), sessions: n(row.sessions) })) }),
+  ])
   const previousStart = localDateBounds(range.previousStartDate, context.timezone).start
   const previousAvailable = !context.analyticsDataStartAt || previousStart >= context.analyticsDataStartAt
   let changePercent: number | null = null
@@ -428,6 +504,7 @@ export async function getAnalyticsReport(db: DbClient, input: {
         sessions, outcomeEvents: n(row.outcome_events), convertingSessions: n(row.converting), sessionConversionRate: rate(n(row.converting), sessions) }
     }).sort((a, b) => b.sessions - a.sessions),
     ...conversionReport,
+    funnel,
     countries: dimensionRows('country').slice(0, 12).map(row => ({ country: row.value, countryCode: row.value, views: row.views, percentOfTotal: percent(row.views) })),
     cities: dimensionRows('city').slice(0, 10).map(row => {
       const [region, countryCode = 'XX'] = row.subvalue.split('|')

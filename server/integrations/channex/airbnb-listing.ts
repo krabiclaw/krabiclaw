@@ -2,11 +2,11 @@ import { HTTPError } from 'nitro'
 import tzLookup from '@photostructure/tz-lookup'
 import { isValidTimezone } from '~/utils/timezone'
 import { channexRequest, type ChannexEnv } from './client'
-import { ChannexDataError, integer, object, received, string } from './data'
+import { ChannexDataError, integer, object, received, string, type JsonRecord } from './data'
 
 /**
- * What an Airbnb listing says about itself, read through Channex: its details
- * and its next 500 nights. Airbnb's listing (checked live on 2026-10-22) has
+ * What an Airbnb listing says about itself, read through Channex: its details,
+ * its content (photos, texts, amenities, rooms) and its next 500 nights. Airbnb's listing (checked live on 2026-10-22) has
  * no time zone, email or phone: the time zone comes from the listing's
  * coordinates and the contact details from the organization, since Channex
  * requires a contact email and phone on a property before it connects to
@@ -85,11 +85,19 @@ function coordinateTimezone(lat: unknown, lng: unknown): string | null {
   return isValidTimezone(zone) ? zone : null
 }
 
-export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {
+/** Channex's `listing_details` action: the listing record as Airbnb reports it. */
+async function listingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
   const raw = await channexRequest(env, `/channels/${encodeURIComponent(channelId)}/action/listing_details?${new URLSearchParams({ listing_id: listingId })}`)
   return provided(() => {
-    const listing = object(object(raw.data, 'Listing details').listing, 'Airbnb listing')
-    if (listing.id !== listingId) throw new ChannexDataError('Airbnb returned a different listing')
+    const record = object(object(raw.data, 'Listing details').listing, 'Airbnb listing')
+    if (record.id !== listingId) throw new ChannexDataError('Airbnb returned a different listing')
+    return record
+  })
+}
+
+export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {
+  const listing = await listingRecord(env, channelId, listingId)
+  return provided(() => {
     const pricing = object(listing.pricing_settings, 'Listing pricing')
     const fields: Partial<Record<DetailField, string>> = {}
     const sources: ReadonlyArray<readonly [DetailField, string]> = [
@@ -119,6 +127,118 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       nightlyRate: amount(pricing.default_daily_price, 'Base price'), fields,
       missingFields: DETAIL_FIELDS.filter(key => fields[key] === undefined),
       checkInTime: hourTime(booking.check_in_time_start), checkOutTime: hourTime(booking.check_out_time),
+    }
+  })
+}
+
+/** The listing texts Airbnb's editor holds, by Airbnb's field name. `name` and `locale` are not content. */
+export const DESCRIPTION_FIELDS = ['summary', 'description', 'space', 'access', 'interaction', 'neighborhood_overview', 'transit', 'notes', 'house_rules'] as const
+export type DescriptionField = typeof DESCRIPTION_FIELDS[number]
+
+export interface ListingImage {
+  /** Airbnb's image id, unique across listings (`<listing id>_<photo id>`). */
+  id: string
+  caption: string | null
+  sortOrder: number
+  /** The largest rendition Airbnb's listing details name: `extra_medium_url`. */
+  url: string
+}
+
+export interface ListingRoom {
+  type: string
+  isPrivate: boolean
+  beds: Array<{ type: string; quantity: number }>
+}
+
+/** A listing's content as Airbnb reports it: nothing is filled in; a text Airbnb has no value for is null. */
+export interface ListingContent {
+  images: ListingImage[]
+  descriptions: Record<DescriptionField, string | null>
+  /** Airbnb's amenity constants reported present (`is_present`), plus its `listing_views`, in Airbnb's spelling. */
+  amenities: string[]
+  bedrooms: number | null
+  beds: number | null
+  bathrooms: number | null
+  rooms: ListingRoom[]
+  houseManual: string | null
+  directions: string | null
+  wifiNetwork: string | null
+  wifiPassword: string | null
+  checkInOption: { category: string; instruction: string | null } | null
+}
+
+/** A text Airbnb may leave out or leave blank: null for both; anything else must be a string. */
+function text(record: JsonRecord, key: string, label: string): string | null {
+  const value = record[key]
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') throw new ChannexDataError(`${label} must be text`)
+  return value.trim() ? value : null
+}
+
+function count(record: JsonRecord, key: string, label: string, step: 1 | 0.5): number | null {
+  const value = record[key]
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || !Number.isInteger(value / step)) throw new ChannexDataError(`${label} must be a count in steps of ${step}`)
+  return value
+}
+
+/**
+ * The listing's content. Channex documents `images` (or null), `rooms` and
+ * `descriptions` (or null) on the listing and leaves their items open;
+ * `amenities`, `bedrooms`, `beds`, `bathrooms`, `house_manual`, `directions`,
+ * the wifi fields and `check_in_option` are undocumented fields Airbnb returns
+ * (checked live, 2026-10-22), so each is null when absent and an error when
+ * present in another shape.
+ */
+export async function listingContent(env: ChannexEnv, channelId: string, listingId: string): Promise<ListingContent> {
+  const listing = await listingRecord(env, channelId, listingId)
+  return provided(() => {
+    const rawImages = listing.images === null || listing.images === undefined ? [] : listing.images
+    if (!Array.isArray(rawImages)) throw new ChannexDataError('images must be a list or null')
+    const images = rawImages.map((value, index): ListingImage => {
+      const image = object(value, `images[${index}]`)
+      const url = string(image.extra_medium_url, `images[${index}].extra_medium_url`)
+      if (!URL.canParse(url) || new URL(url).protocol !== 'https:') throw new ChannexDataError(`images[${index}].extra_medium_url must be an https URL`)
+      return { id: string(image.id, `images[${index}].id`), caption: text(image, 'caption', `images[${index}].caption`), sortOrder: integer(image.sort_order, `images[${index}].sort_order`), url }
+    }).sort((a, b) => a.sortOrder - b.sortOrder)
+    if (new Set(images.map(image => image.id)).size !== images.length) throw new ChannexDataError('images must have distinct ids')
+    const texts = listing.descriptions === null || listing.descriptions === undefined ? {} : object(listing.descriptions, 'descriptions')
+    const descriptions = Object.fromEntries(DESCRIPTION_FIELDS.map(key => [key, text(texts, key, `descriptions.${key}`)])) as Record<DescriptionField, string | null>
+    const amenities: string[] = []
+    if (listing.amenities !== null && listing.amenities !== undefined) {
+      for (const [key, value] of Object.entries(object(listing.amenities, 'amenities'))) {
+        const amenity = object(value, `amenities.${key}`)
+        if (typeof amenity.is_present !== 'boolean') throw new ChannexDataError(`amenities.${key}.is_present must be true or false`)
+        if (amenity.is_present) amenities.push(key)
+      }
+    }
+    if (listing.listing_views !== null && listing.listing_views !== undefined) {
+      if (!Array.isArray(listing.listing_views)) throw new ChannexDataError('listing_views must be a list')
+      amenities.push(...listing.listing_views.map((value, index) => string(value, `listing_views[${index}]`)))
+    }
+    if (!Array.isArray(listing.rooms)) throw new ChannexDataError('rooms must be a list')
+    const rooms = listing.rooms.map((value, index): ListingRoom => {
+      const room = object(value, `rooms[${index}]`)
+      if (typeof room.is_private !== 'boolean') throw new ChannexDataError(`rooms[${index}].is_private must be true or false`)
+      if (!Array.isArray(room.beds)) throw new ChannexDataError(`rooms[${index}].beds must be a list`)
+      return {
+        type: string(room.room_type, `rooms[${index}].room_type`), isPrivate: room.is_private,
+        beds: room.beds.map((entry, bed) => {
+          const record = object(entry, `rooms[${index}].beds[${bed}]`)
+          return { type: string(record.type, `rooms[${index}].beds[${bed}].type`), quantity: integer(record.quantity, `rooms[${index}].beds[${bed}].quantity`, 1) }
+        }),
+      }
+    })
+    let checkInOption: ListingContent['checkInOption'] = null
+    if (listing.check_in_option !== null && listing.check_in_option !== undefined) {
+      const option = object(listing.check_in_option, 'check_in_option')
+      checkInOption = { category: string(option.category, 'check_in_option.category'), instruction: text(option, 'instruction', 'check_in_option.instruction') }
+    }
+    return {
+      images, descriptions, amenities: [...new Set(amenities)], rooms, checkInOption,
+      bedrooms: count(listing, 'bedrooms', 'bedrooms', 1), beds: count(listing, 'beds', 'beds', 1), bathrooms: count(listing, 'bathrooms', 'bathrooms', 0.5),
+      houseManual: text(listing, 'house_manual', 'house_manual'), directions: text(listing, 'directions', 'directions'),
+      wifiNetwork: text(listing, 'wifi_network', 'wifi_network'), wifiPassword: text(listing, 'wifi_password', 'wifi_password'),
     }
   })
 }

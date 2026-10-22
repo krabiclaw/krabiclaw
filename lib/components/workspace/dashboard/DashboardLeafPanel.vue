@@ -28,7 +28,7 @@
         small and centred, an action on the right. Beside its index it is a pane:
         the title large, as every level's, and nothing to close.
       -->
-      <div class="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 pb-2 pt-4 sm:pt-6 lg:flex" :class="dashboardGutterClass">
+      <div class="grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-2 pt-4 sm:pt-6 lg:flex" :class="dashboardGutterClass">
         <UButton
           ref="closeButton"
           icon="i-lucide-x"
@@ -43,9 +43,9 @@
           @click.prevent="cancel"
         />
         <!-- The sheet's title is small and centred; the pane's is every level's (dashboardTitleClass at lg). -->
-        <h1 class="flex min-w-0 items-center justify-center gap-3 truncate text-base font-semibold text-highlighted lg:flex-1 lg:justify-start lg:text-[32px] lg:leading-tight">
+        <h1 class="flex min-w-0 items-center justify-center gap-3 text-center text-base font-semibold text-highlighted lg:flex-1 lg:justify-start lg:text-start lg:text-[32px] lg:leading-tight">
           <UIcon v-if="icon" :name="icon" class="size-5 shrink-0 lg:size-8" />
-          {{ title }}
+          <span class="min-w-0 break-words">{{ title }}</span>
         </h1>
         <!-- An action that belongs to the whole leaf — adding a domain — is a round button beside the title. -->
         <div class="flex items-center justify-self-end gap-2 [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full">

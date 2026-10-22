@@ -79,6 +79,8 @@ import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { stayPhotoRoomName } from '~/shared/stay-photos'
+import { STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
+import { STAY_AMENITIES } from '~/shared/stay-listing'
 import { isNavigationFailure } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
 
@@ -128,6 +130,20 @@ const roomDetails = computed<EditorNavigationGroup[]>(() => {
       summary: current.private_attached_bathroom === null ? 'Add details' : current.private_attached_bathroom ? 'Private attached bathroom' : 'No private attached bathroom',
       placeholder: current.private_attached_bathroom === null,
       to: `${level.path.value}/privacy`,
+    }] : []),
+    {
+      id: 'amenities', label: 'Amenities',
+      summary: current.amenities.length ? current.amenities.map(code => STAY_AMENITIES[code].label).join(', ') : 'Add amenities',
+      placeholder: current.amenities.length === 0,
+      to: `${level.path.value}/amenities`,
+    },
+    ...(current.type === 'bedroom' ? [{
+      id: 'accessibility', label: 'Accessibility features',
+      summary: current.accessibility.some(feature => feature.available === true)
+        ? current.accessibility.filter(feature => feature.available === true).map(feature => STAY_ROOM_ACCESSIBILITY_FEATURES[feature.feature].label).join(', ')
+        : current.accessibility.some(feature => feature.available === false) ? `${current.accessibility.filter(feature => feature.available !== null).length} of ${current.accessibility.length} details provided` : 'Add details',
+      placeholder: current.accessibility.every(feature => feature.available === null),
+      to: `${level.path.value}/accessibility`,
     }] : []),
   ] }]
 })

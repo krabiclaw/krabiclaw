@@ -7,7 +7,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, setStayNights, updateStay, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
@@ -24,13 +24,15 @@ import { loadPublicShellSource } from '../../server/utils/public-shell.ts'
 import { loadPublicProductApiDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductReviews, type PublicProductLocation } from '../../server/utils/public-products.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { getPublicTenantPageForPath } from '../../server/utils/public-tenant-pages.ts'
-import { putResourceLocalization } from '../../server/utils/localization.ts'
+import { putResourceLocalization, replaceResourceLocalizations } from '../../server/utils/localization.ts'
+import { projectExactLocalizedResource } from '../../server/utils/public-localization.ts'
 import { listOrganizationReviews } from '../../server/utils/organization-reviews.ts'
 import { loadPublicSocialMedia } from '../../server/utils/public-social-image.ts'
 import { arrangeProductPhotos, attachMediaPlacement, removeMediaPlacement, setSingleMediaPlacement } from '../../server/utils/media-placement.ts'
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
+import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 
 const ORG = 'org'
 const OWNER = 'owner-user'
@@ -275,7 +277,8 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.equal(cabin.unit_label, 'night')
     assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2,
       property_type_group: null, property_type: null, listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null,
-      bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, assigned_member_id: null, assigned_team_id: 'cleaning', photo_rooms: [] })
+      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: null, long_term_cancellation_policy: null, assigned_member_id: null, assigned_team_id: 'cleaning', photo_rooms: [],
+      accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })) })
     // Its one location shows it; the product's publication decides whether anyone does.
     assert.deepEqual(cabin.locations, [{ location_id: 'cabin-site', active: true, published: true }])
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { location_id: 'lake-site', max_guests: 2 } as never } }), /keeps its location/)
@@ -397,7 +400,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
       await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details } }),
         (error: unknown) => (error as { status: number }).status === 400 && message.test((error as Error).message))
       assert.equal(await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'), beforeSafetyRefusals)
-      assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '["smoke_detector"]')
+      assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '[{"code":"smoke_detector","available":true}]')
     }
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: {
       details_mode: 'merge', details: { exterior_security_cameras: false, exterior_security_cameras_details: null },
@@ -417,7 +420,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.deepEqual(clearedSafety.details, { featured: true, house_rules: 'Leave shoes at the door.' })
     assert.deepEqual(clearedSafety.stay?.amenities, ['smoke_detector'])
     assert.deepEqual(JSON.parse((await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'))!), { featured: true, house_rules: 'Leave shoes at the door.' })
-    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '["smoke_detector"]')
+    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '[{"code":"smoke_detector","available":true}]')
 
     // A disclosure and an amenity cannot make opposite claims about the same
     // property's parking, whichever focused editor supplies the contradiction.
@@ -443,6 +446,74 @@ test('a place to stay is a Product at exactly one location, priced per night', {
         (error: unknown) => (error as { status: number }).status === 400 && /^Remove on-property parking amenities or change “No parking on the property” before saving\.$/.test((error as Error).message))
       assert.deepEqual(await db.prepare('SELECT p.details_json, c.amenities FROM products p JOIN product_stay_configs c ON c.product_id = p.id WHERE p.id = ?').bind(cabin.id).first(), beforeParkingAmenities)
     }
+
+    // Explicit alarm answers share the amenity owner. A positive-list editor
+    // preserves an explicit No, and clearing its former Yes means unknown.
+    await updateStayHome(env, db, manager, cabin.id, {
+      amenity_answers: [{ code: 'carbon_monoxide_detector', available: false }], smoke_detector_details: 'S'.repeat(300),
+    })
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { amenities: ['smoke_detector'] } } })
+    const alarmAnswers = [{ code: 'carbon_monoxide_detector', available: false }, { code: 'smoke_detector', available: true }]
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.amenity_answers, alarmAnswers)
+    const alarms = await readStayHome(db, manager, cabin.id)
+    assert.deepEqual({ answers: alarms.amenity_answers, amenities: alarms.amenities, smoke: alarms.smoke_detector_details, co: alarms.carbon_monoxide_detector_details }, {
+      answers: alarmAnswers, amenities: ['smoke_detector'], smoke: 'S'.repeat(300), co: null,
+    })
+    const beforeAlarmRefusals = await getProduct(db, ORG, cabin.id)
+    for (const patch of [
+      { stay: { amenities: null } },
+      { stay: { amenities: [], amenity_answers: [{ code: 'smoke_detector', available: true }] } },
+      { stay: { amenity_answers: [{ code: 'smoke_detector', available: true }, { code: 'smoke_detector', available: false }] } },
+      { details_mode: 'merge', details: { smoke_detector_details: 'S'.repeat(301) } },
+      { details_mode: 'merge', details: { carbon_monoxide_detector_details: 'A bedroom alarm.' } },
+    ]) {
+      await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: patch as UpdateProductInput }), (error: unknown) => (error as { status: number }).status === 400)
+      assert.deepEqual(await getProduct(db, ORG, cabin.id), beforeAlarmRefusals)
+    }
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('alarm-en', ?, 'en', 1, 'published'), ('alarm-th', ?, 'th', 0, 'published')").bind(ORG, ORG).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('alarm-growth', 'growth', ?, 'active', 4102444800)").bind(ORG).run()
+    const translated = await putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER,
+      values: { name: 'บ้าน', details: { house_rules: 'ถอดรองเท้า', smoke_detector_details: 'เครื่องตรวจจับควันในห้องนอน' } } })
+    assert.equal(translated.values.details && (translated.values.details as Record<string, unknown>).smoke_detector_details, 'เครื่องตรวจจับควันในห้องนอน')
+    const alarmRoom = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
+    const assigned = await updateStayPhotoRoom(db, env, manager, cabin.id, alarmRoom.room.id, { expected_details_version: 1, amenities: ['smoke_detector'] })
+    await updateStayHome(env, db, manager, cabin.id, { amenity_answers: [{ code: 'smoke_detector', available: false }] })
+    const noSmoke = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(noSmoke.stay!.amenity_answers, [{ code: 'carbon_monoxide_detector', available: false }, { code: 'smoke_detector', available: false }])
+    assert.equal(noSmoke.details.smoke_detector_details, undefined)
+    assert.deepEqual({ amenities: noSmoke.stay!.photo_rooms[0]!.amenities, version: noSmoke.stay!.photo_rooms[0]!.details_version }, { amenities: [], version: assigned.room.details_version + 1 })
+    assert.deepEqual(JSON.parse((await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json'))!), { name: 'บ้าน', details: { house_rules: 'ถอดรองเท้า' } })
+    await assert.rejects(putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER,
+      values: { details: { smoke_detector_details: 'old translation' } } }), (error: unknown) => (error as { status: number }).status === 422)
+    // Promotion through a room reuses the same positive fact and cannot revive
+    // cleared source or translated alarm descriptions.
+    await updateStayPhotoRoom(db, env, manager, cabin.id, alarmRoom.room.id, { expected_details_version: assigned.room.details_version + 1, amenities: ['smoke_detector'] })
+    const promoted = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(promoted.stay!.amenity_answers, alarmAnswers)
+    assert.equal(promoted.details.smoke_detector_details, undefined)
+    assert.equal(projectExactLocalizedResource('product', promoted, { resourceType: 'product', resourceId: cabin.id, locale: 'th', routePath: null,
+      values: { name: 'บ้าน', details: { smoke_detector_details: 'retained historical translation' } } }).details.smoke_detector_details, undefined)
+    await assert.rejects(putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER,
+      values: { details: { smoke_detector_details: 'old translation' } } }), (error: unknown) => (error as { status: number }).status === 422)
+    await updateStayHome(env, db, manager, cabin.id, { smoke_detector_details: 'By the bedroom door.' })
+    const concurrentAlarmEdits = await Promise.allSettled([
+      putResourceLocalization(env, db, { organizationId: ORG, resourceType: 'product', resourceId: cabin.id, locale: 'th', userId: OWNER, values: { details: { smoke_detector_details: 'พร้อมคำแปล' } } }),
+      updateStayHome(env, db, manager, cabin.id, { amenity_answers: [{ code: 'smoke_detector', available: false }] }),
+    ])
+    assert.equal(concurrentAlarmEdits[1]!.status, 'fulfilled')
+    if (concurrentAlarmEdits[0]!.status === 'rejected') {
+      const error = concurrentAlarmEdits[0].reason as { status: number; data: { code: string } }
+      assert([409, 422].includes(error.status))
+      assert.equal(error.data.code, 'LOCALIZATION_VALIDATION_FAILED')
+    }
+    assert.equal((await getProduct(db, ORG, cabin.id)).details.smoke_detector_details, undefined)
+    assert.equal(await db.prepare("SELECT json_extract(values_json, '$.details.smoke_detector_details') AS alarm FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first('alarm'), null)
+    const beforeBulkRefusal = await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json')
+    await assert.rejects(replaceResourceLocalizations(env, db, { organizationId: ORG, resourceType: 'product', locale: 'th', userId: OWNER, items: [{ resource_id: cabin.id, values: { name: 'Must not be saved', details: { smoke_detector_details: 'cleared source cannot be translated' } } }] }), { status: 409, data: { code: 'LOCALIZATION_VALIDATION_FAILED', field: 'details' } })
+    assert.equal(await db.prepare("SELECT values_json FROM resource_localizations WHERE organization_id = ? AND resource_id = ? AND locale = 'th'").bind(ORG, cabin.id).first<string>('values_json'), beforeBulkRefusal)
+    await updateStayHome(env, db, manager, cabin.id, { amenity_answers: [{ code: 'smoke_detector', available: null }], carbon_monoxide_detector_details: null })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).amenity_answers, [{ code: 'carbon_monoxide_detector', available: false }])
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'))!), [{ code: 'carbon_monoxide_detector', available: false }])
   } finally {
     await runtime.dispose()
   }
@@ -461,9 +532,14 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     const principal = memberAccessPrincipal(membership, { env })
     // Existing library pictures can have room-like alt text and categories;
     // neither those nor aggregate bedroom counts author a room identity.
-    for (const [id, alt, category] of [['room-a', 'A bedroom with a bed', 'interior'], ['room-b', 'A living room with chairs', 'interior'], ['room-c', 'An exterior deck', 'exterior'], ['room-library', 'Another bedroom', 'interior']] as const) {
+    for (const [id, alt, category] of [['room-a', 'A bedroom with a bed', 'interior'], ['room-b', 'A living room with chairs', 'interior'], ['room-c', 'An exterior deck', 'exterior'], ['room-library', 'Another bedroom', 'interior'], ['room-evidence', 'The bedroom doorway', 'interior']] as const) {
       await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, mime_type, width, height, alt_text, category, status) VALUES (?, ?, 'image', 'cloudflare_images', 'uploaded', ?, 'image/png', 1200, 800, ?, ?, 'active')")
         .bind(id, ORG, `https://imagedelivery.example.test/hash/${id}/public`, alt, category).run()
+    }
+    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('foreign-host', 'Another host', 'foreign-host', 'USD', 'America/Denver')").run()
+    for (const [id, organizationId, kind, status] of [['room-video', ORG, 'video', 'active'], ['room-deleted', ORG, 'image', 'deleted'], ['foreign-room-photo', 'foreign-host', 'image', 'active']] as const) {
+      await db.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, thumbnail_url, status) VALUES (?, ?, ?, ?, 'uploaded', ?, ?, ?)")
+        .bind(id, organizationId, kind, kind === 'video' ? 'cloudflare_stream' : 'cloudflare_images', `https://imagedelivery.example.test/hash/${id}/public`, kind === 'video' ? 'https://videodelivery.net/room-video/thumbnails/thumbnail.jpg' : null, status).run()
     }
     await arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id, from: [], to: ['room-a', 'room-b', 'room-c'] })
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { bedrooms: 2, beds: 3, bathrooms: 1 } } })
@@ -474,11 +550,12 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     const intervening = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'living_room' })
     const second = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
     assert.notEqual(first.room.id, second.room.id)
-    let roomA: StayPhotoRoom = { id: first.room.id, type: 'bedroom', photo_ids: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
-    let roomB: StayPhotoRoom = { id: second.room.id, type: 'bedroom', photo_ids: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+    const unansweredAccessibility: StayPhotoRoom['accessibility'] = [{ feature: 'step_free_access', available: null, photo_ids: [] }, { feature: 'wide_doorway', available: null, photo_ids: [] }]
+    let roomA: StayPhotoRoom = { id: first.room.id, type: 'bedroom', photo_ids: [], amenities: [], accessibility: unansweredAccessibility, sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+    let roomB: StayPhotoRoom = { id: second.room.id, type: 'bedroom', photo_ids: [], amenities: [], accessibility: unansweredAccessibility, sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
     // A bedroom added after a different type still groups with the original
     // bedroom, retaining creation order and identities within their type.
-    const grouped = [roomA, roomB, { id: intervening.room.id, type: 'living_room' as const, photo_ids: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }]
+    const grouped = [roomA, roomB, { id: intervening.room.id, type: 'living_room' as const, photo_ids: [], amenities: [], accessibility: [], sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }]
     const groupedProduct = await getProduct(db, ORG, cabin.id)
     assert.deepEqual(groupedProduct.stay?.photo_rooms, grouped)
     assert.deepEqual(groupedProduct.stay!.photo_rooms.map(room => stayPhotoRoomName(room, groupedProduct.stay!.photo_rooms)), ['Bedroom 1', 'Bedroom 2', 'Living room'])
@@ -486,6 +563,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert(groupedPublic)
     assert.deepEqual(groupedPublic.product.stay?.photo_rooms, grouped)
     await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, intervening.room.id, { expected_details_version: 1, private_attached_bathroom: false }), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field: 'private_attached_bathroom' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, intervening.room.id, { expected_details_version: 1, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } }), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field: 'accessibility' } })
     await removeStayPhotoRoom(db, env, manager, cabin.id, intervening.room.id)
     const retainedRooms = (await getProduct(db, ORG, cabin.id)).stay!.photo_rooms
     assert.deepEqual(retainedRooms, [roomA, roomB])
@@ -513,7 +591,7 @@ test('authored photo rooms move photos atomically and follow the listing placeme
       await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, body), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field } })
       assert.deepEqual(await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom, details_version FROM product_stay_photo_rooms WHERE id = ?').bind(roomA.id).first(), unchangedDetails)
     }
-    await assert.rejects(updateStayPhotoRoom(db, env, manager, lake.id, foreignRoom.room.id, { expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }] }), { status: 409, data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'sleeping_arrangements' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, lake.id, foreignRoom.room.id, { expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }] }), { status: 409, data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'sleeping_arrangements', product_id: lake.id } })
     const authored = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }, { type: 'single', count: 1 }], private_attached_bathroom: true })
     assert.deepEqual(authored.room, { ...roomA, sleeping_arrangements: [{ type: 'single', count: 1 }, { type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: 2 })
     assert.deepEqual(await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom, details_version FROM product_stay_photo_rooms WHERE id = ?').bind(roomA.id).first(), { sleeping_arrangements: '[{"type":"single","count":1},{"type":"queen","count":1}]', private_attached_bathroom: 1, details_version: 2 })
@@ -584,6 +662,193 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-library')
     assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, [roomA, roomB])
 
+    // A room describes where a listing amenity is available. Selecting it here
+    // promotes that same canonical listing fact; it never creates another list
+    // with a contradictory owner or loses a different room's selection.
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.amenities, [])
+    for (const amenities of [null, 'tv', ['invented_amenity'], ['tv', 'tv']]) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities }), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field: 'amenities' } })
+    }
+    await assert.rejects(updateStayPhotoRoom(db, env, cleaner, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities: ['tv'] }), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, foreignRoom.room.id, { expected_details_version: 1, amenities: ['tv'] }), { status: 404, data: { code: 'PHOTO_ROOM_NOT_FOUND', field: 'room_id' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, { ...manager, organizationId: 'another-org' }, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities: ['tv'] }), { status: 404, data: { code: 'HOME_NOT_FOUND' } })
+    const beforeAmenityVersion = roomA.details_version
+    const featuredRoom = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, {
+      expected_details_version: beforeAmenityVersion, amenities: ['wireless_internet', 'tv'], sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true,
+    })
+    assert.deepEqual(featuredRoom.room, { ...roomA, amenities: ['tv', 'wireless_internet'], sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: beforeAmenityVersion + 1 })
+    assert.deepEqual(await db.prepare('SELECT amenity_code FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY amenity_code').bind(ORG, cabin.id, roomA.id).all().then(result => result.results), [{ amenity_code: 'tv' }, { amenity_code: 'wireless_internet' }])
+    assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE organization_id = ? AND product_id = ?').bind(ORG, cabin.id).first('amenities'), '[{"code":"tv","available":true},{"code":"wireless_internet","available":true}]')
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomB.id, { expected_details_version: roomB.details_version, amenities: ['wireless_internet'] })
+    roomB.amenities = ['wireless_internet']
+    roomB.details_version++
+    const featuredProduct = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(featuredProduct.stay!.amenities, ['tv', 'wireless_internet'])
+    assert.deepEqual(featuredProduct.stay!.photo_rooms, [featuredRoom.room, roomB])
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [featuredRoom.room, roomB])
+    const featuredPublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(featuredPublic)
+    assert.deepEqual(featuredPublic.product.stay!.photo_rooms, [featuredRoom.room, roomB])
+    assert.deepEqual(featuredPublic.product.stay!.amenities, ['tv', 'wireless_internet'])
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: beforeAmenityVersion, amenities: ['hot_water'], sleeping_arrangements: [], private_attached_bathroom: false }), { status: 409, data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' } })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay, featuredProduct.stay)
+
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: featuredRoom.room.details_version, amenities: [], sleeping_arrangements: null, private_attached_bathroom: null })
+    roomA.details_version = featuredRoom.room.details_version + 1
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [roomA, roomB])
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.amenities, ['tv', 'wireless_internet'])
+    // Removing the canonical listing fact prunes every room and invalidates an
+    // editor which still has that membership; re-adding cannot resurrect it.
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities: ['wireless_internet'] })
+    roomA.amenities = ['wireless_internet']
+    roomA.details_version++
+    const beforeGlobalRemoval = [roomA.details_version, roomB.details_version]
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { amenities: ['tv'] } } })
+    for (const room of [roomA, roomB]) { room.amenities = []; room.details_version++ }
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [roomA, roomB])
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ?').bind(ORG, cabin.id).first('n'), 0)
+    for (const [index, room] of [roomA, roomB].entries()) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, room.id, { expected_details_version: beforeGlobalRemoval[index], amenities: ['wireless_internet'] }), { status: 409, data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' } })
+    }
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { amenities: ['wireless_internet', 'tv'] } } })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photo_rooms, [roomA, roomB])
+
+    // Canonical validation refuses the entire mixed write, including room facts
+    // and global promotion, when parking would contradict its disclosure.
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { no_property_parking: true } } })
+    const beforeParkingPromotion = await getProduct(db, ORG, cabin.id)
+    for (const parking of ['free_parking', 'paid_parking_on_premises']) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, amenities: [parking], sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true }),
+        (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === 'Remove on-property parking amenities or change “No parking on the property” before saving.')
+      const refusedPromotion = await getProduct(db, ORG, cabin.id)
+      assert.deepEqual(refusedPromotion.stay, beforeParkingPromotion.stay)
+      assert.deepEqual(refusedPromotion.details, beforeParkingPromotion.details)
+      assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ?').bind(ORG, cabin.id).first('n'), 0)
+    }
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { no_property_parking: null } } })
+
+    // Accessibility answers require authored evidence. A saved library photo
+    // becomes a listing photo in the same write, without assigning a room.
+    await assert.rejects(updateStayPhotoRoom(db, env, cleaner, cabin.id, roomA.id, { expected_details_version: roomA.details_version, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } }), { status: 403, data: { code: 'STAY_ROLE_REQUIRED' } })
+    await assert.rejects(updateStayPhotoRoom(db, env, { ...manager, organizationId: 'foreign-host' }, cabin.id, roomA.id, { expected_details_version: roomA.details_version, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } }), { status: 404, data: { code: 'HOME_NOT_FOUND' } })
+    for (const accessibility of [
+      null,
+      [{ feature: 'step_free_access', available: false, photo_ids: [] }],
+      { feature: 'invented', available: false, photo_ids: [] },
+      { feature: 'step_free_access', available: 'yes', photo_ids: [] },
+      { feature: 'step_free_access', available: true, photo_ids: [] },
+      { feature: 'step_free_access', available: false, photo_ids: ['room-a'] },
+      { feature: 'step_free_access', available: null, photo_ids: ['room-a'] },
+      { feature: 'step_free_access', available: true, photo_ids: ['room-a', 'room-a'] },
+    ]) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, accessibility }), { status: 422, data: { code: 'INVALID_ROOM_DETAILS', field: 'accessibility' } })
+    }
+    const inaccessible = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: roomA.details_version, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } })
+    assert.deepEqual(inaccessible.room, { ...roomA, details_version: roomA.details_version + 1, accessibility: [{ feature: 'step_free_access', available: false, photo_ids: [] }, unansweredAccessibility[1]] })
+    assert.deepEqual((await db.prepare('SELECT feature_code, available FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomA.id).all()).results, [{ feature_code: 'step_free_access', available: 0 }])
+    const existingEvidence = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: inaccessible.room.details_version, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['room-a'] } })
+    assert.deepEqual(existingEvidence.room.accessibility, [{ feature: 'step_free_access', available: true, photo_ids: ['room-a'] }, unansweredAccessibility[1]])
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c'])
+    const libraryEvidence = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: existingEvidence.room.details_version, accessibility: { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] } })
+    assert.deepEqual(libraryEvidence.room.accessibility, [{ feature: 'step_free_access', available: true, photo_ids: ['room-a'] }, { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] }])
+    assert.deepEqual((await db.prepare('SELECT feature_code, available FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY feature_code').bind(ORG, cabin.id, roomA.id).all()).results, [{ feature_code: 'step_free_access', available: 1 }, { feature_code: 'wide_doorway', available: 1 }])
+    assert.deepEqual((await db.prepare('SELECT feature_code, asset_id FROM product_stay_room_accessibility_photos WHERE organization_id = ? AND product_id = ? AND room_id = ? ORDER BY feature_code, asset_id').bind(ORG, cabin.id, roomA.id).all()).results, [{ feature_code: 'step_free_access', asset_id: 'room-a' }, { feature_code: 'wide_doorway', asset_id: 'room-evidence' }])
+    const accessibleHome = await readStayHome(db, manager, cabin.id)
+    assert.deepEqual(accessibleHome.photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+    assert.deepEqual(accessibleHome.photo_rooms, [libraryEvidence.room, roomB])
+    assert.deepEqual(libraryEvidence.room.photo_ids, [])
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [libraryEvidence.room, roomB])
+    const accessiblePublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(accessiblePublic)
+    assert.deepEqual(accessiblePublic.product.stay!.photo_rooms, [libraryEvidence.room, roomB])
+    await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: existingEvidence.room.details_version, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['room-library'] } }), { status: 409, data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' } })
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [libraryEvidence.room, roomB])
+    const beforeInvalidEvidence = await getProduct(db, ORG, cabin.id)
+    for (const [assetId, message] of [
+      ['room-video', 'accessibility.photo_ids asset room-video must be image'],
+      ...['foreign-room-photo', 'room-deleted', 'missing-room-photo'].map(id => [id, `accessibility.photo_ids references an inactive, out-of-scope, or generated derivative media asset: ${id}`]),
+    ]) {
+      await assert.rejects(updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, {
+        expected_details_version: libraryEvidence.room.details_version, accessibility: { feature: 'wide_doorway', available: true, photo_ids: ['room-library', assetId] },
+        sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, amenities: ['hot_water'],
+      }), (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === message)
+      await assert.rejects(updateStayHomeAccessibility(db, env, manager, cabin.id, {
+        expected_updated_at: beforeInvalidEvidence.updated_at, accessibility: { feature: 'home_wide_doorway', available: true, photo_ids: ['room-library', assetId] },
+      }), (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message === message)
+      assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay, beforeInvalidEvidence.stay)
+      assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+    }
+
+    // Evidence is attached to the listing, independent of photo-tour grouping
+    // or the particular placement which currently supplies the cover.
+    await moveStayPhotos(db, env, manager, cabin.id, { room_id: roomB.id, photos: [{ photo_id: 'room-a', expected_room_id: null }] })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms[0]!.accessibility, libraryEvidence.room.accessibility)
+    await moveStayPhotos(db, env, manager, cabin.id, { room_id: null, photos: [{ photo_id: 'room-a', expected_room_id: roomB.id }] })
+    await attachMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'gallery' }, assetId: 'room-a' })
+    await setSingleMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-evidence' })
+    await removeMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'gallery' }, assetId: 'room-evidence' })
+    await reorderStayHomePhotos(db, env, manager, principal, cabin.id, { photo_ids: ['room-a', 'room-b', 'room-c', 'room-evidence'] })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [libraryEvidence.room, roomB])
+    // Every canonical media owner protects a positive answer's last placement;
+    // refusal leaves both the evidence and the actual active photo unchanged.
+    const evidenceRemovals = [
+      () => removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-a'),
+      () => removeMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-a' }),
+      () => setSingleMediaPlacement(db, { organizationId: ORG, env, principal, placement: { owner_type: 'product', owner_id: cabin.id, slot: 'image' }, assetId: 'room-b' }),
+      () => arrangeProductPhotos(db, { organizationId: ORG, env, principal, productId: cabin.id, from: ['room-a', 'room-b', 'room-c', 'room-evidence'], to: ['room-b', 'room-c', 'room-evidence'] }),
+      () => deleteMediaAsset(db, env, 'room-a', ORG, OWNER),
+    ]
+    for (const removeEvidence of evidenceRemovals) {
+      await assert.rejects(removeEvidence, { status: 409, data: { code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' } })
+      assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+      assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [libraryEvidence.room, roomB])
+      assert.equal((await getMediaAsset(db, 'room-a', ORG))?.status, 'active')
+    }
+
+    const clearedStep = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: libraryEvidence.room.details_version, accessibility: { feature: 'step_free_access', available: null, photo_ids: [] } })
+    assert.deepEqual(clearedStep.room.accessibility, [unansweredAccessibility[0], { feature: 'wide_doorway', available: true, photo_ids: ['room-evidence'] }])
+    // The same media boundaries protect listing evidence after the room has
+    // released that photo, including the guard before provider storage deletion.
+    const listingEvidence = await updateStayHomeAccessibility(db, env, manager, cabin.id, { expected_updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature: 'home_step_free_access', available: true, photo_ids: ['room-a'] } })
+    const listingPublic = await loadPublicProductApiDetail(env, db, ORG, true, 'cabin-site', cabin.slug)
+    assert(listingPublic)
+    assert.deepEqual(listingPublic.product.stay!.accessibility, listingEvidence.home.accessibility)
+    assert.deepEqual(listingEvidence.home.photo_rooms, [clearedStep.room, roomB])
+    for (const removeEvidence of evidenceRemovals) {
+      await assert.rejects(removeEvidence, { status: 409, data: { code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' } })
+      assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.accessibility, listingEvidence.home.accessibility)
+      assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-evidence'])
+      assert.equal((await getMediaAsset(db, 'room-a', ORG))?.status, 'active')
+    }
+    const listingRace = await Promise.allSettled([true, false].map(available => updateStayHomeAccessibility(db, env, manager, cabin.id, {
+      expected_updated_at: listingEvidence.home.product_updated_at, accessibility: { feature: 'ceiling_hoist', available, photo_ids: available ? ['room-a'] : [] },
+    })))
+    assert.equal(listingRace.filter(result => result.status === 'fulfilled').length, 1)
+    for (const result of listingRace) if (result.status === 'rejected') { assert.equal(result.reason.status, 409); assert.equal(result.reason.data.code, 'STAY_ACCESSIBILITY_CHANGED') }
+    for (const feature of ['home_step_free_access', 'ceiling_hoist']) await updateStayHomeAccessibility(db, env, manager, cabin.id, { expected_updated_at: (await getProduct(db, ORG, cabin.id)).updated_at, accessibility: { feature, available: null, photo_ids: [] } })
+    await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-a')
+    await addStayHomePhoto(db, env, manager, principal, cabin.id, { asset_id: 'room-a' })
+    await reorderStayHomePhotos(db, env, manager, principal, cabin.id, { photo_ids: ['room-a', 'room-b', 'room-c', 'room-evidence'] })
+    const clearedEvidence = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: clearedStep.room.details_version, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })
+    assert.deepEqual(clearedEvidence.room.accessibility, [unansweredAccessibility[0], { feature: 'wide_doorway', available: false, photo_ids: [] }])
+    await deleteMediaAsset(db, env, 'room-evidence', ORG, OWNER)
+    assert.equal((await getMediaAsset(db, 'room-evidence', ORG))?.status, 'deleted')
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c'])
+    const clearedAccessibility = await updateStayPhotoRoom(db, env, manager, cabin.id, roomA.id, { expected_details_version: clearedEvidence.room.details_version, accessibility: { feature: 'wide_doorway', available: null, photo_ids: [] } })
+    roomA.details_version = clearedAccessibility.room.details_version
+    assert.deepEqual(clearedAccessibility.room, roomA)
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomA.id).first('n'), 0)
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_room_accessibility_photos WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomA.id).first('n'), 0)
+
+    const evidenceRoom = await createStayPhotoRoom(db, env, manager, cabin.id, { type: 'bedroom' })
+    await updateStayPhotoRoom(db, env, manager, cabin.id, evidenceRoom.room.id, { expected_details_version: 1, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['room-library'] } })
+    await removeStayPhotoRoom(db, env, manager, cabin.id, evidenceRoom.room.id)
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay!.photo_rooms, [roomA, roomB])
+    assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-a', 'room-b', 'room-c', 'room-library'])
+    assert.equal((await getMediaAsset(db, 'room-library', ORG))?.status, 'active')
+    await removeStayHomePhoto(db, env, manager, principal, cabin.id, 'room-library')
+
     await moveStayPhotos(db, env, manager, cabin.id, { room_id: roomA.id, photos: [{ photo_id: 'room-a', expected_room_id: null }, { photo_id: 'room-b', expected_room_id: null }] })
     const assigned = [{ ...roomA, photo_ids: ['room-a', 'room-b'] }, roomB]
     assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, assigned)
@@ -599,6 +864,9 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     const roomC = createdRooms[2]!
     assert.equal(roomC.type, 'living_room')
     assert.deepEqual(createdRooms, [{ ...roomA, photo_ids: ['room-a'] }, roomB, { ...roomC, photo_ids: ['room-b', 'room-c'] }])
+    await updateStayPhotoRoom(db, env, manager, cabin.id, roomC.id, { expected_details_version: roomC.details_version, amenities: ['ac'] })
+    roomC.amenities = ['ac']
+    roomC.details_version++
     const race = await Promise.allSettled([
       moveStayPhotos(db, env, manager, cabin.id, { room_id: roomB.id, photos: [{ photo_id: 'room-a', expected_room_id: roomA.id }] }),
       moveStayPhotos(db, env, manager, cabin.id, { room_id: null, photos: [{ photo_id: 'room-a', expected_room_id: roomA.id }] }),
@@ -650,6 +918,8 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     await removeStayPhotoRoom(db, env, manager, cabin.id, roomC.id)
     const afterRoomRemoval = await getProduct(db, ORG, cabin.id)
     assert.deepEqual(afterRoomRemoval.stay?.photo_rooms, [roomA, roomB])
+    assert.deepEqual(afterRoomRemoval.stay!.amenities, ['ac', 'tv', 'wireless_internet'])
+    assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, cabin.id, roomC.id).first('n'), 0)
     assert.deepEqual((await readStayHome(db, manager, cabin.id)).photos.map(photo => photo.id), ['room-c', 'room-a'])
     for (const photoId of ['room-c', 'room-a']) assert.equal((await getMediaAsset(db, photoId, ORG))?.status, 'active')
     await assert.rejects(removeStayPhotoRoom(db, env, manager, cabin.id, foreignRoom.room.id), { status: 404, data: { code: 'PHOTO_ROOM_NOT_FOUND', field: 'room_id' } })

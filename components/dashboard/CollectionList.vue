@@ -6,6 +6,7 @@
     :items="listItems"
     :error="loadError"
     :read-only="readOnly"
+    :disabled="Boolean(removingId) || savingOrder || Boolean(loadError) || Boolean(orderError)"
     empty-title="No sections yet"
     empty-icon="i-lucide-layout-list"
     add-label="Add section"
@@ -21,16 +22,18 @@
         browsing never has to step around edit controls.
       -->
       <span class="flex items-center gap-4" :data-testid="`collection-${item.id}`">
-        <DashboardMediaThumb :asset="item.row.cover" :label="item.row.name" fallback-icon="i-lucide-layout-list" />
+        <DashboardMediaThumb :asset="item.row.image" :label="item.row.name" fallback-icon="i-lucide-image" size="lg" />
         <span class="min-w-0 flex-1">
         <p class="truncate text-sm font-semibold text-highlighted">{{ item.row.name }}</p>
-        <p class="mt-1 text-sm text-muted">{{ item.row.product_count === 1 ? '1 item' : `${item.row.product_count} items` }}</p>
+        <p class="mt-1 text-sm text-muted">{{ item.row.product_count === 1 ? '1 item' : `${item.row.product_count} items` }}<span v-if="!item.row.image"> · No section photo</span></p>
+        <p v-if="item.row.description" class="mt-2 line-clamp-2 text-sm text-muted">{{ item.row.description }}</p>
         </span>
       </span>
     </template>
   </DashboardListEditor>
   <UAlert v-if="deleteError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="deleteError" />
   <UAlert v-if="orderError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="orderError" />
+  <UButton v-if="orderError" label="Use current order" color="neutral" variant="soft" :disabled="savingOrder || Boolean(removingId)" @click="resetOrder" />
 
   </div>
 </template>
@@ -44,7 +47,6 @@ import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import DashboardMediaThumb from '~/components/dashboard/DashboardMediaThumb.vue'
 import type { Collection, Product } from '~/server/types/products'
-import type { ResolvedMediaAsset } from '~/server/utils/media-asset-manager'
 import { getErrorMessage } from '~/utils/errors'
 
 const dashboardApi = useDashboardApi()
@@ -62,11 +64,8 @@ const props = defineProps<{
 const locationId = useLocationScope()
 const menuPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products/menu`)
 
-// The cover is the section's own photo; until it has one, the first item in it
-// with a photo stands for it.
 interface CollectionRow extends Collection {
   product_count: number
-  cover: ResolvedMediaAsset | null
   /** The products that belong to it. */
   products: Product[]
 }
@@ -81,17 +80,15 @@ const catalogRows = computed<CollectionRow[]>(() => {
   // Membership is a relationship, so a product counts once in every collection
   // it belongs to — which is the point: it is one product in several places,
   // not several products.
-  const covers = new Map<string, ResolvedMediaAsset>()
   const members = new Map<string, Product[]>()
   for (const product of catalog.products.value) {
     for (const membership of product.collections) {
       members.set(membership.collection_id, [...(members.get(membership.collection_id) ?? []), product])
-      if (product.image && !covers.has(membership.collection_id)) covers.set(membership.collection_id, product.image)
     }
   }
   return catalog.collections.value.filter(row => row.location_id === props.scope).map((row) => {
     const products = members.get(row.id) ?? []
-    return { ...row, product_count: products.length, cover: row.image ?? covers.get(row.id) ?? null, products }
+    return { ...row, product_count: products.length, products }
   })
 })
 
@@ -143,6 +140,8 @@ async function removeCollection(item: { row: CollectionRow }) {
   try {
     await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${item.row.id}`, { method: 'DELETE', validate: isRecord })
     await load()
+    if (localOrder.value) localOrder.value = localOrder.value.filter(collection => collection.id !== item.row.id)
+    if (orderSnapshot.value) orderSnapshot.value = orderSnapshot.value.filter(id => id !== item.row.id)
   } catch (error) {
     deleteError.value = getErrorMessage(error, 'Failed to delete section')
   } finally {
@@ -173,9 +172,12 @@ function moveCollection(item: { row: CollectionRow }, direction: -1 | 1) {
 }
 
 const orderDirty = ref(false)
+const savingOrder = ref(false)
+const orderSnapshot = ref<string[] | null>(null)
 
-async function commitOrder() {
-  if (!orderDirty.value) return
+async function commitOrder(): Promise<boolean> {
+  if (savingOrder.value || orderError.value) return false
+  if (!orderDirty.value) return true
   orderDirty.value = false
   // The whole intended order for this scope — the site's own collections, or
   // one location's — which is the only order there is: the endpoint takes it
@@ -183,6 +185,8 @@ async function commitOrder() {
   const scope = props.scope
   const order = collections.value.map(row => row.id)
   orderError.value = null
+  savingOrder.value = true
+  const expected = orderSnapshot.value ?? catalogRows.value.map(row => row.id)
   try {
     await load()
     if (catalog.error.value) throw catalog.error.value
@@ -190,7 +194,7 @@ async function commitOrder() {
     if (JSON.stringify([...current].sort()) !== JSON.stringify([...order].sort())) throw new Error('The sections changed. Review the current list before reordering it.')
     await dashboardApi(`/api/editor/organizations/${organizationId}/collections/order`, {
       method: 'PUT',
-      body: { collection_ids: order, location_id: scope },
+      body: { collection_ids: order, expected_collection_ids: expected, location_id: scope },
       validate: isRecord,
     })
     await load()
@@ -198,19 +202,41 @@ async function commitOrder() {
     if (props.scope === scope) localOrder.value = null
     const persisted = catalog.collections.value.filter(collection => collection.location_id === scope).map(collection => collection.id)
     if (JSON.stringify(persisted) !== JSON.stringify(order)) throw new Error('Section order changed. Review the current order before editing again.')
+    return true
   } catch (error) {
-    if (props.scope === scope) localOrder.value = null
+    orderDirty.value = true
     orderError.value = getErrorMessage(error, 'Failed to save the new order')
-    await load()
+    try { await load() } catch (readError) { orderError.value += ` The sections could not be read again: ${getErrorMessage(readError, 'Read failed')}` }
+    return false
+  } finally {
+    savingOrder.value = false
   }
 }
 
 watch(editing, (value, previous) => {
+  if (value && !previous && !orderError.value) orderSnapshot.value = catalogRows.value.map(row => row.id)
   if (previous && !value) void commitOrder()
 })
 
+async function resetOrder() {
+  if (savingOrder.value || removingId.value) return
+  savingOrder.value = true
+  try {
+    await load()
+    localOrder.value = null
+    orderDirty.value = false
+    orderSnapshot.value = null
+    orderError.value = null
+    editing.value = false
+  } catch (error) { orderError.value = getErrorMessage(error, 'The current section order could not be read') }
+  finally { savingOrder.value = false }
+}
+
 // Resets this list's own edit state when the catalog underneath it changes.
 // The full catalog stays shared; changing the displayed scope resets its draft.
+onBeforeRouteLeave(async () => !savingOrder.value && !removingId.value && await commitOrder())
+onBeforeRouteUpdate(async () => !savingOrder.value && !removingId.value && await commitOrder())
+
 watch(locationId, () => {
   orderDirty.value = false
   localOrder.value = null

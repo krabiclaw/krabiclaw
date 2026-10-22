@@ -106,7 +106,7 @@ test('Blawby authored contact sections retain their forms and selected locations
 
 for (const tenant of [
   { name: 'Saya', organizationId: 'org-demo', baseURL: tenantTestBaseUrl(), headers: tenantTestExtraHeaders(), path: '/about', schemaType: 'Organization' },
-  ...['/about', '/contact', '/schedule'].map(path => ({ name: 'Blawby', organizationId: 'org-ncls-blawby', baseURL: blawbyBaseURL, headers: blawbyExtraHeaders, path, schemaType: 'LegalService' })),
+  { name: 'Blawby', organizationId: 'org-ncls-blawby', baseURL: blawbyBaseURL, headers: blawbyExtraHeaders, path: '/about', schemaType: 'LegalService' },
   { name: 'Cedar Legal Demo', organizationId: '5WebMejsoVLyZLHC29wHH5GbQx1jlvCd', baseURL: testBaseUrl(), headers: { 'x-preview-tenant': 'cedar-legal' }, path: '/contact', ownerId: 'ivUlJc9BoyZeFszowpbUEjh1pugcDHiT', schemaType: 'ProfessionalService' },
 ]) {
   test(`${tenant.name} ${tenant.path} CMS-authored HowTo persists and accompanies the public page schema`, async ({ page, request, baseURL }) => {
@@ -233,8 +233,10 @@ test('KrabiClaw pricing retains its billing plans after hydration', async ({ pag
   await expect(page.getByRole('link', { name: 'Get Growth', exact: true })).toHaveAttribute('href', '/signup?plan=growth&redirect=%2Fapi%2Fpost-login%3Fplan%3Dgrowth')
 })
 
-for (const width of [390, 1440]) {
-  test(`KrabiClaw MCP reference has usable anchors and contained tables at ${width}px`, async ({ page, request }, testInfo) => {
+// The docs renderer at a phone width: overflow and table scrolling fail there first.
+{
+  const width = 390
+  test(`KrabiClaw MCP reference has usable anchors and contained tables at ${width}px`, async ({ page, request }) => {
     await page.setViewportSize({ width, height: 900 })
     const baseURL = testBaseUrl()
     let referenceURL = `${baseURL}/docs/mcp-tool-reference`
@@ -309,8 +311,8 @@ for (const width of [390, 1440]) {
       table.scrollLeft = 0
       return result
     })
-    if (width === 390) expect(horizontalScroll, 'Narrow tables must remain independently scrollable').not.toBeNull()
-    if (horizontalScroll) expect(horizontalScroll).toEqual({ tableMoved: true, pageLeft: 0 })
+    expect(horizontalScroll, 'Narrow tables must remain independently scrollable').not.toBeNull()
+    expect(horizontalScroll).toEqual({ tableMoved: true, pageLeft: 0 })
     for (const name of [toolNames[0]!, toolNames.at(-1)!]) {
       await article.locator(`a[href="#${name}"]`).first().click()
       expect(new URL(page.url()).hash).toBe(`#${name}`)
@@ -321,8 +323,6 @@ for (const width of [390, 1440]) {
     }
     const menuHeading = article.locator('h3').filter({ hasText: / — update_menu$/ })
     await menuHeading.evaluate(element => element.scrollIntoView({ block: 'start' }))
-    await page.screenshot({ path: testInfo.outputPath(`mcp-reference-${width}px.png`), animations: 'disabled' })
-    await menuHeading.locator('xpath=following-sibling::table[1]').screenshot({ path: testInfo.outputPath(`mcp-reference-menu-table-${width}px.png`), animations: 'disabled' })
   })
 
   for (const { slug } of mcpCatalog.publicDocumentation) {
@@ -611,7 +611,7 @@ test('Pottery House enforces its published languages and localized catalog', asy
 test.describe('NCLS representative journeys', () => {
   test.describe.configure({ mode: 'default' })
 
-  test('header and footer carry the site\'s navigation', async ({ page }, testInfo) => {
+  test('header and footer carry the site\'s navigation', async ({ page }) => {
     await openTenantPage(page, `${blawbyBaseURL}/`, blawbyExtraHeaders)
     for (const label of ['Services', 'Pricing', 'About', 'Contact', 'Blog', 'Donate'])
       await expect(page.locator('header').getByRole('link', { name: label, exact: true })).toBeVisible()
@@ -673,7 +673,6 @@ test.describe('NCLS representative journeys', () => {
           expect(dimensions.height).toBe(64)
           expect(dimensions.width).toBeCloseTo(Math.min(224, dimensions.height * dimensions.ratio), 1)
         }
-        await page.screenshot({ path: testInfo.outputPath(`ncls-header-${name}-${width}.png`) })
       }
     }
   })

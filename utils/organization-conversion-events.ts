@@ -50,27 +50,33 @@ export interface ConversionEventDefinition {
    * error messages, file names and other private content are never collected.
    */
   properties?: readonly string[]
+  /** The step of a business's site funnel the event counts toward, in Insights. Absent: not a funnel step. */
+  funnel?: FunnelStep
 }
 
+/** A business's site funnel, in order. Visits come from pageviews; confirmation from the booked record. */
+export const FUNNEL_STEPS = ['viewed', 'intent', 'submitted', 'paid'] as const
+export type FunnelStep = typeof FUNNEL_STEPS[number]
+
 // Keeps each definition's literal types, so a name's origin and producer are known to the compiler.
-function interaction<const Definition extends Pick<ConversionEventDefinition, 'origin' | 'stages' | 'entityType' | 'ga4' | 'ga4Sender' | 'properties'>>(definition: Definition) {
+function interaction<const Definition extends Pick<ConversionEventDefinition, 'origin' | 'stages' | 'entityType' | 'ga4' | 'ga4Sender' | 'properties' | 'funnel'>>(definition: Definition) {
   return { kind: 'interaction', producer: 'browser', outcome: false, valueBasis: null, conversionType: null, ...definition } as const
 }
 
 export const CONVERSION_EVENT_CATALOG = {
-  consultation_cta_click: interaction({ origin: 'public', stages: ['schedule_navigation', 'external_booking_handoff'], entityType: null, ga4: { name: 'consultation_cta_click' }, ga4Sender: 'browser' }),
-  product_order_external_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: 'product', ga4: { name: 'product_order_external_click' }, ga4Sender: 'browser' }),
+  consultation_cta_click: interaction({ origin: 'public', stages: ['schedule_navigation', 'external_booking_handoff'], entityType: null, ga4: { name: 'consultation_cta_click' }, ga4Sender: 'browser', funnel: 'intent' }),
+  product_order_external_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: 'product', ga4: { name: 'product_order_external_click' }, ga4Sender: 'browser', funnel: 'intent' }),
   link_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: 'content_block', ga4: { name: 'link_click' }, ga4Sender: 'browser' }),
   donation_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: 'content_document', ga4: { name: 'donation_click' }, ga4Sender: 'browser' }),
   // A product was viewed / a booking was started. Interactions: neither is a sale nor a booking.
-  product_view: interaction({ origin: 'public', stages: ['viewed'], entityType: 'product', ga4: { name: 'view_item' }, ga4Sender: 'browser' }),
-  checkout_start: interaction({ origin: 'public', stages: ['started'], entityType: null, ga4: { name: 'begin_checkout' }, ga4Sender: 'browser' }),
+  product_view: interaction({ origin: 'public', stages: ['viewed'], entityType: 'product', ga4: { name: 'view_item' }, ga4Sender: 'browser', funnel: 'viewed' }),
+  checkout_start: interaction({ origin: 'public', stages: ['started'], entityType: null, ga4: { name: 'begin_checkout' }, ga4Sender: 'browser', funnel: 'intent' }),
   // The universal announcement modal (organization-level, not tied to a page or product).
-  announcement_view: interaction({ origin: 'public', stages: ['viewed'], entityType: null, ga4: { name: 'announcement_view' }, ga4Sender: 'browser' }),
-  announcement_cta_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: null, ga4: { name: 'announcement_cta_click' }, ga4Sender: 'browser' }),
-  contact_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: null, conversionType: 'contact', ga4: { name: 'generate_lead' }, ga4Sender: 'browser', outcome: true },
-  reservation_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: null, conversionType: 'reservation', ga4: { name: 'reservation_submit' }, ga4Sender: 'browser', outcome: true },
-  booking_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: 'quoted', conversionType: 'booking', ga4: { name: 'booking_submit' }, ga4Sender: 'browser', outcome: true },
+  announcement_view: interaction({ origin: 'public', stages: ['viewed'], entityType: null, ga4: { name: 'announcement_view' }, ga4Sender: 'browser', funnel: 'viewed' }),
+  announcement_cta_click: interaction({ origin: 'public', stages: ['external_handoff'], entityType: null, ga4: { name: 'announcement_cta_click' }, ga4Sender: 'browser', funnel: 'intent' }),
+  contact_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: null, conversionType: 'contact', ga4: { name: 'generate_lead' }, ga4Sender: 'browser', outcome: true, funnel: 'submitted' },
+  reservation_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: null, conversionType: 'reservation', ga4: { name: 'reservation_submit' }, ga4Sender: 'browser', outcome: true, funnel: 'submitted' },
+  booking_submit: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['submitted'], entityType: 'request', valueBasis: 'quoted', conversionType: 'booking', ga4: { name: 'booking_submit' }, ga4Sender: 'browser', outcome: true, funnel: 'submitted' },
   sign_up: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'user', valueBasis: null, conversionType: null, ga4: { name: 'sign_up' }, ga4Sender: 'measurement_protocol', outcome: true },
   onboarding_complete: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'organization', valueBasis: null, conversionType: null, ga4: { name: 'tutorial_complete' }, ga4Sender: 'measurement_protocol', outcome: true },
   purchase: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'invoice', valueBasis: 'purchase', conversionType: 'subscription', ga4: { name: 'purchase' }, ga4Sender: 'measurement_protocol', outcome: true },
@@ -93,7 +99,7 @@ export const CONVERSION_EVENT_CATALOG = {
   // happens. `member_id` is the team member the booking is with; the money is the business's, in minor units.
   payment_checkout_started: { kind: 'interaction', producer: 'server', origin: 'public', stages: ['started'], entityType: 'payment', valueBasis: 'quoted', conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['member_id', 'saved_cards_offered'] },
   payment_checkout_expired: { kind: 'interaction', producer: 'server', origin: 'public', stages: ['occurred'], entityType: 'payment', valueBasis: null, conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['member_id'] },
-  payment_paid: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['completed'], entityType: 'payment', valueBasis: 'purchase', conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: true, properties: ['member_id', 'saved_card'] },
+  payment_paid: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['completed'], entityType: 'payment', valueBasis: 'purchase', conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: true, properties: ['member_id', 'saved_card'], funnel: 'paid' },
   payment_refunded: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'refund', valueBasis: 'refund', conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['member_id', 'full', 'with_cancellation', 'approval_seconds'] },
   booking_confirmed: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'booking', valueBasis: null, conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['member_id', 'decision_seconds'] },
   booking_declined: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'booking', valueBasis: null, conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['member_id', 'decision_seconds'] },

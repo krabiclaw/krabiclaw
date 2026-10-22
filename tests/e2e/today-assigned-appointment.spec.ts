@@ -94,7 +94,6 @@ test('an assigned staff member can review a future online consultation from Toda
     await expect(appointment).toHaveAttribute('href', `${bookingPath}?range=upcoming`)
     await expect(appointment).toContainText(`Consultation with ${guestFirstName} in 2 days`)
     await expect(appointment.getByText(`${product.name} · Online`, { exact: true })).toBeVisible()
-    await memberPage.screenshot({ path: testInfo.outputPath('assigned-upcoming-mobile.png'), fullPage: true })
     await memberPage.getByRole('tab', { name: 'Today', exact: true }).click()
     const attention = memberPage.locator(`[data-card-id="attention:${requestId}"]`)
     await expect(attention).toHaveAttribute('href', bookingPath)

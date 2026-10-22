@@ -9,7 +9,7 @@ import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 // params instead of host + pathname — public resources are looked up by organizationId
 // directly, not by tenant hostname, so no hostname resolution is needed here.
 //
-// Cache key: public~<organizationId>~v16~<revision>~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
+// Cache key: public~<organizationId>~v20~<revision>~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
 // each field percent-encoded (mirrors composables/usePublicPageRequest.ts's
 // usePublicResourceKey() — cached entries are never preview/draft-authorized,
 // see the preview authorization guard in the shell and page services).
@@ -183,18 +183,17 @@ export interface PublicResourceCacheParams {
 const encodeKeyField = (value: string | null | undefined): string =>
   encodeURIComponent(value ?? '').replace(/~/g, '%7E')
 
-
 /** The site's accepted payment methods, under the site's prefix so its purge clears them. */
 export function buildPublicPaymentMethodsCacheKey(organizationId: string): string {
-  return ['public', encodeKeyField(organizationId), 'v16', 'payment-methods'].join('~')
+  return ['public', encodeKeyField(organizationId), 'v20', 'payment-methods'].join('~')
 }
 
 export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams, revision: string | null): string {
   return [
     'public',
     encodeKeyField(organizationId),
-    // v16: authored rooms include sleeping arrangements and privacy facts.
-    'v16',
+    // v20: room/listing facts and location privacy, fenced by the committed site revision.
+    'v20',
     encodeKeyField(revision),
     params.contract,
     encodeKeyField(params.page),
