@@ -1,12 +1,16 @@
 import { HTTPError } from 'nitro'
+import tzLookup from '@photostructure/tz-lookup'
+import { isValidTimezone } from '~/utils/timezone'
 import { channexRequest, type ChannexEnv } from './client'
 import { ChannexDataError, integer, object, received, string } from './data'
 
 /**
  * What an Airbnb listing says about itself, read through Channex: its details
- * and its next 500 nights. A field
- * Airbnb leaves out is reported as missing for the host to supply; nothing is
- * filled in for them.
+ * and its next 500 nights. Airbnb's listing (checked live on 2026-10-22) has
+ * no time zone, email or phone: the time zone comes from the listing's
+ * coordinates and the contact details from the host's own KrabiClaw account.
+ * A field still unknown after that is reported as missing for the host to
+ * supply; nothing is filled in for them.
  */
 
 export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'propertyType', 'childBeds', 'infantCots'] as const
@@ -24,6 +28,15 @@ export interface ListingDetails {
   nightlyRate: string
   fields: Partial<Record<DetailField, string>>
   missingFields: DetailField[]
+  /** Airbnb's check-in start and checkout hours as HH:MM, or null when Airbnb has none set. */
+  checkInTime: string | null
+  checkOutTime: string | null
+}
+
+/** The host's own contact details, the account's email and verified phone, offered for the home. */
+export interface HostContact {
+  email: string | null
+  phone: string | null
 }
 
 export interface ListingNight {
@@ -54,7 +67,24 @@ function amount(value: unknown, label: string): string {
   return String(value)
 }
 
-export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string): Promise<ListingDetails> {
+/**
+ * Airbnb states check-in start and checkout as an hour of the day, as the
+ * string "16" or the number 10; "FLEXIBLE" and other words mean no set time.
+ */
+function hourTime(value: unknown): string | null {
+  const hour = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,2}$/.test(value) ? Number(value) : null
+  if (hour === null || !Number.isInteger(hour) || hour < 0 || hour > 23) return null
+  return `${String(hour).padStart(2, '0')}:00`
+}
+
+/** The IANA zone at the listing's coordinates. Airbnb sends none of its own. */
+function coordinateTimezone(lat: unknown, lng: unknown): string | null {
+  if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  const zone = tzLookup(lat, lng)
+  return isValidTimezone(zone) ? zone : null
+}
+
+export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, host: HostContact): Promise<ListingDetails> {
   const raw = await channexRequest(env, `/channels/${encodeURIComponent(channelId)}/action/listing_details?${new URLSearchParams({ listing_id: listingId })}`)
   return provided(() => {
     const listing = object(object(raw.data, 'Listing details').listing, 'Airbnb listing')
@@ -62,8 +92,7 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
     const pricing = object(listing.pricing_settings, 'Listing pricing')
     const fields: Partial<Record<DetailField, string>> = {}
     const sources: ReadonlyArray<readonly [DetailField, string]> = [
-      ['timezone', 'timezone'], ['email', 'email'], ['phone', 'phone'], ['country', 'country_code'],
-      ['state', 'state'], ['city', 'city'], ['address', 'street'], ['zipCode', 'zipcode'],
+      ['country', 'country_code'], ['state', 'state'], ['city', 'city'], ['address', 'street'], ['zipCode', 'zipcode'],
     ]
     for (const [key, source] of sources) {
       const value = listing[source]
@@ -71,6 +100,11 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       if (typeof value !== 'string' || !value.trim()) throw new ChannexDataError(`Airbnb listing field ${source} must be a non-empty string`)
       fields[key] = value
     }
+    const timezone = coordinateTimezone(listing.lat, listing.lng)
+    if (timezone) fields.timezone = timezone
+    if (host.email) fields.email = host.email
+    if (host.phone) fields.phone = host.phone
+    const booking = listing.booking_settings === undefined || listing.booking_settings === null ? {} : object(listing.booking_settings, 'Booking settings')
     if (listing.property_type_category !== undefined && listing.property_type_category !== null) {
       const category = string(listing.property_type_category, 'Airbnb property type')
       if (!(PROPERTY_TYPES as readonly string[]).includes(category)) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified KrabiClaw mapping. Import stopped for review.`)
@@ -83,6 +117,7 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       maxGuests: integer(listing.person_capacity, 'Guest capacity', 1), defaultOccupancy: integer(pricing.guests_included, 'Included guests', 1),
       nightlyRate: amount(pricing.default_daily_price, 'Base price'), fields,
       missingFields: DETAIL_FIELDS.filter(key => fields[key] === undefined),
+      checkInTime: hourTime(booking.check_in_time_start), checkOutTime: hourTime(booking.check_out_time),
     }
   })
 }

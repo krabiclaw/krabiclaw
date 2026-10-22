@@ -66,7 +66,7 @@ class FakeChannex {
     }
     if (method === 'GET' && path === '/channels/chan-1/action/listings') return json({ data: { listing_id_dictionary: { values: [{ id: LISTING, title: 'Cliff Cabin', city: 'Moab', country_code: 'US' }] } } })
     if (method === 'GET' && path === '/channels/chan-1/action/listing_details') {
-      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, timezone: TZ, email: 'host@example.test', phone: '+14355550100', country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 } } } })
+      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 } } } })
     }
     if (method === 'GET' && path === '/channels/chan-1/action/get_listing_calendar') {
       const from = url.searchParams.get('date_from')!
@@ -120,7 +120,7 @@ async function boot() {
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ).run()
-    await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@example.test', 1, 0, 0)").bind(OWNER).run()
+    await db.prepare("INSERT INTO user (id, name, email, emailVerified, phoneNumber, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@example.test', 1, '+14355550100', 0, 0)").bind(OWNER).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     return { runtime, db, env }
   } catch (error) {
@@ -147,6 +147,7 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     const connection = await connected(db, env, channex)
     const details = await connection.details(LISTING)
     assert.deepEqual(details.missingFields, ['childBeds', 'infantCots'])
+    assert.deepEqual({ timezone: details.fields.timezone, email: details.fields.email, phone: details.fields.phone, checkIn: details.checkInTime, checkOut: details.checkOutTime }, { timezone: TZ, email: 'owner@example.test', phone: '+14355550100', checkIn: '16:00', checkOut: '10:00' })
 
     const started = await connection.prepare(LISTING, form)
     assert.equal(started.stage, 'property')
@@ -157,7 +158,7 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     const home = await db.prepare(`SELECT p.kind, p.name, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
       FROM products p JOIN product_stay_configs c ON c.product_id = p.id JOIN business_locations l ON l.id = c.location_id
       JOIN product_variants v ON v.product_id = p.id JOIN prices pr ON pr.product_variant_id = v.id WHERE p.id = ?`).bind(productId).first()
-    assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, location: 'Cliff Cabin', timezone: TZ, email: 'host@example.test', unit_amount: 18_950, currency: 'USD' })
+    assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, location: 'Cliff Cabin', timezone: TZ, email: 'owner@example.test', unit_amount: 18_950, currency: 'USD' })
     const nights = await db.prepare("SELECT COUNT(*) AS total, SUM(closed) AS closed, SUM(closed_to_departure) AS ctd, MAX(price_minor) AS top FROM product_nights WHERE product_id = ? AND source = 'import'").bind(productId).first()
     assert.deepEqual(nights, { total: 500, closed: 1, ctd: 1, top: 21_000 })
     const first = await db.prepare('SELECT date, price_minor, max_stay FROM product_nights WHERE product_id = ? ORDER BY date LIMIT 1').bind(productId).first()

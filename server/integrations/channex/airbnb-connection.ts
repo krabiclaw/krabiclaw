@@ -6,7 +6,7 @@ import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
 import { channexCreate, channexGet, channexRequest, ChannexError } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
-import { CALENDAR_NIGHTS, DETAIL_FIELDS, PROPERTY_TYPES, listingCalendar, listingDetails, type DetailField, type ListingDetails, type ListingNight } from './airbnb-listing'
+import { CALENDAR_NIGHTS, DETAIL_FIELDS, PROPERTY_TYPES, listingCalendar, listingDetails, type DetailField, type HostContact, type ListingDetails, type ListingNight } from './airbnb-listing'
 import { installChannexMessages } from './messages'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 
@@ -317,7 +317,14 @@ export class AirbnbConnection {
   async details(listingId: string): Promise<ListingDetails> {
     const row = await this.connected()
     await this.requireListing(row, listingId)
-    return await listingDetails(this.env, row.channel_id, listingId)
+    return await listingDetails(this.env, row.channel_id, listingId, await this.hostContact())
+  }
+
+  /** The signed-in host's account email and phone, offered as the home's contact details. */
+  private async hostContact(): Promise<HostContact> {
+    const user = await queryFirst<{ email: string | null; phoneNumber: string | null }>(this.db, 'SELECT email, "phoneNumber" FROM user WHERE id = ?', [this.userId])
+    if (!user) throw new Error(`User ${this.userId} has no account row`)
+    return { email: user.email?.trim() || null, phone: user.phoneNumber?.trim() || null }
   }
 
   /**
@@ -341,7 +348,7 @@ export class AirbnbConnection {
         return { product_id: existing.product_id, stage: 'inventory', waiting: false }
       }
 
-      const details = await listingDetails(this.env, channelId, listingId)
+      const details = await listingDetails(this.env, channelId, listingId, await this.hostContact())
       const supplied = Object.keys(input.missingDetails ?? {})
       if (supplied.some(key => !(details.missingFields as string[]).includes(key))) fail(422, 'ONLY_MISSING_DETAILS', 'Only the listing details Airbnb left out may be supplied')
       const field = (key: DetailField): string => {
