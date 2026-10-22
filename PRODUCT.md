@@ -78,8 +78,10 @@ amenities by Airbnb's own codes, and its check-in method where Airbnb's
 category has a verified counterpart. Airbnb's transit and other notes are not
 imported. Nothing is filled in: a text Airbnb has no value for leaves the
 home's own alone, a text over the home's limit is cut, an amenity code the
-home vocabulary lacks is not written, and Airbnb's rooms are not created as
-photo rooms because its photos name no room. Each of those is recorded in the
+home vocabulary lacks is not written, a photo the host has since deleted from
+the media library stays deleted, photos past the home's limit are not fetched,
+and Airbnb's rooms are not created as photo rooms because its photos name no
+room. Each of those is recorded in the
 import's content report, which the import progress and the listings carry so
 the apps can show the host what to finish by hand. A photo Airbnb cannot serve
 stops the stage naming the image; the retry keeps every photo already stored.

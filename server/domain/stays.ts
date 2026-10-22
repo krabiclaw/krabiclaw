@@ -411,7 +411,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       channel: row.channel_stage === null ? null : {
         provider: 'channex',
-        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
+        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'content' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
       },
       photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
       photo_rooms: photoRooms.get(String(row.product_id)) ?? [],

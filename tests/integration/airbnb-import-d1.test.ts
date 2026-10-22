@@ -7,6 +7,7 @@ import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { AirbnbConnection, type ImportContentReport } from '../../server/integrations/channex/airbnb-connection.ts'
 import { readStayHome } from '../../server/domain/stays.ts'
+import { deleteMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import contentRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/content.post.ts'
 import listingsRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/listings.get.ts'
@@ -60,6 +61,9 @@ class FakeChannex {
   content = true
   /** An Airbnb image id whose CDN fetch answers 503. */
   failPhoto: string | null = null
+  /** Extra uncaptioned photos after PHOTOS, for a listing with more photos than a home holds. */
+  extraPhotos = 0
+  photoFetches = 0
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
@@ -68,6 +72,7 @@ class FakeChannex {
     const body = typeof init.body === 'string' ? JSON.parse(init.body) as FakeBody : null
     if (url.origin === CDN) {
       const id = url.pathname.slice('/photos/'.length).replace(/\.jpg$/, '')
+      this.photoFetches += 1
       if (this.failPhoto === id) return new Response('upstream unavailable', { status: 503 })
       return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } })
     }
@@ -92,7 +97,7 @@ class FakeChannex {
     if (method === 'GET' && path === '/channels/chan-1/action/listings') return json({ data: { listing_id_dictionary: { values: [{ id: LISTING, title: 'Cliff Cabin', city: 'Moab', country_code: 'US' }] } } })
     if (method === 'GET' && path === '/channels/chan-1/action/listing_details') {
       const content = this.content ? {
-        images: PHOTOS.map(photo => ({ ...photo, listing_id: LISTING, category: 'LISTING', thumbnail_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_small`, small_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=small`, extra_medium_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_medium` })),
+        images: [...PHOTOS, ...Array.from({ length: this.extraPhotos }, (_, i) => ({ id: `${LISTING}_x${i + 1}`, caption: null, sort_order: PHOTOS.length + i + 1 }))].map(photo => ({ ...photo, listing_id: LISTING, category: 'LISTING', thumbnail_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_small`, small_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=small`, extra_medium_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_medium` })),
         descriptions: { summary: 'A cabin on the cliff.', description: 'A cabin on the cliff.\n\nTwo bedrooms.', space: 'Two bedrooms and a deck.', access: 'The whole cabin is yours.', interaction: 'We live next door.', neighborhood_overview: 'Quiet, ten minutes from town.', transit: 'Bus 4 stops outside.', notes: 'No parties.', house_rules: 'No smoking inside.', name: 'Cliff Cabin', locale: 'en' },
         amenities: { WIRELESS_INTERNET: { instruction: '', is_present: true }, SMOKE_DETECTOR: { instruction: '', is_present: true }, HOVERBOARD_DOCK: { instruction: '', is_present: true }, CRIB: { instruction: '', is_present: false } },
         listing_views: ['MOUNTAIN_VIEW'],
@@ -231,7 +236,7 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       if (result.stage === 'messages') {
         const report = result.content!
         assert.deepEqual(report, {
-          photos_imported: [PHOTOS[1]!.id, PHOTOS[2]!.id], photos_skipped: [PHOTOS[0]!.id], unmatched_amenities: ['HOVERBOARD_DOCK'],
+          photos_imported: [PHOTOS[1]!.id, PHOTOS[2]!.id], photos_skipped: [PHOTOS[0]!.id], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'],
           unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2,
         } satisfies ImportContentReport)
         channex.failMessages = true
@@ -264,8 +269,7 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.equal(channex.channel.active, true)
     const connectionRow = await db.prepare('SELECT setup_property_id, operation_id, pending_step FROM channex_connections').first()
     assert.deepEqual(connectionRow, { setup_property_id: null, operation_id: null, pending_step: null })
-    const listed = (await connection.listings())[0]!.import
-    assert.deepEqual({ ...listed, content: listed.status === 'imported' && listed.content ? Object.keys(listed.content).length : null }, { status: 'imported', product_id: productId, stage: 'complete', content: 6 })
+    assert.deepEqual((await connection.listings())[0]!.import, { status: 'imported', product_id: productId, stage: 'complete', content: JSON.parse(String(mapping!.import_content)) as ImportContentReport })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
@@ -323,7 +327,7 @@ test('the backfill route fills a home imported without content and the listings 
     const filled = await call('POST', `/imports/${productId}/content`)
     assert.equal(filled.status, 200)
     assert.deepEqual(filled.body, { product_id: productId, stage: 'complete', content: {
-      photos_imported: PHOTOS.map(photo => photo.id), photos_skipped: [], unmatched_amenities: ['HOVERBOARD_DOCK'], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2,
+      photos_imported: PHOTOS.map(photo => photo.id), photos_skipped: [], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2,
     } satisfies ImportContentReport })
     const after = await readStayHome(db, manager, productId)
     assert.deepEqual({ captions: after.photos.map(photo => photo.alt_text), bedrooms: after.bedrooms, beds: after.beds, bathrooms: after.bathrooms, amenities: after.amenities, method: after.check_in_method, manual: after.house_manual },
@@ -336,6 +340,18 @@ test('the backfill route fills a home imported without content and the listings 
     assert.deepEqual(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first(), { n: 3 })
     const listedAfter = await call('GET', '/listings')
     assert.deepEqual(((listedAfter.body.listings as Array<{ import: { content: ImportContentReport } }>)[0]!.import.content).photos_skipped, PHOTOS.map(photo => photo.id))
+    // The host deleted one imported photo from the library and Airbnb now has more photos than a home holds:
+    // the deleted one stays out, the photos past the limit are never fetched, and both are reported.
+    await deleteMediaAsset(db, env, after.photos[1]!.id, ORG, OWNER)
+    channex.extraPhotos = 49
+    const fetchedBefore = channex.photoFetches
+    const crowded = await call('POST', `/imports/${productId}/content`)
+    assert.equal(crowded.status, 200)
+    const crowdedReport = crowded.body.content as ImportContentReport
+    assert.deepEqual({ removed: crowdedReport.photos_removed, unplaced: crowdedReport.photos_unplaced, skipped: crowdedReport.photos_skipped, imported: crowdedReport.photos_imported.length },
+      { removed: [PHOTOS[1]!.id], unplaced: [`${LISTING}_x49`], skipped: [PHOTOS[0]!.id, PHOTOS[2]!.id], imported: 48 })
+    assert.equal((await readStayHome(db, manager, productId)).photos.length, 50)
+    assert.equal(channex.photoFetches - fetchedBefore, 48)
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
   } finally {
     globalThis.fetch = realFetch

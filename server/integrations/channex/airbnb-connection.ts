@@ -1,13 +1,14 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { createStayHome, importStayNights, placeStayHomePhotosFirst, stayHomeInput, updateStayHome, type StayAccess } from '~/server/domain/stays'
+import { createStayHome, importStayNights, placeStayHomePhotosFirst, readStayHome, stayHomeInput, updateStayHome, type StayAccess } from '~/server/domain/stays'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
 import { memberAccessPrincipal, resolveOrganizationMembership } from '~/server/utils/member-access'
 import { getMediaUploadReplay, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
+import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { STAY_ARRIVAL_TEXT_LIMITS } from '~/shared/stay-arrival'
 import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/shared/stay-listing'
@@ -56,6 +57,10 @@ export interface ImportContentReport {
   photos_imported: string[]
   /** Airbnb image ids already stored by an earlier run; kept as they are, caption included. */
   photos_skipped: string[]
+  /** Airbnb image ids whose stored photo the host has since deleted from the media library; left out, as the host chose. */
+  photos_removed: string[]
+  /** Airbnb image ids left out because the home's photo limit is reached, counting the host's own photos. */
+  photos_unplaced: string[]
   /** Airbnb amenity constants with no entry in the home's amenity vocabulary. */
   unmatched_amenities: string[]
   /** Airbnb's check-in category when it has no verified home check-in method; null when mapped or absent. */
@@ -597,22 +602,45 @@ export class AirbnbConnection {
    * their captions, its texts, its counts, its amenities and its check-in
    * method. Each photo is one media asset keyed by Airbnb's image id, so a
    * retry stores none twice; a photo that cannot be fetched stops the stage
-   * naming the image. A text Airbnb has no value for leaves the home's own
-   * alone; one over the home's limit is cut and the cut reported.
+   * naming the image. A photo the host has since deleted from the library
+   * stays deleted, and photos past the home's limit (the host's own photos
+   * counted first) are not fetched; both are reported. A text Airbnb has no
+   * value for leaves the home's own alone; one over the home's limit is cut
+   * and the cut reported.
    */
   private async importContent(mapping: MappingRow, channelId: string): Promise<ImportContentReport> {
     const content = await listingContent(this.env, channelId, mapping.listing_id)
-    const report: ImportContentReport = { photos_imported: [], photos_skipped: [], unmatched_amenities: [], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: content.rooms.length }
+    const report: ImportContentReport = { photos_imported: [], photos_skipped: [], photos_removed: [], photos_unplaced: [], unmatched_amenities: [], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: content.rooms.length }
     const access = this.manager()
+    const home = await readStayHome(this.db, access, mapping.product_id)
+    // What an earlier run stored, before anything is fetched: the room left for new photos is the home's limit less the host's other photos.
+    const stored = new Map<string, string>()
+    for (const image of content.images) {
+      try {
+        const replay = await getMediaUploadReplay(this.db, { organizationId: this.organizationId, idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id })
+        if (replay) stored.set(image.id, replay.assetId)
+      } catch (error) {
+        if (!(error instanceof HTTPError && error.status === 410)) throw error
+        report.photos_removed.push(image.id)
+      }
+    }
+    const others = home.photos.filter(photo => ![...stored.values()].includes(photo.id)).length
+    let capacity = MAX_ORDERED_MEDIA_ASSETS - others - stored.size
     const assetIds: string[] = []
     for (const image of content.images) {
-      const identity = { organizationId: this.organizationId, idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
-      const stored = await getMediaUploadReplay(this.db, identity)
-      if (stored) {
-        assetIds.push(stored.assetId)
+      if (report.photos_removed.includes(image.id)) continue
+      const assetId = stored.get(image.id)
+      if (assetId) {
+        assetIds.push(assetId)
         report.photos_skipped.push(image.id)
         continue
       }
+      if (capacity <= 0) {
+        report.photos_unplaced.push(image.id)
+        continue
+      }
+      capacity -= 1
+      const identity = { idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
       const { buffer, contentType } = await this.photo(image)
       // Imported photos live in R2 in every environment; Cloudflare Images holds credentials in production only.
       const uploaded = await uploadResolvedMediaToAssetStore({
@@ -669,19 +697,38 @@ export class AirbnbConnection {
     return report
   }
 
-  /** One Airbnb photo's bytes, an image of a supported type within the home photo limit. */
+  /** One Airbnb photo's bytes, an image of a supported type within the home photo size limit; the body is never read past that limit. */
   private async photo(image: ListingImage): Promise<{ buffer: Uint8Array<ArrayBuffer>; contentType: string }> {
     const detail = { image_id: image.id }
+    const tooLarge = () => fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} exceeds ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`, detail)
     let response: Response
+    const chunks: Uint8Array[] = []
+    let total = 0
     try {
       response = await fetch(image.url, { redirect: 'follow' })
+      if (!response.ok) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb answered ${response.status} for photo ${image.id}. Retry the import.`, detail)
+      const declared = Number(response.headers.get('content-length'))
+      if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) tooLarge()
+      const reader = response.body?.getReader()
+      for (let chunk = reader ? await reader.read() : { done: true as const, value: undefined }; !chunk.done; chunk = await reader!.read()) {
+        total += chunk.value.byteLength
+        if (total > MAX_IMAGE_BYTES) {
+          await reader!.cancel()
+          tooLarge()
+        }
+        chunks.push(chunk.value)
+      }
     } catch (error) {
+      if (error instanceof HTTPError) throw error
       fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} could not be fetched: ${error instanceof Error ? error.message : String(error)}. Retry the import.`, detail)
     }
-    if (!response.ok) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb answered ${response.status} for photo ${image.id}. Retry the import.`, detail)
-    const buffer = new Uint8Array(await response.arrayBuffer())
-    if (!buffer.byteLength) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} is empty. Retry the import.`, detail)
-    if (buffer.byteLength > MAX_IMAGE_BYTES) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} exceeds ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`, detail)
+    if (!total) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} is empty. Retry the import.`, detail)
+    const buffer = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset)
+      offset += chunk.byteLength
+    }
     const contentType = sniffMediaMimeType(buffer)
     if (!RESOLVED_MEDIA_IMAGE_TYPES.has(contentType)) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} is not a supported image (${contentType}).`, detail)
     return { buffer, contentType }
