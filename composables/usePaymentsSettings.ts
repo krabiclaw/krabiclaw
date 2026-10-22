@@ -1,6 +1,7 @@
 import { isKnownBillingPlan } from '~/shared/billing-model'
 import { isCurrencyCode } from '~/shared/currencies'
 import type { PaymentMethodRow } from '~/server/utils/billing-customer'
+import type { HomesQuote } from '~/server/utils/billing'
 
 /**
  * What Payments and Plan and billing read: the plan, the services, the usage billing behind the
@@ -24,6 +25,26 @@ export async function useOrganizationBilling() {
     () => dashboardApi('/api/billing/status', { query: { includePrice: 'true' }, validate: isBillingResponse }),
   )
   return { billing: computed(() => data.value?.billing ?? null), billingError: error, refreshBilling: refresh }
+}
+
+const isHomesQuote = (value: unknown): value is HomesQuote =>
+  isRecord(value) && isKnownBillingPlan(value.plan) && value.currency === 'USD'
+  && isRecord(value.homes) && Number.isSafeInteger(value.homes.used) && Number.isSafeInteger(value.homes.included) && Number.isSafeInteger(value.homes.additional_price_minor) && Number.isSafeInteger(value.homes.amount_minor)
+  && isRecord(value.adding) && Number.isSafeInteger(value.adding.count) && Number.isSafeInteger(value.adding.additional_homes) && Number.isSafeInteger(value.adding.amount_minor) && typeof value.adding.allowed === 'boolean'
+  && isRecord(value.billing) && (value.billing.period_end === null || typeof value.billing.period_end === 'string') && value.billing.prorated === false
+
+/**
+ * What adding homes costs on the plan, from the one quote the capacity check
+ * also answers by: `adding` is how many are about to be added, 0 for the cost
+ * of the homes in use now. Read only while `enabled`.
+ */
+export async function useHomesQuote(organizationId: string, adding: MaybeRefOrGetter<number>, enabled: MaybeRefOrGetter<boolean> = true) {
+  const dashboardApi = useDashboardApi()
+  const { data, error, refresh } = await useAsyncData(
+    () => `homes-quote:${organizationId}:${toValue(adding)}:${toValue(enabled)}`,
+    async () => toValue(enabled) ? await dashboardApi(`/api/organizations/${encodeURIComponent(organizationId)}/billing/homes`, { query: { adding: String(toValue(adding)) }, validate: isHomesQuote }) : null,
+  )
+  return { quote: data, quoteError: error, refreshQuote: refresh }
 }
 
 export type Strategy = { item_id: string; amount: number; currency: string; interval: string; since: string }

@@ -5,8 +5,8 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
-import { getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
-import { BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
+import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
+import { ADDITIONAL_HOME_PRICE, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
@@ -254,19 +254,72 @@ export function capacityRefusalOf(error: unknown): CapacityRefusal | null {
   return data?.code === 'LOCATION_LIMIT' || data?.code === 'HOME_LIMIT' ? { status: 402, data } : null
 }
 
+/** The most homes one quote may ask about: an Airbnb account's listings, not a count to bill. */
+export const MAX_HOMES_QUOTE = 500
+
+/**
+ * What adding homes costs, as the host sees it before adding them and as the
+ * capacity check decides it: the plan, the homes in use now, the included
+ * ones and the price of each further one; for the `count` being added, how
+ * many fall beyond the included ones and what they add to the bill, and
+ * whether the plan allows them at all; and the end of the current period,
+ * when a paid plan's invoice bills them. Nothing is prorated: a meter bills
+ * the count at the end of the period.
+ */
+export interface HomesQuote {
+  plan: string
+  currency: 'USD'
+  homes: { used: number; included: number; additional_price_minor: number; amount_minor: number }
+  adding: { count: number; additional_homes: number; amount_minor: number; allowed: boolean }
+  billing: { period_end: string | null; prorated: false }
+}
+
+/** The `adding` query of a homes quote: absent is one home; otherwise an integer from 0 to the most one quote covers. */
+export function parseHomesAdding(value: unknown): number {
+  if (value === undefined) return 1
+  const count = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN
+  if (!Number.isSafeInteger(count) || count > MAX_HOMES_QUOTE) {
+    throw new HTTPError({ statusCode: 422, statusMessage: `adding must be a whole number from 0 to ${MAX_HOMES_QUOTE}`, data: { code: 'INVALID_QUERY', field: 'adding' } })
+  }
+  return count
+}
+
+/** Homes beyond the included ones, priced: what `used` homes cost now, or what `adding` more would add. */
+function additionalHomes(used: number, adding: number): number {
+  return Math.max(0, used + adding - INCLUDED_HOMES) - Math.max(0, used - INCLUDED_HOMES)
+}
+
+/**
+ * The quote for adding `adding` homes to this organization. The plan is read
+ * the way every capacity check reads it, so a quote that allows the homes is
+ * one the write will allow: Basic refuses past the homes it includes, and a
+ * paid plan bills each further one at the end of the period.
+ */
+export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number): Promise<HomesQuote> {
+  const [used, subscriptions] = await Promise.all([countActiveHomes(db, organizationId), readOrganizationSubscriptions(env, [organizationId])])
+  const rows = subscriptions.get(organizationId) ?? []
+  const plan = planFromSubscriptions(organizationId, rows)
+  const paid = isKnownRecurringPlan(plan)
+  const added = additionalHomes(used, adding)
+  return {
+    plan,
+    currency: 'USD',
+    homes: { used, included: INCLUDED_HOMES, additional_price_minor: ADDITIONAL_HOME_PRICE, amount_minor: additionalHomes(0, used) * ADDITIONAL_HOME_PRICE },
+    adding: { count: adding, additional_homes: added, amount_minor: added * ADDITIONAL_HOME_PRICE, allowed: paid || used + adding <= INCLUDED_HOMES },
+    billing: { period_end: paid ? entitlingSubscription(organizationId, rows)?.periodEnd?.toISOString() ?? null : null, prorated: false },
+  }
+}
+
 /**
  * Refuse, before anything is written, the home Basic does not include. A home
  * is a location and then a stay product at it, written one after the other;
  * the location is a home's from the start, so it is not guarded as a location,
- * and the stay product's own write is guarded as a home. On Basic the plan is
- * read here first so a home past the included ones creates no location.
+ * and the stay product's own write is guarded as a home. The quote decides:
+ * on Basic a home past the included ones creates no location.
  */
 export async function requireHomeCapacity(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<void> {
-  const homes = await countActiveHomes(db, organizationId)
-  if (homes < INCLUDED_HOMES) return
-  const subscriptions = await readOrganizationSubscriptions(env, [organizationId])
-  if (isKnownRecurringPlan(planFromSubscriptions(organizationId, subscriptions.get(organizationId) ?? []))) return
-  throw capacityRefusalError(homeLimit(homes))
+  const quote = await homesQuote(env, db, organizationId, 1)
+  if (!quote.adding.allowed) throw capacityRefusalError(homeLimit(quote.homes.used))
 }
 
 /**

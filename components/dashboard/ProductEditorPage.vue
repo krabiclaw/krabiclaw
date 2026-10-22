@@ -42,6 +42,12 @@
     />
     <UAlert v-if="arrivalTab && arrivalError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Arrival guide could not be loaded" :description="arrivalError" />
     <p v-if="arrivalTab && !arrivalHome && !arrivalError" role="status" class="mx-auto w-full max-w-82 text-base text-muted">Loading arrival guide…</p>
+    <!-- What this home costs on the plan, from the quote the write is decided by: included, billed, or past what Basic includes. -->
+    <UAlert v-if="homeQuoteError" class="mx-auto mb-6 w-full max-w-82" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homeQuoteError, 'The plan could not be read')" />
+    <p v-else-if="homeBilling" data-testid="home-billing-line" class="mx-auto mb-6 w-full max-w-82 text-sm text-muted">
+      {{ homeBilling.text }}
+      <NuxtLink v-if="homeBilling.billing" :to="homeBilling.billing" class="font-medium text-highlighted underline">Plan and billing</NuxtLink>
+    </p>
     <EditorNavigationList
       v-if="!loadError && (!arrivalTab || (arrivalHome && !arrivalError))"
       :groups="navigationGroups"
@@ -341,6 +347,8 @@ import { STAY_SAFETY_DETAIL_KEYS, STAY_SAFETY_SECTIONS, staySafetyLines, staySaf
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
+import { formatPlanPrice } from '~/shared/billing-model'
+import { useHomesQuote } from '~/composables/usePaymentsSettings'
 import { formatPostalAddress } from '~/utils/postal-address'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { ApiClientError } from '~/utils/api-clients'
@@ -370,6 +378,7 @@ import {
 
 const route = useRoute()
 const { locale } = useI18n()
+const { formatExactDateTime } = useHumanTime()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
 const productId = computed(() => String(route.params.productId ?? ''))
@@ -458,6 +467,7 @@ const detailKey = computed(() => level.child.value)
 const editorKey = computed<SectionKey>(() => (detailKey.value ?? 'photo') as SectionKey)
 
 const isNew = computed(() => productId.value === 'new')
+
 
 // ── Load ────────────────────────────────────────────────
 const definitions = computed(() => form.kind ? productDetailFields(form.kind) : [])
@@ -699,7 +709,7 @@ const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFail
 async function reload() {
   await refresh()
   if (loadFailure.value) throw loadFailure.value
-  await refreshCatalog()
+  await Promise.all([refreshCatalog(), refreshHomeQuote()])
 }
 
 // ── The weekly schedule ─────────────────────────────────
@@ -761,6 +771,19 @@ const draft = useState<ProductForm>(draftKey, () => ({
   stay_amenities: [] as StayAmenity[], stay_amenity_answers: [] as StayAmenityAnswer[], stay_cancellation_policy: null, stay_long_term_cancellation_policy: null,
 }))
 const form = reactive(draft.value)
+
+// A home's cost on the plan: the one about to be added, or this one among the homes in use.
+const homeQuoted = computed(() => isNew.value ? form.kind === 'stay' : product.value?.kind === 'stay')
+const { quote: homeQuote, quoteError: homeQuoteError, refreshQuote: refreshHomeQuote } = await useHomesQuote(organizationId, () => isNew.value ? 1 : 0, () => homeQuoted.value && !arrivalTab.value)
+const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
+  const quote = homeQuote.value
+  if (!quote) return null
+  if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} homes. Choose Growth or Business to add more.`, billing: `/dashboard/${String(route.params.orgSlug)}/billing` }
+  const billed = isNew.value ? quote.adding.additional_homes > 0 : quote.homes.used > quote.homes.included
+  if (!billed) return { text: `This home is one of your ${quote.homes.included} included homes.` }
+  if (!quote.billing.period_end) throw new Error('A billed home has no billing period')
+  return { text: `This home adds ${formatPlanPrice(quote.homes.additional_price_minor)} per month to your plan, billed on your next invoice on ${formatExactDateTime(quote.billing.period_end)}.` }
+})
 // One key per product being created, kept across the walk's leaves and retries.
 const createKeyName = `product-create-key:${organizationId}`
 const createKey = useState(createKeyName, () => crypto.randomUUID())

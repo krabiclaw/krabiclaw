@@ -4,10 +4,11 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
-import { countActiveHomes, countActiveLocations } from '../../server/utils/billing.ts'
+import { countActiveHomes, countActiveLocations, homesQuote, parseHomesAdding } from '../../server/utils/billing.ts'
 import { createLocation, deleteLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { createProduct, deleteProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, stayHomeInput } from '../../server/domain/stays.ts'
+import { HTTPError } from 'nitro'
 
 // Billing by count: Growth and Business bill every active location and every
 // active home. A home is a stay product at a location; that location is the
@@ -118,12 +119,32 @@ test('active locations and homes are reported to their Stripe meters, and only B
     // ── Growth bills the same way: both meters, nothing refused.
     await organization('grower', 'growth')
     for (const title of ['One', 'Two', 'Three']) assert.equal((await place('grower', title)).status, 201)
-    for (const key of ['g-1', 'g-2', 'g-3']) await home('grower', key)
+    await home('grower', 'g-1')
+    // The quote a paid host reads before adding homes: of three more, one is included and two are billed at the end of the period.
+    const growerPeriodEnd = (await db.prepare("SELECT periodEnd FROM subscription WHERE referenceId = 'grower'").first('periodEnd')) as number
+    assert.deepEqual(await homesQuote(env, db, 'grower', 3), {
+      plan: 'growth', currency: 'USD',
+      homes: { used: 1, included: 2, additional_price_minor: 900, amount_minor: 0 },
+      adding: { count: 3, additional_homes: 2, amount_minor: 1800, allowed: true },
+      billing: { period_end: new Date(growerPeriodEnd * 1000).toISOString(), prorated: false },
+    })
+    for (const key of ['g-2', 'g-3']) await home('grower', key)
+    // With three in use, one is billed now and the next would be too.
+    assert.deepEqual((await homesQuote(env, db, 'grower', 1)).homes, { used: 3, included: 2, additional_price_minor: 900, amount_minor: 900 })
+    assert.deepEqual((await homesQuote(env, db, 'grower', 1)).adding, { count: 1, additional_homes: 1, amount_minor: 900, allowed: true })
     assert.deepEqual(await counts('grower'), { locations: 3, homes: 3 })
     assert.deepEqual(last('cus_grower'), { locations: 3, homes: 3 })
 
     // ── Basic includes two locations and two homes, counted apart, and refuses a third of either; it has no customer and reports nothing.
     await organization('starter', null)
+    // Basic's quote: no period, nothing billed, and the home past the included ones not allowed.
+    const starterQuote = (used: number, adding: number, allowed: boolean) => ({
+      plan: 'free', currency: 'USD',
+      homes: { used, included: 2, additional_price_minor: 900, amount_minor: 0 },
+      adding: { count: adding, additional_homes: Math.max(0, used + adding - 2), amount_minor: 0, allowed },
+      billing: { period_end: null, prorated: false },
+    })
+    assert.deepEqual(await homesQuote(env, db, 'starter', 1), starterQuote(0, 1, true))
     for (const title of ['One', 'Two']) assert.equal((await place('starter', title)).status, 201)
     assert.deepEqual(await place('starter', 'Three'), { status: 402, data: {
       error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 },
@@ -132,6 +153,8 @@ test('active locations and homes are reported to their Stripe meters, and only B
     const starterHomes = []
     for (const key of ['starter-villa-1', 'starter-villa-2']) starterHomes.push(await home('starter', key))
     assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
+    assert.deepEqual(await homesQuote(env, db, 'starter', 0), starterQuote(2, 0, true))
+    assert.deepEqual(await homesQuote(env, db, 'starter', 1), { ...starterQuote(2, 1, false), adding: { count: 1, additional_homes: 1, amount_minor: 900, allowed: false } })
     const homeLimit = { status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } } }
     await assert.rejects(home('starter', 'starter-villa-3'), homeLimit)
     // The refusal wrote nothing: no third location was made for the refused home.
@@ -154,5 +177,14 @@ test('active locations and homes are reported to their Stripe meters, and only B
   } finally {
     globalThis.fetch = originalFetch
     await runtime.dispose()
+  }
+})
+
+test('the homes quote takes a whole number of homes from 0 to 500, one when not asked', () => {
+  assert.equal(parseHomesAdding(undefined), 1)
+  assert.equal(parseHomesAdding('0'), 0)
+  assert.equal(parseHomesAdding('500'), 500)
+  for (const value of ['', 'abc', '-1', '1.5', '501', ['1']]) {
+    assert.throws(() => parseHomesAdding(value), (error: unknown) => error instanceof HTTPError && error.status === 422 && error.data?.code === 'INVALID_QUERY' && error.data?.field === 'adding')
   }
 })
