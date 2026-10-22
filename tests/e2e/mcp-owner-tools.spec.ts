@@ -687,6 +687,8 @@ test.describe('stateless MCP server', () => {
       releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
     })
     test.afterEach(async ({ request: _request }, testInfo) => {
+      const release = releaseTenantMutationLock
+      releaseTenantMutationLock = undefined
       const restore = bookedSessionRestore
       bookedSessionRestore = null
       const failures: unknown[] = []
@@ -734,7 +736,7 @@ test.describe('stateless MCP server', () => {
         } catch (error) { failures.push(error) }
       }
       try {
-        await releaseTenantMutationLock?.()
+        await release?.()
       } catch (error) { failures.push(error) }
       if (failures.length) throw new AggregateError(failures, 'Booked-session authority cleanup failed')
     })
