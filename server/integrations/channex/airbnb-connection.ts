@@ -706,17 +706,14 @@ export class AirbnbConnection {
   /**
    * Airbnb's caption as the asset's own description, written after the asset
    * exists (so a changed caption never changes the asset's identity) and only
-   * while the asset has none: a run interrupted before this write resumes it,
-   * and a caption the host edited is theirs.
+   * while the asset has none, in the write itself: a run interrupted before
+   * this write resumes it, and a caption the host wrote, even meanwhile, is theirs.
    */
   private async caption(assetId: string, image: ListingImage): Promise<void> {
     if (!image.caption) return
-    const asset = await getMediaAsset(this.db, assetId, this.organizationId)
-    if (!asset) throw new Error(`Airbnb photo ${image.id} was stored as ${assetId} but cannot be read back`)
-    if (asset.alt_text !== null) return
-    if (!await updateMediaAssetMetadata(this.db, assetId, this.organizationId, { alt_text: image.caption.trim().slice(0, 500) })) {
-      throw new Error(`Airbnb photo ${image.id} was stored as ${assetId} but its caption could not be saved`)
-    }
+    if (await updateMediaAssetMetadata(this.db, assetId, this.organizationId, { alt_text: image.caption.trim().slice(0, 500) }, undefined, true)) return
+    // Not written: the asset already has a description, or it is gone.
+    if (!await getMediaAsset(this.db, assetId, this.organizationId)) throw new Error(`Airbnb photo ${image.id} was stored as ${assetId} but cannot be read back`)
   }
 
   /** One Airbnb photo's bytes, an image of a supported type within the home photo size limit; the body is never read past that limit. */

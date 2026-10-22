@@ -636,6 +636,8 @@ export async function updateMediaAssetMetadata(
   updates: { alt_text?: string | null; category?: MediaAsset['category'] },
   /** Update it only while it is still placed on this owner, in one of these slots. */
   placedOn?: { owner_type: string; owner_id: string; slots: string[] },
+  /** Write the description only while the asset has none, so one a person wrote meanwhile is kept; false then means it already has one. */
+  onlyWhileUndescribed = false,
 ): Promise<boolean> {
   await assertNotPinnedByPublication(db, organizationId, id)
   const sets: string[] = ['updated_at = ?']
@@ -657,7 +659,7 @@ export async function updateMediaAssetMetadata(
   if (placedOn) params.push(placedOn.owner_type, placedOn.owner_id, d1JsonStringSet(placedOn.slots))
   const [, result] = await executeBatch(db, [
     publicationPinGuardQuery(organizationId, id),
-    { query: `UPDATE media_assets SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?${placement}`, params },
+    { query: `UPDATE media_assets SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?${placement}${onlyWhileUndescribed ? ' AND alt_text IS NULL' : ''}`, params },
     publicResourceCacheInvalidationQuery(organizationId, 'media-update'),
   ])
   return Number(result?.meta?.changes ?? 0) > 0
