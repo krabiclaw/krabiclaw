@@ -344,14 +344,19 @@ test('the backfill route fills a home imported without content and the listings 
     // the deleted one stays out, the photos past the limit are never fetched, and both are reported.
     await deleteMediaAsset(db, env, after.photos[1]!.id, ORG, OWNER)
     channex.extraPhotos = 49
+    // The run is interrupted after it stored photo x40, so that asset exists without a place on the home.
+    channex.failPhoto = `${LISTING}_x41`
+    await assert.rejects(call('POST', `/imports/${productId}/content`).then(result => { if (result.status !== 200) throw Object.assign(new Error('refused'), result.body.data) }), (error: { code?: string; image_id?: string }) => error.code === 'PHOTO_FETCH_FAILED' && error.image_id === `${LISTING}_x41`)
+    assert.equal((await readStayHome(db, manager, productId)).photos.length, 2)
+    channex.failPhoto = null
     const fetchedBefore = channex.photoFetches
     const crowded = await call('POST', `/imports/${productId}/content`)
     assert.equal(crowded.status, 200)
     const crowdedReport = crowded.body.content as ImportContentReport
-    assert.deepEqual({ removed: crowdedReport.photos_removed, unplaced: crowdedReport.photos_unplaced, skipped: crowdedReport.photos_skipped, imported: crowdedReport.photos_imported.length },
-      { removed: [PHOTOS[1]!.id], unplaced: [`${LISTING}_x49`], skipped: [PHOTOS[0]!.id, PHOTOS[2]!.id], imported: 48 })
+    assert.deepEqual({ removed: crowdedReport.photos_removed, unplaced: crowdedReport.photos_unplaced, skipped: crowdedReport.photos_skipped.length, imported: crowdedReport.photos_imported.length },
+      { removed: [PHOTOS[1]!.id], unplaced: [`${LISTING}_x49`], skipped: 42, imported: 8 })
     assert.equal((await readStayHome(db, manager, productId)).photos.length, 50)
-    assert.equal(channex.photoFetches - fetchedBefore, 48)
+    assert.equal(channex.photoFetches - fetchedBefore, 8)
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
   } finally {
     globalThis.fetch = realFetch

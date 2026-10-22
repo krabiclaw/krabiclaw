@@ -624,13 +624,14 @@ export class AirbnbConnection {
         report.photos_removed.push(image.id)
       }
     }
-    const others = home.photos.filter(photo => ![...stored.values()].includes(photo.id)).length
-    let capacity = MAX_ORDERED_MEDIA_ASSETS - others - stored.size
+    // A photo already on the home keeps its place; every other one, stored by an interrupted run or new, takes one of the places left.
+    const onHome = new Set(home.photos.map(photo => photo.id))
+    let capacity = MAX_ORDERED_MEDIA_ASSETS - home.photos.length
     const assetIds: string[] = []
     for (const image of content.images) {
       if (report.photos_removed.includes(image.id)) continue
       const assetId = stored.get(image.id)
-      if (assetId) {
+      if (assetId && onHome.has(assetId)) {
         assetIds.push(assetId)
         report.photos_skipped.push(image.id)
         continue
@@ -640,6 +641,11 @@ export class AirbnbConnection {
         continue
       }
       capacity -= 1
+      if (assetId) {
+        assetIds.push(assetId)
+        report.photos_skipped.push(image.id)
+        continue
+      }
       const identity = { idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
       const { buffer, contentType } = await this.photo(image)
       // Imported photos live in R2 in every environment; Cloudflare Images holds credentials in production only.
@@ -686,7 +692,8 @@ export class AirbnbConnection {
         if (isStayAmenity(code)) matched.push(code)
         else report.unmatched_amenities.push(key)
       }
-      body.amenities = [...new Set(matched)]
+      // Nothing Airbnb names is in the vocabulary: the host's own amenities stay as they are.
+      if (matched.length) body.amenities = [...new Set(matched)]
     }
     if (content.checkInOption) {
       const method = CHECK_IN_METHODS[content.checkInOption.category]
