@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { d1JsonStringSet, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createStayHome, importStayNights, placeStayHomePhotosFirst, readStayHome, stayHomeInput, updateStayHome, type StayAccess } from '~/server/domain/stays'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
@@ -373,10 +373,11 @@ export class AirbnbConnection {
   /**
    * Contact details the host typed because the organization had none become
    * the organization's, so the next import does not ask again. Validated as
-   * the organization settings validate them. A detail set in Brand › Contact
-   * while the import ran is kept: each is written only while still empty.
+   * the organization settings validate them, before anything is written; the
+   * update is committed with the import's mapping. A detail set in Brand ›
+   * Contact while the import ran is kept: each is written only while still empty.
    */
-  private async saveOrganizationContact(details: ListingDetails, values: Record<DetailField, string>): Promise<void> {
+  private organizationContactUpdate(details: ListingDetails, values: Record<DetailField, string>): BatchQuery | null {
     const sets: string[] = []
     const params: unknown[] = []
     if (details.missingFields.includes('email')) {
@@ -389,10 +390,10 @@ export class AirbnbConnection {
       sets.push("contact_phone = COALESCE(NULLIF(TRIM(contact_phone), ''), ?)")
       params.push(values.phone)
     }
-    if (sets.length === 0) return
+    if (sets.length === 0) return null
     sets.push('updated_at = ?', 'updated_by = ?')
     params.push(now(), this.userId, this.organizationId)
-    await execute(this.db, `UPDATE organization SET ${sets.join(', ')} WHERE id = ?`, params)
+    return { query: `UPDATE organization SET ${sets.join(', ')} WHERE id = ?`, params }
   }
 
   /**
@@ -437,6 +438,7 @@ export class AirbnbConnection {
       }
       if (!isValidTimezone(values.timezone)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone')
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
+      const contact = this.organizationContactUpdate(details, values)
       // The home itself is checked and made as a home added by hand is: billed as a home, and refused past the homes Basic includes.
       const home = await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
@@ -452,13 +454,14 @@ export class AirbnbConnection {
       // runs this whole step again (the location and product replay by their
       // idempotency key, the nights upsert), so no import is left without its calendar.
       await importStayNights(this.db, this.env, this.manager(), home.product_id, provided(() => calendar.map(night => importedNight(night, organization.default_currency))))
-      await execute(this.db, `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_calendar)
-        VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
-      [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)])
-      // The import is made, so what the host typed becomes the organization's
-      // contact. Saved last: a refused or failed import leaves the details
-      // missing, so the same form is accepted again on retry.
-      await this.saveOrganizationContact(details, values)
+      // The mapping and what the host typed as the organization's contact are
+      // one write: until both land a retry runs this step again with the same
+      // form, and a refused import leaves the details missing.
+      await executeBatch(this.db, [{
+        query: `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_calendar)
+          VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
+        params: [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)],
+      }, ...(contact ? [contact] : [])], { operation: 'Map an imported Airbnb listing' })
       return { product_id: home.product_id, stage: 'property', waiting: false }
     })
   }
