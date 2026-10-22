@@ -1,12 +1,20 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { createStayHome, importStayNights, stayHomeInput, type StayAccess } from '~/server/domain/stays'
+import { createStayHome, importStayNights, placeStayHomePhotosFirst, readStayHome, stayHomeInput, updateStayHome, type StayAccess } from '~/server/domain/stays'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
+import { memberAccessPrincipal, resolveOrganizationMembership } from '~/server/utils/member-access'
+import { getMediaUploadReplay, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
+import { getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
+import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
+import { PRODUCT_LIMITS } from '~/shared/product-limits'
+import { STAY_ARRIVAL_TEXT_LIMITS } from '~/shared/stay-arrival'
+import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/shared/stay-listing'
 import { channexCreate, channexGet, channexRequest, ChannexError } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
-import { CALENDAR_NIGHTS, DETAIL_FIELDS, PROPERTY_TYPES, listingCalendar, listingDetails, type DetailField, type ListingDetails, type OrganizationContact, type ListingNight } from './airbnb-listing'
+import { CALENDAR_NIGHTS, DETAIL_FIELDS, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { installChannexMessages } from './messages'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 
@@ -40,15 +48,35 @@ interface ConnectionRow {
   connected_at: string | null
 }
 
-export const IMPORT_STAGES = ['property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'messages', 'complete'] as const
+export const IMPORT_STAGES = ['property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'content', 'messages', 'complete'] as const
 export type ImportStage = typeof IMPORT_STAGES[number]
+
+/** What the content stage could not carry over from Airbnb, for the apps to show the host. */
+export interface ImportContentReport {
+  /** Airbnb image ids stored this run, in Airbnb's order. */
+  photos_imported: string[]
+  /** Airbnb image ids already stored by an earlier run; kept as they are, caption included. */
+  photos_skipped: string[]
+  /** Airbnb image ids whose stored photo the host has since deleted from the media library; left out, as the host chose. */
+  photos_removed: string[]
+  /** Airbnb image ids left out because the home's photo limit is reached, counting the host's own photos. */
+  photos_unplaced: string[]
+  /** Airbnb amenity constants with no entry in the home's amenity vocabulary. */
+  unmatched_amenities: string[]
+  /** Airbnb's check-in category when it has no verified home check-in method; null when mapped or absent. */
+  unmapped_check_in_category: string | null
+  /** Texts cut to the home's limits: the field, its limit and the length Airbnb gave. */
+  truncated_fields: Array<{ field: string; limit: number; length: number }>
+  /** Airbnb rooms not created as photo rooms: Airbnb's photos name no room, so no tour can be assembled from them. */
+  photo_rooms_skipped: number
+}
 
 export interface AirbnbListing {
   id: string
   title: string
   city: string
   country_code: string
-  import: { status: 'not_imported' } | { status: 'imported'; product_id: string; stage: ImportStage }
+  import: { status: 'not_imported' } | { status: 'imported'; product_id: string; stage: ImportStage; content: ImportContentReport | null }
 }
 
 interface MappingRow {
@@ -62,6 +90,7 @@ interface MappingRow {
   import_stage: ImportStage
   import_property: string | null
   import_calendar: string | null
+  import_content: string | null
   enabled: number
 }
 
@@ -99,8 +128,22 @@ const SIGN_IN_LIFETIME_MS = 2 * 60 * 60 * 1000
 /** A lock untouched this long belongs to a request that ended without releasing it. */
 const ABANDONED_LOCK_MS = 15 * 60 * 1000
 
-function fail(statusCode: number, code: string, message: string): never {
-  throw new HTTPError({ statusCode, message, data: { code } })
+function fail(statusCode: number, code: string, message: string, detail: Record<string, unknown> = {}): never {
+  throw new HTTPError({ statusCode, message, data: { code, ...detail } })
+}
+
+/**
+ * Airbnb `check_in_option.category` values with a verified home check-in
+ * method: `smartlock` was read live (2026-10-22); `keypad` and `lockbox` are
+ * the same words in both vocabularies. Airbnb's other categories are not
+ * documented by Channex, so they are reported rather than guessed.
+ */
+const CHECK_IN_METHODS: Record<string, StayCheckInMethod> = { smartlock: 'smart_lock', keypad: 'keypad', lockbox: 'lockbox' }
+
+/** The non-empty texts, trimmed, as paragraphs; null when there are none. */
+function paragraphs(...parts: Array<string | null | undefined>): string | null {
+  const text = parts.flatMap(part => part?.trim() ? [part.trim()] : []).join('\n\n')
+  return text || null
 }
 
 function provided<T>(read: () => T): T {
@@ -305,7 +348,7 @@ export class AirbnbConnection {
     const [listings, mappings] = await Promise.all([this.accountListings(row), this.mappings()])
     return listings.map((listing) => {
       const mapping = mappings.find(candidate => candidate.listing_id === listing.id && candidate.channel_id === row.channel_id)
-      return { ...listing, import: mapping ? { status: 'imported', product_id: mapping.product_id, stage: mapping.import_stage } : { status: 'not_imported' } }
+      return { ...listing, import: mapping ? { status: 'imported', product_id: mapping.product_id, stage: mapping.import_stage, content: contentReport(mapping) } : { status: 'not_imported' } }
     })
   }
 
@@ -426,7 +469,7 @@ export class AirbnbConnection {
    * saves where it got; `waiting` means Channex has not applied the last step
    * yet and the same stage is asked again later.
    */
-  async advance(productId: string): Promise<{ product_id: string; stage: ImportStage; waiting: boolean }> {
+  async advance(productId: string): Promise<{ product_id: string; stage: ImportStage; waiting: boolean; content: ImportContentReport | null }> {
     return await this.locked(async (row) => {
       if (row.status !== 'connected' || !row.channel_id || !row.group_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before importing listings.')
       const channelId = row.channel_id
@@ -439,7 +482,7 @@ export class AirbnbConnection {
       if (required.some(id => !id)) throw new Error(`Import of ${productId} at ${stage} is missing a Channex id`)
       const property = mapping.import_property ? JSON.parse(mapping.import_property) as ImportProperty : null
       const calendar = mapping.import_calendar ? JSON.parse(mapping.import_calendar) as ListingNight[] : null
-      const save = async (values: Partial<Pick<MappingRow, 'property_id' | 'room_type_id' | 'rate_plan_id' | 'import_stage' | 'import_property' | 'import_calendar' | 'enabled'>>) => {
+      const save = async (values: Partial<Pick<MappingRow, 'property_id' | 'room_type_id' | 'rate_plan_id' | 'import_stage' | 'import_property' | 'import_calendar' | 'import_content' | 'enabled'>>) => {
         const entries = Object.entries(values)
         const result = await execute(this.db, `UPDATE product_channel_mappings SET ${entries.map(([column]) => `${column} = ?`).join(', ')}, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = ?`,
           [...entries.map(([, value]) => value ?? null), now(), productId, stage])
@@ -504,7 +547,7 @@ export class AirbnbConnection {
         case 'verify_inventory': {
           if (!calendar?.length) throw new Error(`Import of ${productId} has no source calendar to verify`)
           const matches = await this.inventoryMatches(mapping as MappingRow & { property_id: string; room_type_id: string; rate_plan_id: string }, calendar)
-          if (!matches) return { product_id: productId, stage, waiting: true }
+          if (!matches) return { product_id: productId, stage, waiting: true, content: null }
           await save({ import_stage: 'mapping' })
           break
         }
@@ -544,7 +587,13 @@ export class AirbnbConnection {
         case 'reservations': {
           await wrote('load_airbnb_reservations')
           await channexRequest(this.env, `${path}/execute/load_future_reservations`, 'POST', { listing_id: mapping.listing_id })
-          await save({ import_stage: 'messages' })
+          await save({ import_stage: 'content' })
+          break
+        }
+        case 'content': {
+          // Reads Airbnb and writes the home; nothing is written to Channex, so no pending step.
+          const report = await this.importContent(mapping, channelId)
+          await save({ import_stage: 'messages', import_content: JSON.stringify(report) })
           break
         }
         case 'messages': {
@@ -559,8 +608,182 @@ export class AirbnbConnection {
           break
       }
       await wrote(null)
-      return { product_id: productId, stage: mapping.import_stage, waiting: false }
+      return { product_id: productId, stage: mapping.import_stage, waiting: false, content: contentReport(mapping) }
     })
+  }
+
+  /**
+   * The content stage again, for a home whose import is complete: one imported
+   * before content was carried over, or whose Airbnb content changed. Same
+   * lock, same work, same report.
+   */
+  async refreshContent(productId: string): Promise<{ product_id: string; stage: ImportStage; content: ImportContentReport }> {
+    return await this.locked(async (row) => {
+      if (row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before importing listing content.')
+      const mapping = await queryFirst<MappingRow>(this.db, "SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [this.organizationId, productId])
+      if (!mapping || mapping.channel_id !== row.channel_id) fail(404, 'IMPORT_NOT_FOUND', 'Listing import not found')
+      if (mapping.import_stage !== 'complete') fail(409, 'IMPORT_IN_PROGRESS', 'Finish importing this listing first; its content lands at the content stage.')
+      const report = await this.importContent(mapping, row.channel_id)
+      const result = await execute(this.db, "UPDATE product_channel_mappings SET import_content = ?, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = 'complete'", [JSON.stringify(report), now(), productId])
+      if (!result.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
+      return { product_id: productId, stage: 'complete', content: report }
+    })
+  }
+
+  /**
+   * The listing's content onto the home: its photos in Airbnb's order with
+   * their captions, its texts, its counts, its amenities and its check-in
+   * method. Each photo is one media asset keyed by Airbnb's image id, so a
+   * retry stores none twice; a photo that cannot be fetched stops the stage
+   * naming the image. A photo the host has since deleted from the library
+   * stays deleted, and photos past the home's limit (the host's own photos
+   * counted first) are not fetched; both are reported. A text Airbnb has no
+   * value for leaves the home's own alone; one over the home's limit is cut
+   * and the cut reported.
+   */
+  private async importContent(mapping: MappingRow, channelId: string): Promise<ImportContentReport> {
+    const content = await listingContent(this.env, channelId, mapping.listing_id)
+    const report: ImportContentReport = { photos_imported: [], photos_skipped: [], photos_removed: [], photos_unplaced: [], unmatched_amenities: [], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: content.rooms.length }
+    const access = this.manager()
+    const home = await readStayHome(this.db, access, mapping.product_id)
+    // What an earlier run stored, before anything is fetched: the room left for new photos is the home's limit less the host's other photos.
+    const stored = new Map<string, string>()
+    for (const image of content.images) {
+      try {
+        const replay = await getMediaUploadReplay(this.db, { organizationId: this.organizationId, idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id })
+        if (replay) stored.set(image.id, replay.assetId)
+      } catch (error) {
+        if (!(error instanceof HTTPError && error.status === 410)) throw error
+        report.photos_removed.push(image.id)
+      }
+    }
+    // A photo already on the home keeps its place; every other one, stored by an interrupted run or new, takes one of the places left.
+    const onHome = new Set(home.photos.map(photo => photo.id))
+    let capacity = MAX_ORDERED_MEDIA_ASSETS - home.photos.length
+    const assetIds: string[] = []
+    for (const image of content.images) {
+      if (report.photos_removed.includes(image.id)) continue
+      const assetId = stored.get(image.id)
+      if (assetId && onHome.has(assetId)) {
+        await this.caption(assetId, image)
+        assetIds.push(assetId)
+        report.photos_skipped.push(image.id)
+        continue
+      }
+      if (capacity <= 0) {
+        report.photos_unplaced.push(image.id)
+        continue
+      }
+      capacity -= 1
+      if (assetId) {
+        await this.caption(assetId, image)
+        assetIds.push(assetId)
+        report.photos_skipped.push(image.id)
+        continue
+      }
+      const identity = { idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
+      const { buffer, contentType } = await this.photo(image)
+      // Imported photos live in R2 in every environment; Cloudflare Images holds credentials in production only.
+      const uploaded = await uploadResolvedMediaToAssetStore({
+        db: this.db, env: this.env, organizationId: this.organizationId, userId: null, source: 'external', kind: 'image', provider: 'cloudflare_r2',
+        buffer, contentType, filename: `airbnb-${image.id}.${contentType === 'image/jpeg' ? 'jpg' : contentType.slice('image/'.length).replace('+xml', '')}`,
+        idempotencyKey: identity.idempotencyKey, sourceFileId: identity.sourceFileId,
+      })
+      await this.caption(uploaded.assetId, image)
+      assetIds.push(uploaded.assetId)
+      report.photos_imported.push(image.id)
+    }
+    if (assetIds.length) {
+      const membership = await resolveOrganizationMembership(this.env, { organizationId: this.organizationId, userId: this.userId })
+      if (!membership) fail(403, 'NOT_A_MEMBER', 'Only a member of this organization can import listing content')
+      await placeStayHomePhotosFirst(this.db, this.env, access, memberAccessPrincipal(membership, { env: this.env }), mapping.product_id, assetIds)
+    }
+
+    const within = (field: string, text: string, limit: number): string => {
+      if (text.length <= limit) return text
+      report.truncated_fields.push({ field, limit, length: text.length })
+      return text.slice(0, limit).trimEnd()
+    }
+    const body: Record<string, unknown> = {}
+    const texts = content.descriptions
+    const description = paragraphs(texts.summary, texts.space, texts.neighborhood_overview, texts.house_rules)
+    if (description) body.description = within('description', description, PRODUCT_LIMITS.description)
+    const arrival: Record<keyof typeof STAY_ARRIVAL_TEXT_LIMITS, string | null> = {
+      check_in_instructions: paragraphs(content.checkInOption?.instruction, texts.access, texts.interaction),
+      house_manual: paragraphs(content.houseManual), directions: paragraphs(content.directions),
+      wifi_network: paragraphs(content.wifiNetwork), wifi_password: content.wifiPassword,
+    }
+    for (const [field, text] of Object.entries(arrival) as Array<[keyof typeof STAY_ARRIVAL_TEXT_LIMITS, string | null]>) {
+      if (text) body[field] = within(field, text, STAY_ARRIVAL_TEXT_LIMITS[field])
+    }
+    for (const field of ['bedrooms', 'beds', 'bathrooms'] as const) if (content[field] !== null) body[field] = content[field]
+    if (content.amenities.length) {
+      const matched: StayAmenity[] = []
+      for (const key of content.amenities) {
+        const code = key.toLowerCase()
+        if (isStayAmenity(code)) matched.push(code)
+        else report.unmatched_amenities.push(key)
+      }
+      // Nothing Airbnb names is in the vocabulary: the host's own amenities stay as they are.
+      if (matched.length) body.amenities = [...new Set(matched)]
+    }
+    if (content.checkInOption) {
+      const method = CHECK_IN_METHODS[content.checkInOption.category]
+      if (method) body.check_in_method = method
+      else report.unmapped_check_in_category = content.checkInOption.category
+    }
+    if (Object.keys(body).length) await updateStayHome(this.env, this.db, access, mapping.product_id, body)
+    return report
+  }
+
+  /**
+   * Airbnb's caption as the asset's own description, written after the asset
+   * exists (so a changed caption never changes the asset's identity) and only
+   * while the asset has none, in the write itself: a run interrupted before
+   * this write resumes it, and a caption the host wrote, even meanwhile, is theirs.
+   */
+  private async caption(assetId: string, image: ListingImage): Promise<void> {
+    if (!image.caption) return
+    if (await updateMediaAssetMetadata(this.db, assetId, this.organizationId, { alt_text: image.caption.trim().slice(0, 500) }, undefined, true)) return
+    // Not written: the asset already has a description, or it is gone.
+    if (!await getMediaAsset(this.db, assetId, this.organizationId)) throw new Error(`Airbnb photo ${image.id} was stored as ${assetId} but cannot be read back`)
+  }
+
+  /** One Airbnb photo's bytes, an image of a supported type within the home photo size limit; the body is never read past that limit. */
+  private async photo(image: ListingImage): Promise<{ buffer: Uint8Array<ArrayBuffer>; contentType: string }> {
+    const detail = { image_id: image.id }
+    const tooLarge = () => fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} exceeds ${MAX_IMAGE_BYTES / 1024 / 1024} MB.`, detail)
+    let response: Response
+    const chunks: Uint8Array[] = []
+    let total = 0
+    try {
+      response = await fetch(image.url, { redirect: 'follow' })
+      if (!response.ok) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb answered ${response.status} for photo ${image.id}. Retry the import.`, detail)
+      const declared = Number(response.headers.get('content-length'))
+      if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) tooLarge()
+      const reader = response.body?.getReader()
+      for (let chunk = reader ? await reader.read() : { done: true as const, value: undefined }; !chunk.done; chunk = await reader!.read()) {
+        total += chunk.value.byteLength
+        if (total > MAX_IMAGE_BYTES) {
+          await reader!.cancel()
+          tooLarge()
+        }
+        chunks.push(chunk.value)
+      }
+    } catch (error) {
+      if (error instanceof HTTPError) throw error
+      fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} could not be fetched: ${error instanceof Error ? error.message : String(error)}. Retry the import.`, detail)
+    }
+    if (!total) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} is empty. Retry the import.`, detail)
+    const buffer = new Uint8Array(total)
+    let offset = 0
+    for (const chunk of chunks) {
+      buffer.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    const contentType = sniffMediaMimeType(buffer)
+    if (!RESOLVED_MEDIA_IMAGE_TYPES.has(contentType)) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} is not a supported image (${contentType}).`, detail)
+    return { buffer, contentType }
   }
 
   /** Existing imports use the same connection lock and installation review policy. */
@@ -705,6 +928,11 @@ export class AirbnbConnection {
       throw error
     }
   }
+}
+
+/** The content stage's saved report, or null until it ran. */
+function contentReport(mapping: MappingRow): ImportContentReport | null {
+  return mapping.import_content ? JSON.parse(mapping.import_content) as ImportContentReport : null
 }
 
 /** Airbnb states money as a decimal number; the catalog stores minor units of the organization's currency. */
