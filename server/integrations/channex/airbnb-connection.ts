@@ -395,7 +395,7 @@ export class AirbnbConnection {
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
       // Every check has passed, so what the host typed becomes the organization's contact.
       await this.saveOrganizationContact(details, values)
-      // The home itself is checked and made as a home added by hand is.
+      // The home itself is checked and made as a home added by hand is: billed as a home, and refused past the homes Basic includes.
       const home = await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
         zip_code: values.zipCode, phone: values.phone, email: values.email, check_in_time: input.checkInTime, check_out_time: input.checkOutTime,

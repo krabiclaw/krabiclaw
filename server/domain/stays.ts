@@ -4,6 +4,7 @@ import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, t
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
+import { requireHomeCapacity } from '~/server/utils/billing'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
@@ -777,17 +778,19 @@ export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db
 
 /**
  * Add a place to stay: a new location of this organization and an unpublished
- * stay at it, priced per night in the organization's currency. The location
- * is billed like any other; the home is a product there and is not billed. A
- * home added by hand and one imported from a channel are made here, the same
- * way. The key replays every write.
+ * stay at it, priced per night in the organization's currency. The home is
+ * billed as a home, not its location as a location: Basic is refused past the
+ * homes it includes before anything is written, and the stay product's write
+ * is guarded as a home. A home added by hand and one imported from a channel
+ * are made here, the same way. The key replays every write.
  */
 export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string): Promise<StayHome> {
   requireManager(access)
+  await requireHomeCapacity(env, db, access.organizationId)
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),
-  }, access.actorId, { idempotencyKey })
+  }, access.actorId, { idempotencyKey, home: true })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
   if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')

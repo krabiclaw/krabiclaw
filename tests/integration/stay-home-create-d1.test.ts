@@ -123,12 +123,12 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     // On the site unpublished, like a product added in the editor: it can carry photos and a page before it is published.
     assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(made.product_id).all().then(result => result.results), [{ published: 0 }])
 
-    // Without a price the home has no base price; the plan's second location is the last it covers.
+    // Without a price the home has no base price; the plan's second home is the last it covers.
     const second = await call(owner, 'POST', { ...cabin, idempotency_key: 'loft', name: 'River Loft', base_price_minor: undefined, state: undefined, zip_code: undefined })
     assert.equal(second.status, 201)
     assert.equal((second.body.home as { base_price_minor: number | null }).base_price_minor, null)
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, idempotency_key: 'barn', name: 'Barn' })), {
-      status: 402, error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 },
+      status: 402, error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 },
     })
     assert.deepEqual([await count('business_locations'), await count('products')], [2, 2])
 
@@ -277,13 +277,13 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, true)
     assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(made.product_id).all().then(result => result.results), [{ published: 1 }])
 
-    // The plan covers active locations: one taken off the site frees its slot,
-    // and putting it back is refused while every slot is in use.
+    // The plan covers active homes: one whose location is taken off the site
+    // frees its slot, and putting it back is refused as a home while every slot is in use.
     const loftLocation = (second.body.home as { location_id: string }).location_id
     assert.equal((await updateLocation(db, ORG, loftLocation, { status: 'inactive' }, 'owner', env)).status, 200)
     assert.equal((await call(owner, 'POST', { ...cabin, idempotency_key: 'barn-after-loft', name: 'Barn' })).status, 201)
     assert.deepEqual(await updateLocation(db, ORG, loftLocation, { status: 'active' }, 'owner', env), {
-      status: 402, data: { error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 } },
+      status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } },
     })
     assert.equal((await getLocation(db, ORG, loftLocation))!.status, 'inactive')
   } finally {

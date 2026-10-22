@@ -42,7 +42,7 @@
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
 import { classifyStripePlanChange } from '~/shared/stripe-ga4'
-import { BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, additionalLocationPrice, isNewSalePlan } from '~/shared/billing-model'
+import { BUSINESS_PLAN_ID, INCLUDED_HOMES, INCLUDED_LOCATIONS, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, additionalHomePrice, additionalLocationPrice, isNewSalePlan } from '~/shared/billing-model'
 import { cardBrandLabel, useOrganizationBilling, useOrganizationServices, usePaymentMethods } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
@@ -122,6 +122,12 @@ const locationsRow = computed<EditorNavigationItem | null>(() => {
   if (used === undefined) return null
   return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
 })
+// Homes the same way: a home is a place to stay, counted as a home and not as a location.
+const homesRow = computed<EditorNavigationItem | null>(() => {
+  const used = billing.value?.usage.homes
+  if (used === undefined) return null
+  return { id: 'homes', label: 'Homes', summary: onStarter.value ? `${used} in use · ${INCLUDED_HOMES} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_HOMES}` : `${used} in use · ${INCLUDED_HOMES} included, then ${additionalHomePrice()}` }
+})
 
 const serviceRows = computed<EditorNavigationItem[]>(() => {
   const current = services.value
@@ -148,6 +154,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'billing',
   items: [
     ...(locationsRow.value ? [locationsRow.value] : []),
+    ...(homesRow.value ? [homesRow.value] : []),
     ...serviceRows.value,
     ...(portalRow.value ? [portalRow.value] : []),
   ],

@@ -5,7 +5,7 @@ import { assertStripeCatalogPrice, planSubscriptionItem, recurringPriceAmount, s
 import { PRICING_COMPARISON, comparisonValue } from '../../shared/pricing-comparison.ts'
 import { getPlanEntitlements } from '../../server/utils/billing-entitlements.ts'
 import { classifyStripePlanChange } from '../../shared/stripe-ga4.ts'
-import { additionalLocationPrice, assertNewSalePlan, BILLING_METER_KEYS, BILLING_METERS, PAYMENTS_FEE, planMeters, ratePercent } from '../../shared/billing-model.ts'
+import { additionalHomePrice, additionalLocationPrice, assertNewSalePlan, BILLING_METER_KEYS, BILLING_METERS, PAID_PLAN_PRICES, PAYMENTS_FEE, planMeters, ratePercent } from '../../shared/billing-model.ts'
 import { renderPlansMarkdown } from '../../server/routes/pricing.md.get.ts'
 import type { Plan } from '../../server/utils/billing-plans.ts'
 
@@ -41,15 +41,20 @@ test('display rename preserves provider identities and metadata selects one cano
 })
 
 // Stripe's own phrasing for each metered price, and which plan carries it.
-test('locations and fees are metered prices in Stripe’s phrasing', () => {
+test('locations, homes and fees are metered prices in Stripe’s phrasing', () => {
   assert.equal(additionalLocationPrice(), '$49 per additional location per month')
+  assert.equal(additionalHomePrice(), '$9 per additional home per month')
   assert.equal(PAYMENTS_FEE, '1.4% of payment volume, plus Stripe fees')
   assert.equal(ratePercent(0.014), '1.4')
   assert.equal(ratePercent(0.1), '10')
-  assert.deepEqual(planMeters('growth'), ['locations'])
-  assert.deepEqual(planMeters('business'), ['locations', 'captured_volume', 'stripe_cost', 'ad_spend'])
+  // A home is a lodging unit metered apart from locations, the same on Growth and Business.
+  assert.deepEqual(planMeters('growth'), ['locations', 'homes'])
+  assert.deepEqual(planMeters('business'), ['locations', 'homes', 'captured_volume', 'stripe_cost', 'ad_spend'])
   assert.deepEqual(planMeters('free'), [])
-  assert.deepEqual(BILLING_METER_KEYS.map(key => BILLING_METERS[key].formula), ['last', 'sum', 'sum', 'sum'])
+  assert.deepEqual(BILLING_METER_KEYS.map(key => BILLING_METERS[key].formula), ['last', 'last', 'sum', 'sum', 'sum'])
+  assert.deepEqual(BILLING_METERS.homes.tiers, [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 900 }])
+  assert.equal(BILLING_METERS.homes.description, '2 homes included, then $9 per additional home per month.')
+  assert.equal(BILLING_METERS.locations.description, '2 locations included, then $49 per additional location per month. Homes are counted separately and are not locations.')
 })
 
 const meter = (key: string, overrides: Record<string, unknown> = {}) => ({
@@ -80,6 +85,9 @@ test('each metered price must be the published one on its meter', () => {
   const replace = (key: string, overrides: Record<string, unknown>) => ({ ...catalog(), prices: catalog().prices.map(row => row.id === `price-${key}` ? meteredPrice(key, overrides) : row) })
   assert.throws(() => selectMeteredPrices({ ...catalog(), products: catalog().products.filter(row => row.id !== 'prod-locations') }), /0 active Additional location products/)
   assert.throws(() => selectMeteredPrices(replace('locations', { tiers: [{ up_to: 2, unit_amount: 0, flat_amount: null }, { up_to: null, unit_amount: 8900, flat_amount: null }] })), /Additional location monthly on the krabiclaw_locations meter/)
+  assert.throws(() => selectMeteredPrices({ ...catalog(), products: catalog().products.filter(row => row.id !== 'prod-homes') }), /0 active Additional home products/)
+  assert.throws(() => selectMeteredPrices(replace('homes', { tiers: [{ up_to: 2, unit_amount: 0, flat_amount: null }, { up_to: null, unit_amount: 4900, flat_amount: null }] })), /Additional home monthly on the krabiclaw_homes meter/)
+  assert.throws(() => selectMeteredPrices(replace('homes', { tiers: [{ up_to: 5, unit_amount: 0, flat_amount: null }, { up_to: null, unit_amount: 900, flat_amount: null }] })), /Additional home monthly on the krabiclaw_homes meter/)
   assert.throws(() => selectMeteredPrices(replace('captured_volume', { unit_amount_decimal: '0.029' })), /Payments fee monthly/)
   assert.throws(() => selectMeteredPrices(replace('stripe_cost', { recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed', meter: null } })), /Stripe fees monthly/)
   assert.throws(() => selectMeteredPrices({ ...catalog(), meters: catalog().meters.map(row => row.id === 'mtr-ad_spend' ? meter('ad_spend', { default_aggregation: { formula: 'last' } }) : row) }), /Managed ads monthly on the krabiclaw_ad_spend meter/)
@@ -173,11 +181,13 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   assert.ok(md.includes('Custom Domain: Not included'))
   assert.ok(md.includes('- **Locations**: 2 included\n'))
   assert.ok(md.includes('- **Locations**: 2 included, then $49 per additional location per month\n'))
+  assert.ok(md.includes('- **Homes**: 2 included. A home is a place to stay; it is counted as a home, not as a location.\n'))
+  assert.ok(md.includes('- **Homes**: 2 included, then $9 per additional home per month. A home is a place to stay; it is counted as a home, not as a location.\n'))
   const business = renderPlansMarkdown([{ ...dummyPlans[1]!, id: 'business', name: 'Business', prices: [{ id: 'p_business', amount: 14900, currency: 'usd', interval: 'month' }] }])
   assert.ok(business.includes('$149/month'))
   assert.ok(!business.includes('rental unit'))
   assert.ok(business.includes('- **Payments fees**: 1.4% of payment volume, plus Stripe fees.\n'))
-  assert.ok(md.includes('- **Billing**: Additional locations and fees are billed on your subscription invoice at the end of each month.\n'))
+  assert.ok(md.includes('- **Billing**: Additional locations, additional homes and fees are billed on your subscription invoice at the end of each month.\n'))
   assert.ok(!md.includes('Payments fees'))
   assert.ok(md.includes('## Add-ons\n'))
   assert.ok(md.includes('- **Managed ads**: 10% of monthly ad spend. Chris hand-manages'))
@@ -199,9 +209,25 @@ test('the current contract charge uses its exact native price and quantity, incl
 test('a plan subscription has one plan item beside its metered and service items', () => {
   const plan = { id: 'si-business', quantity: 1, price: { ...price('price-business', 14900), product: { id: 'prod-business', metadata: { plan_id: 'business' } } } }
   const metered = { id: 'si-locations', price: { ...meteredPrice('locations'), product: meteredProduct('locations') } }
+  const homes = { id: 'si-homes', price: { ...meteredPrice('homes'), product: meteredProduct('homes') } }
   const strategy = { id: 'si-strategy', quantity: 1, price: { id: 'price-strategy', product: { id: 'prod-strategy', metadata: { product_family: 'services', service: 'strategy' } } } }
   const subscription = (...items: unknown[]) => ({ id: 'sub-business', items: { data: items } }) as unknown as Stripe.Subscription
-  assert.equal(planSubscriptionItem(subscription(plan, metered, strategy)).id, 'si-business')
+  assert.equal(planSubscriptionItem(subscription(plan, metered, homes, strategy)).id, 'si-business')
+  // A subscription from before homes were metered carries no homes item and bills its plan exactly as before.
+  const earlier = subscription(plan, metered, strategy)
+  assert.equal(planSubscriptionItem(earlier).id, 'si-business')
+  assert.equal(recurringPriceAmount(planSubscriptionItem(earlier).price, planSubscriptionItem(earlier).quantity), PAID_PLAN_PRICES.business.monthly)
   assert.throws(() => planSubscriptionItem(subscription(metered)), /exactly one plan price/)
   assert.throws(() => planSubscriptionItem(subscription(plan, { ...plan, id: 'si-growth' })), /exactly one plan price/)
+})
+
+// The published homes price on Business: 50 homes are the flat $149 plus 48 × $9, which is $581 per month.
+test('a 50-home Business organization is quoted $581 per month', () => {
+  const homes = meteredPrice('homes')
+  assert.equal(recurringPriceAmount(homes, 2), 0)
+  assert.equal(recurringPriceAmount(homes, 50), 48 * 900)
+  assert.equal(PAID_PLAN_PRICES.business.monthly + recurringPriceAmount(homes, 50), 58100)
+  assert.equal(PAID_PLAN_PRICES.growth.monthly + recurringPriceAmount(homes, 50), 48100)
+  // Non-lodging locations still bill $49 after the included two.
+  assert.equal(recurringPriceAmount(meteredPrice('locations'), 5), 3 * 4900)
 })

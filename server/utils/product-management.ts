@@ -16,6 +16,7 @@ import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPage
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import { executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
@@ -1234,6 +1235,16 @@ export async function publishStayProducts(env: CloudflareEnv, products: readonly
  * unique key, so a lost response or a concurrent duplicate never makes a
  * second product. The same key with a different request conflicts.
  */
+/**
+ * A stay product is a home, billed and limited as one: its writes run guarded
+ * as a home, and the counts are reported to Stripe after. Other products are
+ * not billed by count, so their writes run as they are.
+ */
+async function executeProductWrites(db: DbClient, env: CloudflareEnv, organizationId: string, writes: BatchQuery[], options: { operation: string; action: string; stay: boolean }): Promise<void> {
+  if (options.stay) await executeWithinCapacity(env, db, organizationId, writes, options)
+  else await executeBatch(db, writes, { operation: options.operation })
+}
+
 export async function createProduct(db: DbClient, input: {
   organizationId: string
   product: CreateProductInput
@@ -1299,7 +1310,7 @@ export async function createProduct(db: DbClient, input: {
   }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering has too many schedule entries for one atomic write')
   try {
-    await executeBatch(db, writes, { operation: 'Create product' })
+    await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Create product', action: 'create it', stay: planned.kind === 'stay' })
   } catch (error) {
     if (isUniqueDedupeConflict(error)) {
       const concurrent = await replay()
@@ -1470,7 +1481,7 @@ export async function createProductsBatch(db: DbClient, input: {
   const { ids, queries } = await planProductCreateWrites(db, { ...input, now: new Date().toISOString() })
   queries.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.created', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: ids, product_count: ids.length } }))
   if (queries.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
-  try { await executeBatch(db, queries, { operation: 'Create products' }) } catch (error) {
+  try { await executeProductWrites(db, input.env, input.organizationId, queries, { operation: 'Create products', action: 'create them', stay: input.products.some(product => product.kind === 'stay') }) } catch (error) {
     if (isUniqueDedupeConflict(error)) {
       const concurrent = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
       if (concurrent) return complete(concurrent)
@@ -1768,7 +1779,7 @@ export async function updateProduct(db: DbClient, input: {
   // A booking taken between the check above and this batch makes the variant
   // delete raise, and D1 rolls the whole batch back: the product is exactly as
   // it was, and the merchant is told why rather than reading a constraint name.
-  await executeBatch(db, writes, { operation: 'Update product' }).catch(async (error: unknown) => {
+  await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Update product', action: 'turn it on', stay: current.kind === 'stay' }).catch(async (error: unknown) => {
     if (isUniqueDedupeConflict(error) && await replay()) return
     if (isStayBedAllocationConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'The listing bed total must cover its assigned room beds. Reduce the room quantities before reducing or clearing the total.', data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'stay.beds', product_id: input.productId }, cause: error })
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
@@ -1831,6 +1842,8 @@ export async function deleteProduct(db: DbClient, input: {
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')
     throw error
   })
+  // A home deleted is one fewer home; its location, if still active, is a location again.
+  if (product.kind === 'stay') await reportBillingUsage(input.env, db, input.organizationId)
   await publishStayProducts(input.env, [product])
 }
 
@@ -2321,13 +2334,13 @@ export async function reconcileProducts(db: DbClient, input: {
     if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The home change requires the organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', product_id: product.id } })
     await requireChannelPush(db, input.env, input.organizationId, product.id)
   }
-  const missing = input.deactivateMissing ? await queryAll<{ id: string }>(db, `SELECT id FROM products WHERE organization_id=? AND active=1 AND id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.product_id=products.id AND pub.organization_id=?)`, [input.organizationId, d1JsonArray(touched), input.organizationId]) : []
+  const missing = input.deactivateMissing ? await queryAll<{ id: string; kind: string }>(db, `SELECT id, kind FROM products WHERE organization_id=? AND active=1 AND id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.product_id=products.id AND pub.organization_id=?)`, [input.organizationId, d1JsonArray(touched), input.organizationId]) : []
   const answered = [...touched, ...missing.map(product => product.id)]
   const writes = perProduct.flat()
   if (missing.length) writes.push({ query: 'UPDATE products SET active=0,updated_at=?,updated_by=? WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))', params: [now, input.actor.actorId, input.organizationId, d1JsonArray(missing.map(product => product.id))] })
   writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
-  try { await executeBatch(db, writes, { operation: 'Reconcile products' }) } catch (error) {
+  try { await executeProductWrites(db, input.env, input.organizationId, writes, { operation: 'Reconcile products', action: 'turn them on', stay: [...planned, ...missing].some(product => product.kind === 'stay') }) } catch (error) {
     if (isStayBedAllocationConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Every listing bed total must cover its assigned room beds. Reduce room quantities before reducing or clearing a total.', data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'stay.beds' }, cause: error })
     const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
     if (stale || isUniqueDedupeConflict(error)) {

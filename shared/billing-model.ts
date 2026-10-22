@@ -37,11 +37,17 @@ export const SERVICE_PRICES = Object.freeze({
   strategy: Object.freeze({ monthly: 200000 }),
 })
 
-/** Locations every plan's price includes. */
+/** Locations every plan's price includes. A home's location is not a location: homes are counted apart. */
 export const INCLUDED_LOCATIONS = 2
 
 /** USD cents for each location beyond the included ones, per month. */
 export const ADDITIONAL_LOCATION_PRICE = 4900
+
+/** Homes (places to stay, each a lodging unit) every plan's price includes. */
+export const INCLUDED_HOMES = 2
+
+/** USD cents for each home beyond the included ones, per month, the same on Growth and Business. */
+export const ADDITIONAL_HOME_PRICE = 900
 
 /** Business's Payments fee: a share of the payment volume it captures. */
 export const PAYMENTS_FEE_RATE = 0.014
@@ -59,6 +65,11 @@ export function additionalLocationPrice(): string {
   return `$${ADDITIONAL_LOCATION_PRICE / 100} per additional location per month`
 }
 
+/** The same phrasing for homes: "$9 per additional home per month". */
+export function additionalHomePrice(): string {
+  return `$${ADDITIONAL_HOME_PRICE / 100} per additional home per month`
+}
+
 /** The fee as the pricing page and the plan screen state it. */
 export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volume, plus Stripe fees`
 
@@ -74,8 +85,9 @@ export const BUSINESS_ADDITIONS = Object.freeze([
  * What a plan subscription bills beside its flat price, each a Stripe meter
  * and the monthly metered price that bills it at the end of the period:
  *
- * - locations report the active locations (`last`), billed in graduated
- *   tiers after the included ones;
+ * - locations and homes each report their active count (`last`), billed in
+ *   graduated tiers after the included ones; a home's location is a home,
+ *   never a location;
  * - captured volume, Stripe cost and ad spend report USD cents as they occur
  *   (`sum`), billed at a flat rate per cent.
  *
@@ -89,7 +101,16 @@ export const BILLING_METERS = Object.freeze({
     unitLabel: 'location',
     plans: [GROWTH_PLAN_ID, BUSINESS_PLAN_ID],
     tiers: [{ up_to: INCLUDED_LOCATIONS, unit_amount: 0 }, { up_to: 'inf', unit_amount: ADDITIONAL_LOCATION_PRICE }],
-    description: `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}.`,
+    description: `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}. Homes are counted separately and are not locations.`,
+  }),
+  homes: Object.freeze({
+    name: 'Additional home',
+    eventName: 'krabiclaw_homes',
+    formula: 'last',
+    unitLabel: 'home',
+    plans: [GROWTH_PLAN_ID, BUSINESS_PLAN_ID],
+    tiers: [{ up_to: INCLUDED_HOMES, unit_amount: 0 }, { up_to: 'inf', unit_amount: ADDITIONAL_HOME_PRICE }],
+    description: `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}.`,
   }),
   captured_volume: Object.freeze({
     name: 'Payments fee',
