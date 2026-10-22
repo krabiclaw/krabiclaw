@@ -41,11 +41,13 @@
 
     <div>
       <UAlert v-if="offeringsError" class="mb-6" color="error" variant="soft" title="Offerings could not be loaded" :description="offeringsError" />
-      <!-- Which location the calendar is, the same pill Catalog narrows by. An account has no branch to choose. -->
+      <!-- Offering and Location choose scope; repeating-time settings belong to the chosen location. -->
       <div v-if="!personalScope" class="mb-8 flex flex-wrap items-center gap-3">
         <CalendarOfferingFilter :items="offeringItems ?? []" :disabled="Boolean(level.child.value)" />
         <DashboardLocationFilter v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
-        <UButton v-if="sessionProduct && physicalLocation" label="Repeating times" color="neutral" variant="outline" :to="{ path: `/dashboard/${route.params.orgSlug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
+        <UTooltip v-if="sessionProduct && physicalLocation" text="Repeating times">
+          <UButton icon="i-lucide-settings" color="neutral" variant="soft" square class="size-10 justify-center rounded-full" aria-label="Schedule settings" :to="{ path: `/dashboard/${route.params.orgSlug}/products/${sessionProduct.id}/booking/schedule`, query: { location_id: physicalLocation.id } }" />
+        </UTooltip>
       </div>
       <UAlert
         v-if="locationError"
@@ -56,15 +58,15 @@
         :description="getErrorMessage(locationError, 'Location request failed')"
       />
 
-      <!-- Where in time: the period's name and the three controls Tailwind's header carries. -->
+      <!-- The period and its date navigation share one quiet toolbar. -->
       <header class="flex items-center justify-between py-2">
         <h2 class="text-base font-semibold text-highlighted">
           <time :datetime="view === 'year' ? String(shownYear) : monthKey">{{ periodLabel }}</time>
         </h2>
-        <div class="flex items-center rounded-md ring ring-default">
-          <UButton icon="i-lucide-chevron-left" color="neutral" variant="ghost" square :aria-label="view === 'year' ? 'Previous year' : 'Previous month'" @click="step(-1)" />
-          <UButton label="Today" color="neutral" variant="ghost" class="hidden md:block" @click="goToToday" />
-          <UButton icon="i-lucide-chevron-right" color="neutral" variant="ghost" square :aria-label="view === 'year' ? 'Next year' : 'Next month'" @click="step(1)" />
+        <div class="flex items-center gap-1">
+          <UButton icon="i-lucide-chevron-left" color="neutral" variant="ghost" square class="size-10 justify-center rounded-full" :aria-label="view === 'year' ? 'Previous year' : 'Previous month'" @click="step(-1)" />
+          <UButton label="Today" color="neutral" variant="ghost" class="hidden h-10 rounded-full px-4 md:inline-flex" @click="goToToday" />
+          <UButton icon="i-lucide-chevron-right" color="neutral" variant="ghost" square class="size-10 justify-center rounded-full" :aria-label="view === 'year' ? 'Next year' : 'Next month'" @click="step(1)" />
         </div>
       </header>
 
