@@ -340,6 +340,11 @@ test('the backfill route fills a home imported without content and the listings 
     assert.deepEqual(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first(), { n: 3 })
     const listedAfter = await call('GET', '/listings')
     assert.deepEqual(((listedAfter.body.listings as Array<{ import: { content: ImportContentReport } }>)[0]!.import.content).photos_skipped, PHOTOS.map(photo => photo.id))
+    // A caption write that did not land is resumed; a caption the host edited is kept.
+    await db.prepare('UPDATE media_assets SET alt_text = NULL WHERE id = ?').bind(after.photos[0]!.id).run()
+    await db.prepare("UPDATE media_assets SET alt_text = 'Our bedroom' WHERE id = ?").bind(after.photos[2]!.id).run()
+    await call('POST', `/imports/${productId}/content`)
+    assert.deepEqual((await readStayHome(db, manager, productId)).photos.map(photo => photo.alt_text), ['The deck at sunset', null, 'Our bedroom'])
     // The host deleted one imported photo from the library and Airbnb now has more photos than a home holds:
     // the deleted one stays out, the photos past the limit are never fetched, and both are reported.
     await deleteMediaAsset(db, env, after.photos[1]!.id, ORG, OWNER)

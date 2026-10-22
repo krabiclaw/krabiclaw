@@ -6,7 +6,7 @@ import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
 import { memberAccessPrincipal, resolveOrganizationMembership } from '~/server/utils/member-access'
 import { getMediaUploadReplay, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
-import { updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
@@ -632,6 +632,7 @@ export class AirbnbConnection {
       if (report.photos_removed.includes(image.id)) continue
       const assetId = stored.get(image.id)
       if (assetId && onHome.has(assetId)) {
+        await this.caption(assetId, image)
         assetIds.push(assetId)
         report.photos_skipped.push(image.id)
         continue
@@ -642,6 +643,7 @@ export class AirbnbConnection {
       }
       capacity -= 1
       if (assetId) {
+        await this.caption(assetId, image)
         assetIds.push(assetId)
         report.photos_skipped.push(image.id)
         continue
@@ -654,10 +656,7 @@ export class AirbnbConnection {
         buffer, contentType, filename: `airbnb-${image.id}.${contentType === 'image/jpeg' ? 'jpg' : contentType.slice('image/'.length).replace('+xml', '')}`,
         idempotencyKey: identity.idempotencyKey, sourceFileId: identity.sourceFileId,
       })
-      // The caption is the asset's own description, set after the asset exists so a changed caption never changes the asset's identity.
-      if (image.caption && !await updateMediaAssetMetadata(this.db, uploaded.assetId, this.organizationId, { alt_text: image.caption.trim().slice(0, 500) })) {
-        throw new Error(`Airbnb photo ${image.id} was stored as ${uploaded.assetId} but its caption could not be saved`)
-      }
+      await this.caption(uploaded.assetId, image)
       assetIds.push(uploaded.assetId)
       report.photos_imported.push(image.id)
     }
@@ -702,6 +701,22 @@ export class AirbnbConnection {
     }
     if (Object.keys(body).length) await updateStayHome(this.env, this.db, access, mapping.product_id, body)
     return report
+  }
+
+  /**
+   * Airbnb's caption as the asset's own description, written after the asset
+   * exists (so a changed caption never changes the asset's identity) and only
+   * while the asset has none: a run interrupted before this write resumes it,
+   * and a caption the host edited is theirs.
+   */
+  private async caption(assetId: string, image: ListingImage): Promise<void> {
+    if (!image.caption) return
+    const asset = await getMediaAsset(this.db, assetId, this.organizationId)
+    if (!asset) throw new Error(`Airbnb photo ${image.id} was stored as ${assetId} but cannot be read back`)
+    if (asset.alt_text !== null) return
+    if (!await updateMediaAssetMetadata(this.db, assetId, this.organizationId, { alt_text: image.caption.trim().slice(0, 500) })) {
+      throw new Error(`Airbnb photo ${image.id} was stored as ${assetId} but its caption could not be saved`)
+    }
   }
 
   /** One Airbnb photo's bytes, an image of a supported type within the home photo size limit; the body is never read past that limit. */
