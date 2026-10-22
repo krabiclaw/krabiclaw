@@ -240,11 +240,14 @@ test('a third home on Basic is refused as a home, nothing is saved, and the same
     assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: null, contact_phone: null })
     assert.deepEqual((await connection.details(LISTING)).missingFields, ['email', 'phone', 'childBeds', 'infantCots'])
     // On Growth the same form, with the same details, imports; the contact is kept once the home is made.
+    // A phone set in Brand › Contact meanwhile is no longer missing: the form no longer carries it, and the import keeps it.
+    await db.prepare("UPDATE organization SET contact_phone = '+1 435 555 0199' WHERE id = ?").bind(ORG).run()
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-org', 'growth', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
-    const started = await connection.prepare(LISTING, form)
+    const { phone: _phone, ...withoutPhone } = form.missingDetails
+    const started = await connection.prepare(LISTING, { ...form, missingDetails: withoutPhone })
     assert.equal(started.stage, 'property')
     assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [3, 3, 1])
-    assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0100' })
+    assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0199' })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

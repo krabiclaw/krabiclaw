@@ -12,8 +12,9 @@ import type { PaymentMethodRow } from '~/server/utils/billing-customer'
 export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year'; meters: string[] }; usage: { locations: number; homes: number }; scheduledPlan?: { plan: string; at: string } | null }
 const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
-  && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.locations)
-  && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && ['month', 'year'].includes(String(value.billing.subscriptionPrice.interval))))
+  && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.locations) && Number.isSafeInteger(value.billing.usage.homes)
+  && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && ['month', 'year'].includes(String(value.billing.subscriptionPrice.interval))
+    && Array.isArray(value.billing.subscriptionPrice.meters) && value.billing.subscriptionPrice.meters.every(meter => typeof meter === 'string')))
   && (value.billing.scheduledPlan === undefined || value.billing.scheduledPlan === null || (isRecord(value.billing.scheduledPlan) && isKnownBillingPlan(value.billing.scheduledPlan.plan) && typeof value.billing.scheduledPlan.at === 'string'))
 
 export async function useOrganizationBilling() {

@@ -152,6 +152,11 @@ test('active locations and homes are reported to their Stripe meters, and only B
     assert.equal((await updateLocation(db, 'starter', starterVilla, { status: 'active' }, OWNER, env)).status, 200)
     await assert.rejects(updateProduct(db, { env, organizationId: 'starter', productId: starterHomes[1]!.product_id, actor, patch: { active: true } }), homeLimit)
     assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
+    // Deleting a home would make its location a third location: refused as a location while both slots are in use.
+    await assert.rejects(deleteProduct(db, { organizationId: 'starter', productId: starterHomes[1]!.product_id, env }), {
+      status: 402, data: { error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 } },
+    })
+    assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
     assert.equal(reportsFor('cus_starter'), 0)
   } finally {
     globalThis.fetch = originalFetch

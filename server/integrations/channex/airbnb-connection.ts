@@ -330,19 +330,20 @@ export class AirbnbConnection {
   /**
    * Contact details the host typed because the organization had none become
    * the organization's, so the next import does not ask again. Validated as
-   * the organization settings validate them.
+   * the organization settings validate them. A detail set in Brand › Contact
+   * while the import ran is kept: each is written only while still empty.
    */
   private async saveOrganizationContact(details: ListingDetails, values: Record<DetailField, string>): Promise<void> {
     const sets: string[] = []
     const params: unknown[] = []
     if (details.missingFields.includes('email')) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email')
-      sets.push('contact_email = ?')
+      sets.push("contact_email = COALESCE(NULLIF(TRIM(contact_email), ''), ?)")
       params.push(values.email.toLowerCase())
     }
     if (details.missingFields.includes('phone')) {
       if (values.phone.length > 32) fail(422, 'INVALID_DETAIL', 'Contact phone must be 32 characters or fewer')
-      sets.push('contact_phone = ?')
+      sets.push("contact_phone = COALESCE(NULLIF(TRIM(contact_phone), ''), ?)")
       params.push(values.phone)
     }
     if (sets.length === 0) return
