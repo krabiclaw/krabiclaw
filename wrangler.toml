@@ -96,8 +96,8 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v19"
-database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
+database_name = "krabiclaw-production-v20"
+database_id = "1953787d-eef5-482c-81f4-1819d85704c3"
 migrations_dir = "migrations"
 remote = false
 
@@ -175,8 +175,8 @@ WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v19"
-database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
+database_name = "krabiclaw-production-v20"
+database_id = "1953787d-eef5-482c-81f4-1819d85704c3"
 migrations_dir = "migrations"
 remote = false
 
@@ -244,8 +244,8 @@ E2E_ALLOW_DEV_ROUTES = "true"
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-staging-v19"
-database_id = "036d7910-66a9-4343-9ae4-47398dd3c653"
+database_name = "krabiclaw-staging-v20"
+database_id = "caa1d5c6-2310-4c22-902a-c795f70b0c3a"
 migrations_dir = "migrations"
 remote = false
 
@@ -316,8 +316,8 @@ WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v19"
-database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
+database_name = "krabiclaw-production-v20"
+database_id = "1953787d-eef5-482c-81f4-1819d85704c3"
 migrations_dir = "migrations"
 remote = false
 

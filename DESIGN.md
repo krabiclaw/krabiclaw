@@ -1076,7 +1076,8 @@ items, tabs and some modes their own URLs (`house-rules?feature=checkInOut`,
 ## Naming
 
 Use the owner's vocabulary, not the schema's. The catalog's words are fixed,
-whatever the template: Catalog; Menu, Experiences, Services; a menu's
+whatever the template: Catalog; Menu, Experiences, Places to stay, and
+Practice areas & consultations; a menu's
 **sections** and its **items**; a **variant** is a purchasable version of one
 offering, never a section. Collection is the model's name and never appears in
 the menu workflow; blog categories classify articles and are not part of the

@@ -512,6 +512,34 @@ top-level production, development and E2E bindings then moved to
 `krabiclaw-production-v19` together, immediately before promotion; take the
 production final delta from v18 right after the deployment.
 
+The v19-to-v20 catalog replacement narrows `products_kind_check` to the four
+supported offering kinds: food or drink, Experience, Legal Services and lodging.
+The Products parent is referenced by variants, prices, locations, publications,
+bookings and stays, so an in-place table rebuild would risk those rows. The full
+v19 chain, including `0023_stay_check_in_end_time.sql`, is archived unchanged in
+`migrations-history/v19/`; `migrations/0000_baseline.sql` is generated from the
+current schema. No existing offering is reclassified or discarded. Transfers
+refuse unsupported offering identities, complete missing archived forward
+migrations and retain v19 session identities and timestamps without regenerating
+provider hours.
+
+On 2026-10-23 production and staging had no physical-item Products. The replacement
+databases were created with `--location wnam`, and Cloudflare reported WNAM before
+binding or loading either:
+
+- `krabiclaw-staging-v20`: `caa1d5c6-2310-4c22-902a-c795f70b0c3a`
+- `krabiclaw-production-v20`: `1953787d-eef5-482c-81f4-1819d85704c3`
+
+The PR prepares each replacement from its own v19 source using the canonical
+snapshot path and preserves that environment's signing keys. Its bindings point
+to the prepared copies; deployed Workers continue using v19 until an authorized
+deployment. Before each cutover, take a fresh delta with `--source
+krabiclaw-staging-v19` or `--source krabiclaw-production-v19` and the corresponding
+initial v20 snapshot as `--delta-from`. Review changed/deleted keys, carry important
+source edits without overwriting replacement writes, and verify deployed schema,
+foreign keys and guest journeys before retiring either v19 database. Production,
+development and E2E bindings move together.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;
