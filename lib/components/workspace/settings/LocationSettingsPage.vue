@@ -16,7 +16,6 @@
     :resource-id="editor.location.value.id"
     resource-label="location"
     :fields="editor.locationLocalizationFields.value"
-    :route-path="editor.localizedLocationPath"
     :language-settings-path="editor.organizationLocalizationSettingsPath.value"
   />
 </template>
@@ -162,7 +161,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const dashboardApi = useDashboardApi()
   const nuxtApp = useNuxtApp()
   const editorError = ref<string | null>(null)
-  const dashboard = useDashboardOrganization()
 
 
 
@@ -234,7 +232,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
 
   const detailsForm = reactive({
     title: '',
-    slug: '',
     phone: '',
     email: '',
     price_level: '',
@@ -264,18 +261,12 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     { key: 'address.locality', label: 'City', source: location.value?.address?.locality },
     { key: 'address.administrativeArea', label: 'State or province', source: location.value?.address?.administrativeArea },
   ])
-  function localizedLocationPath(locale: string): string {
-    const slug = location.value?.slug
-    if (!slug) throw new Error('The location slug is unavailable.')
-    return `/${locale}/locations/${slug}`
-  }
 
 
   const hoursForm = ref<LocationHoursForm>({ timezone: '', hours: null, specialHours: null })
 
   function fillDetailsForm(loc: BusinessLocation) {
     detailsForm.title = loc.title
-    detailsForm.slug = loc.slug
     detailsForm.phone = loc.phone ?? ''
     detailsForm.email = loc.email ?? ''
     detailsForm.price_level = loc.price_level ?? ''
@@ -376,12 +367,11 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsSaving.value = true
     editorError.value = null
     try {
-      const response = await dashboardApi<{ success: true; location: BusinessLocation }>(
+      await dashboardApi<{ success: true; location: BusinessLocation }>(
         `/api/dashboard/locations/${requestedLocationId}`,
         { method: 'PATCH', body, validate: isLocationResponse },
       )
       if (locationId.value !== requestedLocationId) return false
-      const previousSlug = typeof route.params.locationSlug === 'string' ? route.params.locationSlug : null
       // Every editor of this location reads one shared resource; refreshing it
       // refills them all, so the index beside this leaf shows what was saved.
       if (locationConcern) await refreshLocationReads(requestedLocationId)
@@ -389,11 +379,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
         await refreshLocationWorkspace()
         // The location's own index draws the same location from its own read.
         await refreshNuxtData(`dashboard-location-overview:${organizationId}:${requestedLocationId}`)
-      }
-      if (previousSlug && response.location.slug !== previousSlug) {
-        await dashboard.refresh()
-        // The record moved: same level, its new address.
-        await navigateTo(route.path.replace(`/locations/${previousSlug}`, `/locations/${response.location.slug}`), { replace: true })
       }
       return true
     } catch (error) {
@@ -580,7 +565,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     editorError: computed(() => isNew.value ? newLocation.createError.value : editorError.value),
     saveLabel: newLocation.saveLabel,
     detailsForm, hoursForm, reservationForm, reservationConfigExists, closingReservations,
-    navigationGroups, locationLocalizationFields, localizedLocationPath, organizationLocalizationSettingsPath,
+    navigationGroups, locationLocalizationFields, organizationLocalizationSettingsPath,
     revert: resetDraft, save: () => isNew.value ? newLocation.save() : saveCurrentEditor(), closeReservations,
   }
 }

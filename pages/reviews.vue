@@ -101,6 +101,7 @@ useSocialMetadata(() => ({
   title: `${t('site.footer.reviews')} | ${organizationName}`,
   description: t('site.reviews_page.meta_description', { organization: organizationName }),
   label: t('site.footer.reviews'),
+  socialImage: organization.social_image,
   breadcrumbs: [
     { name: t('site.footer.reviews'), url: '/reviews' },
   ],

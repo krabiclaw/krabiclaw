@@ -296,10 +296,9 @@ export type ReconcileProductInput = CreateProductInput & { product_id?: string }
 /**
  * The public surfaces a catalog reaches guests through.
  *
- * Four, because guests read four different things: a restaurant's dishes
- * are its Menu, anything a guest books a seat on is an Experience, a place a
- * guest sleeps is a Place to stay, and the goods a merchant sells are
- * Products. One Product model, named on the page the way the customer says it.
+ * Dishes use the Menu, experiences use Experiences, homes use Places to stay,
+ * and practice areas and consultations use the products surface, presented
+ * as Services by a legal practice.
  */
 export type ProductSurface = 'menu' | 'products' | 'experiences' | 'stays'
 
@@ -319,9 +318,9 @@ export interface ProductPresentation {
   collectionGroupLabel: 'Section' | 'Collection'
   collectionGroupLabelPlural: 'Sections' | 'Collections'
   /**
-   * What this surface's items are, in schema.org's vocabulary: dishes are
-   * MenuItems, goods are Products, a bookable experience is an Event and a
-   * place to stay is an Accommodation.
+   * What this surface presents in schema.org's vocabulary: dishes are
+   * MenuItems, a bookable experience is an Event and a place to stay is an
+   * Accommodation. A priced offering can also use Product.
    */
   structuredDataType: 'MenuItem' | 'Product' | 'Event' | 'Accommodation'
 }

@@ -21,7 +21,7 @@
           </TenantButton>
         </div>
       </div>
-      <img v-if="featuredUrl" :src="featuredUrl" alt="" width="300" height="370" loading="lazy" class="max-h-[160px] object-contain lg:max-h-[370px]">
+      <img v-if="featuredMedia?.public_url" :src="featuredMedia.public_url" :alt="featuredMedia.alt_text ?? ''" width="300" height="370" loading="lazy" class="max-h-[160px] object-contain lg:max-h-[370px]">
     </div>
   </section>
 </template>
@@ -66,7 +66,7 @@ const label = computed(() => targetsSchedule.value && props.page.recipe === 'sch
 const priceLine = computed(() => blockTextOrNull(props.block.data.price_line))
 const notice = computed(() => blockTextOrNull(props.block.data.notice))
 const backgroundUrl = computed(() => blockMedia(props.block, 'media')[0]?.public_url ?? null)
-const featuredUrl = computed(() => blockMedia(props.block, 'featured')[0]?.public_url ?? null)
+const featuredMedia = computed(() => blockMedia(props.block, 'featured')[0] ?? null)
 
 const emit = defineEmits<{ click: [] }>()
 const { trackConsultationClick } = useOrganizationConversionTracking(consultation)

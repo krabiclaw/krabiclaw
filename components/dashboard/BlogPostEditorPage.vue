@@ -66,7 +66,6 @@ import BlogPostEditor from '~/lib/components/workspace/blog/BlogPostEditor.vue'
 import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
 import type { BlogEditorBlock, BlogPost } from '~/lib/components/workspace/blog/types'
 import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlocks, writeBlogLocalizedText, type BlogLocalizedFieldPath } from '~/utils/blog-editor'
-import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
 // One post. Rendered by `blog.vue`, which owns the frame — this level draws its
@@ -146,6 +145,7 @@ interface BlogLocalizationState {
   locale: string
   blocks: BlogEditorBlock[]
   documentUpdatedAt: string | null
+  values: Record<string, unknown>
 }
 let blogLocalizationState: BlogLocalizationState | null = null
 let blogLocalizationLoadGeneration = 0
@@ -207,7 +207,7 @@ async function loadBlogLocalization(locale: string): Promise<Record<string, unkn
     })
   })
   if (generation !== blogLocalizationLoadGeneration) return {}
-  blogLocalizationState = { locale, blocks, documentUpdatedAt }
+  blogLocalizationState = { locale, blocks, documentUpdatedAt, values: Object.fromEntries(['title', 'summary', 'seo_keywords', 'metadata'].filter(key => Object.hasOwn(values, key)).map(key => [key, structuredClone(values[key])])) }
   return values
 }
 
@@ -226,20 +226,16 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
       if (typeof value === 'string') writeBlogLocalizedText(translated.data, field.path, value)
     })
   })
-  const values: Record<string, unknown> = {}
+  const values: Record<string, unknown> = structuredClone(state.values)
   for (const key of ['title', 'summary']) {
-    if (Object.hasOwn(submitted, key)) values[key] = submitted[key]
+    values[key] = Object.hasOwn(submitted, key) ? submitted[key] : null
   }
-  const post = postResource.value?.post
-  if (!post?.slug) throw new Error('Save the source post with a URL before localizing it.')
-  const sourcePath = tenantBlogPostPath(post.slug, post.collection ?? 'blog')
   const response = await dashboardApi<BlogTranslationResponse>(
     `/api/editor/organizations/${organizationId}/localization/content_document/${postId}/${encodeURIComponent(locale)}`,
     {
       method: 'PUT',
       body: {
         values,
-        route_path: `/${locale}${sourcePath}`,
         content_blocks: blocks,
         ...(state.documentUpdatedAt ? { expected_updated_at: state.documentUpdatedAt } : {}),
       },
@@ -250,6 +246,7 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
     locale,
     blocks: structuredClone(response.localization.content_blocks),
     documentUpdatedAt: response.localization.updated_at,
+    values: Object.fromEntries(['title', 'summary', 'seo_keywords', 'metadata'].map(key => [key, structuredClone(response.localization[key])])),
   }
 }
 

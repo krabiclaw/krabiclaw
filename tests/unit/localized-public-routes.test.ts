@@ -4,6 +4,7 @@ import { validateLocaleCatalog } from '../../shared/platform-locale-catalog.ts'
 import { projectExactLocalizedResource } from '../../server/utils/public-localization.ts'
 import { resolveTenantLocalePath } from '../../utils/tenant-locale-path.ts'
 import { tenantBlogPostPath } from '../../utils/tenant-blog-route.ts'
+import { validateLocalizedRoutePath } from '../../server/utils/localization-registry.ts'
 
 test('catch-all locale classification uses the tenant published-locale set', () => {
   assert.deepEqual(resolveTenantLocalePath('/th/contact', ['th']), {
@@ -45,6 +46,18 @@ test('localized projection clears untranslated localizable fields', () => {
 
 test('professional-service blog paths use the canonical /blog route', () => {
   assert.equal(tenantBlogPostPath('thai-law'), '/blog/thai-law')
+})
+
+test('a location translation retains its saved historical route and refuses an explicit move', () => {
+  assert.equal(validateLocalizedRoutePath('business_location', 'th', undefined, 'current-location'), '/th/locations/current-location')
+  assert.equal(validateLocalizedRoutePath('business_location', 'th', null, 'current-location'), '/th/locations/current-location')
+  assert.equal(validateLocalizedRoutePath('business_location', 'th', undefined, 'current-location', '/th/locations/historical-name'), '/th/locations/historical-name')
+  assert.equal(validateLocalizedRoutePath('business_location', 'th', null, 'current-location', '/th/locations/historical-name'), '/th/locations/historical-name')
+  assert.equal(validateLocalizedRoutePath('business_location', 'th', '/th/locations/historical-name', 'current-location', '/th/locations/historical-name'), '/th/locations/historical-name')
+  assert.throws(() => validateLocalizedRoutePath('business_location', 'th', '/th/locations/current-location', 'current-location', '/th/locations/historical-name'),
+    { statusCode: 422, message: 'A translation keeps its canonical path' })
+  assert.throws(() => validateLocalizedRoutePath('business_location', 'th', undefined, 'current-location', null),
+    { statusCode: 500, message: 'The location translation has no saved route' })
 })
 
 test('platform catalog validation rejects placeholder drift', () => {

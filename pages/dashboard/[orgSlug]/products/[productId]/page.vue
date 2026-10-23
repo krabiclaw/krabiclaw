@@ -9,7 +9,7 @@
     <UEmpty
       v-else-if="p.product.value?.page"
       icon="i-lucide-file-text"
-      :title="p.product.value.page.path"
+      :title="p.product.value.page.title"
       :actions="[{ label: 'Edit page content', to: `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(p.product.value.page.id)}` }]"
     />
     <UEmpty
