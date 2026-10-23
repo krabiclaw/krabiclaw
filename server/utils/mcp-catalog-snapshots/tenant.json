@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:3529439c8716318abeabc290f74485f52e4204dbd9e57df3c5009e7e69ec8859",
-  "documentationFingerprint": "sha256:bfad5dc879a68dc5f480cbdbdc8846bcd38b4ee0b226c8a8be10dc330397834a",
+  "fingerprint": "sha256:09fadd8dd0827f5a38842fc93251a8cda386ccd8bf55d90622c1934a6d50d9df",
+  "documentationFingerprint": "sha256:b21dde0dc9ac4df8bfb5012b2d9d67796b3ad12487de633bb92de9f04db7cc65",
   "tools": [
     {
       "name": "add_organization_language",
@@ -755,6 +755,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -1501,6 +1508,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -10173,6 +10181,14 @@
                         "null"
                       ]
                     },
+                    "check_in_end_time": {
+                      "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "check_in_time": {
                       "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -10714,6 +10730,7 @@
                   "required": [
                     "location_id",
                     "check_in_time",
+                    "check_in_end_time",
                     "check_out_time",
                     "max_guests",
                     "min_nights",
@@ -24512,6 +24529,14 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_time": {
                 "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                 "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -26276,6 +26301,14 @@
                       "null"
                     ]
                   },
+                  "check_in_end_time": {
+                    "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -26817,6 +26850,7 @@
                 "required": [
                   "location_id",
                   "check_in_time",
+                  "check_in_end_time",
                   "check_out_time",
                   "max_guests",
                   "min_nights",
@@ -45919,6 +45953,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -46665,6 +46706,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -52531,6 +52573,14 @@
                       "null"
                     ]
                   },
+                  "check_in_end_time": {
+                    "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -53072,6 +53122,7 @@
                 "required": [
                   "location_id",
                   "check_in_time",
+                  "check_in_end_time",
                   "check_out_time",
                   "max_guests",
                   "min_nights",
@@ -64039,6 +64090,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -64785,6 +64843,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -71663,6 +71722,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -72409,6 +72475,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -88195,6 +88262,14 @@
                         "null"
                       ]
                     },
+                    "check_in_end_time": {
+                      "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "check_in_time": {
                       "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                       "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -88736,6 +88811,7 @@
                   "required": [
                     "location_id",
                     "check_in_time",
+                    "check_in_end_time",
                     "check_out_time",
                     "max_guests",
                     "min_nights",
@@ -91725,6 +91801,14 @@
                       "null"
                     ]
                   },
+                  "check_in_end_time": {
+                    "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -92266,6 +92350,7 @@
                 "required": [
                   "location_id",
                   "check_in_time",
+                  "check_in_end_time",
                   "check_out_time",
                   "max_guests",
                   "min_nights",
@@ -93093,6 +93178,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -93839,6 +93931,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -106545,6 +106638,14 @@
                       "null"
                     ]
                   },
+                  "check_in_end_time": {
+                    "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -107086,6 +107187,7 @@
                 "required": [
                   "location_id",
                   "check_in_time",
+                  "check_in_end_time",
                   "check_out_time",
                   "max_guests",
                   "min_nights",
@@ -108745,6 +108847,14 @@
                       "null"
                     ]
                   },
+                  "check_in_end_time": {
+                    "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -109286,6 +109396,7 @@
                 "required": [
                   "location_id",
                   "check_in_time",
+                  "check_in_end_time",
                   "check_out_time",
                   "max_guests",
                   "min_nights",
@@ -110186,6 +110297,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -110932,6 +111050,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -120022,6 +120141,14 @@
                               "null"
                             ]
                           },
+                          "check_in_end_time": {
+                            "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                            "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "check_in_time": {
                             "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                             "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -120563,6 +120690,7 @@
                         "required": [
                           "location_id",
                           "check_in_time",
+                          "check_in_end_time",
                           "check_out_time",
                           "max_guests",
                           "min_nights",
@@ -123475,6 +123603,14 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_time": {
                 "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                 "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -125269,6 +125405,14 @@
                       "null"
                     ]
                   },
+                  "check_in_end_time": {
+                    "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "check_in_time": {
                     "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
                     "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
@@ -125810,6 +125954,7 @@
                 "required": [
                   "location_id",
                   "check_in_time",
+                  "check_in_end_time",
                   "check_out_time",
                   "max_guests",
                   "min_nights",
@@ -135071,6 +135216,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -135817,6 +135969,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -136573,6 +136726,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -137319,6 +137479,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -138298,6 +138459,13 @@
                   "null"
                 ]
               },
+              "check_in_end_time": {
+                "description": "The end of the check-in window, local HH:MM; null is a flexible end.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_instructions": {
                 "maxLength": 5000,
                 "minLength": 1,
@@ -139044,6 +139212,7 @@
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
+              "check_in_end_time",
               "check_out_time",
               "max_guests",
               "min_nights",
@@ -139601,18 +139770,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:41b29ae278e9c18a9ae5e57ab03dd152d89fd7bb1e8829218059b42099fa853f",
-        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
+        "create_product": "sha256:76acab81db84367a3b24535ea874c2f6616548d967dd4ce24cd2aca0598588bc",
+        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:813875041bb00763e75aa026a7dd1398cc767ad501dddb8ac6b13c8b193234e0",
+        "reconcile_products": "sha256:ff17ac2e2d9f915285393beb7f2e9064dc721d497e829c655f4e42531e7e7c9b",
         "reorder_collections": "sha256:76c649e913d6bda4e000b36748b4899a2aae89625a0c1c354b2d149998f9528a",
         "set_collection_products": "sha256:8c3df1adb1002b9c3177788b9de6f3cf14b4ed0be42a9ccad2a576e651848fe0",
-        "update_menu": "sha256:cb030295915c9e476e9628bff6ec5053391d87849f723e32e1c08219a3d054e0",
-        "update_product": "sha256:2e8f3eeadd94a2df523cbdf0e1c0ffa0310adce9e31ea1a17710fc5f72bed8ce"
+        "update_menu": "sha256:79bef9496304887ef8a666cf02473e7af7f22ebc8cd869335b5ca02208f29378",
+        "update_product": "sha256:24bc3f8c4c6f7d0459a3179e7fd0ae57e4c6ad37e2e105bf3d933ec95c99d28e"
       }
     },
     {
@@ -139657,8 +139826,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
-        "create_product": "sha256:41b29ae278e9c18a9ae5e57ab03dd152d89fd7bb1e8829218059b42099fa853f",
-        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
+        "create_product": "sha256:76acab81db84367a3b24535ea874c2f6616548d967dd4ce24cd2aca0598588bc",
+        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
@@ -139722,7 +139891,7 @@
         "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
+        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
@@ -139738,7 +139907,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:41b29ae278e9c18a9ae5e57ab03dd152d89fd7bb1e8829218059b42099fa853f",
+        "create_product": "sha256:76acab81db84367a3b24535ea874c2f6616548d967dd4ce24cd2aca0598588bc",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
@@ -139749,7 +139918,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
-        "update_menu": "sha256:cb030295915c9e476e9628bff6ec5053391d87849f723e32e1c08219a3d054e0",
+        "update_menu": "sha256:79bef9496304887ef8a666cf02473e7af7f22ebc8cd869335b5ca02208f29378",
         "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
         "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
@@ -139764,7 +139933,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
-        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
+        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -139772,7 +139941,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:c007ea9559df74ac50714b2adf181eb57053b53523366adb89d0df9fff291b3b",
-        "update_product": "sha256:2e8f3eeadd94a2df523cbdf0e1c0ffa0310adce9e31ea1a17710fc5f72bed8ce",
+        "update_product": "sha256:24bc3f8c4c6f7d0459a3179e7fd0ae57e4c6ad37e2e105bf3d933ec95c99d28e",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -139792,7 +139961,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
-        "update_product": "sha256:2e8f3eeadd94a2df523cbdf0e1c0ffa0310adce9e31ea1a17710fc5f72bed8ce",
+        "update_product": "sha256:24bc3f8c4c6f7d0459a3179e7fd0ae57e4c6ad37e2e105bf3d933ec95c99d28e",
         "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
@@ -139808,14 +139977,14 @@
         "create_post": "sha256:b92f874ccdfc79c9f47f353fec0f017f51fe58263b056a02aba6a71a737bf46e",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:9cefa0a9158269dbd5b5e5d1b69b2cad708446df5edfb4e8619dc02c0c2b72aa",
-        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
+        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:2e8f3eeadd94a2df523cbdf0e1c0ffa0310adce9e31ea1a17710fc5f72bed8ce"
+        "update_product": "sha256:24bc3f8c4c6f7d0459a3179e7fd0ae57e4c6ad37e2e105bf3d933ec95c99d28e"
       }
     }
   ],
@@ -139843,7 +140012,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
+        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
@@ -139851,7 +140020,7 @@
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:76c649e913d6bda4e000b36748b4899a2aae89625a0c1c354b2d149998f9528a",
         "set_collection_products": "sha256:8c3df1adb1002b9c3177788b9de6f3cf14b4ed0be42a9ccad2a576e651848fe0",
-        "update_menu": "sha256:cb030295915c9e476e9628bff6ec5053391d87849f723e32e1c08219a3d054e0"
+        "update_menu": "sha256:79bef9496304887ef8a666cf02473e7af7f22ebc8cd869335b5ca02208f29378"
       }
     },
     {

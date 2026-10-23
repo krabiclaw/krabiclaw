@@ -19,6 +19,9 @@
       <UFormField label="Check-in from" required>
         <UInput v-model="p.form.check_in_time" type="time" class="w-full" />
       </UFormField>
+      <UFormField label="Check-in until">
+        <StayCheckInEndSelect v-model="p.form.check_in_end_time" />
+      </UFormField>
       <UFormField label="Checkout by" required>
         <UInput v-model="p.form.check_out_time" type="time" class="w-full" />
       </UFormField>
@@ -34,6 +37,7 @@
 
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
+import StayCheckInEndSelect from '~/components/dashboard/StayCheckInEndSelect.vue'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!

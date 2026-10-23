@@ -7,7 +7,9 @@ import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { AirbnbConnection, type ImportContentReport } from '../../server/integrations/channex/airbnb-connection.ts'
 import { createStayHome, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
-import { deleteMediaAsset } from '../../server/utils/media-asset-manager.ts'
+import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
+import { getProduct } from '../../server/utils/product-management.ts'
+import importRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/listings/[listingId]/import.post.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import contentRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/content.post.ts'
 import listingsRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/listings.get.ts'
@@ -64,6 +66,15 @@ class FakeChannex {
   /** Extra uncaptioned photos after PHOTOS, for a listing with more photos than a home holds. */
   extraPhotos = 0
   photoFetches = 0
+  /** Every photo URL asked of Airbnb's image server. */
+  photoUrls: string[] = []
+  /** Airbnb's booking settings for the listing. */
+  booking: Record<string, unknown> = {
+    check_in_time_start: '16', check_in_time_end: '21', check_out_time: 10,
+    guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: true, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: 1 },
+  }
+  /** The room types Channex was asked to create. */
+  roomTypes: Array<Record<string, unknown>> = []
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
@@ -73,6 +84,7 @@ class FakeChannex {
     if (url.origin === CDN) {
       const id = url.pathname.slice('/photos/'.length).replace(/\.jpg$/, '')
       this.photoFetches += 1
+      this.photoUrls.push(url.toString())
       if (this.failPhoto === id) return new Response('upstream unavailable', { status: 503 })
       return new Response(PNG, { status: 200, headers: { 'content-type': 'image/png' } })
     }
@@ -104,15 +116,19 @@ class FakeChannex {
         rooms: [{ id: 'r1', listing_id: LISTING, room_type: 'bedroom', is_private: true, beds: [{ quantity: 1, type: 'queen_bed' }], accessibility_features: [] }, { id: 'r2', listing_id: LISTING, room_type: 'bedroom', is_private: true, beds: [{ quantity: 2, type: 'queen_bed' }], accessibility_features: [] }],
         bedrooms: 2, beds: 3, bathrooms: 1, house_manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi_network: '5 Star', wifi_password: 'open sesame',
         check_in_option: { category: 'smartlock', instruction: 'Door code 0126' },
+        quiet_hours: [{ start_time: '23', end_time: '7' }],
       } : { rooms: [] }
-      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
+      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: this.booking, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
     }
     if (method === 'GET' && path === '/channels/chan-1/action/get_listing_calendar') {
       const from = url.searchParams.get('date_from')!
       const days = Array.from({ length: 500 }, (_, i) => ({ date: addDays(from, i), availability: i === 3 ? 'unavailable' : 'available', daily_price: i === 0 ? 210 : 189.5, min_nights: 2, max_nights: 30, closed_to_arrival: false, closed_to_departure: i === 5 }))
       return json({ data: { calendar: { listing_id: LISTING, start_date: from, end_date: url.searchParams.get('date_to'), days } } })
     }
-    if (method === 'POST' && path === '/room_types') return resource('room_type')
+    if (method === 'POST' && path === '/room_types') {
+      this.roomTypes.push((JSON.parse(String(init.body)) as { room_type: Record<string, unknown> }).room_type)
+      return resource('room_type')
+    }
     if (method === 'POST' && path === '/rate_plans') return resource('rate_plan')
     if (method === 'POST' && path === '/restrictions') {
       for (const value of body!.values) this.restrictions[value.date] = { rate: value.rate, min_stay_arrival: value.min_stay_arrival, max_stay: value.max_stay, closed_to_arrival: value.closed_to_arrival, closed_to_departure: value.closed_to_departure, stop_sell: value.stop_sell, rate_plan_id: value.rate_plan_id }
@@ -180,7 +196,7 @@ async function connected(db: D1Database, env: CloudflareEnv, channex: FakeChanne
   return connection
 }
 
-const form = { missingDetails: { email: 'Stay@Example.test', phone: '+1 435 555 0100', childBeds: '1', infantCots: '0' }, checkInTime: '15:00', checkOutTime: '11:00' }
+const form = { missingDetails: { email: 'Stay@Example.test', phone: '+1 435 555 0100' } }
 const manager = { organizationId: ORG, actorId: OWNER, manage: true } as const
 
 async function importAll(connection: AirbnbConnection, db: D1Database, channex: FakeChannex, productId: string): Promise<void> {
@@ -202,8 +218,9 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     const connection = await connected(db, env, channex)
     const details = await connection.details(LISTING)
     // The organization has no contact details yet, so the import asks for them once.
-    assert.deepEqual(details.missingFields, ['email', 'phone', 'childBeds', 'infantCots'])
-    assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.checkInTime, checkOut: details.checkOutTime }, { timezone: TZ, checkIn: '16:00', checkOut: '10:00' })
+    // Children and infants are not asked: Airbnb counts neither.
+    assert.deepEqual(details.missingFields, ['email', 'phone'])
+    assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.checkInTime, checkInEnd: details.checkInEndTime, checkOut: details.checkOutTime }, { timezone: TZ, checkIn: '16:00', checkInEnd: '21:00', checkOut: '10:00' })
 
     const started = await connection.prepare(LISTING, form)
     assert.equal(started.stage, 'property')
@@ -211,13 +228,14 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.deepEqual(await connection.prepare(LISTING, form), started)
     // What the host typed is now the organization's contact, so the next listing will not ask.
     assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0100' })
-    assert.deepEqual((await connection.details(LISTING)).missingFields, ['childBeds', 'infantCots'])
+    assert.deepEqual((await connection.details(LISTING)).missingFields, [])
     const productId = started.product_id
 
-    const home = await db.prepare(`SELECT p.kind, p.name, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
+    const home = await db.prepare(`SELECT p.kind, p.name, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, l.title AS location, l.timezone, l.email, pr.unit_amount, pr.currency
       FROM products p JOIN product_stay_configs c ON c.product_id = p.id JOIN business_locations l ON l.id = c.location_id
       JOIN product_variants v ON v.product_id = p.id JOIN prices pr ON pr.product_variant_id = v.id WHERE p.id = ?`).bind(productId).first()
-    assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, location: 'Cliff Cabin', timezone: TZ, email: 'Stay@Example.test', unit_amount: 18_950, currency: 'USD' })
+    // Check-in and checkout are Airbnb's window, not anything the client sent.
+    assert.deepEqual(home, { kind: 'stay', name: 'Cliff Cabin', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, location: 'Cliff Cabin', timezone: TZ, email: 'Stay@Example.test', unit_amount: 18_950, currency: 'USD' })
     const nights = await db.prepare("SELECT COUNT(*) AS total, SUM(closed) AS closed, SUM(closed_to_departure) AS ctd, MAX(price_minor) AS top FROM product_nights WHERE product_id = ? AND source = 'import'").bind(productId).first()
     assert.deepEqual(nights, { total: 500, closed: 1, ctd: 1, top: 21_000 })
     const first = await db.prepare('SELECT date, price_minor, max_stay FROM product_nights WHERE product_id = ? ORDER BY date LIMIT 1').bind(productId).first()
@@ -233,7 +251,8 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       if (result.stage === 'content') {
         // A photo Airbnb cannot serve stops the stage naming the image; the retry keeps the photo already stored.
         channex.failPhoto = PHOTOS[1]!.id
-        await assert.rejects(connection.advance(productId), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 502 && error.data?.code === 'PHOTO_FETCH_FAILED' && error.data.image_id === PHOTOS[1]!.id)
+        await assert.rejects(connection.advance(productId), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 502 && error.data?.code === 'PHOTO_FETCH_FAILED'
+          && error.data.image_id === PHOTOS[1]!.id && error.data.url === `${CDN}/photos/${PHOTOS[1]!.id}.jpg?im_w=2560`)
         assert.deepEqual(await db.prepare('SELECT import_stage, import_content FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'content', import_content: null })
         assert.equal((await readStayHome(db, manager, productId)).photos.length, 0)
         channex.failPhoto = null
@@ -241,7 +260,7 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       if (result.stage === 'messages') {
         const report = result.content!
         assert.deepEqual(report, {
-          photos_imported: [PHOTOS[1]!.id, PHOTOS[2]!.id], photos_skipped: [PHOTOS[0]!.id], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'],
+          photos_imported: [PHOTOS[1]!.id, PHOTOS[2]!.id], photos_skipped: [PHOTOS[0]!.id], photos_upgraded: [], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'],
           unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2,
         } satisfies ImportContentReport)
         channex.failMessages = true
@@ -258,10 +277,23 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       { kind: 'image', alt_text: 'The deck at sunset', position: 0, hosted: true }, { kind: 'image', alt_text: null, position: 1, hosted: true }, { kind: 'image', alt_text: 'Bedroom one', position: 2, hosted: true },
     ])
     assert.deepEqual(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND source = 'external' AND provider = 'cloudflare_r2' AND status = 'active'").bind(ORG).first(), { n: 3 })
-    assert.equal(filled.description, 'A cabin on the cliff.\n\nTwo bedrooms and a deck.\n\nQuiet, ten minutes from town.\n\nNo smoking inside.')
+    // Every photo is asked for at 2560 px, never at a rendition Channex names, and its size is recorded.
+    assert.ok(channex.photoUrls.length && channex.photoUrls.every(url => url.endsWith('.jpg?im_w=2560')))
+    assert.deepEqual(await Promise.all(filled.photos.map(async photo => (await getMediaAsset(db, photo.id, ORG))!.width)), [1, 1, 1])
+    // One to one: Airbnb's Listing description is the description; its other texts are the sections of the same names. Its concatenation is not used.
+    assert.equal(filled.description, 'A cabin on the cliff.')
+    const product = await getProduct(db, ORG, productId)
+    assert.deepEqual(Object.fromEntries(Object.entries(product.details).filter(([key]) => key !== 'featured')), {
+      your_property: 'Two bedrooms and a deck.', guest_access: 'The whole cabin is yours.', interaction_with_guests: 'We live next door.', other_details_to_note: 'No parties.',
+      neighborhood_description: 'Quiet, ten minutes from town.', getting_around: 'Bus 4 stops outside.', house_rules: 'No smoking inside.',
+      pets_allowed: true, events_allowed: false, smoking_allowed: false, quiet_hours: true, quiet_hours_start: '23:00', quiet_hours_end: '07:00',
+    })
+    assert.deepEqual({ start: filled.check_in_time, end: filled.check_in_end_time, checkout: filled.check_out_time }, { start: '16:00', end: '21:00', checkout: '10:00' })
+    // Channex's child-only beds and infant cots are 0: Airbnb counts neither.
+    assert.deepEqual(channex.roomTypes.map(room => [room.occ_adults, room.occ_children, room.occ_infants]), [[4, 0, 0]])
     assert.deepEqual({ bedrooms: filled.bedrooms, beds: filled.beds, bathrooms: filled.bathrooms, amenities: filled.amenities }, { bedrooms: 2, beds: 3, bathrooms: 1, amenities: ['wireless_internet', 'smoke_detector', 'mountain_view'] })
     assert.deepEqual({ method: filled.check_in_method, check_in: filled.check_in_instructions, manual: filled.house_manual, directions: filled.directions, wifi: filled.wifi_network, password: filled.wifi_password, rooms: filled.photo_rooms }, {
-      method: 'smart_lock', check_in: 'Door code 0126\n\nThe whole cabin is yours.\n\nWe live next door.', manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi: '5 Star', password: 'open sesame', rooms: [],
+      method: 'smart_lock', check_in: 'Door code 0126', manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi: '5 Star', password: 'open sesame', rooms: [],
     })
     assert.equal(channex.seen.filter(request => request.path === '/channels/chan-1/execute/load_future_reservations').length, 1)
     const mapping = await db.prepare('SELECT property_id, room_type_id, rate_plan_id, enabled, import_property, import_calendar, import_content FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<Record<string, unknown>>()
@@ -332,12 +364,15 @@ test('the backfill route fills a home imported without content and the listings 
     const filled = await call('POST', `/imports/${productId}/content`)
     assert.equal(filled.status, 200)
     assert.deepEqual(filled.body, { product_id: productId, stage: 'complete', content: {
-      photos_imported: PHOTOS.map(photo => photo.id), photos_skipped: [], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2,
+      photos_imported: PHOTOS.map(photo => photo.id), photos_skipped: [], photos_upgraded: [], photos_removed: [], photos_unplaced: [], unmatched_amenities: ['HOVERBOARD_DOCK'], unmapped_check_in_category: null, truncated_fields: [], photo_rooms_skipped: 2,
     } satisfies ImportContentReport })
     const after = await readStayHome(db, manager, productId)
     assert.deepEqual({ captions: after.photos.map(photo => photo.alt_text), bedrooms: after.bedrooms, beds: after.beds, bathrooms: after.bathrooms, amenities: after.amenities, method: after.check_in_method, manual: after.house_manual },
       { captions: ['The deck at sunset', null, 'Bedroom one'], bedrooms: 2, beds: 3, bathrooms: 1, amenities: ['wireless_internet', 'smoke_detector', 'mountain_view'], method: 'smart_lock', manual: 'Unit 63A. Shoes off, please.' })
-    assert.equal(after.description, 'A cabin on the cliff.\n\nTwo bedrooms and a deck.\n\nQuiet, ten minutes from town.\n\nNo smoking inside.')
+    assert.equal(after.description, 'A cabin on the cliff.')
+    // The check-in window is Airbnb's on a home imported before it was read.
+    assert.deepEqual([after.check_in_time, after.check_in_end_time, after.check_out_time], ['16:00', '21:00', '10:00'])
+    assert.deepEqual([(await getProduct(db, ORG, productId)).details.guest_access, (await getProduct(db, ORG, productId)).details.quiet_hours_start], ['The whole cabin is yours.', '23:00'])
     // Run again: every photo is already stored, nothing is stored twice, and the listings carry the report.
     const again = await call('POST', `/imports/${productId}/content`)
     assert.deepEqual((again.body.content as ImportContentReport).photos_skipped, PHOTOS.map(photo => photo.id))
@@ -345,6 +380,25 @@ test('the backfill route fills a home imported without content and the listings 
     assert.deepEqual(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first(), { n: 3 })
     const listedAfter = await call('GET', '/listings')
     assert.deepEqual(((listedAfter.body.listings as Array<{ import: { content: ImportContentReport } }>)[0]!.import.content).photos_skipped, PHOTOS.map(photo => photo.id))
+    // Photos an earlier import stored at 450 px record no size: the backfill fetches each again at 2560 px into the same
+    // photo, so its place, its asset id and its caption stay, and only its file and size change.
+    const legacy = await readStayHome(db, manager, productId)
+    await db.prepare("UPDATE media_assets SET width = NULL, height = NULL, alt_text = CASE WHEN id = ? THEN 'Host words' ELSE alt_text END WHERE organization_id = ?").bind(legacy.photos[2]!.id, ORG).run()
+    const filesBefore = await Promise.all(legacy.photos.map(async photo => (await getMediaAsset(db, photo.id, ORG))!.r2_key))
+    channex.failPhoto = PHOTOS[1]!.id
+    const refused = await call('POST', `/imports/${productId}/content`)
+    assert.deepEqual({ status: refused.status, code: (refused.body.data as Record<string, unknown>).code, image: (refused.body.data as Record<string, unknown>).image_id, url: (refused.body.data as Record<string, unknown>).url },
+      { status: 502, code: 'PHOTO_FETCH_FAILED', image: PHOTOS[1]!.id, url: `${CDN}/photos/${PHOTOS[1]!.id}.jpg?im_w=2560` })
+    channex.failPhoto = null
+    const upgraded = await call('POST', `/imports/${productId}/content`)
+    assert.deepEqual({ upgraded: (upgraded.body.content as ImportContentReport).photos_upgraded, skipped: (upgraded.body.content as ImportContentReport).photos_skipped }, { upgraded: [PHOTOS[1]!.id, PHOTOS[2]!.id], skipped: [PHOTOS[0]!.id] })
+    const afterUpgrade = await readStayHome(db, manager, productId)
+    assert.deepEqual(afterUpgrade.photos.map(photo => [photo.id, photo.alt_text]), legacy.photos.map((photo, index) => [photo.id, index === 2 ? 'Host words' : photo.alt_text]))
+    const assetsAfter = await Promise.all(afterUpgrade.photos.map(photo => getMediaAsset(db, photo.id, ORG)))
+    assert.deepEqual(assetsAfter.map(asset => asset!.width), [1, 1, 1])
+    assert.deepEqual(assetsAfter.map((asset, index) => asset!.r2_key !== filesBefore[index]), [true, true, true])
+    assert.equal(await env.MEDIA_BUCKET!.get(filesBefore[1]!), null)
+    await db.prepare("UPDATE media_assets SET alt_text = 'Bedroom one' WHERE id = ?").bind(legacy.photos[2]!.id).run()
     // A caption write that did not land is resumed; a caption the host edited is kept.
     await db.prepare('UPDATE media_assets SET alt_text = NULL WHERE id = ?').bind(after.photos[0]!.id).run()
     await db.prepare("UPDATE media_assets SET alt_text = 'Our bedroom' WHERE id = ?").bind(after.photos[2]!.id).run()
@@ -390,7 +444,7 @@ test('a third home on Basic is refused as a home, nothing is saved, and the same
     await assert.rejects(connection.prepare(LISTING, form), { status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } } })
     assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [2, 2, 0])
     assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: null, contact_phone: null })
-    assert.deepEqual((await connection.details(LISTING)).missingFields, ['email', 'phone', 'childBeds', 'infantCots'])
+    assert.deepEqual((await connection.details(LISTING)).missingFields, ['email', 'phone'])
     // On Growth the same form, with the same details, imports; the contact is kept once the home is made.
     // A phone set in Brand › Contact meanwhile is no longer missing: the form no longer carries it, and the import keeps it.
     await db.prepare("UPDATE organization SET contact_phone = '+1 435 555 0199' WHERE id = ?").bind(ORG).run()
@@ -400,6 +454,52 @@ test('a third home on Basic is refused as a home, nothing is saved, and the same
     assert.equal(started.stage, 'property')
     assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [3, 3, 1])
     assert.deepEqual(await db.prepare('SELECT contact_email, contact_phone FROM organization WHERE id = ?').bind(ORG).first(), { contact_email: 'stay@example.test', contact_phone: '+1 435 555 0199' })
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('the import asks only for what Airbnb leaves out, takes the installed app\'s former fields without using them, and stops when Airbnb has no check-in start or checkout', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const app = new H3()
+    app.post('/api/organizations/:organizationId/integrations/airbnb/listings/:listingId/import', importRoute)
+    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: PASSWORD }, asResponse: true })
+    const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const start = async (body: Record<string, unknown>) => {
+      const response = await app.request(Object.assign(new Request(`${BASE}/api/organizations/${ORG}/integrations/airbnb/listings/${LISTING}/import`, {
+        method: 'POST', headers: { cookie, origin: BASE, 'content-type': 'application/json' }, body: JSON.stringify(body),
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      return { status: response.status, body: await response.json() as Record<string, unknown> }
+    }
+    // Any key the import does not know is refused; the installed app's former fields are not, as the next steps show.
+    assert.deepEqual(await start({ ...form, sleeps: 4 }), { status: 400, body: { error: 'sleeps is not accepted', code: 'VALIDATION_ERROR', field: 'sleeps' } })
+    // "FLEXIBLE" or "NOT_SELECTED" is no start: the import stops naming Airbnb's field, and nothing is made.
+    // Even with the app's own times in the request: the window is Airbnb's.
+    for (const [setting, field] of [[{ check_in_time_start: 'NOT_SELECTED' }, 'booking_settings.check_in_time_start'], [{ check_out_time: null }, 'booking_settings.check_out_time']] as const) {
+      channex.booking = { ...channex.booking, check_in_time_start: '16', check_out_time: 10, ...setting }
+      const refused = await start({ ...form, checkInTime: '15:00', checkOutTime: '11:00' })
+      assert.deepEqual({ status: refused.status, data: refused.body.data }, { status: 422, data: { code: 'MISSING_AIRBNB_FIELD', field } })
+      assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [0, 0, 0])
+    }
+    // A flexible end is a home whose check-in window has no end; an hour after midnight is that hour.
+    channex.booking = { ...channex.booking, check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 }
+    assert.equal((await connection.details(LISTING)).checkInEndTime, null)
+    channex.booking = { ...channex.booking, check_in_time_end: '25' }
+    assert.equal((await connection.details(LISTING)).checkInEndTime, '01:00')
+    // The installed app (build 10) still sends its own times and asks for child beds and infant cots:
+    // the request is taken, those four are discarded, and the home has Airbnb's window.
+    const started = await start({ missingDetails: { ...form.missingDetails, childBeds: '1', infantCots: '2' }, checkInTime: '15:00', checkOutTime: '11:00' })
+    assert.equal(started.status, 202)
+    assert.deepEqual(await db.prepare('SELECT check_in_time, check_in_end_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(started.body.product_id).first(), { check_in_time: '16:00', check_in_end_time: '01:00', check_out_time: '10:00' })
+    assert.deepEqual(channex.roomTypes, [])
+    const property = JSON.parse(String(await db.prepare('SELECT import_property FROM product_channel_mappings WHERE product_id = ?').bind(started.body.product_id).first('import_property'))) as Record<string, unknown>
+    assert.deepEqual(['child_beds', 'infant_cots'].filter(key => key in property), [])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

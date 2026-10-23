@@ -513,6 +513,7 @@
   "stay.max_guests": "この宿泊施設の定員は乳幼児を除き最大{count}名です。",
   "stay.min_nights": "最低{count}泊",
   "stay.check_in_after": "チェックイン {time} 以降",
+  "stay.check_in_window": "チェックイン {start}〜{end}",
   "stay.check_out_before": "チェックアウト {time} まで",
   "stay.nights_in": "{place}で{nights}",
   "stay.select_check_in": "チェックイン日を選択",

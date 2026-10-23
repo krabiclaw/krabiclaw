@@ -58,7 +58,7 @@
     >
       <template v-if="summaryCards" #summary="{ item }">
         <span v-if="arrivalTab && item.id === 'arrival-time'" class="grid grid-cols-2 gap-4 text-base">
-          <span class="block border-r border-default pr-4"><span class="block font-medium text-highlighted">Check-in</span><span class="mt-1 block">{{ product?.stay?.check_in_time }}</span></span>
+          <span class="block border-r border-default pr-4"><span class="block font-medium text-highlighted">Check-in</span><span class="mt-1 block">{{ product?.stay ? stayCheckInWindow(product.stay.check_in_time, product.stay.check_in_end_time) : '' }}</span></span>
           <span class="block"><span class="block font-medium text-highlighted">Checkout</span><span class="mt-1 block">{{ product?.stay?.check_out_time }}</span></span>
         </span>
         <span v-else-if="item.id === 'name'" class="block text-xl font-medium leading-snug text-highlighted">{{ item.summary }}</span>
@@ -205,6 +205,8 @@ export interface ProductForm {
   /** A place to stay's one location, fixed once it is created, and its stay settings. */
   stay_location_id: string
   check_in_time: string
+  /** The end of the check-in window; empty is a flexible end. */
+  check_in_end_time: string
   check_out_time: string
   max_guests: string
   min_nights: string
@@ -337,7 +339,7 @@ import { useHomesQuote } from '~/composables/usePaymentsSettings'
 import { formatPostalAddress } from '~/utils/postal-address'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { ApiClientError } from '~/utils/api-clients'
-import { isStayArrivalGuide } from '~/shared/stay-arrival'
+import { isStayArrivalGuide, stayCheckInWindow } from '~/shared/stay-arrival'
 import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
@@ -772,7 +774,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
-  stay_location_id: '', check_in_time: '15:00', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: null, stay_member_id: null,
+  stay_location_id: '', check_in_time: '15:00', check_in_end_time: '', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: null, stay_member_id: null,
   stay_property_type_group: null, stay_property_type: null,
   stay_listing_type: null, stay_total_floors: '', stay_listing_floor: '', stay_year_built: '', stay_property_size: '', stay_property_size_unit: null,
   stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
@@ -863,6 +865,7 @@ function loadForm(row: Product) {
   form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
   form.check_in_time = stay ? stay.check_in_time : ''
+  form.check_in_end_time = stay?.check_in_end_time ?? ''
   form.check_out_time = stay ? stay.check_out_time : ''
   form.max_guests = stay ? String(stay.max_guests) : ''
   form.min_nights = stay ? String(stay.min_nights) : ''
@@ -993,7 +996,7 @@ const sectionValid = computed(() => {
   if (editorKey.value === 'stay') return !stayIncomplete()
   if (editorKey.value === 'guests') return Number.isInteger(Number(form.max_guests)) && Number(form.max_guests) >= 1 && Number(form.max_guests) <= 99
   if (editorKey.value === 'availability') return Number.isInteger(Number(form.min_nights)) && Number(form.min_nights) >= 1 && Number(form.min_nights) <= 365
-  if (editorKey.value === 'arrival-time') return MINUTE_TIME_PATTERN.test(form.check_in_time) && MINUTE_TIME_PATTERN.test(form.check_out_time)
+  if (editorKey.value === 'arrival-time') return checkInWindowValid()
   if (editorKey.value === 'property-type') {
     return !Object.keys(propertyTypeErrors.value).length
   }
@@ -1020,13 +1023,18 @@ const sectionValid = computed(() => {
 function stayIncomplete(): boolean {
   const guests = Number(form.max_guests)
   const nights = Number(form.min_nights)
-  return !form.stay_location_id || !MINUTE_TIME_PATTERN.test(form.check_in_time) || !MINUTE_TIME_PATTERN.test(form.check_out_time)
+  return !form.stay_location_id || !checkInWindowValid()
     || !Number.isInteger(guests) || guests < 1 || guests > 99 || !Number.isInteger(nights) || nights < 1 || nights > 365
+}
+/** Start and checkout are times; the end is a time other than the start, or empty for a flexible end. */
+function checkInWindowValid(): boolean {
+  return MINUTE_TIME_PATTERN.test(form.check_in_time) && MINUTE_TIME_PATTERN.test(form.check_out_time)
+    && (form.check_in_end_time === '' || (MINUTE_TIME_PATTERN.test(form.check_in_end_time) && form.check_in_end_time !== form.check_in_time))
 }
 function staySummary(): string {
   const place = organizationLocations.value.find(entry => entry.id === form.stay_location_id)?.title
   if (!place) return 'Choose where it is'
-  return `${place} · Check-in ${form.check_in_time}, checkout ${form.check_out_time} · Sleeps ${form.max_guests}`
+  return `${place} · Check-in ${stayCheckInWindow(form.check_in_time, form.check_in_end_time || null)}, checkout ${form.check_out_time} · Sleeps ${form.max_guests}`
 }
 function stayTeamSummary(): string {
   if (schedulingMembersError.value) return 'Teams could not be loaded'
@@ -1229,7 +1237,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     const home = arrivalHome.value
     if (!home || arrivalError.value) return []
     return [{ id: 'arrival', items: [
-      { id: 'arrival-time', label: '', summary: `${product.value.stay!.check_in_time} · ${product.value.stay!.check_out_time}`, to: sectionPath('arrival-time') },
+      { id: 'arrival-time', label: '', summary: `${stayCheckInWindow(product.value.stay!.check_in_time, product.value.stay!.check_in_end_time)} · ${product.value.stay!.check_out_time}`, to: sectionPath('arrival-time') },
       { id: 'directions', label: 'Directions', summary: home.directions || 'Add details', placeholder: !home.directions, to: sectionPath('directions') },
       { id: 'check-in-method', label: 'Check-in method', summary: home.check_in_method ? STAY_CHECK_IN_METHODS[home.check_in_method].label : 'Add details', placeholder: !home.check_in_method, to: sectionPath('check-in-method') },
       { id: 'wifi', label: 'Wifi details', summary: home.wifi_network || 'Add details', placeholder: !home.wifi_network, to: sectionPath('wifi') },
@@ -1496,7 +1504,7 @@ function payload(concern?: ProductConcern) {
   }
   if (concern === 'arrival-time') {
     if (!product.value?.stay) throw new Error('Arrival times require a place to stay.')
-    return { stay: { check_in_time: form.check_in_time, check_out_time: form.check_out_time } }
+    return { stay: { check_in_time: form.check_in_time, check_in_end_time: form.check_in_end_time || null, check_out_time: form.check_out_time } }
   }
   if (concern === 'house-rules' || concern === 'additional-rules') {
     const stay = product.value?.stay
@@ -1551,6 +1559,7 @@ function payload(concern?: ProductConcern) {
     ...(form.kind === 'stay' && isNew.value ? { stay: {
       location_id: form.stay_location_id,
       check_in_time: form.check_in_time,
+      check_in_end_time: form.check_in_end_time || null,
       check_out_time: form.check_out_time,
       max_guests: Number(form.max_guests),
       min_nights: Number(form.min_nights),
@@ -1644,7 +1653,7 @@ async function commit(concern?: ProductConcern) {
     stay_property_size: form.stay_property_size,
     stay_property_size_unit: form.stay_property_size_unit,
   } : null
-  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_out_time: form.check_out_time } : null
+  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_in_end_time: form.check_in_end_time, check_out_time: form.check_out_time } : null
   const safetyDraft = isSafetyConcern(concern) ? { keys: staySafetySectionKeys(concern), details: { ...form.details }, answers: form.stay_amenity_answers.map(answer => ({ ...answer })) } : null
   const locationDetailKey = editorKey.value === 'location' ? STAY_LOCATION_DETAIL_KEYS.find(key => key === route.params.field) : undefined
   const locationDraft = locationDetailKey ? { key: locationDetailKey, value: form.details[locationDetailKey] } : null
@@ -1853,6 +1862,7 @@ function revert(concern?: 'additional-rules' | 'arrival-time' | StaySafetySectio
   }
   if (concern === 'arrival-time') {
     form.check_in_time = product.value?.stay?.check_in_time ?? ''
+    form.check_in_end_time = product.value?.stay?.check_in_end_time ?? ''
     form.check_out_time = product.value?.stay?.check_out_time ?? ''
     return
   }

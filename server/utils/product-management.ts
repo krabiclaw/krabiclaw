@@ -265,7 +265,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type_group, property_type,
+    { query: `SELECT product_id, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, property_type_group, property_type,
         listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit, bedrooms, beds, bathrooms, amenities,
         cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id FROM product_stay_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
@@ -286,7 +286,8 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     if (product) product.stay = {
       photo_rooms: photoRooms.get(product.id) ?? [],
       accessibility: accessibility.get(product.id)!,
-      location_id: String(row.location_id), check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time),
+      location_id: String(row.location_id), check_in_time: String(row.check_in_time),
+      check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: String(row.check_out_time),
       max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
@@ -772,6 +773,9 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   for (const field of ['check_in_time', 'check_out_time'] as const) {
     if (typeof stay[field] !== 'string' || !STAY_TIME.test(stay[field] as string)) invalid(`stay.${field} must be a 24-hour HH:MM time`)
   }
+  const checkInEnd = stay.check_in_end_time ?? null
+  if (checkInEnd !== null && (typeof checkInEnd !== 'string' || !STAY_TIME.test(checkInEnd))) invalidStayField('check_in_end_time', 'stay.check_in_end_time must be a 24-hour HH:MM time, or null for a flexible end')
+  if (checkInEnd === stay.check_in_time) invalidStayField('check_in_end_time', 'stay.check_in_end_time must differ from stay.check_in_time')
   const maxGuests = stay.max_guests
   if (typeof maxGuests !== 'number' || !Number.isInteger(maxGuests) || maxGuests < 1 || maxGuests > 99) invalid('stay.max_guests must be a whole number from 1 to 99')
   const minNights = stay.min_nights ?? 1
@@ -782,7 +786,7 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   const assignedTeamId = stay.assigned_team_id ?? null
   if (assignedMemberId !== null && (typeof assignedMemberId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM member WHERE organizationId = ? AND id = ?', [organizationId, assignedMemberId]))) notFound('stay.assigned_member_id is not a member of this organization')
   if (assignedTeamId !== null && (typeof assignedTeamId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM team WHERE organizationId = ? AND id = ?', [organizationId, assignedTeamId]))) notFound('stay.assigned_team_id is not a team of this organization')
-  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights,
+  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights,
     ...planStayListing(stay), assigned_member_id: assignedMemberId as string | null, assigned_team_id: assignedTeamId as string | null }
 }
 
@@ -1129,7 +1133,7 @@ function productWrites(
   // unrelated save never restates settings someone else changed.
   if (planned.stay && (options.stayFields === undefined || options.stayFields.length)) {
     const columns = [
-      'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'property_type_group', 'property_type',
+      'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'property_type_group', 'property_type',
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
       'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
@@ -1144,13 +1148,13 @@ function productWrites(
                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
-      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights,
+      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights,
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
                  bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
-      params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_out_time,
+      params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
         planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type,
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
