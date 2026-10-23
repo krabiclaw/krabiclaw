@@ -35,16 +35,16 @@
       :content="false"
       color="neutral"
       variant="pill"
-      class="mx-auto mb-10 w-full max-w-82"
+      class="mb-10 w-full"
       :ui="{ list: 'rounded-full bg-muted', trigger: 'rounded-full data-[state=active]:text-highlighted', indicator: 'rounded-full bg-default shadow-sm' }"
       aria-label="Listing editor sections"
       @update:model-value="changeStayTab"
     />
     <UAlert v-if="arrivalTab && arrivalError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Arrival guide could not be loaded" :description="arrivalError" />
-    <p v-if="arrivalTab && !arrivalHome && !arrivalError" role="status" class="mx-auto w-full max-w-82 text-base text-muted">Loading arrival guide…</p>
+    <p v-if="arrivalTab && !arrivalHome && !arrivalError" role="status" class="w-full text-base text-muted">Loading arrival guide…</p>
     <!-- What this home costs on the plan, from the quote the write is decided by: included, billed, or past what Basic includes. -->
-    <UAlert v-if="homeQuoteError" class="mx-auto mb-6 w-full max-w-82" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homeQuoteError, 'The plan could not be read')" />
-    <p v-else-if="homeBilling" data-testid="home-billing-line" class="mx-auto mb-6 w-full max-w-82 text-sm text-muted">
+    <UAlert v-if="homeQuoteError" class="mb-6 w-full" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(homeQuoteError, 'The plan could not be read')" />
+    <p v-else-if="homeBilling" data-testid="home-billing-line" class="mb-6 w-full text-sm text-muted">
       {{ homeBilling.text }}
       <NuxtLink v-if="homeBilling.billing" :to="homeBilling.billing" class="font-medium text-highlighted underline">Plan and billing</NuxtLink>
     </p>
@@ -53,7 +53,7 @@
       :groups="navigationGroups"
       :active-item="activeNavigationItem"
       :variant="summaryCards ? 'cards' : 'rows'"
-      :class="summaryCards ? 'mx-auto w-full max-w-82 pb-24' : undefined"
+      :class="summaryCards ? 'w-full pb-24' : undefined"
       :data-testid="stayEditor ? 'stay-editor-cards' : dishEditor ? 'dish-editor-cards' : experienceEditor ? 'experience-editor-cards' : legalEditor ? 'legal-editor-cards' : undefined"
     >
       <template v-if="summaryCards" #summary="{ item }">

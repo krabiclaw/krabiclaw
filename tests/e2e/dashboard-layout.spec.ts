@@ -732,7 +732,7 @@ test.describe('dashboard pane hierarchy', () => {
       const calendar = page.locator('#dashboard-panel-org-calendar')
       const locationFilter = calendar.getByRole('combobox', { name: 'Location', exact: true })
       await expect(calendar.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(product.name)
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${product.name}`)
       await expect(locationFilter).toContainText('All locations')
       const unscopedAdd = calendar.getByRole('link', { name: 'Add availability', exact: true })
       const unscopedAddHref = new URL((await unscopedAdd.getAttribute('href'))!, baseURL)
@@ -806,7 +806,7 @@ test.describe('dashboard pane hierarchy', () => {
       await waitForNuxtHydration(page)
       expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: nextMonth, locationId: location!.id })
       await expect(calendar.locator(`time[datetime="${nextMonth}"]`)).toHaveText(nextMonthLabel)
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(product.name)
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${product.name}`)
       await expect(locationFilter).toContainText(location!.title)
       const calendarTimeZone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
       const currentCalendarMonth = localNow(calendarTimeZone).date.slice(0, 7)
@@ -863,8 +863,8 @@ test.describe('dashboard pane hierarchy', () => {
       const beforeOfferingChange = new URL(page.url()).searchParams
       expect(Object.fromEntries(beforeOfferingChange)).toEqual({ product_id: productId, locationId: location!.id, date: sessionDay, ...returnedMonthQuery, view: 'list' })
       const otherSessionsRead = page.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${otherOffering!.id}/sessions` && response.request().method() === 'GET')
-      await calendar.getByRole('combobox', { name: 'Offering', exact: true }).click()
-      await page.getByRole('option', { name: otherOffering!.name, exact: true }).click()
+      await calendar.getByRole('combobox', { name: 'Calendar', exact: true }).click()
+      await page.getByRole('option', { name: `Availability: ${otherOffering!.name}${otherOffering!.active ? '' : ' · Paused'}`, exact: true }).click()
       const otherSessionsResponse = await otherSessionsRead
       expect(otherSessionsResponse.status(), await otherSessionsResponse.text()).toBe(200)
       await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === otherOffering!.id)
@@ -873,7 +873,7 @@ test.describe('dashboard pane hierarchy', () => {
         ...(beforeOfferingChange.has('month') ? { month: beforeOfferingChange.get('month') } : {}),
         ...(beforeOfferingChange.has('view') ? { view: beforeOfferingChange.get('view') } : {}),
       })
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(otherOffering!.name)
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${otherOffering!.name}${otherOffering!.active ? '' : ' · Paused'}`)
       await expect(locationFilter).toContainText('All locations')
       await expect(calendar.getByRole('button', { name: 'View: List', exact: true })).toBeVisible()
     } finally {
@@ -1119,7 +1119,7 @@ test.describe('dashboard pane hierarchy', () => {
       const calendarMonth = calendarDay.slice(0, 7)
       await open(memberPage, `/dashboard/${org}/calendar?product_id=${productId}&month=${calendarMonth}`)
       const calendar = memberPage.locator('#dashboard-panel-org-calendar')
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(editedName)
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${editedName}`)
       await expect(calendar.getByRole('link', { name: 'Add availability', exact: true })).toBeVisible()
       // A month cell shows two times; the next future time can be its third.
       await calendar.locator(`[data-day="${calendarDay}"]`).getByRole('link').first().click()

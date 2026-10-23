@@ -77,8 +77,8 @@ const scopeError = computed(() => {
 const stayScope = computed(() => Boolean(knownHome.value || scoped.value?.product.kind === 'stay'))
 const offeringItems = computed(() => [
   { label: 'All bookings', value: AGENDA_FILTER_ALL },
-  ...(homes.value?.homes ?? []).map(home => ({ label: home.name, value: home.product_id })),
-  ...(products.value?.products ?? []).filter(product => ['experience', 'service'].includes(product.kind) && product.booking).map(product => ({ label: product.name, value: product.id })),
+  ...(homes.value?.homes ?? []).map(home => ({ label: `Availability: ${home.name}`, value: home.product_id })),
+  ...(products.value?.products ?? []).filter(product => ['experience', 'service'].includes(product.kind) && product.booking).map(product => ({ label: `Availability: ${product.name}${product.active ? '' : ' · Paused'}`, value: product.id })),
 ])
 const offeringsError = computed(() => homesError.value ? getErrorMessage(homesError.value, 'The places to stay could not be loaded') : productsError.value ? getErrorMessage(productsError.value, 'The offerings could not be loaded') : '')
 </script>

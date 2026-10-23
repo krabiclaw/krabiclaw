@@ -1251,9 +1251,13 @@ test.describe('stateless MCP server', () => {
         page.on('request', countCreation)
         const calendarFailure = 'The newly saved calendar could not be read for this verification.'
         const interceptCalendar = (url: URL) => url.pathname === sessionEndpoint
-        await page.route(interceptCalendar, async route => route.request().method() === 'GET'
-          ? await route.fulfill({ status: 503, json: { error: calendarFailure } })
-          : await route.continue())
+        await page.route(interceptCalendar, async route => {
+          if (route.request().method() !== 'GET') return route.continue()
+          // The failed read completes after the saved editor is visible, so
+          // a save handler left on a discarded /new instance cannot pass.
+          await expect(availability.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
+          await route.fulfill({ status: 503, json: { error: calendarFailure } })
+        })
         const added = page.waitForResponse(response => new URL(response.url()).pathname === sessionEndpoint && response.request().method() === 'POST')
         const refusedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
         await availability.getByRole('button', { name: 'Add to calendar', exact: true }).click()

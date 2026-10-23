@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import Ajv from 'ajv'
 import { loginAs } from './helpers/auth'
-import { openTenantPage, tenantBaseURL, tenantExtraHeaders } from './helpers'
+import { openTenantPage, tenantBaseURL, tenantExtraHeaders, waitForNuxtHydration } from './helpers'
 import { MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
 
 // Split out of mcp.spec.ts (content/publishing tool tests) — see
@@ -354,7 +354,7 @@ test.describe('stateless MCP server', () => {
     }
   })
 
-  test('tenant blog tools preserve the canonical block document', async ({ request, baseURL }) => {
+  test('tenant blog tools preserve the canonical block document', async ({ request, page, baseURL }) => {
     await loginAs(request, baseURL!)
     const organizationId = MCP_ORGANIZATION_ID
     const discovery = await mcpRequest(request, baseURL!, { method: 'tools/list' })
@@ -364,6 +364,7 @@ test.describe('stateless MCP server', () => {
     expect(blogTool).toBeDefined()
     const validateBlog = new Ajv({ strict: false, allErrors: true }).compile(blogTool!.outputSchema)
     let postId = ''
+    let addedLocale = ''
     try {
       const categoryList = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'list_article_categories',
@@ -465,6 +466,59 @@ test.describe('stateless MCP server', () => {
         expect(preview.searchParams.get('preview_token')).toBeTruthy()
       }
 
+      const editor = `${baseURL}/api/editor/organizations/${organizationId}`
+      const languageSettingsResponse = await request.get(`${editor}/locales`)
+      expect(languageSettingsResponse.status()).toBe(200)
+      const languageSettings = await languageSettingsResponse.json() as { languages: Array<{ locale: string }>; available_catalogs: Array<{ locale: string }> }
+      const language = languageSettings.available_catalogs.find(candidate => !languageSettings.languages.some(saved => saved.locale === candidate.locale))
+      expect(language, 'The paid fixture has a language available for private article authoring').toBeDefined()
+      addedLocale = language!.locale
+      const added = await request.post(`${editor}/locales/${addedLocale}/add`)
+      expect(added.status(), await added.text()).toBe(200)
+      expect((await added.json()).language).toMatchObject({ locale: addedLocale, status: 'disabled' })
+      const translatedBlocks = [
+        { type: 'heading', level: 2, data: { text: 'Translated article heading' } },
+        { type: 'markdown', data: { markdown: 'Translated **article** body.', editor_mode: 'rich' } },
+        { type: 'faq', data: { source: 'page_qa' } },
+      ]
+      const translation = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'put_resource_localization', args: {
+        organization_id: organizationId, resource_type: 'content_document', resource_id: postId, locale: addedLocale,
+        values: { title: 'Translated article title', summary: 'Translated article excerpt', seo_keywords: 'Preserved translated keywords', metadata: {} },
+        content_blocks: translatedBlocks,
+      } })
+      expect(translation.status(), await translation.text()).toBe(200)
+      const authoredTranslation = mcpData<{ localization: { title: string; summary: string; updated_at: string; path: string; slug: string; seo_keywords: string; metadata: Record<string, unknown> } }>(await translation.json()).localization
+      expect(authoredTranslation).toMatchObject({ title: 'Translated article title', summary: 'Translated article excerpt', seo_keywords: 'Preserved translated keywords', metadata: {} })
+      await loginAs(page.request, baseURL!)
+      expect(readPost.admin_edit_url).toEqual(expect.any(String))
+      const translationEditor = new URL(String(readPost.admin_edit_url), baseURL)
+      translationEditor.searchParams.set('editMode', 'translations')
+      translationEditor.searchParams.set('locale', addedLocale)
+      await page.goto(translationEditor.toString())
+      await waitForNuxtHydration(page)
+      await expect(page.getByTestId('localize-field-title')).toHaveValue(authoredTranslation.title)
+      await expect(page.getByTestId('localize-field-summary')).toHaveValue(authoredTranslation.summary)
+      await page.getByTestId('localize-field-title').fill('')
+      await page.getByTestId('localize-field-summary').fill('')
+      const localizationPath = `/api/editor/organizations/${organizationId}/localization/content_document/${postId}/${addedLocale}`
+      const cleared = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === localizationPath),
+        page.getByTestId('localize-save').click(),
+      ]).then(([response]) => response)
+      expect(cleared.status(), await cleared.text()).toBe(200)
+      const clearedWrite = cleared.request().postDataJSON()
+      expect(clearedWrite.values).toEqual({ title: null, summary: null, seo_keywords: authoredTranslation.seo_keywords, metadata: authoredTranslation.metadata })
+      expect(clearedWrite.expected_updated_at).toBe(authoredTranslation.updated_at)
+      const clearedRead = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_resource_localization', args: {
+        organization_id: organizationId, resource_type: 'content_document', resource_id: postId, locale: addedLocale,
+      } })
+      expect(clearedRead.status()).toBe(200)
+      const clearedTranslation = mcpData<{ localization: { title: string | null; summary: string | null; updated_at: string; path: string; slug: string; seo_keywords: string; metadata: Record<string, unknown>; content_blocks: Array<{ type: string; data: Record<string, unknown> }> } }>(await clearedRead.json()).localization
+      expect(clearedTranslation).toMatchObject({ title: null, summary: null, path: authoredTranslation.path, slug: authoredTranslation.slug, seo_keywords: authoredTranslation.seo_keywords, metadata: authoredTranslation.metadata })
+      expect(clearedTranslation.metadata).toEqual(authoredTranslation.metadata)
+      expect(clearedTranslation.updated_at).not.toBe(authoredTranslation.updated_at)
+      expect(clearedTranslation.content_blocks.map(({ type, data }) => ({ type, data }))).toEqual(translatedBlocks.map(({ type, data }) => ({ type, data })))
+
       // Articles publish now or stay drafts: there is no scheduling.
       const schedule = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_blog_post',
@@ -503,6 +557,11 @@ test.describe('stateless MCP server', () => {
           method: 'tools/call', toolName: 'delete_blog_post', args: { organization_id: organizationId, post_id: postId },
         })
         expect(cleanup.status()).toBe(200)
+      }
+      if (addedLocale) {
+        const cleanupLanguage = await request.delete(`${baseURL}/api/editor/organizations/${organizationId}/locales/${addedLocale}`)
+        expect(cleanupLanguage.status(), await cleanupLanguage.text()).toBe(200)
+        expect(await cleanupLanguage.json()).toEqual({ deleted: true, locale: addedLocale })
       }
     }
   })

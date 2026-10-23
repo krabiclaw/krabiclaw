@@ -25,7 +25,9 @@ import { getErrorMessage } from '~/utils/errors'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import type { ProductSessionStatus } from '~/shared/bookings'
 
-definePageMeta({ layout: 'dashboard' })
+// Creation replaces /new with the saved ID while its readback is still part
+// of this save. Keep that operation and its visible error on the same leaf.
+definePageMeta({ layout: 'dashboard', key: false })
 const context = inject(calendarSessionsKey)
 if (!context?.product.value) throw createError({ statusCode: 400, statusMessage: 'Choose the offering whose availability you want to edit.' })
 const productId = context.product.value.id
