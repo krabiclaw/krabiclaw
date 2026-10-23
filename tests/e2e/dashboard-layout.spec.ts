@@ -2240,7 +2240,9 @@ test.describe('dashboard pane hierarchy', () => {
 
   // Choosing, opening and deleting an organization are the account's; the
   // organization's own Website has no delete row.
-  test('Account settings → Organizations deletes exactly the organization it names', async ({ page, baseURL }) => {
+  test('Account settings → Organizations deletes exactly the organization it names', async ({ page, baseURL }, testInfo) => {
+    const release = await acquireTenantMutationLock(testInfo, 'user-e2e-onboarding-wizard')
+    try {
     await page.setViewportSize(WIDE)
     await page.context().clearCookies()
     await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
@@ -2276,6 +2278,9 @@ test.describe('dashboard pane hierarchy', () => {
         const removed = await page.request.post('/api/auth/organization/delete', { headers: authRequestHeaders(baseURL!), data: { organizationId } })
         expect(removed.status(), await removed.text()).toBe(200)
       }
+    }
+    } finally {
+      await release()
     }
   })
 })

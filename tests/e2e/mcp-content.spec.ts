@@ -476,6 +476,10 @@ test.describe('stateless MCP server', () => {
       const added = await request.post(`${editor}/locales/${addedLocale}/add`)
       expect(added.status(), await added.text()).toBe(200)
       expect((await added.json()).language).toMatchObject({ locale: addedLocale, status: 'disabled' })
+      const savedLanguagesResponse = await request.get(`${editor}/locales`)
+      expect(savedLanguagesResponse.status()).toBe(200)
+      const savedLanguages = await savedLanguagesResponse.json() as { languages: Array<{ locale: string; status: string }> }
+      expect(savedLanguages.languages.find(language => language.locale === addedLocale)).toMatchObject({ locale: addedLocale, status: 'disabled' })
       const translatedBlocks = [
         { type: 'heading', level: 2, data: { text: 'Translated article heading' } },
         { type: 'markdown', data: { markdown: 'Translated **article** body.', editor_mode: 'rich' } },

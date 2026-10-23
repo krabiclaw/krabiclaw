@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { dismissPreviewToolbar } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { tenantHostIsAddressable, testBaseUrl } from './test-env'
 import { environmentTenantAliasSlug } from '../../server/utils/tenant-hosts'
 import { formatMinorAmount } from '../../shared/prices'
@@ -33,21 +34,31 @@ function organizationSubdomain(origin: string): string {
 // this owner's menu section takes. A collection slug is unique within its
 // organization, so the new site gets the same slug for its own section rather
 // than failing to save it.
-// The two new-site journeys sign in as the same fixture owner, and each one
-// discards that owner's active draft before it starts. Run in parallel, one
-// discarded the draft the other was reading back, so this file runs in order.
+// The new-site journeys share one fixture owner and active draft. Keep this
+// file in order, and share its actor lock with the account organization journey.
 test.describe.configure({ mode: 'default' })
 
 const otherTenantId = 'org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX'
 let otherTenant: { owner: APIRequestContext; collectionId: string } | null = null
+let releaseWizardMutationLock: (() => Promise<void>) | undefined
+
+test.beforeEach(async ({ request: _request }, testInfo) => {
+  releaseWizardMutationLock = await acquireTenantMutationLock(testInfo, 'user-e2e-onboarding-wizard')
+})
 
 test.afterEach(async () => {
-  if (!otherTenant) return
-  const { owner, collectionId } = otherTenant
-  otherTenant = null
-  const removed = await owner.delete(`/api/editor/organizations/${otherTenantId}/collections/${collectionId}`)
-  expect(removed.status(), await removed.text()).toBe(200)
-  await owner.dispose()
+  try {
+    if (!otherTenant) return
+    const { owner, collectionId } = otherTenant
+    otherTenant = null
+    const removed = await owner.delete(`/api/editor/organizations/${otherTenantId}/collections/${collectionId}`)
+    expect(removed.status(), await removed.text()).toBe(200)
+    await owner.dispose()
+  } finally {
+    const release = releaseWizardMutationLock
+    releaseWizardMutationLock = undefined
+    await release?.()
+  }
 })
 
 test('a new owner builds a draft and creates a site through the routed flow', async ({ page, request, baseURL, browser, playwright }) => {
