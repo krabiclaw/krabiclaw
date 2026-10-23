@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:26e6bedda7a06f4c964a725ef2a5414bb9c4da2ff96fea85ce4344da9d1d4caf",
-  "documentationFingerprint": "sha256:5ddbd1152d9b89ad6b97c70b92ba0921430427b08325e2a06bf43551866e77a0",
+  "fingerprint": "sha256:fe68ff9904dc5f454e046695dff33bf5a540e927509aa72e126c5cd174202d77",
+  "documentationFingerprint": "sha256:99507f9e62ed427bb8b0cc500da09ba52ae8c22ee9880f9a0c9b8e7785f794c5",
   "tools": [
     {
       "name": "add_organization_language",
@@ -65254,6 +65254,17 @@
                 "available": {
                   "type": "boolean"
                 },
+                "calendar": {
+                  "description": "The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.",
+                  "enum": [
+                    "vrbo",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "channel": {
                   "properties": {
                     "detail": {
@@ -65355,6 +65366,7 @@
                 "closed_to_departure",
                 "source",
                 "held_until",
+                "calendar",
                 "channel"
               ],
               "type": "object"
@@ -111595,6 +111607,17 @@
                 "available": {
                   "type": "boolean"
                 },
+                "calendar": {
+                  "description": "The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.",
+                  "enum": [
+                    "vrbo",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "channel": {
                   "properties": {
                     "detail": {
@@ -111696,6 +111719,7 @@
                 "closed_to_departure",
                 "source",
                 "held_until",
+                "calendar",
                 "channel"
               ],
               "type": "object"

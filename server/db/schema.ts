@@ -1435,8 +1435,45 @@ export const stays = sqliteTable("stays", {
 	check("stays_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 ]);
 
-// Row meaning: this stay, or this guest's checkout hold, holds this night at
-//   this home. Exactly one of stay_id and hold_id is set.
+// Row meaning: the home's calendar on another site (Vrbo), linked by its iCal
+//   address. KrabiClaw reads `import_url` every five minutes and claims the
+//   nights it shows taken (stay_nights.calendar_link_id), and serves the home's
+//   own taken nights at /api/public/stay-calendars/<export_token>.ics for that
+//   site to read. iCal carries dates only: no guest, price or rules.
+// `blocked_json`: the [start, end) date ranges the last successful read found,
+//   as a JSON array of pairs. A night in it that another stay already holds is
+//   a double booking for the host to resolve; it is not claimed.
+// `synced_at`/`sync_error`: the last read. A failed read records its reason
+//   and leaves the earlier claims, the last calendar the site served, in place.
+// Deletion: cascades from the home; its claims cascade with it.
+export const stay_calendar_links = sqliteTable("stay_calendar_links", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	channel: text().$type<'vrbo'>().notNull(),
+	import_url: text().notNull(),
+	export_token: text().notNull(),
+	blocked_json: text().default("[]").notNull(),
+	synced_at: text(),
+	sync_error: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	created_by: text().notNull(),
+	updated_by: text().notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stay_calendar_links_home_scope_fk" }).onDelete("cascade"),
+	unique("stay_calendar_links_org_product_id_unique").on(table.organization_id, table.product_id, table.id),
+	uniqueIndex("stay_calendar_links_home_channel_unique").on(table.product_id, table.channel),
+	uniqueIndex("stay_calendar_links_export_token_unique").on(table.export_token),
+	check("stay_calendar_links_channel_check", sql`channel = 'vrbo'`),
+	check("stay_calendar_links_import_url_check", sql`import_url LIKE 'https://%'`),
+	check("stay_calendar_links_blocked_check", sql`json_valid(blocked_json) AND json_type(blocked_json) = 'array'`),
+	check("stay_calendar_links_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (synced_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', synced_at, '+0 days') IS synced_at)`),
+]);
+
+// Row meaning: this stay, this guest's checkout hold, or this linked calendar
+//   holds this night at this home. Exactly one of stay_id, hold_id and
+//   calendar_link_id is set.
 // The primary key is the overlap guard: a night is held by at most one stay or
 //   hold, so two concurrent writes for the same night cannot both commit.
 //   Claims are written in the same batch as the stay or hold and deleted when
@@ -1452,13 +1489,16 @@ export const stay_nights = sqliteTable("stay_nights", {
 	date: text().notNull(),
 	stay_id: text(),
 	hold_id: text().references(() => payment_checkout_holds.id, { onDelete: "cascade" }),
+	calendar_link_id: text(),
 }, (table) => [
 	primaryKey({ columns: [table.product_id, table.date], name: "stay_nights_pk" }),
 	foreignKey({ columns: [table.organization_id, table.product_id, table.stay_id], foreignColumns: [stays.organization_id, stays.product_id, stays.id], name: "stay_nights_stay_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.calendar_link_id], foreignColumns: [stay_calendar_links.organization_id, stay_calendar_links.product_id, stay_calendar_links.id], name: "stay_nights_calendar_link_scope_fk" }).onDelete("cascade"),
 	index("stay_nights_stay_idx").on(table.stay_id),
 	index("stay_nights_hold_idx").on(table.hold_id),
+	index("stay_nights_calendar_link_idx").on(table.calendar_link_id),
 	check("stay_nights_date_check", sql`date(date, '+0 days') IS date`),
-	check("stay_nights_claimant_check", sql`(stay_id IS NULL) <> (hold_id IS NULL)`),
+	check("stay_nights_claimant_check", sql`(stay_id IS NOT NULL) + (hold_id IS NOT NULL) + (calendar_link_id IS NOT NULL) = 1`),
 ]);
 
 // Row meaning: the host recorded receiving (or, negative, refunding) this
