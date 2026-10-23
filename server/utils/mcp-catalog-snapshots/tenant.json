@@ -140036,7 +140036,7 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:904ce7d0d392af7973e01224bda83bc41bf4aec353760a3307b91a96b73e01b7",
+      "contentHash": "sha256:0b2917dfdebeaf67144d8f312a5f9aeba159c8a3a02c3dc78346ba03ac712bf9",
       "toolContracts": {
         "create_location": "sha256:76191e793ce66aae9289cf1e505b47bd44a04320d4b29660f173959391e9c5b0",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
