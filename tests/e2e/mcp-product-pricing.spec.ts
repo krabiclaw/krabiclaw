@@ -210,9 +210,19 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     const matrix = (await matrixRead.json() as { product: Product }).product
     expect(matrix.variants).toHaveLength(4)
     expect(matrix.options.map(option => option.name)).toEqual(['Portion', 'Color'])
-    for (const previous of before.variants) {
+    const matrixPortion = matrix.options.find(option => option.name === 'Portion')!
+    const matrixColor = matrix.options.find(option => option.name === 'Color')!
+    expect(matrixPortion.id).toBe(portion.id)
+    for (const [name, portionValue, colorValue] of [['Six pieces', 'Small portion', 'Red'], ['Twelve pieces', 'Large portion', 'Blue']] as const) {
+      const previous = before.variants.find(variant => variant.name === name)!
       const saved = matrix.variants.find(variant => variant.id === previous.id)!
-      expect({ ...saved, option_values: previous.option_values }).toEqual(previous)
+      expect(saved).toEqual({
+        ...previous,
+        option_values: {
+          [matrixPortion.id]: matrixPortion.values.find(value => value.value === portionValue)!.id,
+          [matrixColor.id]: matrixColor.values.find(value => value.value === colorValue)!.id,
+        },
+      })
     }
     expect(matrix.variants.filter(variant => !before.variants.some(previous => previous.id === variant.id)).map(variant => ({ name: variant.name, prices: variant.prices }))).toEqual([
       { name: 'Large portion / Red', prices: [] }, { name: 'Small portion / Blue', prices: [] },
@@ -239,8 +249,6 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     const unchangedMatrix = await request.get(`${baseURL}${editorPath}`)
     expect(unchangedMatrix.status()).toBe(200)
     expect((await unchangedMatrix.json() as { product: Product }).product).toEqual(before)
-    const matrixPortion = before.options.find(option => option.name === 'Portion')!
-    const matrixColor = before.options.find(option => option.name === 'Color')!
     for (const variant of before.variants) {
       const selection = matrixPortion.values.find(value => value.id === variant.option_values[matrixPortion.id])!.value
       await choice.getByRole('combobox', { name: variant.name, exact: true }).click()
