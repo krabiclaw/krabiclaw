@@ -231,7 +231,7 @@
           </section>
 
           <section v-if="location" class="mt-10 border-t border-default pt-10">
-            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : product.kind === 'dish' || product.kind === 'item' ? t('site.location.find_us') : t('site.experience_detail.where_youll_meet') }}</h2>
+            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : product.kind === 'dish' ? t('site.location.find_us') : t('site.experience_detail.where_youll_meet') }}</h2>
             <div class="mt-5 overflow-hidden rounded-xl border border-default bg-elevated">
               <div class="flex items-start gap-4 p-6">
                 <TenantIcon name="map-pin" class="mt-0.5 size-5 shrink-0 text-primary" />

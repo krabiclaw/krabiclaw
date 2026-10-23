@@ -1235,7 +1235,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect(desktopImage!.width / desktopImage!.height).toBeCloseTo(20 / 19, 2)
 
     // A kind pill narrows the grid in place and is held in the URL.
-    const kind = (['experience', 'item', 'service'] as const).find(value => offerings.some(product => product.kind === value))
+    const kind = (['experience', 'service'] as const).find(value => offerings.some(product => product.kind === value))
     expect(kind, 'The demo offers something besides its menu').toBeDefined()
     await catalog.getByTestId(`catalog-kind-${kind}`).click()
     await expect(page).toHaveURL(`${ORG}/products?kind=${kind}`)

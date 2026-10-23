@@ -141,11 +141,11 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
 
   const invalidDetails = await mcpRequest(request, baseURL!, {
     method: 'tools/call', toolName: 'update_product',
-    args: { organization_id: organizationId, product_id: created.id, details: { care_instructions: 'Hand wash only' } },
+    args: { organization_id: organizationId, product_id: created.id, details: { meeting_point: 'Meet at the counter' } },
   })
   const invalidDetailsBody = await invalidDetails.json() as { result?: { isError?: boolean; content?: Array<{ text?: string }> } }
   expect(invalidDetailsBody.result?.isError, JSON.stringify(invalidDetailsBody)).toBe(true)
-  expect(invalidDetailsBody.result?.content?.map(part => part.text).join(' ')).toMatch(/care_instructions.*dish/)
+  expect(invalidDetailsBody.result?.content?.map(part => part.text).join(' ')).toMatch(/meeting_point.*dish/)
   const unchanged = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
   expect(unchanged.status()).toBe(200)
   expect((await unchanged.json() as { product: Product }).product.details).toEqual(edited.details)

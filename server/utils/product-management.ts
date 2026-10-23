@@ -410,7 +410,7 @@ export async function productPublicPresentation(db: DbClient, env: CloudflareEnv
   const origin = published ? await resolvePublicTenantOrigin(db, env, organizationId) : null
   const siteProduct = product.kind === 'experience' || product.kind === 'stay'
   const path = siteProduct
-    ? presentationForProduct(null, product).productPath('', product.slug) : product.page?.path ?? null
+    ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
   // An authored Page remains readable when its offering cannot be booked.
   // Its publication owner also proves the saved binding and source address.
   const page = !siteProduct && product.page
@@ -424,7 +424,7 @@ export async function productPublicPresentation(db: DbClient, env: CloudflareEnv
       JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
       WHERE l.organization_id = ? AND pl.product_id = ? AND l.status = 'active' AND pl.published = 1
     `, [organizationId, product.id])
-    for (const location of locations) publicUrls[location.id] = new URL(presentationForProduct(null, product).productPath(location.slug, product.slug), origin).toString()
+    for (const location of locations) publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
   }
   return { readiness, publicUrl: origin && publicPath ? new URL(publicPath, origin).toString() : null, publicUrls }
 }

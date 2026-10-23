@@ -406,14 +406,12 @@ const { locations: allOrganizationLocations, error: locationsError, pending: loc
 const organizationLocations = computed(() => allOrganizationLocations.value.filter(entry => entry.status === 'active'))
 const location = computed(() => allOrganizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
 
-const vertical = dashboard.organization.value?.vertical
-if (!vertical) throw createError({ statusCode: 500, statusMessage: 'Organization vertical is not configured' })
 // The words follow the product's kind: a class is an experience whatever the
 // site sells otherwise. Until a kind is loaded or chosen there are no words for
 // it, and the screen says only that it is a product.
 const presentation = computed(() => {
   const kind = product.value?.kind ?? form.kind
-  return kind ? presentationForProduct(vertical, { kind: assertProductKind(kind) }, dashboard.organization.value?.theme_id) : null
+  return kind ? presentationForProduct({ kind: assertProductKind(kind) }, dashboard.organization.value?.theme_id) : null
 })
 const itemLabel = computed(() => presentation.value?.itemLabel ?? 'Product')
 const rawCurrency = dashboard.organization.value?.default_currency

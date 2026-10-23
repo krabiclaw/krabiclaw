@@ -110,9 +110,9 @@ test('a service, its default variant, its page and their binding commit together
     // Renaming and changing the offering's kind are content edits. The saved
     // slug and its independently bound page survive both update entry points.
     await updateProduct(db, { organizationId: ORG, productId: created.id, actor: ACTOR, env,
-      patch: { name: 'Family consultation guide', kind: 'item' } })
+      patch: { name: 'Family Law Workshop', kind: 'experience' } })
     assert.deepEqual(await db.prepare('SELECT kind, name, slug FROM products WHERE id = ?').bind(created.id).first(),
-      { kind: 'item', name: 'Family consultation guide', slug: 'family-law' })
+      { kind: 'experience', name: 'Family Law Workshop', slug: 'family-law' })
     await reconcileProducts(db, { organizationId: ORG, actor: ACTOR, env,
       products: [{ product_id: created.id, kind: 'service', name: 'Family Law Consultation' }] })
     assert.deepEqual(await db.prepare('SELECT kind, name, slug FROM products WHERE id = ?').bind(created.id).first(),

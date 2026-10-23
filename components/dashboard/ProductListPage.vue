@@ -54,7 +54,6 @@ type CatalogKind = 'all' | 'menu' | Exclude<ProductKind, 'dish'>
 const KINDS: Array<{ value: Exclude<CatalogKind, 'all'>; label: string }> = [
   { value: 'menu', label: 'Menu' },
   { value: 'experience', label: 'Experiences' },
-  { value: 'item', label: 'Products' },
   { value: 'service', label: 'Services' },
   { value: 'stay', label: 'Places to stay' },
 ]
