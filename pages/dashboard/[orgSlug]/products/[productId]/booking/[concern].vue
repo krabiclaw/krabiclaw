@@ -47,9 +47,10 @@
       </UFormField>
       <UFormField v-else-if="concern === 'location'" name="held_online">
         <SettingRow v-model="p.form.held_online" :disabled="p.form.scheduling_mode !== 'provider' && !p.form.held_online" label="Held online" />
-        <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="`${level.to.value}/assignment`">Book the host's working hours</UButton>
+        <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="p.sectionPath('booking/assignment')">Book the host's working hours</UButton>
       </UFormField>
     </UForm>
+    <UButton v-if="p.saveError.value" class="mt-6" color="neutral" variant="outline" @click="reset">Use saved values</UButton>
   </DashboardLeafPanel>
 </template>
 
@@ -100,10 +101,12 @@ const hostOptions = computed(() => members.value ? [
   ...members.value.members.map(member => ({ label: member.name, avatar: member.scheduling?.public_photo_url || member.image, published: member.scheduling?.public_approved === 1, team: false, state: profileState(member.scheduling?.public_approved === 1), value: `member:${member.id}` })),
   ...members.value.teams.map(team => ({ label: team.name, avatar: null, published: true, team: true, state: `${team.members.length} ${team.members.length === 1 ? 'member' : 'members'}: guests see each one with a published profile`, value: `team:${team.id}` })),
 ] : [])
-const setting = computed(() => settings[concern.value as keyof typeof settings] ?? { title: '', lead: '' })
+const setting = computed(() => concern.value === 'location' && p.product.value?.kind === 'experience'
+  ? { title: 'Meeting format', lead: 'Enable online booking in the host’s working hours. Edit physical availability and repeating times at each saved location.' }
+  : settings[concern.value as keyof typeof settings] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return
-  if ((concern.value === 'location' && p.locationId.value) || !(concern.value in settings) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  if ((concern.value === 'location' && p.locationId.value && p.product.value?.kind !== 'experience') || !(concern.value in settings) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
 const capacityOptions = [{ value: 'one', label: 'One guest' }, { value: 'group', label: 'A group of guests' }, { value: 'unlimited', label: 'No guest limit' }, { value: 'closed', label: 'Closed to new guests' }]
 const capacityChoice = ref('unlimited')
@@ -113,7 +116,9 @@ function reset() {
   formKey.value++
   capacityChoice.value = p.form.booking_capacity === '' ? 'unlimited' : p.form.booking_capacity === '1' ? 'one' : p.form.booking_capacity === '0' ? 'closed' : 'group'
 }
-watch([concern, p.product], reset, { immediate: true })
+watch([concern, p.product], ([nextConcern], [previousConcern]) => {
+  if (nextConcern !== previousConcern || !p.saving.value && !p.saveError.value) reset()
+}, { immediate: true })
 watch(capacityChoice, choice => {
   if (choice === 'one') p.form.booking_capacity = '1'
   else if (choice === 'unlimited') p.form.booking_capacity = ''

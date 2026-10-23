@@ -1,12 +1,14 @@
-import { expect, test } from '@playwright/test'
+import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from '@playwright/test'
 import { blawbyBaseURL, blawbyExtraHeaders, dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './helpers'
 import { loginAs } from './helpers/auth'
 import { MCP_ORGANIZATION_ID, mcpRequest, mcpData, publishOwnHostProfile } from './helpers/mcp'
 import { E2E_POTTERY_ORGANIZATION_ID, tenantTestExtraHeaders } from './test-env'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
-import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone'
+import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../../utils/timezone'
 import type { OrganizationMembersData } from '../../utils/organization-members'
+import type { Product } from '../../server/types/products'
+import type { SessionAvailability } from '../../server/utils/availability'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
 // for why. This group covers the bulk of an owner's MCP tool surface: site
@@ -673,11 +675,70 @@ test.describe('stateless MCP server', () => {
     // The large-batch spec asserts the demo tenant's whole catalogue under this
     // lock, so every test that adds a Product to it takes the same lock.
     let releaseTenantMutationLock: (() => Promise<void>) | undefined
+    let bookedSessionRestore: {
+      cleanupRequest: APIRequestContext
+      page: Page
+      baseURL: string
+      organizationId: string
+      productId: string | null
+      locationId: string
+    } | null = null
     test.beforeEach(async ({ request: _request }, testInfo) => {
       releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
     })
-    test.afterEach(async () => {
-      await releaseTenantMutationLock?.()
+    test.afterEach(async ({ request: _request }, testInfo) => {
+      const release = releaseTenantMutationLock
+      releaseTenantMutationLock = undefined
+      const restore = bookedSessionRestore
+      bookedSessionRestore = null
+      const failures: unknown[] = []
+      if (restore) {
+        try {
+          if (testInfo.status !== 'passed' && !restore.page.isClosed()) await restore.page.close()
+        } catch (error) { failures.push(error) }
+        if (restore.productId) {
+          // Preserve booking history while withdrawing the test-owned schedule
+          // and listing, even when the test request fixture has timed out.
+          const productId = restore.productId
+          for (const [toolName, args] of [
+            ['replace_product_weekly_schedule', { product_id: productId, location_id: restore.locationId, slots: [] }],
+            ['set_product_location', { product_id: productId, location_id: restore.locationId, active: false, published: false }],
+            ['set_product_publication', { product_id: productId, published: false }],
+          ] as const) {
+            try {
+              const response = await mcpRequest(restore.cleanupRequest, restore.baseURL, { method: 'tools/call', toolName, args: { organization_id: restore.organizationId, ...args } })
+              expect(response.status(), await response.text()).toBe(200)
+              mcpData(await response.json())
+            } catch (error) { failures.push(error) }
+          }
+          const url = `/api/editor/organizations/${restore.organizationId}/products/${productId}`
+          try {
+            const rules = await restore.cleanupRequest.get(`${url}/availability`, { params: { location_id: restore.locationId } })
+            expect(rules.status(), await rules.text()).toBe(200)
+            expect((await rules.json()).rules).toEqual([])
+          } catch (error) { failures.push(error) }
+          try {
+            const response = await mcpRequest(restore.cleanupRequest, restore.baseURL, { method: 'tools/call', toolName: 'get_product', args: { organization_id: restore.organizationId, product_id: productId } })
+            expect(response.status(), await response.text()).toBe(200)
+            const retained = mcpData<{ product: Product }>(await response.json()).product
+            expect(retained.locations.find(location => location.location_id === restore.locationId)).toMatchObject({ active: false, published: false })
+          } catch (error) { failures.push(error) }
+          try {
+            const response = await restore.cleanupRequest.get(url)
+            expect(response.status(), await response.text()).toBe(200)
+            const retained = (await response.json() as { product: Product }).product
+            expect(retained.locations.find(location => location.location_id === restore.locationId)).toMatchObject({ active: false, published: false })
+            expect(retained.publications).toEqual([{ organization_id: restore.organizationId, published: false }])
+          } catch (error) { failures.push(error) }
+        }
+        try {
+          await restore.cleanupRequest.dispose()
+        } catch (error) { failures.push(error) }
+      }
+      try {
+        await release?.()
+      } catch (error) { failures.push(error) }
+      if (failures.length) throw new AggregateError(failures, 'Booked-session authority cleanup failed')
     })
 
     test('HTTP and MCP share booking defaults, weekly replacement and authored Q&A', async ({ request, baseURL }) => {
@@ -792,7 +853,7 @@ test.describe('stateless MCP server', () => {
       }
     })
 
-    test('booked session authority survives CMS clear and MCP re-add', async ({ request, page, baseURL }) => {
+    test('booked session authority survives CMS clear and MCP re-add', async ({ request, page, baseURL }, testInfo) => {
       await loginAs(request, baseURL!)
       const organizationId = MCP_ORGANIZATION_ID
       const call = async (toolName: string, args: Record<string, unknown>) => {
@@ -803,64 +864,212 @@ test.describe('stateless MCP server', () => {
         return body
       }
       const { settings } = mcpData<{ settings: { default_currency: string } }>(await call('get_organization_settings', {}))
+      const { location } = mcpData<{ location: { id: string; title: string; timezone: string } }>(await call('get_location', { location_id: 'loc-demo' }))
+      expect(location.id).toBe('loc-demo')
+      expect(location.timezone).toBe('America/New_York')
+      const cleanupRequest = await playwrightRequest.newContext({ baseURL })
+      const restore = { cleanupRequest, page, baseURL: baseURL!, organizationId, productId: null as string | null, locationId: location.id }
+      bookedSessionRestore = restore
+      await loginAs(cleanupRequest, baseURL!)
       const created = mcpData<{ product: { id: string; slug: string } }>(await call('create_product', { kind: 'service', active: true, idempotency_key: crypto.randomUUID(),
-        name: 'MCP Session Authority Proof', variants: [{ name: 'Seat', prices: [{ unit_amount: 1000, currency: settings.default_currency }] }],
+        name: 'Family Estate Planning Consultation', variants: [{ name: 'Consultation', prices: [{ unit_amount: 1000, currency: settings.default_currency }] }],
       })).product
+      restore.productId = created.id
       const url = `${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`
       const slots = [{ weekday: 0, start_time: '14:00' }]
-      try {
-        await call('set_product_publication', { product_id: created.id, published: true })
-        await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: true })
-        await call('set_product_booking_config', { product_id: created.id, duration_minutes: 120, default_capacity: 10 })
-        await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
-        await loginAs(page.request, baseURL!)
-        // The location's schedule is the one Product editor's Booking, scoped to that location.
-        await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
-        await waitForNuxtHydration(page)
-        await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
-        await expect(page.getByRole('link', { name: 'Guest limit Up to 10 guests per session', exact: true })).toBeVisible()
-        await page.getByRole('link', { name: 'Weekly schedule Sunday', exact: true }).click()
-        await page.getByRole('link', { name: 'Sunday 2:00 PM', exact: true }).click()
-        await expect(page.getByLabel('Start time 1', { exact: true })).toHaveValue('14:00')
-        await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-        const read = async () => {
-          const response = await request.get(`${url}/sessions`)
-          expect(response.status(), await response.text()).toBe(200)
-          return (await response.json()).sessions as Array<{ id: string; location_id: string | null; source_occurrence_key: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string; claimed: number; remaining: number }>
-        }
-        const target = (await read()).find(row => row.location_id === 'loc-demo' && row.starts_at > new Date().toISOString())
-        expect(target).toBeTruthy()
-        const booked = await request.post(`${baseURL}/api/public/products/${created.slug}/book`, {
-          headers: tenantTestExtraHeaders(),
-          data: { session_id: target!.id, guest_name: 'Session Authority Guest', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
-        })
-        expect(booked.status(), await booked.text()).toBe(201)
-        const before = (await read()).find(row => row.id === target!.id)!
-        expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
-        await page.getByRole('button', { name: 'Remove start time 1', exact: true }).click()
-        await page.getByRole('button', { name: 'Save', exact: true }).click()
-        await expect(page.getByRole('link', { name: 'Sunday No sessions', exact: true })).toBeVisible()
-        const cleared = await request.get(`${url}/availability?location_id=loc-demo`)
-        expect(cleared.status()).toBe(200)
-        expect((await cleared.json()).rules).toEqual([])
-        await call('set_product_booking_config', { product_id: created.id, duration_minutes: 30, default_capacity: 2 })
-        await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
-        const after = (await read()).find(row => row.id === target!.id)!
-        for (const field of ['id', 'source_occurrence_key', 'timezone', 'starts_at', 'ends_at', 'capacity', 'status', 'claimed', 'remaining'] as const) expect(after[field]).toEqual(before[field])
-        const publicRead = await request.get(`${baseURL}/api/public/products/${created.slug}/sessions`, { headers: tenantTestExtraHeaders() })
-        expect(publicRead.status(), await publicRead.text()).toBe(200)
-        expect((await publicRead.json()).sessions.find((row: { id: string }) => row.id === target!.id)).toMatchObject({ remaining: 4, is_full: false, starts_at: target!.starts_at, ends_at: target!.ends_at, timezone: target!.timezone })
-      } finally {
-        // Preserve Booking history while withdrawing this test-owned schedule and listing.
-        await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots: [] })
-        await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: false, published: false })
-        await call('set_product_publication', { product_id: created.id, published: false })
-        const rules = await request.get(`${url}/availability?location_id=loc-demo`)
-        expect(rules.status(), await rules.text()).toBe(200)
-        expect((await rules.json()).rules).toEqual([])
-        const retained = mcpData<{ product: { locations: Array<{ location_id: string; active: boolean; published: boolean }> } }>(await call('get_product', { product_id: created.id })).product
-        expect(retained.locations.find(location => location.location_id === 'loc-demo')).toMatchObject({ active: false, published: false })
+      await call('set_product_publication', { product_id: created.id, published: true })
+      await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: true })
+      await call('set_product_booking_config', { product_id: created.id, duration_minutes: 120, default_capacity: 10 })
+      await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
+      await loginAs(page.request, baseURL!)
+      // The location's schedule is the one Product editor's Booking, scoped to that location.
+      await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
+      await waitForNuxtHydration(page)
+      await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Guest limit Up to 10 guests per session', exact: true })).toBeVisible()
+      const scheduleConcern = page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-schedule')
+      await expect(scheduleConcern).toHaveAccessibleName(`Weekly schedule ${location.title} · Sunday`)
+      await expect(scheduleConcern).toHaveAttribute('href', `/dashboard/ember-slice-demo/products/${created.id}/booking/schedule?location_id=loc-demo`)
+      await scheduleConcern.click()
+      const sunday = page.locator('#dashboard-panel-booking-schedule').getByTestId('editor-row-sunday')
+      await expect(sunday).toHaveAccessibleName('Sunday 2:00 PM')
+      await sunday.click()
+      await expect(page.getByLabel('Start time 1', { exact: true })).toHaveValue('14:00')
+      await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      const read = async () => {
+        const response = await request.get(`${url}/sessions`)
+        expect(response.status(), await response.text()).toBe(200)
+        return (await response.json()).sessions as Array<{ id: string; location_id: string | null; source_occurrence_key: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string; claimed: number; remaining: number }>
       }
+      const target = (await read()).find(row => row.location_id === 'loc-demo' && row.starts_at > new Date().toISOString())
+      expect(target).toBeTruthy()
+      const booked = await request.post(`${baseURL}/api/public/products/${created.slug}/book`, {
+        headers: tenantTestExtraHeaders(),
+        data: { session_id: target!.id, guest_name: 'Estate Planning Client', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
+      })
+      expect(booked.status(), await booked.text()).toBe(201)
+      const before = (await read()).find(row => row.id === target!.id)!
+      expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
+      await page.getByRole('button', { name: 'Remove start time 1', exact: true }).click()
+      await page.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(page.getByRole('link', { name: 'Sunday No sessions', exact: true })).toBeVisible()
+      const cleared = await request.get(`${url}/availability?location_id=loc-demo`)
+      expect(cleared.status()).toBe(200)
+      expect((await cleared.json()).rules).toEqual([])
+      await call('set_product_booking_config', { product_id: created.id, duration_minutes: 30, default_capacity: 2 })
+      await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
+      const after = (await read()).find(row => row.id === target!.id)!
+      for (const field of ['id', 'source_occurrence_key', 'timezone', 'starts_at', 'ends_at', 'capacity', 'status', 'claimed', 'remaining'] as const) expect(after[field]).toEqual(before[field])
+      const publicRead = await request.get(`${baseURL}/api/public/products/${created.slug}/sessions`, { headers: tenantTestExtraHeaders() })
+      expect(publicRead.status(), await publicRead.text()).toBe(200)
+      expect((await publicRead.json()).sessions.find((row: { id: string }) => row.id === target!.id)).toMatchObject({ remaining: 4, is_full: false, starts_at: target!.starts_at, ends_at: target!.ends_at, timezone: target!.timezone })
+
+      const sessionsBeforeDraft = await read()
+      const createRequests: string[] = []
+      const updateRequests: string[] = []
+      page.on('request', entry => {
+        if (new URL(entry.url()).pathname === new URL(`${url}/sessions`).pathname && entry.method() === 'POST') createRequests.push(entry.url())
+        if (new URL(entry.url()).pathname.startsWith(`${new URL(`${url}/sessions`).pathname}/`) && entry.method() === 'PATCH') updateRequests.push(entry.url())
+      })
+      const calendarPath = '/dashboard/ember-slice-demo/calendar'
+      const gapDate = '2027-03-14'
+      expect((await page.goto(`${calendarPath}/sessions/new?product_id=${created.id}&month=${gapDate.slice(0, 7)}&date=${gapDate}`))?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const draft = page.locator('#dashboard-panel-product-session')
+      const date = draft.getByLabel('Date', { exact: true })
+      const starts = draft.getByLabel('Starts', { exact: true })
+      const ends = draft.getByLabel('Ends', { exact: true })
+      const add = draft.getByRole('button', { name: 'Add to calendar', exact: true })
+      const locationChoice = draft.getByRole('combobox', { name: 'Location*', exact: true })
+      await locationChoice.click()
+      await expect(page.getByRole('listbox')).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(draft.getByText('Choose a location.', { exact: true })).toBeVisible()
+      await expect(locationChoice).toHaveAccessibleDescription('Choose a location.')
+      await expect(date).toHaveValue(gapDate)
+      await expect(starts).toBeDisabled()
+      await expect(ends).toBeDisabled()
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await locationChoice.click()
+      await page.getByRole('option', { name: location.title, exact: true }).click()
+      await expect(draft).toContainText(`Times are in ${location.timezone}.`)
+      await expect(date).toHaveValue(gapDate)
+      await date.fill('')
+      await date.press('Tab')
+      await expect(draft.getByText('Choose a date.', { exact: true })).toBeVisible()
+      await expect(date).toHaveAccessibleDescription('Choose a date.')
+      await expect(locationChoice).toContainText(location.title)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await date.fill(gapDate)
+      await starts.focus()
+      await ends.focus()
+      await expect(draft.getByText('Choose a start time.', { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription('Choose a start time.')
+      await expect(date).toHaveValue(gapDate)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await starts.fill('02:30')
+      const startGap = `This time does not exist because the clocks move forward. Choose another start time in ${location.timezone}.`
+      await expect(draft.getByText(startGap, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(startGap)
+      await expect(starts).toHaveValue('02:30')
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await page.screenshot({ path: testInfo.outputPath('experience-validation-desktop.jpg') })
+
+      await starts.fill('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T04:00`)
+      await ends.fill('')
+      await ends.press('Tab')
+      await expect(draft.getByText('Choose an end date and time.', { exact: true })).toBeVisible()
+      await expect(ends).toHaveAccessibleDescription('Choose an end date and time.')
+      await expect(date).toHaveValue(gapDate)
+      await expect(starts).toHaveValue('03:30')
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await ends.fill(`${gapDate}T04:30`)
+      await expect(draft.getByText(startGap, { exact: true })).toHaveCount(0)
+      await expect(add).toBeEnabled()
+      await ends.fill(`${gapDate}T02:30`)
+      const endGap = `This time does not exist because the clocks move forward. Choose another end time in ${location.timezone}.`
+      await expect(draft.getByText(endGap, { exact: true })).toBeVisible()
+      await expect(ends).toHaveAccessibleDescription(endGap)
+      await expect(draft.getByLabel('Date', { exact: true })).toHaveValue(gapDate)
+      await expect(starts).toHaveValue('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T02:30`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+
+      await ends.fill(`${gapDate}T03:00`)
+      const orderingError = 'End time must be after the start time.'
+      await expect(draft.getByText(orderingError, { exact: true })).toBeVisible()
+      await expect(ends).toHaveAccessibleDescription(orderingError)
+      await expect(starts).toHaveValue('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T03:00`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+
+      await ends.fill(`${gapDate}T04:30`)
+      await expect(draft.getByText(orderingError, { exact: true })).toHaveCount(0)
+      await expect(add).toBeEnabled()
+      await draft.getByLabel('Date', { exact: true }).fill('2026-11-01')
+      await starts.fill('01:30')
+      const foldError = `This time occurs twice because the clocks move back. Choose another start time in ${location.timezone}.`
+      await expect(draft.getByText(foldError, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(foldError)
+      await expect(starts).toHaveValue('01:30')
+      await expect(ends).toHaveValue(`${gapDate}T04:30`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(draft.getByText(foldError, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(foldError)
+      await expect(draft.getByText(foldError, { exact: true })).toBeInViewport({ ratio: 1 })
+      await page.screenshot({ path: testInfo.outputPath('experience-validation-phone.jpg') })
+      await draft.getByLabel('Date', { exact: true }).fill(gapDate)
+      await starts.fill('03:30')
+      await expect(draft.getByText(foldError, { exact: true })).toHaveCount(0)
+      await expect(ends).toHaveValue(`${gapDate}T04:30`)
+      await expect(add).toBeEnabled()
+      await draft.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === created.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: created.id, locationId: location.id, month: gapDate.slice(0, 7), date: gapDate })
+      expect(createRequests).toEqual([])
+      const sessionsAfterDraft = await read()
+      expect(sessionsAfterDraft.map(session => session.id)).toEqual(sessionsBeforeDraft.map(session => session.id))
+      expect(sessionsAfterDraft.find(session => session.id === target!.id)).toEqual(after)
+
+      const unclaimed = sessionsBeforeDraft.find(session => session.id !== target!.id && session.status === 'scheduled' && session.claimed === 0)
+      expect(unclaimed, 'the real weekly schedule has another unclaimed occurrence to edit').toBeDefined()
+      const unclaimedStart = localNow(unclaimed!.timezone, new Date(unclaimed!.starts_at))
+      const unclaimedEnd = localNow(unclaimed!.timezone, new Date(unclaimed!.ends_at))
+      expect((await page.goto(`${calendarPath}/sessions/${unclaimed!.id}?product_id=${created.id}&locationId=${location.id}&month=${unclaimedStart.date.slice(0, 7)}&date=${unclaimedStart.date}`))?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const save = draft.getByRole('button', { name: 'Save', exact: true })
+      await expect(save).toBeDisabled()
+      await starts.fill('')
+      await starts.press('Tab')
+      await expect(draft.getByText('Choose a start date and time.', { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription('Choose a start date and time.')
+      await expect(ends).toHaveValue(`${unclaimedEnd.date}T${unclaimedEnd.time}`)
+      await expect(save).toBeDisabled()
+      await starts.press('Enter')
+      await expect(starts).toHaveValue('')
+      await expect(ends).toHaveValue(`${unclaimedEnd.date}T${unclaimedEnd.time}`)
+      expect(updateRequests).toEqual([])
+      await starts.fill(`${unclaimedStart.date}T${unclaimedStart.time}`)
+      await expect(draft.getByText('Choose a start date and time.', { exact: true })).toHaveCount(0)
+      await expect(save).toBeEnabled()
+      await draft.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === created.id)
+      expect(createRequests).toEqual([])
+      expect(updateRequests).toEqual([])
+      const sessionsAfterEdit = await read()
+      expect(sessionsAfterEdit.map(session => session.id)).toEqual(sessionsBeforeDraft.map(session => session.id))
+      expect(sessionsAfterEdit.find(session => session.id === unclaimed!.id)).toEqual(unclaimed)
+      expect(sessionsAfterEdit.find(session => session.id === target!.id)).toEqual(after)
     })
 
     test('MCP finishes the public menu and creates a separately bookable experience', async ({ request, page, baseURL }) => {
@@ -951,8 +1160,114 @@ test.describe('stateless MCP server', () => {
         const sessions = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, {headers: tenantTestExtraHeaders()})
         expect(sessions.status(),await sessions.text()).toBe(200)
         expect((await sessions.json()).sessions).toEqual([expect.objectContaining({starts_at:start.toISOString(),remaining:6,is_full:false})])
+        let additionalSeating: { date: string; time: string } | undefined
+        for (let offset = 1; offset <= 7 && !additionalSeating; offset++) {
+          const date = addLocalDays(seating!.date, offset)
+          const time = generateReservationTimes(location.opening_hours, date, { lastSeatingBufferMinutes: 60, specialHours: location.special_hours })[0]
+          if (time) additionalSeating = { date, time }
+        }
+        expect(additionalSeating, 'the existing location has another open one-hour time on a later date').toBeDefined()
+        const additionalStart = localDateTimeToInstant(additionalSeating!.date, additionalSeating!.time, location.timezone)
+        const additionalEnd = new Date(additionalStart.getTime() + 60 * 60_000)
+        const additionalEndLocal = localNow(location.timezone, additionalEnd)
+        await loginAs(page.request, baseURL!)
+        await page.setExtraHTTPHeaders({})
+        const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
+        const calendarPath = '/dashboard/ember-slice-demo/calendar'
+        const sessionEndpoint = `/api/editor/organizations/${organizationId}/products/${product.id}/sessions`
+        expect((await page.goto(`${calendarPath}/sessions/new?product_id=${product.id}&locationId=${locationId}&month=${additionalSeating!.date.slice(0, 7)}&date=${additionalSeating!.date}`))?.status()).toBe(200)
+        await waitForNuxtHydration(page)
+        const availability = page.locator('#dashboard-panel-product-session')
+        await expect(availability.getByLabel('Date', { exact: true })).toHaveValue(additionalSeating!.date)
+        await expect(availability.getByLabel('Starts', { exact: true })).toHaveValue('')
+        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('6')
+        await availability.getByLabel('Starts', { exact: true }).fill(additionalSeating!.time)
+        await expect(availability.getByLabel('Ends', { exact: true })).toHaveValue(`${additionalEndLocal.date}T${additionalEndLocal.time}`)
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('4')
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        let creations = 0
+        const countCreation = (request: import('@playwright/test').Request) => {
+          if (new URL(request.url()).pathname === sessionEndpoint && request.method() === 'POST') creations++
+        }
+        page.on('request', countCreation)
+        const calendarFailure = 'The newly saved calendar could not be read for this verification.'
+        const interceptCalendar = (url: URL) => url.pathname === sessionEndpoint
+        await page.route(interceptCalendar, async route => route.request().method() === 'GET'
+          ? await route.fulfill({ status: 503, json: { error: calendarFailure } })
+          : await route.continue())
+        const added = page.waitForResponse(response => new URL(response.url()).pathname === sessionEndpoint && response.request().method() === 'POST')
+        const refusedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
+        await availability.getByRole('button', { name: 'Add to calendar', exact: true }).click()
+        const addedResponse = await added
+        expect(addedResponse.status(), await addedResponse.text()).toBe(201)
+        const addedSessions = (await addedResponse.json() as { sessions: SessionAvailability[] }).sessions
+        expect(addedSessions).toHaveLength(1)
+        const addedId = addedSessions[0]!.id
+        expect((await refusedCalendar).status()).toBe(503)
+        await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/sessions/${addedId}`)
+        await expect(availability.getByText(calendarFailure, { exact: true })).toBeVisible()
+        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('4')
+        const beforeRetry = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+          product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
+        })
+        expect(beforeRetry.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 4, remaining: 4 })])
+        await page.unroute(interceptCalendar)
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('5')
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        const retried = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'PATCH')
+        const savedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
+        await availability.getByRole('button', { name: 'Save', exact: true }).click()
+        const retriedResponse = await retried
+        expect(retriedResponse.status(), await retriedResponse.text()).toBe(200)
+        expect((await savedCalendar).status()).toBe(200)
+        page.off('request', countCreation)
+        expect(creations).toBe(1)
+        await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('locationId') === locationId)
+        expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: product.id, locationId, month: additionalSeating!.date.slice(0, 7), date: additionalSeating!.date })
+        await expect(page.locator(`#dashboard-panel-org-calendar [data-session-id="${addedId}"]:visible`)).toBeVisible()
+        const persisted = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+          product_id: product.id,
+          from: localDateTimeToInstant(additionalSeating!.date, '00:00', location.timezone).toISOString(),
+          to: localDateTimeToInstant(addLocalDays(additionalSeating!.date, 1), '00:00', location.timezone).toISOString(),
+        })
+        expect(persisted.sessions).toEqual([expect.objectContaining({
+          id: addedId, organization_id: organizationId, product_id: product.id, location_id: locationId, timezone: location.timezone,
+          starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), capacity: 5, status: 'scheduled', claimed: 0, remaining: 5, is_full: false,
+        })])
+        const publicReadback = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, { headers: tenantTestExtraHeaders(), params: { location_id: locationId } })
+        expect(publicReadback.status(), await publicReadback.text()).toBe(200)
+        const publicSessions = (await publicReadback.json() as { sessions: Array<Pick<SessionAvailability, 'id' | 'starts_at' | 'ends_at' | 'location_id' | 'timezone' | 'remaining' | 'is_full'>> }).sessions
+        expect(publicSessions).toHaveLength(2)
+        expect(publicSessions.find(session => session.id === addedId)).toMatchObject({
+          id: addedId, location_id: locationId, timezone: location.timezone, starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), remaining: 5, is_full: false,
+        })
+        // Online is a public booking scope, not a physical Product location.
+        // Removing it from its own focused editor returns to the same Product
+        // and rereads saved state without following an invalid online address.
+        await call('set_product_publication', { product_id: product.id, published: false })
+        await call('set_product_booking_config', { product_id: product.id, held_online: true, scheduling_mode: 'provider' })
+        await page.goto(`${bookingPath}/location?location_id=online`)
+        const format = page.locator('#dashboard-panel-booking-location')
+        await expect(format.getByRole('switch', { name: 'Held online', exact: true })).toHaveAttribute('aria-checked', 'true')
+        await format.getByRole('switch', { name: 'Held online', exact: true }).click()
+        await format.getByRole('button', { name: 'Save', exact: true }).click()
+        await expect(page).toHaveURL(`${bookingPath}/duration`)
+        const offline = await call<{ product: Product }>('get_product', { product_id: product.id })
+        expect(offline.product.booking).toMatchObject({ held_online: false, scheduling_mode: 'provider', assigned_member_id: host.memberId })
+        expect(offline.product.locations).toEqual([{ location_id: locationId, active: true, published: true }])
+        await call('set_product_booking_config', { product_id: product.id, held_online: true })
+        await page.goto(`${bookingPath}/enabled?location_id=online`)
+        const calendar = page.locator('#dashboard-panel-booking-enabled')
+        await calendar.getByRole('switch', { name: 'Use a booking calendar', exact: true }).click()
+        await calendar.getByRole('button', { name: 'Save', exact: true }).click()
+        await expect(page).toHaveURL(`${bookingPath}/enabled`)
+        expect((await call<{ product: Product }>('get_product', { product_id: product.id })).product.booking).toBeNull()
       } finally {
-        if (experienceId) expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId})).deleted).toBe(true)
+        if (experienceId) {
+          expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId})).deleted).toBe(true)
+          const deleted = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${experienceId}`)
+          expect(deleted.status(), await deleted.text()).toBe(404)
+        }
         for (const section of menu?.sections.filter(section => section.collection.name.endsWith(stamp)) ?? []) {
           for (const product of section.products) expect((await call<{deleted:boolean}>('delete_product',{product_id:product.id})).deleted).toBe(true)
           expect((await call<{deleted:boolean}>('delete_collection',{collection_id:section.collection.id})).deleted).toBe(true)

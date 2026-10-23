@@ -4,6 +4,10 @@
     day, so Back from one is the day and the Calendar tab stays lit.
   -->
   <DashboardIndexPanel :id="personalScope ? 'account-calendar-day' : 'calendar-day'" :title="title" column="leaf">
+    <template v-if="sessionProduct" #right>
+      <UButton v-if="!calendarSessions?.providerHours.value" label="Add availability" icon="i-lucide-plus" :to="calendarSessions?.canCreate.value ? calendarSessions.addTo(day) : undefined" :disabled="!calendarSessions?.canCreate.value" />
+      <UButton v-else-if="sessionProduct.booking?.held_online" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
+    </template>
     <div class="space-y-6">
       <UAlert v-if="errorMessage" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
       <!--
@@ -11,7 +15,7 @@
         action that flips it. A closure is the tenant's whole day, written to
         the location's special hours — the same thing its hours leaf edits.
       -->
-      <UCard v-if="location" variant="subtle">
+      <UCard v-if="!sessionProduct && location" variant="subtle">
         <div class="flex items-center justify-between gap-3">
           <p class="text-sm text-muted">{{ availability.open ? 'Available' : 'Unavailable' }}</p>
           <span v-if="!availability.open" class="size-2 rounded-full bg-primary" aria-hidden="true" />
@@ -37,12 +41,14 @@
           @click="toggleClosure"
         />
       </UCard>
-      <p v-else-if="!personalScope" class="text-sm text-muted">Choose a location to manage this day's availability.</p>
+      <p v-else-if="!sessionProduct && !personalScope" class="text-sm text-muted">Choose a location to manage this day's availability.</p>
+
+      <p v-if="sessionProduct && status === 'loading'" role="status" class="text-sm text-muted">Loading scheduled times…</p>
 
       <div v-if="items.length" class="divide-y divide-default border-y border-default">
         <AgendaRow v-for="item in items" :key="item.id" :item="item" :to="openHere(item)" />
       </div>
-      <div v-else-if="!errorMessage && status === 'success'" class="py-6 text-center">
+      <div v-else-if="!errorMessage && (status === 'success' || status === 'ready')" class="py-6 text-center">
         <img
           src="https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/e10ff26b-ab52-4f93-8f48-36e23828aa00/w=224"
           alt=""
@@ -62,7 +68,7 @@ import { closeDates, closureOnDate, datedHours, getDateIntervals, openDates, par
 import { formatCalendarDate } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
-import { calendarLocationKey } from './CalendarPage.vue'
+import { calendarLocationKey, calendarSessionsKey, type CalendarItem } from './CalendarPage.vue'
 
 // The business's day can be blocked or opened; the account's day only lists its visits.
 const props = defineProps<{ personalScope?: boolean }>()
@@ -72,6 +78,8 @@ const level = useRouteLevel()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const organizationId = props.personalScope ? null : await useDashboardOrganizationId()
+const calendarSessions = inject(calendarSessionsKey, null)
+const sessionProduct = computed(() => calendarSessions?.product.value)
 const day = computed(() => String(route.params.day ?? ''))
 const locationId = computed(() => typeof route.query.locationId === 'string' ? route.query.locationId : null)
 const title = computed(() => formatCalendarDate(day.value, 'en', { weekday: 'long', month: 'long', day: 'numeric' }))
@@ -90,9 +98,10 @@ const calendarLocation = inject(calendarLocationKey)!
 const location = computed(() => calendarLocation.location.value ?? null)
 const refreshLocation = calendarLocation.refresh
 
-const { data, error, status, refresh } = await useAsyncData(
+const { data, error, status: agendaStatus, refresh } = await useAsyncData(
   () => `calendar-day:${organizationId}:${day.value}:${locationId.value ?? ''}:${String(route.query.kinds ?? '')}`,
   async () => {
+    if (sessionProduct.value) return null
     const agenda = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, {
       query: { from: day.value, to: day.value, locationId: locationId.value ?? undefined, kinds: typeof route.query.kinds === 'string' ? route.query.kinds : undefined },
       validate: isAgendaPayload,
@@ -110,14 +119,15 @@ if (!props.personalScope) {
 
 // A booking opens as a leaf of this day; a post keeps its own screen. The
 // item id is `kind:record`, which is how the agenda names a row; a stay's two rows name their stay.
-function openHere(item: AgendaItem): string | undefined {
-  if (item.kind === 'post' || props.personalScope) return undefined
+function openHere(item: CalendarItem): string | undefined {
+  if (item.kind === 'session' || item.kind === 'post' || props.personalScope) return undefined
   return `${level.path.value}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`
 }
-const items = computed(() => data.value?.items ?? [])
+const items = computed(() => sessionProduct.value ? calendarSessions!.itemsOn(day.value) : data.value?.items ?? [])
+const status = computed(() => sessionProduct.value ? calendarSessions!.status.value : agendaStatus.value)
 const saveError = ref<unknown>(null)
 const errorMessage = computed(() => {
-  const cause = saveError.value ?? error.value
+  const cause = saveError.value ?? (sessionProduct.value ? calendarSessions!.error.value : error.value)
   return cause ? getErrorMessage(cause, 'The day could not be loaded') : ''
 })
 

@@ -16,22 +16,30 @@ const route = useRoute()
 const router = useRouter()
 const to = (name: string) => router.resolve({ path: `${level.path.value}/${name}`, query: route.query }).fullPath
 const row = (id: string, label: string, summary: string, icon?: string) => ({ id, label, summary, icon, to: to(id) })
+const availability = () => ({ id: 'availability', label: 'Availability', summary: 'Add or change bookable times in Calendar', icon: 'i-lucide-calendar-days', to: router.resolve({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: p.product.value?.id, locationId: typeof route.query.location_id === 'string' ? route.query.location_id : undefined } }).fullPath })
 const groups = computed<EditorNavigationGroup[]>(() => {
   const config = p.product.value?.booking
   const items: EditorNavigationItem[] = config ? [] : [row('enabled', 'Booking calendar', 'Not set up', 'i-lucide-calendar-check')]
   if (config) items.push(
     row('duration', 'Duration', config.duration_minutes ? `${config.duration_minutes} minutes` : 'Choose a duration'),
-    p.locationId.value ? { id: 'location', label: 'Meeting location', summary: p.location.value?.title ?? '' } : row('location', 'Meeting location', config.held_online ? 'Online' : 'Not set'),
+    p.product.value?.kind === 'experience'
+      ? row('location', 'Meeting format', config.held_online ? 'Online booking available' : p.product.value.locations.length ? 'At physical locations' : 'No physical locations assigned')
+      : p.locationId.value ? { id: 'location', label: 'Meeting location', summary: p.location.value?.title ?? '' } : row('location', 'Meeting location', config.held_online ? 'Online' : 'Not set'),
     row('capacity', 'Guest limit', config.default_capacity === null ? 'No guest limit' : config.default_capacity === 1 ? 'One guest per session' : config.default_capacity === 0 ? 'Closed to new guests' : `Up to ${config.default_capacity} guests per session`),
     row('assignment', 'Host', p.assignmentSummary.value, 'i-lucide-user-round'),
     row('confirmation', 'Confirmation', config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request'),
-    // Online, the provider's working hours are the schedule; at a location, its weekly times are.
-    ...(config.held_online
-      ? [{ id: 'hours', icon: 'i-lucide-clock', label: 'Bookable times', summary: config.assigned_team_id ? 'Each team member\'s working hours' : 'Your provider\'s working hours', to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team` }]
-      : [
-          row('schedule', 'Weekly schedule', p.scheduleError.value ? p.scheduleError.value : p.weekdays.filter(day => p.savedSlotsFor(day.value).length).map(day => day.label).join(', ') || 'No weekly times set'),
-          row('sessions', 'Dated sessions', 'Add or edit individual dates', 'i-lucide-calendar-days'),
-        ]),
+    ...((p.product.value?.kind === 'experience' ? config.scheduling_mode === 'provider' : config.held_online)
+      ? [{ id: 'hours', icon: 'i-lucide-clock', label: 'Bookable times', summary: config.assigned_team_id ? 'Each team member\'s working hours' : p.product.value?.kind === 'experience' ? 'The host\'s working hours' : 'Your provider\'s working hours', to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team` }]
+      : []),
+    // Defaults above belong to the offering; weekly times belong to the chosen physical location.
+    ...(route.query.location_id !== 'online' && (!config.held_online || p.product.value?.kind === 'experience' && (p.locationId.value || p.product.value.locations.length))
+      ? p.product.value?.kind === 'experience' ? [
+          availability(),
+        ] : [
+          row('schedule', 'Weekly schedule', !p.locationId.value ? 'Choose a physical location' : p.scheduleError.value ?? `${p.location.value?.title ?? 'Location unavailable'} · ${p.weekdays.filter(day => p.savedSlotsFor(day.value).length).map(day => day.label).join(', ') || 'No weekly times set'}`),
+          availability(),
+        ]
+      : []),
   )
   // One flat list. Whether guests book on the website at all is the
   // organization's setting, under Website, not this product's.

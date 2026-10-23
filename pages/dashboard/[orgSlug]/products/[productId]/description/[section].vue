@@ -13,12 +13,15 @@
     <template v-if="validSection && p.product.value && !p.loadError.value">
       <p class="mb-2 text-sm font-semibold text-muted" data-testid="stay-description-counter">{{ PRODUCT_LIMITS.description - value.length }}/{{ PRODUCT_LIMITS.description }} available</p>
       <UTextarea
+        ref="descriptionTextarea"
         v-model="value"
         :aria-label="title"
         :data-testid="`stay-description-${section}`"
-        :rows="10"
+        variant="none"
+        :rows="1"
         :maxlength="PRODUCT_LIMITS.description"
         :disabled="p.saving.value"
+        autoresize
         autofocus
         class="w-full"
       />
@@ -27,6 +30,7 @@
 </template>
 
 <script setup lang="ts">
+import { useElementSize } from '@vueuse/core'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
@@ -42,6 +46,11 @@ const definition = computed(() => descriptionFields.find(field => field.key === 
 const listingDescription = computed(() => section.value === 'listing-description')
 const validSection = computed(() => p.product.value?.kind === 'stay' && (listingDescription.value || Boolean(definition.value)))
 const title = computed(() => listingDescription.value ? 'Listing description' : definition.value?.name ?? '')
+const descriptionTextarea = useTemplateRef('descriptionTextarea')
+const { width: descriptionWidth } = useElementSize(() => descriptionTextarea.value?.textareaRef)
+watch(descriptionWidth, (width) => {
+  if (width > 0) descriptionTextarea.value?.autoResize()
+}, { flush: 'post' })
 const value = computed({
   get: () => listingDescription.value ? p.form.description : definition.value ? p.textValue(definition.value) : '',
   set: (text: string) => {

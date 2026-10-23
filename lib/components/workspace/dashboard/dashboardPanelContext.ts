@@ -1,14 +1,15 @@
 import type { ComputedRef, InjectionKey } from 'vue'
 
 /**
- * The widths a level's content may take instead of the frame. A page names
- * which one it is and never a size: a leaf and anything edited like one, or a
- * list of records read top to bottom. A grid, a table, a calendar or a chart
- * names none and takes the frame, as Airbnb's listings, calendar and insights do.
+ * The widths an explicitly standalone level may take instead of the frame.
+ * A page names which one it is and never a size: a single-concern screen, or a
+ * list of records read top to bottom. Paired panels use their full inner width.
+ * A grid, a table, a calendar or a chart names none and takes the frame, as
+ * Airbnb's listings, calendar and insights do.
  *
  * Content always starts at the panel's gutter, the same edge as the top nav,
  * and is never centred. Below `lg` a level is the whole screen or a drawer and
- * uses all of it; from `lg` the column only stops a line running on.
+ * uses all of it; from `lg` a standalone column stops a line running on.
  */
 export const dashboardColumnWidths = {
   leaf: 'lg:max-w-xl',

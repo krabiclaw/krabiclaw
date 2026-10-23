@@ -20,6 +20,8 @@ import { requestInsertQueries, threadPayloadForGuest, getThreadOperationalRecord
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
+import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
+import { getProduct, removeProductLocation } from '../../server/utils/product-management.ts'
 import { occurrenceKey } from '../../shared/bookings.ts'
 import { addLocalDays, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -76,9 +78,17 @@ function addRule(db: D1Database, id: string, over: Partial<{ weekday: number; st
       over.start_time ?? '14:00', ACTOR, ACTOR).run()
 }
 
-test('session materialization is idempotent across cancel, edit and reschedule', { timeout: 120_000 }, async () => {
+test('session materialization is idempotent across cancel, edit and reschedule, and retains assigned session locations', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   try {
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('member-actor', ?, ?, 'owner')").bind(ORG, ACTOR).run()
+    const member = await db.prepare('SELECT id FROM member WHERE organizationId = ? AND userId = ?').bind(ORG, ACTOR).first<{ id: string }>()
+    assert(member)
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
+    assert.deepEqual(await listDashboardLocations(db, ORG, ACTOR, true), [], 'an unassigned Product grants no location visibility')
+    await setProductBookingConfig(db, { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env, patch: { assigned_member_id: member.id } })
+    assert.equal((await getProduct(db, ORG, PRODUCT)).booking?.assigned_member_id, member.id)
     await addRule(db, 'rule-sunday')
     const throughDate = addLocalDays(localNow('Asia/Bangkok').date, 31)
     const first = await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate, actorId: ACTOR })
@@ -115,6 +125,33 @@ test('session materialization is idempotent across cancel, edit and reschedule',
     assert.equal(after?.capacity, 4, 'regeneration must not overwrite an edited capacity')
     assert.equal(await db.prepare('SELECT count(*) n FROM product_sessions').first<number>('n'), count,
       'regeneration must not recreate a rescheduled occurrence under its old start')
+
+    const readScope: Parameters<typeof listSessions>[1] = {
+      organizationId: ORG, productId: PRODUCT, statuses: ['scheduled', 'cancelled'],
+      fromInstant: localDateTimeToInstant(localNow('Asia/Bangkok').date, '00:00', 'Asia/Bangkok').toISOString(),
+      toInstant: localDateTimeToInstant(addLocalDays(throughDate, 1), '00:00', 'Asia/Bangkok').toISOString(),
+    }
+    const sessionsBeforeRemoval = await listSessions(db, readScope)
+    assert.equal(sessionsBeforeRemoval.length, count)
+    assert(sessionsBeforeRemoval.every(session => session.location_id === LOCATION))
+    const assignedLocations = await listDashboardLocations(db, ORG, ACTOR, true)
+    assert.deepEqual(assignedLocations.map(location => location.id), [LOCATION])
+    const [retainedLocation] = assignedLocations
+    assert(retainedLocation)
+    assert.equal(retainedLocation.title, 'Studio')
+    assert.equal(retainedLocation.timezone, 'Asia/Bangkok')
+
+    await removeProductLocation(db, { organizationId: ORG, productId: PRODUCT, locationId: LOCATION })
+    const productAfterRemoval = await getProduct(db, ORG, PRODUCT)
+    assert.deepEqual(productAfterRemoval.locations, [])
+    assert.equal(productAfterRemoval.booking?.assigned_member_id, member.id)
+    assert.deepEqual(await listSessions(db, readScope), sessionsBeforeRemoval, 'removing the Product location preserves each saved occurrence')
+    assert.deepEqual(await listDashboardLocations(db, ORG, ACTOR, true), [retainedLocation], 'the assigned host retains the exact historical session location')
+
+    await setProductBookingConfig(db, { organizationId: ORG, productId: PRODUCT, actorId: ACTOR, env, patch: { assigned_member_id: null } })
+    assert.equal((await getProduct(db, ORG, PRODUCT)).booking?.assigned_member_id, null)
+    assert.deepEqual(await listDashboardLocations(db, ORG, ACTOR, true), [], 'historical sessions grant no visibility after host unassignment')
+    assert.deepEqual((await listSessions(db, readScope)).map(session => session.id), sessionsBeforeRemoval.map(session => session.id))
   } finally { await runtime.dispose() }
 })
 

@@ -101,10 +101,10 @@ const panelUi = computed((): { body?: string } => {
   return { body: fill ? 'p-0 sm:p-0 gap-0' : undefined }
 })
 const pair = computed(() => level.mode.value === 'pair')
-// Beside a child every index is a leaf-wide column; alone it is its own column, or the frame.
+// Paired panels own their width; an explicit column caps a standalone screen.
 const width = computed((): string | undefined => {
   const column: DashboardColumn | undefined = props.column
-  if (pair.value) return dashboardColumnWidths.leaf
+  if (pair.value) return undefined
   return column ? dashboardColumnWidths[column] : undefined
 })
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.
