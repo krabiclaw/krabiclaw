@@ -639,7 +639,8 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
       product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
-      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
+      // A home the editor creates has a flexible check-in end until the host chooses one.
+      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
       // The editor's listing choices persist through the native home projection too.
       description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',

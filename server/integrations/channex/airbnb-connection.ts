@@ -791,8 +791,8 @@ export class AirbnbConnection {
       report.photos_skipped.push(image.id)
       return
     }
-    await replaceR2ImageFile({ db: this.db, env: this.env, organizationId: this.organizationId, assetId, ...await this.photo(image) })
-    report.photos_upgraded.push(image.id)
+    // Counted when the photo names its new file, so a failure deleting the old one still purges the cached pages.
+    await replaceR2ImageFile({ db: this.db, env: this.env, organizationId: this.organizationId, assetId, ...await this.photo(image), onSwitched: () => report.photos_upgraded.push(image.id) })
   }
 
   /**

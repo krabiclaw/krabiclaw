@@ -270,6 +270,8 @@ export async function replaceR2ImageFile(input: {
   filename: string
   width: number
   height: number
+  /** Called once the asset names the new file, before the old file is deleted, so a caller can act on a switch whose cleanup then fails. */
+  onSwitched?: () => void
 }): Promise<void> {
   const asset = await getMediaAsset(input.db, input.assetId, input.organizationId)
   if (!asset || asset.status !== 'active' || asset.kind !== 'image' || asset.provider !== 'cloudflare_r2' || !asset.r2_key) {
@@ -299,6 +301,7 @@ export async function replaceR2ImageFile(input: {
     await deleteFromR2(input.env, key)
     throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${input.assetId} changed while its file was replaced`, data: { code: 'MEDIA_CHANGED', field: 'asset_id' } })
   }
+  input.onSwitched?.()
   try {
     await deleteFromR2(input.env, asset.r2_key)
   } catch (error) {
