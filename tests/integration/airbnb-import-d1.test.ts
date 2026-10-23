@@ -460,7 +460,7 @@ test('a third home on Basic is refused as a home, nothing is saved, and the same
   }
 })
 
-test('the import asks only for what Airbnb leaves out and stops when Airbnb has no check-in start or checkout', { timeout: 120_000 }, async () => {
+test('the import asks only for what Airbnb leaves out, takes the installed app\'s former fields without using them, and stops when Airbnb has no check-in start or checkout', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
@@ -477,13 +477,13 @@ test('the import asks only for what Airbnb leaves out and stops when Airbnb has 
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       return { status: response.status, body: await response.json() as Record<string, unknown> }
     }
-    // Times are Airbnb's and children and infants are not asked: a client still sending them is refused, not ignored.
-    assert.deepEqual(await start({ ...form, checkInTime: '15:00', checkOutTime: '11:00' }), { status: 400, body: { error: 'checkInTime is not accepted; the import takes it from Airbnb', code: 'VALIDATION_ERROR', field: 'checkInTime' } })
-    assert.deepEqual((await start({ missingDetails: { ...form.missingDetails, childBeds: '1' } })).body.data, { code: 'ONLY_MISSING_DETAILS' })
+    // Any key the import does not know is refused; the installed app's former fields are not, as the next steps show.
+    assert.deepEqual(await start({ ...form, sleeps: 4 }), { status: 400, body: { error: 'sleeps is not accepted', code: 'VALIDATION_ERROR', field: 'sleeps' } })
     // "FLEXIBLE" or "NOT_SELECTED" is no start: the import stops naming Airbnb's field, and nothing is made.
+    // Even with the app's own times in the request: the window is Airbnb's.
     for (const [setting, field] of [[{ check_in_time_start: 'NOT_SELECTED' }, 'booking_settings.check_in_time_start'], [{ check_out_time: null }, 'booking_settings.check_out_time']] as const) {
       channex.booking = { ...channex.booking, check_in_time_start: '16', check_out_time: 10, ...setting }
-      const refused = await start(form)
+      const refused = await start({ ...form, checkInTime: '15:00', checkOutTime: '11:00' })
       assert.deepEqual({ status: refused.status, data: refused.body.data }, { status: 422, data: { code: 'MISSING_AIRBNB_FIELD', field } })
       assert.deepEqual([await count(db, 'business_locations'), await count(db, 'products'), await count(db, 'product_channel_mappings')], [0, 0, 0])
     }
@@ -492,9 +492,14 @@ test('the import asks only for what Airbnb leaves out and stops when Airbnb has 
     assert.equal((await connection.details(LISTING)).checkInEndTime, null)
     channex.booking = { ...channex.booking, check_in_time_end: '25' }
     assert.equal((await connection.details(LISTING)).checkInEndTime, '01:00')
-    const started = await start(form)
+    // The installed app (build 10) still sends its own times and asks for child beds and infant cots:
+    // the request is taken, those four are discarded, and the home has Airbnb's window.
+    const started = await start({ missingDetails: { ...form.missingDetails, childBeds: '1', infantCots: '2' }, checkInTime: '15:00', checkOutTime: '11:00' })
     assert.equal(started.status, 202)
     assert.deepEqual(await db.prepare('SELECT check_in_time, check_in_end_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(started.body.product_id).first(), { check_in_time: '16:00', check_in_end_time: '01:00', check_out_time: '10:00' })
+    assert.deepEqual(channex.roomTypes, [])
+    const property = JSON.parse(String(await db.prepare('SELECT import_property FROM product_channel_mappings WHERE product_id = ?').bind(started.body.product_id).first('import_property'))) as Record<string, unknown>
+    assert.deepEqual(['child_beds', 'infant_cots'].filter(key => key in property), [])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

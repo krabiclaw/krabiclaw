@@ -11,11 +11,15 @@ export default defineHandler(async (event) => {
   if (!organizationId || !listingId) return jsonResponse({ error: 'Organization and listing IDs are required' }, { status: 400 })
   const { env, session, organization } = await requireOrganizationAccess(event, organizationId)
   const body = await readBody<Record<string, unknown>>(event)
-  // Check-in and checkout come from Airbnb; a request still sending them is refused rather than ignored.
-  const unknown = Object.keys(body ?? {}).find(key => key !== 'missingDetails')
-  if (unknown) return jsonResponse({ error: `${unknown} is not accepted; the import takes it from Airbnb`, code: 'VALIDATION_ERROR', field: unknown }, { status: 400 })
-  const missing = body?.missingDetails ?? {}
+  // The installed iOS build (10) still sends checkInTime and checkOutTime and
+  // asks for childBeds and infantCots. They are read and discarded: the times
+  // are Airbnb's and Channex gets 0 for both bed counts. Any other key is refused.
+  const { checkInTime: _checkInTime, checkOutTime: _checkOutTime, ...rest } = body ?? {}
+  const unknown = Object.keys(rest).find(key => key !== 'missingDetails')
+  if (unknown) return jsonResponse({ error: `${unknown} is not accepted`, code: 'VALIDATION_ERROR', field: unknown }, { status: 400 })
+  const missing = rest.missingDetails ?? {}
   if (!missing || typeof missing !== 'object' || Array.isArray(missing)) return jsonResponse({ error: 'missingDetails must be an object', code: 'VALIDATION_ERROR', field: 'missingDetails' }, { status: 400 })
-  const result = await new AirbnbConnection(env.DB, env, organization.id, session.user.id).prepare(listingId, { missingDetails: missing as Record<string, unknown> })
+  const { childBeds: _childBeds, infantCots: _infantCots, ...missingDetails } = missing as Record<string, unknown>
+  const result = await new AirbnbConnection(env.DB, env, organization.id, session.user.id).prepare(listingId, { missingDetails })
   return jsonResponse(result, { status: result.stage === 'complete' ? 200 : 202 })
 })
