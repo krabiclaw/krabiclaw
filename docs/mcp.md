@@ -278,7 +278,11 @@ nightly availability, prices and restrictions. Members read only the homes they
 are assigned to; owners and admins manage the organization's homes.
 
 `create_stay` records a stay the host took directly and holds its nights. It takes
-no payment and sends no guest email. `update_stay` and `cancel_stay` change only
+no payment, applies existing automatic guest-message schedules and updates
+availability on the home's connected Airbnb listing through Channex. A failed
+channel update returns `CHANNEL_PUSH_FAILED` with `committed:true`: the stay was
+saved. Read the calendar and channel state before retrying with the same
+`idempotency_key`. `update_stay` and `cancel_stay` change only
 host-owned stays under their current `expected_version`; channel-owned stays
 change on their source channel. `record_stay_payment` records external money,
 including a negative refund record, and `delete_stay_payment` removes a mistaken
