@@ -105,9 +105,10 @@ not open-world: the selected business's Stripe account, media storage and linked
 accounts remain bounded targets. Guest email, host attachment downloads and
 external social audiences cross that scope.
 
-The [metadata evaluation corpus](mcp-metadata-evaluation.md) contains direct,
-indirect and nearby negative prompts for every retained tool. Its prompts are
-prepared checks; selection outcomes require an actual refreshed ChatGPT session.
+The [metadata evaluation corpus](mcp-metadata-evaluation.md) contains prepared
+direct, indirect and nearby negative prompts for the covered operations. It is
+not a complete catalog evaluation; selection outcomes require an actual
+refreshed ChatGPT session.
 
 ### Release sequence
 

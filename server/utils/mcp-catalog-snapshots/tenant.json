@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f7ebebffd19da37fe6f1cc04098b99f5e9a629fa401aa59091fea7e72de6d932",
-  "documentationFingerprint": "sha256:9cf60a5aef68daa280248c606de4875d18d1ffa3ef73b29c1dfc9f5509fe4669",
+  "fingerprint": "sha256:221c37bf136aaff7b54d481f2ef91d87e97db0364246218a758d7b617841bf97",
+  "documentationFingerprint": "sha256:0bde0652f06863c632dc33ae9c9af435d08624bafa0af6411346b939ff60c03b",
   "tools": [
     {
       "name": "add_organization_language",
@@ -30974,7 +30974,7 @@
             "type": "string"
           },
           "pageType": {
-            "description": "Type of the new page.",
+            "description": "Type of a new source page. A language version inherits its source page’s type; omit this field or supply the same type.",
             "enum": [
               "custom",
               "recipe",
@@ -30995,14 +30995,14 @@
             "type": "string"
           },
           "recipe": {
-            "description": "Template section the new page fills, or null for none.",
+            "description": "Template section a new source page fills, or null for none. A language version inherits its source page’s recipe when omitted; an explicit value, including null, must match the source.",
             "type": [
               "string",
               "null"
             ]
           },
           "sortOrder": {
-            "description": "Position of the new page in the site’s page list.",
+            "description": "Position of a new source page in the site’s page list. Language versions inherit the source page’s position and must omit this field.",
             "type": "number"
           },
           "summary": {

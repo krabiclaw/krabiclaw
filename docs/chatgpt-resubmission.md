@@ -103,7 +103,11 @@ checks support the PR; they do not satisfy these production review gates.
 
 On October 23, 2026, authenticated OAuth discovery, PKCE, token exchange,
 MCP initialize, 165-tool discovery, workspace context and organization reads
-passed against both staging and production. The current Chrome portal draft
+passed against the deployed production commit
+`cbb3e59eed7e9eac81700dcce3e951233a1198d6` and staging commit
+`d36dac084a65542d5f043f5a171ed194edbed361`. These are baseline checks of the
+165-tool catalog, not deployed verification of this PR's 163-tool catalog.
+The current Chrome portal draft
 is version `0.1.3`, authorized and domain verified. Its fresh production scan
 completed and shows ten tool findings. All ten saved definitions were inspected:
 nine request further review without identifying a defect, and one questions

@@ -47,6 +47,8 @@ test.describe('stateless MCP server', () => {
     const sourceRead = await request.get(`${editor}/pages/${home!.id}`)
     expect(sourceRead.status()).toBe(200)
     const originalSource = await sourceRead.json()
+    expect(originalSource.page.page_type).toBe('recipe')
+    expect(originalSource.page.recipe, 'The existing source homepage has a template recipe to inherit').toEqual(expect.any(String))
     const publicSource = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/' } })
     expect(publicSource.status()).toBe(200)
     const originalPublicSource = (await publicSource.json()).page
@@ -73,11 +75,45 @@ test.describe('stateless MCP server', () => {
       expect(prematureBody.result?.isError).toBe(true)
       expect(prematureBody.result?.content?.[0]?.text).toContain('Translate the homepage before publishing this language')
 
-      const translation = await request.put(localizationPath, { data: {
-        route_path: `/${locale}/`, values: { title: translatedTitle },
-        content_blocks: [{ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } }],
-      } })
+      const translationArgs = {
+        organization_id: MCP_ORGANIZATION_ID, page_id: home!.page_id, locale, path: '/', title: translatedTitle,
+        blocks: [{ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } }],
+      }
+      for (const [change, message] of [
+        [{ recipe: null }, 'A translated tenant-page variant must use the source page identity'],
+        [{ sortOrder: originalSource.page.sort_order + 1 }, 'Set sortOrder on the source page, not a translation'],
+      ] as const) {
+        const refused = await mcpRequest(request, baseURL!, {
+          method: 'tools/call', toolName: 'create_site_page', args: { ...translationArgs, ...change },
+        })
+        expect(refused.status()).toBe(200)
+        const refusal = await refused.json()
+        expect(refusal.result?.isError).toBe(true)
+        expect(refusal.result?.structuredContent).toBeUndefined()
+        expect(JSON.parse(refusal.result.content[0].text)).toMatchObject({ status: 400, message })
+        const editorRefusal = await request.post(`${editor}/pages`, { data: {
+          pageId: home!.page_id, locale, path: '/', title: translatedTitle, blocks: translationArgs.blocks, ...change,
+        } })
+        expect(editorRefusal.status()).toBe(400)
+        expect(await editorRefusal.text()).toContain(message)
+        const absent = await request.get(localizationPath)
+        expect(absent.status(), await absent.text()).toBe(404)
+        const unchangedSource = await request.get(`${editor}/pages/${home!.id}`)
+        expect(unchangedSource.status()).toBe(200)
+        expect(await unchangedSource.json()).toEqual(originalSource)
+      }
+      const translation = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'create_site_page', args: translationArgs,
+      })
       expect(translation.status(), await translation.text()).toBe(200)
+      const created = mcpData<{ page: { id: string } }>(await translation.json()).page
+      const editorTranslation = await request.get(`${editor}/pages/${created.id}`)
+      expect(editorTranslation.status()).toBe(200)
+      expect((await editorTranslation.json()).page).toMatchObject({
+        page_id: home!.page_id, locale, path: '/', title: translatedTitle,
+        page_type: originalSource.page.page_type, recipe: originalSource.page.recipe, sort_order: originalSource.page.sort_order,
+        blocks: [expect.objectContaining({ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } })],
+      })
       const translatedRead = await request.get(localizationPath)
       expect(translatedRead.status()).toBe(200)
       const authored = (await translatedRead.json()).localization

@@ -220,9 +220,9 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
         ...TENANT_PAGE_METADATA_SCHEMA,
         path: { ...TENANT_PAGE_METADATA_SCHEMA.path, description: 'New unused path in this language. An occupied path or redirect is refused; creation does not move an existing page.' },
         summary: { ...TENANT_PAGE_METADATA_SCHEMA.summary, description: 'Summary of the new page; null means no summary.' },
-        pageType: { ...TENANT_PAGE_METADATA_SCHEMA.pageType, description: 'Type of the new page.' },
-        recipe: { ...TENANT_PAGE_METADATA_SCHEMA.recipe, description: 'Template section the new page fills, or null for none.' },
-        sortOrder: { ...TENANT_PAGE_METADATA_SCHEMA.sortOrder, description: 'Position of the new page in the site’s page list.' },
+        pageType: { ...TENANT_PAGE_METADATA_SCHEMA.pageType, description: 'Type of a new source page. A language version inherits its source page’s type; omit this field or supply the same type.' },
+        recipe: { ...TENANT_PAGE_METADATA_SCHEMA.recipe, description: 'Template section a new source page fills, or null for none. A language version inherits its source page’s recipe when omitted; an explicit value, including null, must match the source.' },
+        sortOrder: { ...TENANT_PAGE_METADATA_SCHEMA.sortOrder, description: 'Position of a new source page in the site’s page list. Language versions inherit the source page’s position and must omit this field.' },
         blocks: { ...TENANT_PAGE_BLOCKS_SCHEMA, description: 'Ordered blocks for the new page. Existing pages and their blocks are not replaced. Block data contains no asset IDs or delivery URLs; use each block’s media field for its saved media placements.' },
       },
       required: ['path', 'title', 'blocks'],
@@ -470,8 +470,8 @@ export async function handleContentTools(ctx: McpExecutorContext): Promise<unkno
             // source page, and a null here would be read as stating a
             // different one.
             pageType: (optionalString(args, "pageType") ?? undefined) as "custom" | "recipe" | "legal" | "system" | undefined,
-            recipe: nullableStringArg(args, "recipe", null),
-            sortOrder: typeof args.sortOrder === 'number' ? args.sortOrder : null,
+            recipe: args.recipe === undefined ? undefined : nullableStringArg(args, "recipe", null),
+            sortOrder: typeof args.sortOrder === 'number' ? args.sortOrder : undefined,
             blocks: args.blocks,
           },
           env: organization.env,
