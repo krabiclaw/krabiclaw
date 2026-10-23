@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import type Stripe from 'stripe'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
@@ -9,6 +10,7 @@ import { createLocation, deleteLocation, updateLocation } from '../../server/uti
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, readStayHome, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
 import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
+import { returnExtrasToDraftsForPlanEnd } from '../../server/utils/billing-plan-end.ts'
 import { HTTPError } from 'nitro'
 
 // Billing by count: Growth and Business bill every active location and every
@@ -195,6 +197,26 @@ test('active locations and live homes are reported to their Stripe meters, draft
     assert.deepEqual((await homesQuote(env, db, 'grower', 1)).adding, { count: 1, additional_homes: 1, amount_minor: 700, allowed: true })
     assert.deepEqual(await counts('grower'), { locations: 3, homes: 4 })
     assert.deepEqual(last('cus_grower'), { locations: 3, homes: 4 })
+
+    // ── Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. The organization is on Basic, so its
+    // newest location and two newest homes past what Basic includes go back to drafts; the oldest stay as they are.
+    const newestFirst = async (sql: string) => (await db.prepare(sql).bind('grower').all<{ id: string }>()).results.map(row => row.id)
+    const growerHomes = await newestFirst("SELECT id FROM products WHERE organization_id = ? AND kind = 'stay' ORDER BY created_at DESC, id DESC")
+    const growerLocations = await newestFirst("SELECT id FROM business_locations WHERE organization_id = ? AND id NOT IN (SELECT location_id FROM product_stay_configs) ORDER BY created_at DESC, id DESC")
+    const ended = { type: 'customer.subscription.deleted', data: { object: { id: 'sub_grower', customer: 'cus_grower', status: 'canceled' } } } as unknown as Stripe.Event
+    // While the subscription still entitles Growth, nothing changes.
+    await returnExtrasToDraftsForPlanEnd(env, db, ended)
+    assert.deepEqual(await counts('grower'), { locations: 3, homes: 4 })
+    await db.prepare("UPDATE subscription SET status = 'canceled' WHERE referenceId = 'grower'").run()
+    await returnExtrasToDraftsForPlanEnd(env, db, ended)
+    assert.deepEqual(await counts('grower'), { locations: 2, homes: 2 })
+    const liveNow = async (productId: string) => (await getProduct(db, 'grower', productId)).stay!.live
+    assert.deepEqual(await Promise.all(growerHomes.map(liveNow)), [false, false, true, true])
+    assert.deepEqual((await db.prepare(`SELECT id, status FROM business_locations WHERE organization_id = 'grower' AND id IN (${growerLocations.map(() => '?').join(', ')})`).bind(...growerLocations).all<{ id: string; status: string }>()).results
+      .sort((a, b) => growerLocations.indexOf(a.id) - growerLocations.indexOf(b.id)).map(row => row.status), ['inactive', 'active', 'active'])
+    // Delivered again, the event changes nothing more.
+    await returnExtrasToDraftsForPlanEnd(env, db, ended)
+    assert.deepEqual(await counts('grower'), { locations: 2, homes: 2 })
 
     // ── Basic includes two locations and two live homes, counted apart, and refuses a third of either; drafts are unlimited. It has no customer and reports nothing.
     await organization('starter', null)

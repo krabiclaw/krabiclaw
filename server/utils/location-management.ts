@@ -438,7 +438,8 @@ export async function updateLocation(
   organizationId: string,
   locationIdOrSlug: string,
   input: UpdateLocationInput,
-  userId: string,
+  /** The member making the change, or null for KrabiClaw's own (recorded as a system event). */
+  userId: string | null,
   env: CloudflareEnv,
   writeGuard?: BatchQuery,
 ) {

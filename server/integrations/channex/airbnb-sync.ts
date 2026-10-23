@@ -148,17 +148,41 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
     throw new HTTPError({ statusCode: refusal.status, statusMessage: refusal.data.error, data: { ...refusal.data, quote: await homesQuote(env, db, organizationId, adding - leaving) } })
   }
 
-  const at = now()
   const queued = [...items.map(item => ({ listing: item.listing_id, product: productOf(item.listing_id) ?? null, action: 'sync' as const, details: item.details ? JSON.stringify(item.details) : null })),
     ...stopped.map(listing => ({ listing: listing.id, product: productOf(listing.id) ?? null, action: 'stop' as const, details: null }))]
-  await executeBatch(db, queued.map(job => ({ query: `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, attempts, created_at, updated_at)
+  await queueJobs(db, organizationId, userId, queued)
+  const named = new Set(queued.map(job => job.listing))
+  return (await readAirbnbSync(db, organizationId)).filter(listing => named.has(listing.listing_id))
+}
+
+/**
+ * Queue each listing's change, replacing any earlier request for it. A request
+ * clears any run's lease, so a run still on the old request writes nothing
+ * over this one. `requestedBy` is null only for a stop KrabiClaw asks for itself.
+ */
+async function queueJobs(db: DbClient, organizationId: string, requestedBy: string | null, jobs: Array<{ listing: string; product: string | null; action: 'sync' | 'stop'; details: string | null }>): Promise<void> {
+  const at = now()
+  await executeBatch(db, jobs.map(job => ({ query: `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, attempts, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)
       ON CONFLICT (organization_id, listing_id) DO UPDATE SET id = excluded.id, action = excluded.action, details = excluded.details, state = 'pending', requested_by = excluded.requested_by,
         product_id = COALESCE(excluded.product_id, airbnb_sync_jobs.product_id), attempts = 0, last_error_code = NULL, last_error = NULL,
         next_attempt_at = NULL, completed_at = NULL, lease_token = NULL, lease_until = NULL, updated_at = excluded.updated_at`,
-    params: [crypto.randomUUID(), organizationId, job.listing, job.product, job.action, job.details, userId, at, at] })), { operation: 'Queue an Airbnb sync change' })
-  const named = new Set(queued.map(job => job.listing))
-  return (await readAirbnbSync(db, organizationId)).filter(listing => named.has(listing.listing_id))
+    params: [crypto.randomUUID(), organizationId, job.listing, job.product, job.action, job.details, requestedBy, at, at] })), { operation: 'Queue an Airbnb sync change' })
+}
+
+/**
+ * Stop syncing these homes with Airbnb because the organization's paid plan
+ * ended: queued as a stop no one asked for, which the airbnb-sync task runs as
+ * it runs any other. Each must be a home imported from the connected account.
+ */
+export async function stopAirbnbSyncForPlanEnd(db: DbClient, organizationId: string, productIds: string[]): Promise<void> {
+  if (!productIds.length) return
+  const mappings = await queryAll<{ product_id: string; listing_id: string }>(db, `SELECT m.product_id, m.listing_id FROM product_channel_mappings m
+    JOIN channex_connections c ON c.organization_id = m.organization_id AND c.channel_id = m.channel_id
+    WHERE m.organization_id = ? AND m.provider = 'channex' AND m.product_id IN (SELECT value FROM json_each(?))`, [organizationId, JSON.stringify(productIds)])
+  const missing = productIds.find(id => !mappings.some(row => row.product_id === id))
+  if (missing) throw new Error(`Home ${missing} is not imported from the organization's connected Airbnb account`)
+  await queueJobs(db, organizationId, null, mappings.map(row => ({ listing: row.listing_id, product: row.product_id, action: 'stop', details: null })))
 }
 
 /** Every listing this organization asked to sync or stop, with where each stands. */
@@ -185,8 +209,9 @@ type Step = 'done' | 'continue' | 'later'
 
 /** One step of a job: what the listing needs next to reach what was asked, as one AirbnbConnection call. */
 async function step(env: CloudflareEnv, db: DbClient, job: JobRow, lease: string, signal: AbortSignal): Promise<Step> {
-  if (!job.requested_by) fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
-  const connection = new AirbnbConnection(db, env, job.organization_id, job.requested_by, signal)
+  // A sync acts for the person who asked; a stop writes nothing of theirs, so one KrabiClaw asked for, or whose requester left, still runs.
+  if (!job.requested_by && job.action === 'sync') fail(409, 'REQUESTER_REMOVED', 'The person who asked for this sync is no longer a member; ask again')
+  const connection = new AirbnbConnection(db, env, job.organization_id, job.requested_by ?? 'system', signal)
   const mapping = await queryFirst<{ product_id: string; import_stage: ImportStage; enabled: number; channel_id: string; connected_channel_id: string | null }>(db,
     `SELECT m.product_id, m.import_stage, m.enabled, m.channel_id, c.channel_id AS connected_channel_id FROM product_channel_mappings m
       LEFT JOIN channex_connections c ON c.organization_id = m.organization_id

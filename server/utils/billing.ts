@@ -139,7 +139,7 @@ function billingInterval(value: string | undefined): 'month' | undefined {
 // Only an active location is on the site, so only an active one is billed. A
 // location a home (a stay product) is at is the home's, not a location: the
 // home is billed in its place while it is live.
-const HOME_LOCATIONS_SQL = "SELECT c.location_id FROM product_stay_configs c JOIN products p ON p.id = c.product_id WHERE p.organization_id = ? AND p.kind = 'stay'"
+export const HOME_LOCATIONS_SQL = "SELECT c.location_id FROM product_stay_configs c JOIN products p ON p.id = c.product_id WHERE p.organization_id = ? AND p.kind = 'stay'"
 const ACTIVE_LOCATIONS_SQL = `SELECT COUNT(*) FROM business_locations l WHERE l.organization_id = ? AND l.status = 'active' AND l.id NOT IN (${HOME_LOCATIONS_SQL})`
 
 /**

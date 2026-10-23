@@ -46,7 +46,7 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 
 ### 3.1 Homes quote
 
-`GET /api/organizations/:id/billing/homes?adding=N`, owner or admin. `adding` is optional, default 1, an integer from 0 to 500: the homes about to go live (§3.4). Anything else is 422 `INVALID_QUERY` with `field: "adding"`. Every amount is read from Stripe: a paid plan's from the homes price on its own subscription (its graduated tiers: the ones at no charge are the included homes, the next is each further home), billed at the end of the period, never prorated; Basic's from the published homes price in the Stripe catalog. Basic includes 2 live homes and refuses a third. Drafts are free and unlimited on every plan.
+`GET /api/organizations/:id/billing/homes?adding=N`, owner or admin. `adding` is optional, default 1, an integer from 0 to 500: the homes about to go live (§3.4). Anything else is 422 `INVALID_QUERY` with `field: "adding"`. Every amount is read from Stripe: a paid plan's from the homes price on its own subscription (its graduated tiers: the ones at no charge are the included homes, the next is each further home), billed at the end of the period, never prorated; Basic's from the published homes price in the Stripe catalog. Basic includes 2 live homes and refuses a third. Drafts are free and unlimited on every plan. When a paid plan ends (Stripe deletes the subscription, or pauses it when a trial ends without a card), the organization is on Basic and its newest live homes and active locations past the 2 included go back to drafts: a home is taken off the site and its Airbnb sync stopped (a stop job with no requester, which the airbnb-sync task runs), and a location is turned off.
 
 ```json
 {
