@@ -9,7 +9,7 @@ export function sessionMemberSql(s: string): string {
 export function providerUnavailableSql(s: string, replacingBooking = 'NULL', convertingPayment = 'NULL', member = sessionMemberSql(s)): string {
   return `(((EXISTS(SELECT 1 FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider') OR ${s}.assigned_member_id IS NOT NULL) AND ${member} IS NULL) OR (${member} IS NOT NULL AND (
     NOT EXISTS (SELECT 1 FROM member_scheduling ms JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
-      WHERE ms.member_id=${member} AND ms.organization_id=${s}.organization_id
+      WHERE ms.member_id=${member} AND ms.organization_id=${s}.organization_id AND ms.timezone IS NOT NULL
       AND ms.windows_until>=${s}.ends_at
       AND EXISTS (SELECT 1 FROM json_each(ms.windows_json) w WHERE json_extract(w.value,'$.start')<=${s}.starts_at AND json_extract(w.value,'$.end')>=${s}.ends_at)
       AND NOT EXISTS (SELECT 1 FROM json_each(ms.time_off_json) t WHERE json_extract(t.value,'$.start')<${s}.ends_at AND json_extract(t.value,'$.end')>${s}.starts_at)

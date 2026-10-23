@@ -21,7 +21,7 @@
         :rows="1"
         :maxlength="PRODUCT_LIMITS.description"
         :disabled="p.saving.value"
-        autoresize
+        :ui="{ base: 'resize-none' }"
         autofocus
         class="w-full"
       />
@@ -30,7 +30,7 @@
 </template>
 
 <script setup lang="ts">
-import { useElementSize } from '@vueuse/core'
+import { useTextareaAutosize } from '@vueuse/core'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
@@ -47,10 +47,6 @@ const listingDescription = computed(() => section.value === 'listing-description
 const validSection = computed(() => p.product.value?.kind === 'stay' && (listingDescription.value || Boolean(definition.value)))
 const title = computed(() => listingDescription.value ? 'Listing description' : definition.value?.name ?? '')
 const descriptionTextarea = useTemplateRef('descriptionTextarea')
-const { width: descriptionWidth } = useElementSize(() => descriptionTextarea.value?.textareaRef)
-watch(descriptionWidth, (width) => {
-  if (width > 0) descriptionTextarea.value?.autoResize()
-}, { flush: 'post' })
 const value = computed({
   get: () => listingDescription.value ? p.form.description : definition.value ? p.textValue(definition.value) : '',
   set: (text: string) => {
@@ -58,6 +54,7 @@ const value = computed({
     else if (definition.value) p.setDetail(definition.value, text)
   },
 })
+useTextareaAutosize({ element: computed(() => descriptionTextarea.value?.textareaRef), input: value })
 
 watchEffect(() => {
   if (p.product.value && !p.loadError.value && !validSection.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))

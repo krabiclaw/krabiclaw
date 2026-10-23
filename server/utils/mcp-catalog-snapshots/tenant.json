@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:70a83684d33c885030713b92567376bad175704243ac7f6e02d461d847550f0b",
-  "documentationFingerprint": "sha256:284503f878272e8ed75b7651dc70ac9bf39d75e3b8a56044258f390ce399464a",
+  "fingerprint": "sha256:26e6bedda7a06f4c964a725ef2a5414bb9c4da2ff96fea85ce4344da9d1d4caf",
+  "documentationFingerprint": "sha256:5ddbd1152d9b89ad6b97c70b92ba0921430427b08325e2a06bf43551866e77a0",
   "tools": [
     {
       "name": "add_organization_language",
@@ -9198,7 +9198,7 @@
                   "description": "Omit to create a single default variant. Required once the product has options.",
                   "items": {
                     "additionalProperties": false,
-                    "description": "One buyable configuration. A product with no options still has exactly one. Keep the id when editing: a variant that keeps its id keeps its bookings.",
+                    "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
                     "properties": {
                       "active": {
                         "type": "boolean"
@@ -25169,7 +25169,7 @@
             "description": "Omit to create a single default variant. Required once the product has options.",
             "items": {
               "additionalProperties": false,
-              "description": "One buyable configuration. A product with no options still has exactly one. Keep the id when editing: a variant that keeps its id keeps its bookings.",
+              "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
               "properties": {
                 "active": {
                   "type": "boolean"
@@ -48119,7 +48119,7 @@
     {
       "name": "get_member_scheduling",
       "title": "Get member scheduling",
-      "description": "List accessible members and their scheduling when member_id is omitted, or read one member’s hours, time off, explicitly approved public profile and Calendar status. Ordinary members can read only their own scheduling record; owners/admins can inspect their team. No Google event content or credentials are returned.",
+      "description": "List accessible members and their scheduling when member_id is omitted, or read one member’s hours, time off, explicitly approved public profile and Calendar status. Ordinary members can read only their own scheduling record; owners/admins can inspect their team. Before hours are authored, timezone, weekly and time_off are null. No Google event content or credentials are returned.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -48293,10 +48293,16 @@
                         ],
                         "type": "object"
                       },
-                      "type": "array"
+                      "type": [
+                        "array",
+                        "null"
+                      ]
                     },
                     "timezone": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "updated_at": {
                       "type": "string"
@@ -48326,7 +48332,10 @@
                         ],
                         "type": "object"
                       },
-                      "type": "array"
+                      "type": [
+                        "array",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -48485,10 +48494,16 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "timezone": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "updated_at": {
                 "type": "string"
@@ -48518,7 +48533,10 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -87224,7 +87242,7 @@
                   "description": "Omit to create a single default variant. Required once the product has options.",
                   "items": {
                     "additionalProperties": false,
-                    "description": "One buyable configuration. A product with no options still has exactly one. Keep the id when editing: a variant that keeps its id keeps its bookings.",
+                    "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
                     "properties": {
                       "active": {
                         "type": "boolean"
@@ -104974,7 +104992,7 @@
     {
       "name": "set_member_busy_calendars",
       "title": "Set member busy calendars",
-      "description": "Select busy-input calendars on the member’s already-linked Google account, returning scheduling and check status. Stale or disconnected selected calendars block availability; no selection uses internal scheduling.",
+      "description": "After working hours are authored, select busy-input calendars on the member’s already-linked Google account, returning scheduling and check status. Stale or disconnected selected calendars block availability; no selection uses internal scheduling.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -105140,10 +105158,16 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "timezone": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "updated_at": {
                 "type": "string"
@@ -105173,7 +105197,10 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -105215,7 +105242,7 @@
     {
       "name": "set_member_scheduling",
       "title": "Set member scheduling",
-      "description": "Replace a member’s own timezone, weekly working hours and UTC time-off intervals using the latest updated_at. Owner/admin may oversee any member and approve public profile. Profile edits revoke approval unless explicitly approved by an admin. Existing Booking assignments and times stay fixed. Returns the saved scheduling record; no guest messages are sent.",
+      "description": "Update only the supplied member settings using the latest updated_at, or null for a new record. Omitted fields retain their values. Profile fields accept null to clear them and may be saved before hours exist. The first hours save requires timezone, weekly and time_off together; explicit empty arrays mean no working hours or time off. Later hours changes may name only the changed fields. Owner/admin may oversee any member and approve their public profile. Profile edits revoke approval unless explicitly approved by an admin. Profile-only saves leave availability and Calendar inputs unchanged. Existing Booking assignments and times stay fixed; no guest messages are sent.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -105306,9 +105333,6 @@
         },
         "required": [
           "member_id",
-          "timezone",
-          "weekly",
-          "time_off",
           "expected_updated_at"
         ],
         "type": "object"
@@ -105444,10 +105468,16 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "timezone": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "updated_at": {
                 "type": "string"
@@ -105477,7 +105507,10 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -140232,14 +140265,14 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
+        "create_product": "sha256:579bd761b254d24f5bd0d68a961113510dbf4aa01be571a8d8d9e2de89326598",
         "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:cc4fdac62f5da6e406f16fc6016f0180702e39ad213e71f26ba7375010ce4a1a",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:9542abb15f2a1371124fcf07a9c8debdedf0685fdd52e64222af7bde655af39f",
+        "reconcile_products": "sha256:414494212b383e36a35d77dadda1d5a92429d001b1b66f7adf74cf2525569166",
         "reorder_collections": "sha256:76c649e913d6bda4e000b36748b4899a2aae89625a0c1c354b2d149998f9528a",
         "set_collection_products": "sha256:dc4ea7d0380826d81e8a9a170a679d1695a933a4621aeae67ff42177b6a1610f",
         "update_menu": "sha256:f68c72c72504a0df3cdd77685f526413e1c0883b56f63f4e4911b7502cefb1d5",
@@ -140288,7 +140321,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:fb767338cefb7392e96c8d7cb09a9af397665f7217d7e26c401e858e5876ed57",
-        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
+        "create_product": "sha256:579bd761b254d24f5bd0d68a961113510dbf4aa01be571a8d8d9e2de89326598",
         "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -140369,7 +140402,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
+        "create_product": "sha256:579bd761b254d24f5bd0d68a961113510dbf4aa01be571a8d8d9e2de89326598",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
@@ -140453,13 +140486,12 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:0b2917dfdebeaf67144d8f312a5f9aeba159c8a3a02c3dc78346ba03ac712bf9",
+      "contentHash": "sha256:6b1c5205427d0e9f78516a5fa1f2af3a556033059a0801405c3cc9fc076fe2af",
       "toolContracts": {
         "create_location": "sha256:76191e793ce66aae9289cf1e505b47bd44a04320d4b29660f173959391e9c5b0",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
-        "get_stay_calendar": "sha256:d767aa2658527e986d0719284e3d84b2e61eb655146111d87e25410eb2820432",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
@@ -140467,7 +140499,6 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
-        "set_stay_nights": "sha256:d6a9375ee7c1b638c105b67aef8ae0aa2fe3e9156b0290859135433118be671c",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
@@ -140495,7 +140526,7 @@
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
         "create_product_booking": "sha256:a05bb23c5fca92ad866321dd97cab8364ef398b0c4c46240d8457965c7727494",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
-        "get_member_scheduling": "sha256:fe4a81a1b928b2e8ea93577b47cbbdb67be60a83586b5d57dec9524322bbd6fd",
+        "get_member_scheduling": "sha256:2037ed8e9f0206c9d7bc443263331ffed77e8ee14994aa244de8bd739a2626e3",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
@@ -140504,7 +140535,7 @@
         "reject_product_booking": "sha256:557fcf98b488029ac8081da295552e9ee2569dfc54a0ba561418a5ca7b8492d4",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "request_product_booking_change": "sha256:da50fa96ac71952ddaa8d3097a319ae2965b6e0ec0a3b52208b22cc5f6d95025",
-        "set_member_scheduling": "sha256:4917424bba3a8e887e87f7af783ae042161e738962e5e4b02c9d21b1ae946134",
+        "set_member_scheduling": "sha256:6612da7ae2b999d774ecb3d72ea891588ff02662ee87b08b58824c44c69e152c",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
     },
@@ -140539,12 +140570,11 @@
     },
     {
       "slug": "handle-inquiries-and-reservation-requests",
-      "contentHash": "sha256:e79f2a9c6917973a49b4d96cfaf67bf6d587c727e619be056eb394f3cd32b944",
+      "contentHash": "sha256:ef918a59f51075aabf427c0d67ecce375c65deb59579f716f759a2368dd3a988",
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "create_table_reservation": "sha256:9c27873124240d1f214c93c3e7ba73db383038fd555d7b93da570781ca2a4a18",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
-        "get_guest_messaging_context": "sha256:bf2305be7071f5ec29d9f289c7814b87632bbfad917317ab1818a9295d7311ea",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",

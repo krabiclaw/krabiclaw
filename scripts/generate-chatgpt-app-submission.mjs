@@ -43,7 +43,7 @@ const effects = {
   create_table_reservation: 'Allocates a table reservation and guest conversation using configured duration, hours, capacity and policy; sends canonical notices. Required deposits hand off before operational or financial writes.',
   update_menu: 'Atomically creates or updates menu dishes, prices, sections and location publication using a durable retry key. Existing sections, items and their positions remain; new entries append in supplied order.',
   get_member_scheduling: 'Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records.',
-  set_member_scheduling: 'Replaces authorized member hours, timezone, time off and approved public profile using optimistic revision. Existing Booking assignments remain fixed.',
+  set_member_scheduling: 'Updates supplied member profile or availability fields using optimistic revision. Profile saves retain Hours and Calendar; the first Hours save explicitly supplies timezone, weekly hours and time off. Existing Booking assignments remain fixed.',
   set_member_busy_calendars: 'Selects already-linked Google busy calendars or disconnects input, then rechecks interval-only busy data. Grants no OAuth access.',
   reassign_product_booking: 'Atomically reassigns every live attendee in a Session to the offering’s current member, refusing overlap and active checkout holds, retaining IDs and auditing old/new actor values, then sending the canonical guest notice.',
   get_payment_summary: 'Reads UTC tenant financial and usage summaries, retaining separate currency totals.',

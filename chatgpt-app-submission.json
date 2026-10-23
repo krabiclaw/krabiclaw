@@ -1635,9 +1635,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Replaces authorized member hours, timezone, time off and approved public profile using optimistic revision. Existing Booking assignments remain fixed.",
+        "read_only_justification": "Updates supplied member profile or availability fields using optimistic revision. Profile saves retain Hours and Calendar; the first Hours save explicitly supplies timezone, weekly hours and time off. Existing Booking assignments remain fixed.",
         "open_world_justification": "Changes public booking availability and any approved member profile shown to website visitors.",
-        "destructive_justification": "Replaces authorized member hours, timezone, time off and approved public profile using optimistic revision. Existing Booking assignments remain fixed."
+        "destructive_justification": "Updates supplied member profile or availability fields using optimistic revision. Profile saves retain Hours and Calendar; the first Hours save explicitly supplies timezone, weekly hours and time off. Existing Booking assignments remain fixed."
       }
     },
     "set_product_booking_config": {

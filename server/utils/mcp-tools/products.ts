@@ -114,7 +114,7 @@ const optionWrite = {
 
 const variantWrite = {
   type: 'object',
-  description: 'One buyable configuration. A product with no options still has exactly one. Keep the id when editing: a variant that keeps its id keeps its bookings.',
+  description: 'One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.',
   properties: {
     id: { type: 'string' }, name: { type: 'string' }, sku: { type: ['string', 'null'] },
     active: { type: 'boolean' }, sort_order: { type: 'integer' },

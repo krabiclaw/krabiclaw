@@ -880,7 +880,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     expect(featuredResponse.status(), await featuredResponse.text()).toBe(200)
     expect(featuredResponse.request().postDataJSON().details_mode).toBe('merge')
     expect(featuredResponse.request().postDataJSON().details).toEqual({ featured: false })
-    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/attributes`)
+    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/photo`)
     const savedAttributeSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedAttributeSafety.error).toBeNull()
     expect(savedAttributeSafety.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: false })

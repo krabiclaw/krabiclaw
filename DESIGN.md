@@ -222,9 +222,13 @@ Services and Experiences have no grouping step. A service's overview leads
 with Assigned team member (the booking assignment concern: who guests' bookable
 consultations are with — not case ownership, and changing it never reassigns
 existing appointments), Consultation pricing, Bookings, Description, Page
-content, Locations and Website visibility. A price row opens the price it
-names: one variant's price directly, several variants' list rather than the
-first of them.
+content, Locations and Website visibility. Pricing has one entrance. Its index
+names the saved prices and any real choices; a single amount opens beside it
+on desktop, while several amounts leave the choice to the host. Named priced
+versions remain valid without choice dimensions. Adding a dimension requires
+an explicit value for each saved version and preserves its identity and prices.
+Typed facts open their own editors from the record; they do not need another
+overview card.
 
 ### Tabs, parents and exits
 
@@ -255,9 +259,9 @@ is a child of the calendar, which lights Calendar.
 | Product, its variants and prices | what is sold: kind, pricing, booking, publication, locations, collections, its page |
 | A page, article or post | its own content |
 | Location | its place, hours, photos and reservation policy |
-| Member | availability and public profile |
+| Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
-| User | personal preferences and security |
+| User | account name, avatar, personal preferences and security |
 
 Themes own nothing. A theme renders what these hold; it adds no CMS route,
 editor or writer, and it never grants or hides an authorization.
@@ -266,7 +270,7 @@ editor or writer, and it never grants or hides an authorization.
 
 | Airbnb | KrabiClaw |
 | --- | --- |
-| Listings holds homes, experiences and services behind kind pills | Catalog's pills are Menu, Experiences, Products, Services and Places to stay; each is a view of the same Products |
+| Listings holds homes, experiences and services behind kind pills | Catalog's pills are Menu, Experiences, Services and Places to stay; each is a view of the same Products |
 | Homes and experiences have different editors | One Product editor at `O/products/:productId` for every kind: kind changes wording and rows, not the route or the editor |
 | Listing editor rows preview their values and open one concern | Product, location, page, post and member records do the same |
 | Pricing and availability link to the calendar; Earnings links to payouts | Catalog links to Calendar and member availability; Earnings links to the organization's Payments |
@@ -510,7 +514,7 @@ shared reading or leaf width; a calendar or grid takes the available frame.
 of a desktop window is never the fourth.** Content that scales — a grid, a
 table, a calendar, a chart, cards — takes the frame: Today, Calendar, Catalog,
 Insights, Photos, Transactions name no column. A settings index pairs with its
-first row where there is a pane, as Account settings, Integrations, Payments,
+first row where there is a pane, as Account settings, Integrations,
 Plan and billing and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
 Only a list of records with nothing of its own to open — Notifications, Past
 activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
@@ -703,8 +707,8 @@ A URL names a record, a concern, a keyed item, a tab or a mode, and a direct
 entry or a reload reconstructs it. A control's temporary state — a picker, a
 popover, a filter chip, a confirmation — is not in it.
 
-- **Keyed items use their ids.** An option is `options/:optionId`, a price
-  `options/prices/:variantId`, a block `sections/:blockId`; never an index, a
+- **Keyed items use their ids.** A price choice is `price/choices/:optionId`, an amount
+  `price/amounts/:variantId`, a block `sections/:blockId`; never an index, a
   name or a combination label, so reordering or renaming never changes which
   item a saved URL edits.
 - **Views keep their query.** Blog or Docs is `?collection=`, Q&A or Reviews
@@ -1010,11 +1014,20 @@ because every one re-stated layout, copy and state that already existed.
 and `docs/design/airbnb-navigation-map.md`; where the evidence is missing, open
 the actual screen in the owner's logged-in browser. Read its sections, headings,
 rows, button labels and card shapes, and mirror that structure. "Inspired by" is not
-parity. Earnings is Performance card → Upcoming → Paid → Reports; the account's
-Payments is sections with *Manage payments* → *Your payments*; Payouts is *How
+parity. Earnings is Performance card → Upcoming → Paid → Reports; Airbnb's account
+Payments has *Manage payments* → *Your payments*; Payouts is *How
 you get paid* rows + *Add payout method* + *Need help?*. When Airbnb has no
 equivalent, say so in a comment and keep the screen to the smallest honest
 thing — never invent a section to fill the space.
+
+KrabiClaw's personal Payments opens its payment and refund history directly;
+there is no second concern requiring a settings index. Organization payouts
+remain in the organization's Earnings. Profile & availability opens the
+explicit organization member: public name, photo and bio can be saved before
+Hours are known. A profile save preserves availability, calendar selection and
+existing sessions. Unknown Hours say Not set; only an explicit Hours or time-off
+change recalculates the schedule. Account name and avatar remain Better Auth
+User facts, and failures stay visible in the editor that attempted the save.
 
 **One screen per concept, scoped, never copied.** A second audience gets a
 `personal-scope` (or similar) prop on the existing component and a scope on the

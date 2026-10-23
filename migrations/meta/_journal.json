@@ -22,6 +22,13 @@
       "when": 1792746128973,
       "tag": "0002_airbnb_sync_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792752213610,
+      "tag": "0003_member_profile_hours",
+      "breakpoints": true
     }
   ]
 }
