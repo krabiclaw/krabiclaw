@@ -647,7 +647,7 @@ test.describe('stateless MCP server', () => {
     let createdId: string | undefined
     const localeUrl = `${baseURL}/api/editor/organizations/${qaOrganizationId}/locales`
     const translationLocale = 'th'
-    let originalLanguages: Array<{ locale: string; status: string; is_source: boolean }> | undefined
+    let originalLanguages: Array<{ locale: string; status: string; is_source: number }> | undefined
     try {
       const before = await openTenantPage(publicPage, `${blawbyBaseURL}${pagePath}`, blawbyExtraHeaders)
       expect(before?.status()).toBe(200)
@@ -727,7 +727,7 @@ test.describe('stateless MCP server', () => {
       mcpData(await addedLanguage.json())
       const languageReadback = await page.request.get(localeUrl)
       expect(languageReadback.status()).toBe(200)
-      expect((await languageReadback.json()).languages).toContainEqual(expect.objectContaining({ locale: translationLocale, status: 'disabled', is_source: false }))
+      expect((await languageReadback.json()).languages).toContainEqual(expect.objectContaining({ locale: translationLocale, status: 'disabled', is_source: 0 }))
       const localizationPath = `/api/editor/organizations/${qaOrganizationId}/localization/content_document/${createdId}/${translationLocale}`
       // The second open reads the first authored translation back before it is
       // revised. Q&A's canonical writer accepts a question and answer, without SEO.
