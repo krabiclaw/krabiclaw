@@ -14,7 +14,7 @@ import { countActiveHomes } from '../../server/utils/billing.ts'
 import contentRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/content.post.ts'
 import syncPostRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.post.ts'
 import syncGetRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.get.ts'
-import { runAirbnbSyncJobs } from '../../server/integrations/channex/airbnb-sync.ts'
+import { requestAirbnbSync, runAirbnbSyncJobs } from '../../server/integrations/channex/airbnb-sync.ts'
 import listingsRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/listings.get.ts'
 
 // An Airbnb listing imported as a home, through every stage, against a fake
@@ -58,10 +58,14 @@ class FakeChannex {
   seen: Array<{ method: string; path: string }> = []
   currency = 'USD'
   ids = 0
+  mappingIds = 0
+  rateProperties = new Map<string, string>()
   channel = { title: '', active: false, properties: ['setup-1'], ratePlans: [] as Array<{ id: string; rate_plan_id: string; settings: { listing_id: string } }> }
   availability: Record<string, number> = {}
   restrictions: Record<string, Record<string, unknown>> = {}
   token = ''
+  channelId = 'chan-1'
+  listings = [LISTING]
   messagesProperty: string | null = null
   failMessages = false
   /** Whether listing_details carries the listing's content; off, it is the record as the import read it before the content stage existed. */
@@ -86,7 +90,7 @@ class FakeChannex {
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
     const method = (init.method ?? 'GET').toUpperCase()
-    const path = url.pathname.replace('/api/v1', '')
+    const path = url.pathname.replace('/api/v1', '').replace(`/channels/${this.channelId}`, '/channels/chan-1')
     const body = typeof init.body === 'string' ? JSON.parse(init.body) as FakeBody : null
     if (url.origin === CDN) {
       const id = url.pathname.slice('/photos/'.length).replace(/\.jpg$/, '')
@@ -102,7 +106,6 @@ class FakeChannex {
     if (method === 'POST' && path === '/properties') {
       if (body!.property.title === 'KrabiClaw connection setup') return json({ data: { id: 'setup-1', type: 'property', attributes: {} } })
       const id = `prop-${++this.ids}`
-      this.channel.properties.push(id)
       return json({ data: { id, type: 'property', attributes: {} } })
     }
     if (method === 'POST' && path === '/meta/airbnb/connection_link') {
@@ -111,26 +114,27 @@ class FakeChannex {
       return json({ data: { type: 'connection_link', attributes: { url: 'https://www.airbnb.com/oauth2/auth?x=1' } } })
     }
     if (method === 'GET' && path === '/channels/chan-1') {
-      return json({ data: { id: 'chan-1', type: 'channel', attributes: { channel: 'AirBNB', title: this.channel.title, is_active: this.channel.active, properties: this.channel.properties, rate_plans: this.channel.ratePlans }, relationships: { group: { data: { id: 'grp-1' } } } } })
+      return json({ data: { id: this.channelId, type: 'channel', attributes: { channel: 'AirBNB', title: this.channel.title, is_active: this.channel.active, properties: this.channel.properties, rate_plans: this.channel.ratePlans }, relationships: { group: { data: { id: 'grp-1' } } } } })
     }
-    if (method === 'GET' && path === '/channels/chan-1/action/listings') return json({ data: { listing_id_dictionary: { values: [{ id: LISTING, title: 'Cliff Cabin', city: 'Moab', country_code: 'US' }] } } })
+    if (method === 'GET' && path === '/channels/chan-1/action/listings') return json({ data: { listing_id_dictionary: { values: this.listings.map(id => ({ id, title: 'Cliff Cabin', city: 'Moab', country_code: 'US' })) } } })
     if (method === 'GET' && path === '/channels/chan-1/action/listing_details') {
+      const listingId = url.searchParams.get('listing_id')!
       const content = this.content ? {
-        images: [...PHOTOS, ...Array.from({ length: this.extraPhotos }, (_, i) => ({ id: `${LISTING}_x${i + 1}`, caption: null, sort_order: PHOTOS.length + i + 1 }))].map(photo => ({ ...photo, listing_id: LISTING, category: 'LISTING', thumbnail_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_small`, small_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=small`, extra_medium_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_medium` })),
+        images: [...PHOTOS, ...Array.from({ length: this.extraPhotos }, (_, i) => ({ id: `${LISTING}_x${i + 1}`, caption: null, sort_order: PHOTOS.length + i + 1 }))].map(photo => ({ ...photo, listing_id: listingId, category: 'LISTING', thumbnail_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_small`, small_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=small`, extra_medium_url: `${CDN}/photos/${photo.id}.jpg?aki_policy=x_medium` })),
         descriptions: { summary: 'A cabin on the cliff.', description: 'A cabin on the cliff.\n\nTwo bedrooms.', space: 'Two bedrooms and a deck.', access: 'The whole cabin is yours.', interaction: 'We live next door.', neighborhood_overview: 'Quiet, ten minutes from town.', transit: 'Bus 4 stops outside.', notes: 'No parties.', house_rules: 'No smoking inside.', name: 'Cliff Cabin', locale: 'en' },
         amenities: { WIRELESS_INTERNET: { instruction: '', is_present: true }, SMOKE_DETECTOR: { instruction: '', is_present: true }, HOVERBOARD_DOCK: { instruction: '', is_present: true }, CRIB: { instruction: '', is_present: false } },
         listing_views: ['MOUNTAIN_VIEW'],
-        rooms: [{ id: 'r1', listing_id: LISTING, room_type: 'bedroom', is_private: true, beds: [{ quantity: 1, type: 'queen_bed' }], accessibility_features: [] }, { id: 'r2', listing_id: LISTING, room_type: 'bedroom', is_private: true, beds: [{ quantity: 2, type: 'queen_bed' }], accessibility_features: [] }],
+        rooms: [{ id: 'r1', listing_id: listingId, room_type: 'bedroom', is_private: true, beds: [{ quantity: 1, type: 'queen_bed' }], accessibility_features: [] }, { id: 'r2', listing_id: listingId, room_type: 'bedroom', is_private: true, beds: [{ quantity: 2, type: 'queen_bed' }], accessibility_features: [] }],
         bedrooms: 2, beds: 3, bathrooms: 1, house_manual: 'Unit 63A. Shoes off, please.', directions: 'Behind the capitol.', wifi_network: '5 Star', wifi_password: 'open sesame',
         check_in_option: { category: 'smartlock', instruction: 'Door code 0126' },
         quiet_hours: [{ start_time: '23', end_time: '7' }],
       } : { rooms: [] }
-      return json({ data: { listing: { id: LISTING, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: this.booking, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
+      return json({ data: { listing: { id: listingId, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: this.booking, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
     }
     if (method === 'GET' && path === '/channels/chan-1/action/get_listing_calendar') {
       const from = url.searchParams.get('date_from')!
       const days = Array.from({ length: 500 }, (_, i) => ({ date: addDays(from, i), availability: i === 3 ? 'unavailable' : 'available', daily_price: i === 0 ? 210 : 189.5, min_nights: 2, max_nights: 30, closed_to_arrival: false, closed_to_departure: i === 5 }))
-      return json({ data: { calendar: { listing_id: LISTING, start_date: from, end_date: url.searchParams.get('date_to'), days } } })
+      return json({ data: { calendar: { listing_id: url.searchParams.get('listing_id'), start_date: from, end_date: url.searchParams.get('date_to'), days } } })
     }
     // The room type and rate plan the inventory reads are about are the last ones created.
     if (method === 'POST' && path === '/room_types') {
@@ -140,6 +144,7 @@ class FakeChannex {
     }
     if (method === 'POST' && path === '/rate_plans') {
       this.ratePlan = `rate_plan-${this.ids + 1}`
+      this.rateProperties.set(this.ratePlan, (JSON.parse(String(init.body)) as { rate_plan: { property_id: string } }).rate_plan.property_id)
       return resource('rate_plan')
     }
     if (method === 'PUT' && path === '/channels/chan-1/execute/update_booking_setting') { this.settings.push({ booking: (JSON.parse(String(init.body)) as Record<string, unknown>) }); return json({ data: {} }) }
@@ -155,12 +160,19 @@ class FakeChannex {
     if (method === 'GET' && path === '/availability') return json({ data: { [Object.keys(this.availability).length ? this.roomType : 'none']: this.availability } })
     if (method === 'GET' && path === '/restrictions') return json({ data: { [this.ratePlan]: Object.fromEntries(Object.entries(this.restrictions).map(([date, rule]) => [date, { ...rule, rate: String(rule.rate) }])) } })
     if (method === 'POST' && path === '/channels/chan-1/mappings') {
-      this.channel.ratePlans.push({ id: 'map-1', rate_plan_id: body!.mapping.rate_plan_id, settings: { listing_id: body!.mapping.settings.listing_id } })
-      return json({ data: { id: 'map-1', type: 'channel_rate_plan', attributes: {} } })
+      const id = `map-${++this.mappingIds}`
+      // Channex's Airbnb mapping endpoint attaches this rate plan's property automatically.
+      const property = this.rateProperties.get(body!.mapping.rate_plan_id)
+      assert.ok(property)
+      if (!this.channel.properties.includes(property)) this.channel.properties.push(property)
+      this.channel.ratePlans.push({ id, rate_plan_id: body!.mapping.rate_plan_id, settings: { listing_id: body!.mapping.settings.listing_id } })
+      return json({ data: { id, type: 'channel_rate_plan', attributes: {} } })
     }
     if (method === 'PUT' && path === '/channels/chan-1') { this.channel.properties = body!.channel.properties; return json({ data: {} }) }
     if (method === 'DELETE' && path === '/properties/setup-1') return json({ meta: { message: 'Success' } })
     if (method === 'POST' && path === '/channels/chan-1/activate') { this.channel.active = true; return json({ meta: { message: 'Success' } }) }
+    if (method === 'POST' && path === '/channels/chan-1/deactivate') { this.channel.active = false; return json({ meta: { message: 'Success' } }) }
+    if (method === 'DELETE' && path === '/channels/chan-1') return json({ meta: { message: 'Success' } })
     if (method === 'DELETE' && path.startsWith('/channels/chan-1/mappings/')) {
       this.channel.ratePlans = this.channel.ratePlans.filter(entry => entry.id !== path.split('/').pop())
       return json({ meta: { message: 'Success' } })
@@ -367,11 +379,10 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
         guest_controls: { allows_pets_as_host: true, allows_smoking_as_host: false, allows_events_as_host: false }, cancellation_policy_settings: { cancellation_policy_category: 'firm_14' } } } },
       { availability_settings: { availability_settings: { default_min_nights: 3 } } },
     ])
-    // A value Airbnb cannot take is saved and named, not sent.
+    // A value Airbnb cannot take is refused before the home changes.
     await assert.rejects(updateStayHome(env, db, manager, productId, { check_in_time: '16:30' }), (error: { status?: number; data?: Record<string, unknown> }) =>
-      error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true && String(error.data.reason).includes('whole hours'))
-    assert.equal((await readStayHome(db, manager, productId)).check_in_time, '16:30')
-    await updateStayHome(env, db, manager, productId, { check_in_time: '17:00' })
+      error.status === 422 && error.data?.code === 'AIRBNB_UNSUPPORTED_VALUE' && error.data.field === 'check_in_time' && !Object.hasOwn(error.data, 'committed'))
+    assert.equal((await readStayHome(db, manager, productId)).check_in_time, '17:00')
     // Airbnb offers no Strict: a home syncing with it is refused one before anything is written.
     await assert.rejects(updateStayHome(env, db, manager, productId, { cancellation_policy: 'strict' }), { status: 422, data: { code: 'AIRBNB_UNSUPPORTED_VALUE', field: 'cancellation_policy' } })
     assert.equal((await readStayHome(db, manager, productId)).cancellation_policy, 'limited')
@@ -619,9 +630,9 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     channex.failMessages = true
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 202)
     await settle()
-    assert.deepEqual(await job(), { action: 'sync', state: 'error', product_id: productId, last_error_code: 'SYNC_STEP_FAILED', attempts: 1 })
+    assert.deepEqual(await job(), { action: 'sync', state: 'error', product_id: productId, last_error_code: 'CHANNEX_REQUEST_FAILED', attempts: 1 })
     const retrying = ((await call('GET')).body.listings as Array<Record<string, unknown>>)[0]!
-    assert.deepEqual([retrying.status, retrying.stage, retrying.attempts, typeof retrying.next_attempt_at, (retrying.error as { code: string }).code], ['running', 'messages', 1, 'string', 'SYNC_STEP_FAILED'])
+    assert.deepEqual([retrying.status, retrying.stage, retrying.attempts, typeof retrying.next_attempt_at, (retrying.error as { code: string }).code], ['running', 'messages', 1, 'string', 'CHANNEX_REQUEST_FAILED'])
     channex.failMessages = false
     await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z' WHERE listing_id = ?").bind(LISTING).run()
     await cron()
@@ -642,6 +653,263 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     const extra = await call('POST', { sync: [{ listing_id: LISTING, details: { city: 'Elsewhere' } }] })
     assert.deepEqual([extra.status, (extra.body as { data: Record<string, unknown> }).data.code, (extra.body as { data: Record<string, unknown> }).data.field], [422, 'ONLY_MISSING_DETAILS', 'details.city'])
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING, details: { email: ' ' } }] })).status, 422)
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a full-plan sync swap stops its old home before activation and reconnects the same home on a new channel', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    channex.listings.push('listing-88', 'listing-99')
+    const first = await connection.prepare(LISTING, form)
+    await importAll(connection, db, channex, first.product_id)
+    const second = await connection.prepare('listing-88', { missingDetails: {} })
+    await importAll(connection, db, channex, second.product_id)
+    const replacement = await connection.prepare('listing-99', { missingDetails: {} })
+    await advanceTo(connection, db, channex, replacement.product_id, 'draft')
+    assert.equal(await countActiveHomes(db, ORG), 2)
+    const queued = await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: 'listing-99' }], stop: [first.product_id] })
+    assert.equal(queued.length, 2)
+    await db.prepare('UPDATE airbnb_sync_jobs SET next_attempt_at = ? WHERE action = ?').bind(new Date(Date.now() + 60_000).toISOString(), 'stop').run()
+    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000), { stepped: 0, done: 0, failed: 0 })
+    assert.equal((await readStayHome(db, manager, replacement.product_id)).live, false, 'a delayed stop retains the home allowance until it finishes')
+    await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = NULL WHERE action = 'stop'").run()
+    const totals = await runAirbnbSyncJobs(env, Date.now() + 60_000)
+    assert.equal(totals.done, 2)
+    assert.equal(totals.failed, 0)
+    assert.deepEqual(await db.prepare('SELECT listing_id, action, state, last_error_code FROM airbnb_sync_jobs ORDER BY listing_id').all().then(result => result.results), [
+      { listing_id: LISTING, action: 'stop', state: 'done', last_error_code: null },
+      { listing_id: 'listing-99', action: 'sync', state: 'done', last_error_code: null },
+    ])
+    assert.deepEqual([(await readStayHome(db, manager, first.product_id)).live, (await readStayHome(db, manager, replacement.product_id)).live, await countActiveHomes(db, ORG)], [false, true, 2])
+
+    while (!(await connection.disconnect()).disconnected);
+    channex.channelId = 'chan-2'
+    channex.channel.properties = ['setup-1']
+    await connection.start()
+    await connection.complete(channex.token, 'chan-2')
+    const photosBefore = (await readStayHome(db, manager, replacement.product_id)).photos.map(photo => photo.id)
+    await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: 'listing-99' }] })
+    const reconnected = await runAirbnbSyncJobs(env, Date.now() + 60_000)
+    assert.equal(reconnected.done, 1, JSON.stringify(await db.prepare('SELECT state, last_error_code, last_error FROM airbnb_sync_jobs WHERE listing_id = ?').bind('listing-99').first()))
+    assert.deepEqual(await db.prepare('SELECT channel_id, import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(replacement.product_id).first(), { channel_id: 'chan-2', import_stage: 'complete', enabled: 1 })
+    assert.equal(await count(db, 'products'), 3, 'reconnection retains the existing home')
+    assert.deepEqual((await readStayHome(db, manager, replacement.product_id)).photos.map(photo => photo.id), photosBefore)
+    assert.equal((await connection.listings()).find(listing => listing.id === 'listing-99')!.import.status, 'imported')
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('slice deadlines cancel provider reads and photo bodies, and uncertain writes stay failed without duplicate mutations', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const prepared = await connection.prepare(LISTING, form)
+    const job = () => db.prepare('SELECT state, last_error_code, attempts, lease_token, lease_until FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first()
+    const stalled = (matches: (url: URL, init: RequestInit) => boolean, body = false) => {
+      globalThis.fetch = async (input, init = {}) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+        if (!matches(url, init)) return channex.fetch(input, init)
+        assert.ok(init.signal, 'the provider boundary receives the current slice deadline')
+        if (body) return new Response(new ReadableStream({ start(controller) { init.signal!.addEventListener('abort', () => controller.error(init.signal!.reason), { once: true }) } }))
+        return new Promise<Response>((_resolve, reject) => { init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true }) })
+      }
+    }
+    await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
+    stalled(url => url.pathname === '/api/v1/channels/chan-1')
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000)).failed, 1)
+    assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
+    assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections').first(), { status: 'connected', operation_id: null, pending_step: null })
+
+    globalThis.fetch = channex.fetch as typeof fetch
+    for (let step = 0; step < 6; step++) { if ((await connection.advance(prepared.product_id)).stage === 'content') break }
+    assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings').first('import_stage'), 'content')
+    await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
+    stalled(url => url.origin === CDN, true)
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000)).failed, 1)
+    assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
+    assert.equal(await count(db, 'media_assets'), 0)
+    assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
+
+    globalThis.fetch = channex.fetch as typeof fetch
+    await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
+    assert.equal((await readStayHome(db, manager, prepared.product_id)).photos.length, 3)
+    await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
+    await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
+    let sent = 0
+    stalled((url, init) => { if (url.pathname === '/api/v1/channels/chan-1/mappings' && init.method === 'POST') { sent++; return true } return false })
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000)).failed, 1)
+    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
+    assert.equal(await db.prepare('SELECT status FROM channex_connections').first('status'), 'needs_review')
+    assert.equal(await db.prepare('SELECT pending_step FROM channex_connections').first('pending_step'), 'map_airbnb_listing')
+    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000), { stepped: 0, done: 0, failed: 0 })
+    assert.equal(sent, 1)
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a paid home retains a failed meter report and retries terminal billing before completing', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const prepared = await connection.prepare(LISTING, form)
+    await advanceTo(connection, db, channex, prepared.product_id, 'draft')
+    await db.prepare('UPDATE organization SET stripeCustomerId = ? WHERE id = ?').bind('cus_paid_host', ORG).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, stripeCustomerId, stripeSubscriptionId, status, seats, periodEnd) VALUES ('sub-paid', 'growth', ?, 'cus_paid_host', 'sub-paid', 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
+    let stalled = true
+    let requests = 0
+    const receipts: Array<{ event: string; customer: string; value: string }> = []
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (url.origin !== 'https://api.stripe.com') return channex.fetch(input, init)
+      assert.equal(url.pathname, '/v1/billing/meter_events')
+      requests++
+      if (stalled) {
+        assert.ok(init.signal, 'the real Stripe SDK transport receives the operation deadline')
+        return new Promise<Response>((_resolve, reject) => {
+          if (init.signal!.aborted) reject(init.signal!.reason)
+          else init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
+        })
+      }
+      const data = new URLSearchParams(String(init.body))
+      receipts.push({ event: data.get('event_name')!, customer: data.get('payload[stripe_customer_id]')!, value: data.get('payload[value]')! })
+      return new Response(JSON.stringify({ object: 'billing.meter_event', identifier: `meter-${requests}`, event_name: data.get('event_name'), created: Math.floor(Date.now() / 1000), livemode: false }), { status: 200, headers: { 'content-type': 'application/json', 'request-id': `req-${requests}` } })
+    }
+    const job = () => db.prepare('SELECT state, last_error_code, attempts, lease_token, lease_until FROM airbnb_sync_jobs').first()
+    const retry = async () => { await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z'").run() }
+    await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 2_000)).failed, 1)
+    assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
+    assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'reservations', enabled: 1 })
+    assert.equal(requests, 1, 'the SDK does not retry beyond the operation deadline')
+    await retry()
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 2_000)).failed, 1)
+    assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 2, lease_token: null, lease_until: null })
+    assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'complete', enabled: 1 })
+    assert.equal(requests, 2)
+    const providerWrites = channex.seen.filter(entry => entry.method !== 'GET').length
+    stalled = false
+    await retry()
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
+    assert.deepEqual(await job(), { state: 'done', last_error_code: null, attempts: 2, lease_token: null, lease_until: null })
+    assert.deepEqual(receipts, [{ event: 'krabiclaw_locations', customer: 'cus_paid_host', value: '0' }, { event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '1' }])
+    assert.equal(channex.seen.filter(entry => entry.method !== 'GET').length, providerWrites, 'billing recovery does not repeat provider mutations')
+    assert.equal((await readStayHome(db, manager, prepared.product_id)).live, true)
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a failed verification read retains the completed provider write for review', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const prepared = await connection.prepare(LISTING, form)
+    await advanceTo(connection, db, channex, prepared.product_id, 'draft')
+    await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
+    let mappings = 0
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (init.method === 'POST' && url.pathname.endsWith('/mappings')) mappings++
+      if (mappings && (!init.method || init.method === 'GET') && url.pathname === '/api/v1/channels/chan-1') return new Response('verification unavailable', { status: 503 })
+      return channex.fetch(input, init)
+    }
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).failed, 1)
+    assert.deepEqual(await db.prepare('SELECT state, last_error_code, lease_token, lease_until FROM airbnb_sync_jobs').first(), { state: 'failed', last_error_code: 'CHANNEX_REQUEST_FAILED', lease_token: null, lease_until: null })
+    assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'needs_review', pending_step: 'map_airbnb_listing' })
+    assert.equal(channex.channel.ratePlans.length, 1, 'the provider applied the write whose verification failed')
+    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000), { stepped: 0, done: 0, failed: 0 })
+    assert.equal(mappings, 1)
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('an in-flight stop cannot mark a newer sync request done', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const prepared = await connection.prepare(LISTING, form)
+    await importAll(connection, db, channex, prepared.product_id)
+    await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
+    let listingsEntered!: () => void
+    const listingsReady = new Promise<void>(resolve => { listingsEntered = resolve })
+    let returnListings!: () => void
+    const listingsHeld = new Promise<void>(resolve => { returnListings = resolve })
+    let stopEntered!: () => void
+    const stopReady = new Promise<void>(resolve => { stopEntered = resolve })
+    let returnStop!: () => void
+    const stopHeld = new Promise<void>(resolve => { returnStop = resolve })
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (url.pathname.endsWith('/action/listings')) { listingsEntered(); await listingsHeld }
+      if (init.method === 'DELETE' && url.pathname.includes('/mappings/')) { stopEntered(); await stopHeld }
+      return channex.fetch(input, init)
+    }
+    // The newer request read a connected account before the old run locked it.
+    const newer = requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
+    await listingsReady
+    const older = runAirbnbSyncJobs(env, Date.now() + 60_000)
+    await stopReady
+    const oldId = await db.prepare('SELECT id FROM airbnb_sync_jobs').first('id')
+    returnListings()
+    await newer
+    assert.notEqual(await db.prepare('SELECT id FROM airbnb_sync_jobs').first('id'), oldId)
+    returnStop()
+    assert.equal((await older).done, 0)
+    assert.deepEqual(await db.prepare('SELECT action, state, lease_token, lease_until FROM airbnb_sync_jobs').first(), { action: 'sync', state: 'pending', lease_token: null, lease_until: null })
+    assert.equal((await readStayHome(db, manager, prepared.product_id)).live, false)
+    globalThis.fetch = channex.fetch as typeof fetch
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
+    assert.deepEqual(await db.prepare('SELECT action, state FROM airbnb_sync_jobs').first(), { action: 'sync', state: 'done' })
+    assert.equal((await readStayHome(db, manager, prepared.product_id)).live, true)
+
+    // An expired lease can be reclaimed while its old provider call is still
+    // returning. Only the new holder may complete the durable job.
+    await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
+    let reclaimed = false
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (!reclaimed && init.method === 'DELETE' && url.pathname.includes('/mappings/')) {
+        reclaimed = true
+        await db.prepare("UPDATE airbnb_sync_jobs SET lease_until = '2000-01-01T00:00:00.000Z'").run()
+        assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000), { stepped: 0, done: 0, failed: 0 })
+      }
+      return channex.fetch(input, init)
+    }
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 0)
+    assert.equal(reclaimed, true)
+    assert.deepEqual(await db.prepare('SELECT action, state, lease_token, lease_until FROM airbnb_sync_jobs').first(), { action: 'stop', state: 'pending', lease_token: null, lease_until: null })
+    assert.equal((await readStayHome(db, manager, prepared.product_id)).live, false)
+    globalThis.fetch = channex.fetch as typeof fetch
+    await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z'").run()
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

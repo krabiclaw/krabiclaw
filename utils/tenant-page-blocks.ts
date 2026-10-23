@@ -797,7 +797,7 @@ function blockTextFields(fields: Readonly<Record<string, TenantPageField>>, pref
   return collected
 }
 
-export const CONTENT_BLOCK_TEXT_FIELDS = Object.fromEntries(
+export const CONTENT_BLOCK_TEXT_FIELDS = Object.fromEntries<readonly ContentBlockTextField[]>(
   Object.entries(TENANT_PAGE_BLOCK_REGISTRY).map(([type, definition]) => [type, blockTextFields(definition.fields)]),
 ) as Record<TenantPageBlockType, readonly ContentBlockTextField[]>
 

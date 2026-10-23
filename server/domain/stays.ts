@@ -711,12 +711,12 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     if (price !== null) patch.variants = [{ id: variant.id, prices: [base ? { id: base.id, unit_amount: price } : { unit_amount: price }] }]
     else if (base) patch.variants = [{ id: variant.id, prices_mode: 'replace', prices: variant.prices.filter(other => other.id !== base.id).map(other => ({ id: other.id })) }]
   }
-  const pushes = pricing || nights !== null
-  const settings = touchesAirbnbSettings(patch)
+  const pushes = pricing || (nights !== null && nights !== home.min_nights)
   // Clearing an already absent base price still asks for channel completion,
   // but creates no product pricing patch for updateProduct to preflight.
   if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
-  if (Object.keys(patch).length) await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true })
+  const saved = Object.keys(patch).length ? await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true }) : null
+  const settings = saved ? touchesAirbnbSettings({ stay: saved.stay ?? undefined }, { stay: home }) : null
   // The product's checks are the ones a valid request can still fail, so it is written first.
   if ((zone !== null && zone !== home.timezone) || Object.keys(location).length) {
     const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { ...location, ...(zone !== null && zone !== home.timezone ? { timezone: zone } : {}) }, access.actorId, env)
@@ -1297,14 +1297,15 @@ const AIRBNB_CANCELLATION: Partial<Record<StayCancellationPolicy, string>> = {
 }
 
 /**
- * Refuse, before anything is written, a value a home syncing with Airbnb could
- * not send: a short-term cancellation policy Airbnb does not offer.
+ * Refuse, before anything is written, settings a home syncing with Airbnb
+ * cannot send. The same mapper validates and sends the normalized values.
  */
-export async function requireAirbnbAcceptable(db: DbClient, organizationId: string, productId: string, patch: UpdateProductInput): Promise<void> {
-  const policy = patch.stay?.cancellation_policy
-  if (!policy || AIRBNB_CANCELLATION[policy]) return
+export async function requireAirbnbAcceptable(db: DbClient, organizationId: string, productId: string, product: { stay: AirbnbHomeSettings | null; details: Product['details'] }, sections: AirbnbSettingSections | null): Promise<void> {
+  if (!product.stay || !sections) return
+  const settings = airbnbListingSettings(product.stay, product.details, sections)
+  if (!('refusal' in settings)) return
   const syncing = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1", [organizationId, productId])
-  if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', `Airbnb has no ${STAY_CANCELLATION_POLICIES[policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, 'cancellation_policy')
+  if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', settings.refusal, settings.field)
 }
 const AIRBNB_LONG_TERM_CANCELLATION: Record<StayLongTermCancellationPolicy, string> = { firm: 'CANCEL_LONG_TERM_FAIR', strict: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD' }
 /** House rules Airbnb takes as guest controls, by product detail. */
@@ -1312,14 +1313,17 @@ const AIRBNB_GUEST_CONTROLS = { pets_allowed: 'allows_pets_as_host', smoking_all
 /** Which of a connected home's Airbnb listing settings a product write changes, by section. */
 export type AirbnbSettingSections = { [Section in keyof AirbnbListingSettings]: boolean }
 
-export function touchesAirbnbSettings(patch: UpdateProductInput): AirbnbSettingSections | null {
+/** With a previous value, compare complete normalized snapshots; without one, select requested sections for completion replay. */
+export function touchesAirbnbSettings(patch: UpdateProductInput, previous?: UpdateProductInput): AirbnbSettingSections | null {
   const sections = {
-    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined)
-      || Object.keys(AIRBNB_GUEST_CONTROLS).some(key => patch.details?.[key as keyof typeof AIRBNB_GUEST_CONTROLS] !== undefined),
-    availability: patch.stay?.min_nights !== undefined,
+    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined && (!previous || patch.stay[field] !== previous.stay?.[field]))
+      || (Object.keys(AIRBNB_GUEST_CONTROLS) as Array<keyof typeof AIRBNB_GUEST_CONTROLS>).some(key => previous ? patch.details?.[key] !== previous.details?.[key] : patch.details?.[key] !== undefined),
+    availability: patch.stay?.min_nights !== undefined && (!previous || patch.stay.min_nights !== previous.stay?.min_nights),
   }
   return sections.booking || sections.availability ? sections : null
 }
+
+type AirbnbHomeSettings = Pick<StayHome, 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'cancellation_policy' | 'long_term_cancellation_policy' | 'min_nights'>
 
 /**
  * A home's Airbnb listing settings, or why one of its values cannot be one.
@@ -1329,38 +1333,38 @@ export function touchesAirbnbSettings(patch: UpdateProductInput): AirbnbSettingS
  * Airbnb has it. Prices are not listing settings here: every night's price,
  * the base price's included, already reaches Airbnb with the nightly calendar.
  */
-function airbnbListingSettings(home: StayHome, details: Product['details'], sections: AirbnbSettingSections): AirbnbListingSettings | { refusal: string } {
+function airbnbListingSettings(home: AirbnbHomeSettings, details: Product['details'], sections: AirbnbSettingSections): AirbnbListingSettings | { refusal: string; field: string } {
   const booking = sections.booking ? airbnbBookingSettings(home, details) : {}
-  if ('refusal' in booking) return booking as { refusal: string }
+  if ('refusal' in booking) return booking as { refusal: string; field: string }
   return { booking, availability: sections.availability ? { default_min_nights: home.min_nights } : {} }
 }
 
-function airbnbBookingSettings(home: StayHome, details: Product['details']): Record<string, unknown> | { refusal: string } {
-  const hour = (time: string, field: string): number | { refusal: string } => {
+function airbnbBookingSettings(home: AirbnbHomeSettings, details: Product['details']): Record<string, unknown> | { refusal: string; field: string } {
+  const hour = (time: string, field: string, label: string): number | { refusal: string; field: string } => {
     const [hh, mm] = time.split(':')
-    return mm === '00' ? Number(hh) : { refusal: `Airbnb takes ${field} in whole hours; ${time} was saved but not sent to Airbnb` }
+    return mm === '00' ? Number(hh) : { refusal: `Airbnb takes ${label} in whole hours; ${time} cannot be sent to Airbnb`, field }
   }
-  const start = hour(home.check_in_time, 'the check-in start')
+  const start = hour(home.check_in_time, 'check_in_time', 'the check-in start')
   if (typeof start !== 'number') return start
   const startHour = start < 8 ? start + 24 : start
-  if (startHour > 26) return { refusal: `Airbnb's check-in start is between 08:00 and 02:00; ${home.check_in_time} was saved but not sent to Airbnb` }
+  if (startHour > 26) return { refusal: `Airbnb's check-in start is between 08:00 and 02:00; ${home.check_in_time} cannot be sent to Airbnb`, field: 'check_in_time' }
   const booking: Record<string, unknown> = { check_in_time_start: String(startHour) }
   if (home.check_in_end_time === null) booking.check_in_time_end = 'FLEXIBLE'
   else {
-    const end = hour(home.check_in_end_time, 'the check-in end')
+    const end = hour(home.check_in_end_time, 'check_in_end_time', 'the check-in end')
     if (typeof end !== 'number') return end
     // An end earlier than the start is the next day, as is every end of a start after midnight.
     const endHour = startHour >= 24 || end <= start ? end + 24 : end
-    if (endHour > 27 || endHour <= startHour) return { refusal: `Airbnb's check-in end is after the start and no later than 03:00; ${home.check_in_end_time} was saved but not sent to Airbnb` }
+    if (endHour > 27 || endHour <= startHour) return { refusal: `Airbnb's check-in end is after the start and no later than 03:00; ${home.check_in_end_time} cannot be sent to Airbnb`, field: 'check_in_end_time' }
     booking.check_in_time_end = String(endHour)
   }
-  const checkout = hour(home.check_out_time, 'checkout')
+  const checkout = hour(home.check_out_time, 'check_out_time', 'checkout')
   if (typeof checkout !== 'number') return checkout
   booking.check_out_time = checkout
   const controls = Object.fromEntries((Object.entries(AIRBNB_GUEST_CONTROLS) as Array<[keyof typeof AIRBNB_GUEST_CONTROLS, string]>).flatMap(([key, control]) => typeof details[key] === 'boolean' ? [[control, details[key]]] : []))
   if (Object.keys(controls).length) booking.guest_controls = controls
   const category = home.cancellation_policy ? AIRBNB_CANCELLATION[home.cancellation_policy] : undefined
-  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy; it was saved but not sent to Airbnb` }
+  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, field: 'cancellation_policy' }
   const cancellation = {
     ...(category ? { cancellation_policy_category: category } : {}),
     ...(home.long_term_cancellation_policy ? { lts_cancellation_policy_id: AIRBNB_LONG_TERM_CANCELLATION[home.long_term_cancellation_policy] } : {}),

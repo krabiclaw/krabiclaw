@@ -1335,9 +1335,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Atomically creates or updates catalog products using supplied IDs and a durable retry key. Disables omitted products only when deactivate_missing is requested.",
-        "open_world_justification": "Changes catalog content or availability shown for published products on the public website.",
-        "destructive_justification": "Atomically creates or updates catalog products using supplied IDs and a durable retry key. Disables omitted products only when deactivate_missing is requested."
+        "read_only_justification": "Atomically creates or updates local catalog products using supplied IDs and a durable retry key. Disables omitted products only when deactivate_missing is requested. Changed connected-home listing settings and nightly rates are pushed to Airbnb through Channex after saving; failed completion reports committed changes.",
+        "open_world_justification": "Changes catalog content or availability shown on the public website and pushes changed connected-home settings or nightly rates to the mapped Airbnb listing through Channex.",
+        "destructive_justification": "Atomically creates or updates local catalog products using supplied IDs and a durable retry key. Disables omitted products only when deactivate_missing is requested. Changed connected-home listing settings and nightly rates are pushed to Airbnb through Channex after saving; failed completion reports committed changes."
       }
     },
     "record_stay_payment": {
@@ -1851,9 +1851,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Updates supplied product fields and preserves omitted variants, prices and options. An expected Product version rejects the entire stale edit. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly.",
-        "open_world_justification": "Changes published product content or prices and can publish configured booking availability to website visitors.",
-        "destructive_justification": "Updates supplied product fields and preserves omitted variants, prices and options. An expected Product version rejects the entire stale edit. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly."
+        "read_only_justification": "Updates supplied product fields and preserves omitted variants, prices and options. An expected Product version rejects the entire stale edit. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly. Changed connected-home arrival windows, supported policies and rules, minimum nights and nightly rates push to Airbnb through Channex after saving; failed completion reports committed changes.",
+        "open_world_justification": "Changes published product content or prices and can publish configured booking availability. Changed connected-home settings and nightly rates also update the mapped Airbnb listing through Channex.",
+        "destructive_justification": "Updates supplied product fields and preserves omitted variants, prices and options. An expected Product version rejects the entire stale edit. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly. Changed connected-home arrival windows, supported policies and rules, minimum nights and nightly rates push to Airbnb through Channex after saving; failed completion reports committed changes."
       }
     },
     "update_product_session": {
@@ -1935,9 +1935,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published.",
-        "open_world_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published."
+        "read_only_justification": "Saves one home’s private arrival guide; nothing is sent to a guest or published. Returns canonical Airbnb editor advisories for supplied fields that Channex cannot update on a connected listing.",
+        "open_world_justification": "Saves one home’s private arrival guide; nothing is sent to a guest or published. Returns canonical Airbnb editor advisories for supplied fields that Channex cannot update on a connected listing. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Saves one home’s private arrival guide; nothing is sent to a guest or published. Returns canonical Airbnb editor advisories for supplied fields that Channex cannot update on a connected listing."
       }
     },
     "update_stay_photo_room": {

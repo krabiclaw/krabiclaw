@@ -18,6 +18,7 @@ import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPage
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import type { AirbnbSettingSections } from '~/server/domain/stays'
 import { executeWithinCapacity, liveHomeSql } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -1569,7 +1570,7 @@ async function planProductUpdate(db: DbClient, input: {
   idOwners?: SuppliedIdOwners
   knownSlugs?: ReadonlyMap<string, string>
   cacheInvalidations: BatchQuery[]
-}): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct }> {
+}): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct; airbnbSettings: AirbnbSettingSections | null }> {
   const { current, patch, organizationId } = input
   if (patch.expected_updated_at !== undefined) {
     if (typeof patch.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(patch.expected_updated_at))) invalid('expected_updated_at must be the Product updated_at value from the latest read')
@@ -1637,6 +1638,9 @@ async function planProductUpdate(db: DbClient, input: {
   planned.slug = patch.name === undefined ? current.slug : planned.slug
   planned.source = current.source
   assertVariantPricesConsistent(planned)
+  const { requireAirbnbAcceptable, touchesAirbnbSettings } = await import('~/server/domain/stays')
+  const airbnbSettings = touchesAirbnbSettings({ stay: planned.stay ?? undefined, details: planned.details }, { stay: current.stay ?? undefined, details: current.details })
+  await requireAirbnbAcceptable(db, organizationId, current.id, planned, airbnbSettings)
 
   if (current.publications.some(publication => publication.organization_id === organizationId && publication.published)) await assertStayBookable(db, organizationId, { ...current, ...planned })
   const guardPublication = !input.booking && planned.kind === 'experience' && !planned.order_url
@@ -1694,7 +1698,7 @@ async function planProductUpdate(db: DbClient, input: {
     }] : []),
     ...input.cacheInvalidations,
   ]
-  return { writes, keptVariants, product: planned }
+  return { writes, keptVariants, product: planned, airbnbSettings }
 }
 
 const variantInput = (variant: ProductVariant) => ({
@@ -1802,11 +1806,13 @@ export async function updateProduct(db: DbClient, input: {
   if (roomUpdate && (Object.keys(input.patch).length || input.booking)) invalid('Room details cannot be combined with unrelated product edits')
   if (homeUpdate && (roomUpdate || Object.keys(input.patch).length || input.booking)) invalid('Home accessibility cannot be combined with unrelated product edits')
   if (homeUpdate && (!isStayHomeAccessibility(homeUpdate.accessibility) || typeof homeUpdate.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(homeUpdate.expectedUpdatedAt)))) invalid('Home accessibility needs a valid answer and the Product updated_at value')
-  const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
+  const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
+  const requestedReprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
+  const requestedSettings = touchesAirbnbSettings(input.patch)
+  let reprice = requestedReprice
+  let settings = requestedSettings
   const complete = async (product: Product): Promise<ProductMutation> => {
     let channelPush: ChannelPushCompletion = null
-    const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
-    const settings = touchesAirbnbSettings(input.patch)
     if (product.kind === 'stay' && (reprice || settings !== null) && !input.deferStayNightPush) {
       if (!env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
       channelPush = await pushStayHomeChannel(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: reprice, settings })
@@ -1825,14 +1831,12 @@ export async function updateProduct(db: DbClient, input: {
     const record = await readCreationRecord(db, dedupeKey)
     if (!record) return null
     if (record.requestHash !== requestHash || record.entityId !== input.productId) conflict('This idempotency key belongs to a different product update')
+    reprice = requestedReprice
+    settings = requestedSettings
     return getProduct(db, input.organizationId, input.productId)
   }
   const earlier = await replay()
   if (earlier) return complete(earlier)
-  if (input.patch.stay) {
-    const { requireAirbnbAcceptable } = await import('~/server/domain/stays')
-    await requireAirbnbAcceptable(db, input.organizationId, input.productId, input.patch)
-  }
   if (input.booking && !dedupeKey) invalid('An idempotency key is required when configuring bookable sessions')
   const current = await getProduct(db, input.organizationId, input.productId)
   const roomChanged = (): never => {
@@ -1868,6 +1872,8 @@ export async function updateProduct(db: DbClient, input: {
     env: input.env, booking: input.booking?.data,
     cacheInvalidations: roomUpdate ? [publicResourceCacheInvalidationQuery(input.organizationId, 'stay-photo-room-details')] : await productCacheInvalidations(db, input.organizationId, input.productId, 'product_updated'),
   })
+  settings = plan?.airbnbSettings ?? null
+  reprice = input.patch.variants !== undefined || settings?.availability === true
   const writes = plan ? plan.writes : [publicResourceCacheInvalidationQuery(input.organizationId, 'stay-photo-room-details')]
   const keptVariants = plan ? plan.keptVariants : d1JsonArray(current.variants.map(variant => variant.id))
   if (photoPlan) writes.push(...photoPlan.queries)
@@ -2430,7 +2436,7 @@ async function planProductReconciliation(db: DbClient, input: {
   actor: Actor
   env?: CloudflareEnv
   deactivateMissing?: boolean
-}): Promise<{ touched: string[]; perProduct: BatchQuery[][]; now: string; products: PlannedProduct[] }> {
+}): Promise<{ touched: string[]; perProduct: BatchQuery[][]; now: string; products: PlannedProduct[]; airbnbSettings: Map<string, AirbnbSettingSections> }> {
   if (!Array.isArray(input.products)) invalid('products must be an array')
   if (input.products.length > PRODUCT_LIMITS.reconcile) invalid(`products may contain at most ${PRODUCT_LIMITS.reconcile} rows`)
   input.products.forEach((product, index) => {
@@ -2466,6 +2472,7 @@ async function planProductReconciliation(db: DbClient, input: {
   // filled with.
   const perProduct: BatchQuery[][] = []
   const plannedProducts: PlannedProduct[] = []
+  const airbnbSettings = new Map<string, AirbnbSettingSections>()
   const removals: Array<{ productId: string; keptVariants: string }> = []
 
   for (const entry of input.products) {
@@ -2480,6 +2487,7 @@ async function planProductReconciliation(db: DbClient, input: {
         cacheInvalidations: [],
       })
       plannedProducts.push(planned.product)
+      if (planned.airbnbSettings) airbnbSettings.set(current.id, planned.airbnbSettings)
       perProduct.push(planned.writes)
       removals.push({ productId: current.id, keptVariants: planned.keptVariants })
       touched.push(current.id)
@@ -2524,7 +2532,7 @@ async function planProductReconciliation(db: DbClient, input: {
   // carried the named products, a question with only one possible answer now.
   perProduct.push([publicResourceCacheInvalidationQuery(input.organizationId, 'products_reconciled')])
 
-  return { touched, perProduct, now, products: plannedProducts }
+  return { touched, perProduct, now, products: plannedProducts, airbnbSettings }
 }
 
 export async function reconcileProducts(db: DbClient, input: {
@@ -2537,13 +2545,13 @@ export async function reconcileProducts(db: DbClient, input: {
   const reprice = new Set(input.products.flatMap(product => product.product_id && (product.variants !== undefined || product.stay?.min_nights !== undefined) ? [product.product_id] : []))
   const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
   const settings = new Map(input.products.flatMap(product => { const sections = product.product_id ? touchesAirbnbSettings(product as UpdateProductInput) : null; return sections ? [[product.product_id!, sections] as const] : [] }))
-  const complete = async (products: Product[]): Promise<ProductMutation[]> => {
+  const complete = async (products: Product[], settingChanges = settings, nightChanges = reprice): Promise<ProductMutation[]> => {
     const results: Array<{ product: Product; channelPush: ChannelPushCompletion }> = []
     for (const product of products) {
       let channelPush: ChannelPushCompletion = null
-      if (product.kind === 'stay' && (reprice.has(product.id) || settings.has(product.id))) {
+      if (product.kind === 'stay' && (nightChanges.has(product.id) || settingChanges.has(product.id))) {
         if (!input.env) channelPush = new Error('The saved home requires its organization environment to update the channel')
-        else channelPush = await pushStayHomeChannel(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: reprice.has(product.id), settings: settings.get(product.id) ?? null })
+        else channelPush = await pushStayHomeChannel(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: nightChanges.has(product.id), settings: settingChanges.get(product.id) ?? null })
       }
       results.push({ product, channelPush })
     }
@@ -2571,9 +2579,10 @@ export async function reconcileProducts(db: DbClient, input: {
       variants: product.variants.map(variant => ({ ...variant, ...(variant.prices === undefined ? {} : { prices_mode: 'replace' as const }) })),
     }),
   }))
-  const { touched, perProduct, now, products: planned } = await planProductReconciliation(db, { ...input, products })
+  const { touched, perProduct, now, products: planned, airbnbSettings } = await planProductReconciliation(db, { ...input, products })
+  const nightChanges = new Set(input.products.flatMap(product => product.product_id && (product.variants !== undefined || airbnbSettings.get(product.product_id)?.availability) ? [product.product_id] : []))
   for (const product of planned) {
-    if (product.kind !== 'stay' || !reprice.has(product.id)) continue
+    if (product.kind !== 'stay' || !nightChanges.has(product.id)) continue
     if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The home change requires the organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', product_id: product.id } })
     await requireChannelPush(db, input.env, input.organizationId, product.id)
   }
@@ -2595,7 +2604,7 @@ export async function reconcileProducts(db: DbClient, input: {
     if (stale) throw new HTTPError({ statusCode: 409, statusMessage: 'The catalog or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT' }, cause: error })
     throw error
   }
-  return complete(await readProductBatch(db, input.organizationId, answered))
+  return complete(await readProductBatch(db, input.organizationId, answered), airbnbSettings, nightChanges)
 }
 
 

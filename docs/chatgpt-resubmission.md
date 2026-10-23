@@ -18,8 +18,13 @@ Translations inherit page order; the dashboard can author configured draft
 languages before publication. Page translation fields now come from the same
 block registry as the content contract, including secondary button and accent
 text. Empty translated experience catalogs use their existing 404 contract
-before checking for branding. These source changes require deployed verification
-before they count as production review evidence.
+before checking for branding. Incoming background-sync changes also require
+MCP product edits to disclose their Airbnb listing effects. Bulk product tools
+now accept the canonical stay settings required to create a home, and private
+arrival-guide edits preserve their full channel receipt and Airbnb editor
+advisories. Photo-tour and accessibility tools identify their local scope.
+These source changes require deployed verification before they count as
+production review evidence.
 
 ## Prepared reviewer data
 
@@ -152,3 +157,18 @@ Staging also contains the Airbnb import change from
 hold until the draft-aware iOS build ships. The owning iOS sessions are handling
 that build. Complete MCP source validation independently, then verify the native
 release evidence before promoting the combined staging branch.
+
+The integrated staging base `760ba5b2d` also includes
+[#1545](https://github.com/krabiclaw/krabiclaw/pull/1545)'s background sync and
+listing-settings pushes. This audit found deterministic preflight, unchanged
+settings, stop/sync ordering, reconnect and bounded-job completion defects in
+those paths. The corrections pass the focused D1/provider cases, including
+paid-host Stripe transport cancellation and terminal usage repair, and the
+final local browser journeys pass bulk-home creation, arrival-guide schema and
+independent readbacks, cleaner scope and photos. The live local catalog has
+163 unique tools with exact generated metadata/schema equality. All 333 unit
+tests, full typecheck, lint and the canonical build pass. The full current
+189-case browser run and deployed verification remain required before promotion. Its staging Worker deployed, but
+[run 39927646225](https://github.com/krabiclaw/krabiclaw/actions/runs/39927646225)
+failed the published-guide check for two articles; read-only tenant rendering
+was skipped. Do not record that run as a completed staging qualification.

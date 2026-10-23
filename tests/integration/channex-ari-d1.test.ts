@@ -31,6 +31,7 @@ class FakeChannex {
 
   /** The listing settings a minimum-stay change sends, by mapping: Airbnb's default minimum before each night's own. */
   settings: Array<{ path: string; body: unknown }> = []
+  settingsAnswer?: () => Response
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
@@ -40,7 +41,7 @@ class FakeChannex {
     }
     if (init.method === 'PUT' && (/^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path) || (path as string) === '/channels/chan-1/execute/update_booking_setting')) {
       this.settings.push({ path, body: JSON.parse(init.body as string) })
-      return Response.json({ data: {} })
+      return this.settingsAnswer ? this.settingsAnswer() : Response.json({ data: {} })
     }
     assert.equal(init.method, 'POST')
     assert.ok(path === '/restrictions' || path === '/availability', `unexpected ${path}`)
@@ -297,6 +298,80 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.equal(offline.channel_push, null)
     assert.deepEqual(offline.nights.map(night => night.channel), [null])
     assert.deepEqual(channex.take(), [])
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('Airbnb settings preflight the whole catalog and unchanged settings do not push while replays repair completion', async () => {
+  const { runtime, db, env, connected, unpriced, local } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const before = await Promise.all([connected, unpriced, local].map(id => getProduct(db, ORG, id)))
+    const activity = (await db.prepare('SELECT id FROM activity_entries ORDER BY id').all()).results
+    const invalidations = (await db.prepare('SELECT id FROM public_resource_cache_invalidations ORDER BY id').all()).results
+    const { photo_rooms: _photoRooms, accessibility: _accessibility, ...stay } = before[0]!.stay!
+    for (const invalid of [
+      { field: 'cancellation_policy', value: 'strict' },
+      { field: 'check_in_time', value: '16:30' },
+      { field: 'check_in_time', value: '03:00' },
+      { field: 'check_in_end_time', value: '18:30' },
+      { field: 'check_in_end_time', value: '04:00' },
+      { field: 'check_out_time', value: '10:30' },
+    ] as const) {
+      await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { name: 'Must remain Cabin', stay: { [invalid.field]: invalid.value } } }),
+        { status: 422, data: { code: 'AIRBNB_UNSUPPORTED_VALUE', field: invalid.field } })
+      await assert.rejects(reconcileProducts(db, { env, organizationId: ORG, actor: { actorId: OWNER }, deactivateMissing: true, products: [
+        { product_id: local, kind: 'stay', name: 'Must remain Barn' },
+        { product_id: connected, kind: 'stay', name: 'Must remain Cabin', stay: { ...stay, [invalid.field]: invalid.value } },
+      ] }), { status: 422, data: { code: 'AIRBNB_UNSUPPORTED_VALUE', field: invalid.field } })
+      assert.deepEqual(await Promise.all([connected, unpriced, local].map(id => getProduct(db, ORG, id))), before)
+      assert.deepEqual((await db.prepare('SELECT id FROM activity_entries ORDER BY id').all()).results, activity)
+      assert.deepEqual((await db.prepare('SELECT id FROM public_resource_cache_invalidations ORDER BY id').all()).results, invalidations)
+      assert.deepEqual(channex.take(), [])
+      assert.deepEqual(channex.settings, [])
+    }
+
+    const unchanged = { check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', cancellation_policy: null, long_term_cancellation_policy: null, min_nights: 2 } as const
+    assert.equal((await updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: unchanged } })).channel_push, null)
+    assert.equal((await reconcileProducts(db, { env, organizationId: ORG, actor: { actorId: OWNER }, products: [{ product_id: connected, kind: 'stay', name: 'Cabin', stay: { ...stay, ...unchanged } }] }))[0]!.channel_push, null)
+    assert.equal((await updateStayHome(env, db, manager, connected, unchanged)).channel_push, null)
+    assert.deepEqual(channex.settings, [])
+    assert.deepEqual(channex.take(), [])
+
+    // Homes which are not syncing retain legitimate minute-valued times.
+    await updateStayHome(env, db, manager, local, { check_in_time: '16:30', cancellation_policy: 'strict' })
+    assert.equal((await getProduct(db, ORG, local)).stay!.check_in_time, '16:30')
+    assert.equal((await getProduct(db, ORG, local)).stay!.cancellation_policy, 'strict')
+    assert.deepEqual(channex.settings, [])
+
+    channex.settingsAnswer = () => Response.json({ errors: { detail: 'Settings refused' } }, { status: 422 })
+    const update = { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: { check_in_time: '17:00' } }, idempotencyKey: 'booking-repair' }
+    await assert.rejects(updateProduct(db, update), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
+    const saved = await getProduct(db, ORG, connected)
+    assert.equal(saved.stay!.check_in_time, '17:00')
+    assert.equal(channex.settings.length, 1)
+    channex.settingsAnswer = undefined
+    const replay = await updateProduct(db, update)
+    assert.equal(replay.updated_at, saved.updated_at)
+    assert.deepEqual(replay.channel_push, { state: 'pushed', detail: null })
+    assert.equal(channex.settings.length, 2)
+
+    channex.settingsAnswer = () => Response.json({ errors: { detail: 'Settings refused' } }, { status: 422 })
+    const reconcile = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'catalog-booking-repair', products: [{ product_id: connected, kind: 'stay' as const, name: 'Cabin', stay: { ...stay, check_in_time: '18:00' } }] }
+    await assert.rejects(reconcileProducts(db, reconcile), (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_PUSH_FAILED' && error.data.committed === true)
+    const savedCatalog = await getProduct(db, ORG, connected)
+    assert.equal(savedCatalog.stay!.check_in_time, '18:00')
+    assert.equal(channex.settings.length, 3)
+    channex.settingsAnswer = undefined
+    const replayedCatalog = await reconcileProducts(db, reconcile)
+    assert.equal(replayedCatalog[0]!.updated_at, savedCatalog.updated_at)
+    assert.deepEqual(replayedCatalog[0]!.channel_push, { state: 'pushed', detail: null })
+    assert.equal(channex.settings.length, 5, 'a replay completes both requested booking and minimum-stay sections')
+    assert.deepEqual(channex.take().map(request => request.values.length), [500, 500])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
