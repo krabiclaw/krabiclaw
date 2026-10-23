@@ -103,7 +103,10 @@ const planLine = computed(() => {
   const trial = status.subscriptionPrice?.trial
   if (trial) {
     parts.push(`Free trial ends ${formatExactDateTime(trial.end)}`)
-    if (!card.value) parts.push(TRIAL_WITHOUT_CARD[trial.withoutPaymentMethod](planName.value))
+    // A change already set for the period's end is what happens; only without one does the card decide.
+    if (status.cancelAtPeriodEnd) parts.push(`${planName.value} ends with the trial`)
+    else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
+    else if (!card.value) parts.push(TRIAL_WITHOUT_CARD[trial.withoutPaymentMethod](planName.value))
   } else if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
   else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
   else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)
