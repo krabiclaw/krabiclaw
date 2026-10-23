@@ -448,7 +448,7 @@ const collectionProductGroups = computed(() => {
     }).slice(0, 4).flatMap((entry) => {
       const product = locationProducts.value.find(row => row.id === entry.id)
       if (!product) return []
-      const presentation = presentationForProduct((organization as ApiValue)?.vertical, product)
+      const presentation = presentationForProduct(product)
       const offer = offerFor(product)
       return [{
         name: product.name,

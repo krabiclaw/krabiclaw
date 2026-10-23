@@ -616,7 +616,7 @@ const PINNING_PUBLICATION = `SELECT pp.id, pp.channel FROM media_placements mp
       AND pp.state IN ('preparing', 'publishing', 'unknown')`
 
 /** Fails the batch it is in when a publication pinned the asset after the check above read it. */
-function publicationPinGuardQuery(organizationId: string, assetId: string): BatchQuery {
+export function publicationPinGuardQuery(organizationId: string, assetId: string): BatchQuery {
   return {
     query: `INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at)
       SELECT NULL, ?, 'content_document', NULL, 'cover', ?, 0, 'active', NULL, NULL WHERE EXISTS (${PINNING_PUBLICATION})`,
@@ -624,7 +624,7 @@ function publicationPinGuardQuery(organizationId: string, assetId: string): Batc
   }
 }
 
-async function assertNotPinnedByPublication(db: DbClient, organizationId: string, assetId: string) {
+export async function assertNotPinnedByPublication(db: DbClient, organizationId: string, assetId: string) {
   const pinned = await queryFirst<{ id: string; channel: string }>(db, `${PINNING_PUBLICATION} LIMIT 1`, [organizationId, assetId])
   if (pinned) throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${assetId} is part of the unresolved ${pinned.channel} publication ${pinned.id}; resolve it first`, data: { code: 'MEDIA_PINNED_BY_PUBLICATION', field: 'asset_id' } })
 }

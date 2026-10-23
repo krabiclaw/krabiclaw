@@ -1,12 +1,14 @@
-import { expect, test } from '@playwright/test'
+import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from '@playwright/test'
 import { blawbyBaseURL, blawbyExtraHeaders, dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './helpers'
 import { loginAs } from './helpers/auth'
 import { MCP_ORGANIZATION_ID, mcpRequest, mcpData, publishOwnHostProfile } from './helpers/mcp'
 import { E2E_POTTERY_ORGANIZATION_ID, tenantTestExtraHeaders } from './test-env'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
-import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone'
+import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../../utils/timezone'
 import type { OrganizationMembersData } from '../../utils/organization-members'
+import type { Product } from '../../server/types/products'
+import type { SessionAvailability } from '../../server/utils/availability'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
 // for why. This group covers the bulk of an owner's MCP tool surface: site
@@ -107,6 +109,38 @@ test.describe('stateless MCP server', () => {
         blocks: Array<{ id: string; type: string; level: number | null; parent_block_id: string | null; source_block_id: string | null; data: Record<string, unknown>; media: unknown[] }>
       }
     }>(await pageBefore.json()).page
+    const pageSnapshot = {
+      path: pageBeforeData.path, title: pageBeforeData.title,
+      sortOrder: pageBeforeData.sort_order, pageType: pageBeforeData.page_type, recipe: pageBeforeData.recipe,
+      blocks: pageBeforeData.blocks.map(({ id, type, level, parent_block_id, source_block_id, data, media }) =>
+        ({ id, type, level, parent_block_id, source_block_id, data, media })),
+    }
+    const pageEditorPath = `${baseURL}/api/editor/organizations/${organizationId}/pages/${homeVariant!.id}`
+    const editorPageBefore = await request.get(pageEditorPath)
+    expect(editorPageBefore.status()).toBe(200)
+    const savedPageBefore = (await editorPageBefore.json()).page
+    const pathChange = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'update_site_page', args: {
+        organization_id: organizationId, variant_id: homeVariant!.id, expected_updated_at: pageBeforeData.updated_at,
+        ...pageSnapshot, path: '/another-home-address', title: 'Must not be saved',
+      },
+    })
+    expect(pathChange.status()).toBe(200)
+    const pathChangeResult = (await pathChange.json()).result
+    expect(pathChangeResult.isError).toBe(true)
+    expect(pathChangeResult.content).toHaveLength(1)
+    expect(pathChangeResult.content[0].type).toBe('text')
+    expect(JSON.parse(pathChangeResult.content[0].text)).toEqual({ status: 400, message: 'A page keeps its saved path' })
+    const unchangedPageRead = await request.get(pageEditorPath)
+    expect(unchangedPageRead.status()).toBe(200)
+    expect((await unchangedPageRead.json()).page).toEqual(savedPageBefore)
+    const httpPathChange = await request.patch(pageEditorPath, { data: {
+      ...pageSnapshot, expectedUpdatedAt: pageBeforeData.updated_at, path: '/another-home-address', title: 'Must not be saved',
+    } })
+    expect(httpPathChange.status()).toBe(400)
+    const unchangedHttpPageRead = await request.get(pageEditorPath)
+    expect(unchangedHttpPageRead.status()).toBe(200)
+    expect((await unchangedHttpPageRead.json()).page).toEqual(savedPageBefore)
     for (const [type, data, message] of [
       ['showcase', { items: [{ title: ' ' }] }, /title/],
       ['steps', { items: [{}] }, /required.*title/],
@@ -133,6 +167,7 @@ test.describe('stateless MCP server', () => {
     // update_site_page replaces the document, so the writer states the path,
     // title and identity it read rather than leaving them to be filled in from
     // the stored row. Order is the array's; there is no position to send.
+    const renamedPageTitle = `MCP page title ${Date.now()}`
     const contentUpdate = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'update_site_page',
@@ -141,7 +176,7 @@ test.describe('stateless MCP server', () => {
         variant_id: homeVariant!.id,
         expected_updated_at: pageBeforeData.updated_at,
         path: pageBeforeData.path,
-        title: pageBeforeData.title,
+        title: renamedPageTitle,
         sortOrder: pageBeforeData.sort_order,
         pageType: pageBeforeData.page_type,
         recipe: pageBeforeData.recipe,
@@ -170,6 +205,9 @@ test.describe('stateless MCP server', () => {
     const mergedBody = await contentRead.json()
     const mergedHero = mcpData<{ page: { blocks: Array<{ type: string; data: Record<string, unknown> }> } }>(mergedBody).page.blocks.find(item => item.type === 'hero')
     expect(mergedHero?.data.title).toContain('MCP Hero')
+    const renamedPage = await request.get(pageEditorPath)
+    expect(renamedPage.status()).toBe(200)
+    expect((await renamedPage.json()).page).toMatchObject({ path: pageBeforeData.path, title: renamedPageTitle })
 
     const settingsBefore = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
@@ -491,6 +529,19 @@ test.describe('stateless MCP server', () => {
       args: { organization_id: organizationId, location_id: locationId },
     })
     expect(locationRead.status()).toBe(200)
+    const originalLocation = mcpData<{ location: { title: string; slug: string; phone: string | null; updated_at: string } }>(await locationRead.json()).location
+    const locationApiPath = `${baseURL}/api/organizations/${organizationId}/locations/${locationId}`
+    const locationBefore = await request.get(locationApiPath)
+    expect(locationBefore.status()).toBe(200)
+    const originalLocationRead = await locationBefore.json()
+    for (const path of [locationApiPath, `${baseURL}/api/dashboard/locations/${locationId}`]) {
+      const moved = await request.patch(path, { data: { slug: 'another-location-address', title: 'Must not be saved' } })
+      expect(moved.status()).toBe(400)
+      expect(await moved.json()).toMatchObject({ error: 'A location keeps its saved slug', code: 'INVALID_LOCATION_FIELD', field: 'slug' })
+      const unchanged = await request.get(locationApiPath)
+      expect(unchanged.status()).toBe(200)
+      expect(await unchanged.json()).toEqual(originalLocationRead)
+    }
 
     // Unique per run. A constant would pass on a value a previous run had left
     // on the row, which is the exact failure this read-back exists to catch.
@@ -513,11 +564,12 @@ test.describe('stateless MCP server', () => {
     })
     expect(afterRefusal.status()).toBe(200)
     expect(mcpData<{ location: { phone: string | null } }>(await afterRefusal.json()).location.phone)
-      .toBe(mcpData<{ location: { phone: string | null } }>(await locationRead.json()).location.phone)
+      .toBe(originalLocation.phone)
+    const renamedLocationTitle = `${originalLocation.title} ${Date.now()}`
     const locationUpdate = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'update_location',
-      args: { organization_id: organizationId, location_id: locationId, phone: updatedPhone },
+      args: { organization_id: organizationId, location_id: locationId, phone: updatedPhone, title: renamedLocationTitle },
     })
     expect(locationUpdate.status()).toBe(200)
     // A 200 is the tool answering, not the row changing. updateTenantPage
@@ -531,7 +583,18 @@ test.describe('stateless MCP server', () => {
     })
     expect(locationAfter.status()).toBe(200)
     expect(mcpData<{ location: { phone: string } }>(await locationAfter.json()).location)
-      .toMatchObject({ phone: `+1202555${lineNumber}` })
+      .toMatchObject({ phone: `+1202555${lineNumber}`, title: renamedLocationTitle, slug: originalLocation.slug })
+    const independentlyReadLocation = await request.get(locationApiPath)
+    expect(independentlyReadLocation.status()).toBe(200)
+    expect((await independentlyReadLocation.json()).location).toMatchObject({ title: renamedLocationTitle, slug: originalLocation.slug, phone: `+1202555${lineNumber}` })
+    const restoredTitle = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'update_location', args: { organization_id: organizationId, location_id: locationId, title: originalLocation.title },
+    })
+    expect(restoredTitle.status()).toBe(200)
+    expect(mcpData<{ ok: boolean }>(await restoredTitle.json()).ok).toBe(true)
+    const locationAfterRestore = await request.get(locationApiPath)
+    expect(locationAfterRestore.status()).toBe(200)
+    expect((await locationAfterRestore.json()).location).toMatchObject({ title: originalLocation.title, slug: originalLocation.slug, phone: `+1202555${lineNumber}` })
 
     const reviewsList = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
@@ -582,6 +645,9 @@ test.describe('stateless MCP server', () => {
     const publicPage = await browser.newPage()
     const release = await acquireTenantMutationLock(testInfo, qaOrganizationId)
     let createdId: string | undefined
+    const localeUrl = `${baseURL}/api/editor/organizations/${qaOrganizationId}/locales`
+    const translationLocale = 'th'
+    let originalLanguages: Array<{ locale: string; status: string; is_source: number }> | undefined
     try {
       const before = await openTenantPage(publicPage, `${blawbyBaseURL}${pagePath}`, blawbyExtraHeaders)
       expect(before?.status()).toBe(200)
@@ -651,6 +717,44 @@ test.describe('stateless MCP server', () => {
       await expect(publishedQuestion.locator('summary')).toBeVisible()
       await publishedQuestion.locator('summary').click()
       await expect(publishedQuestion.getByText(answer, { exact: true })).toBeVisible()
+
+      const languages = await page.request.get(localeUrl)
+      expect(languages.status()).toBe(200)
+      originalLanguages = (await languages.json()).languages
+      expect(originalLanguages).not.toContainEqual(expect.objectContaining({ locale: translationLocale }))
+      const addedLanguage = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'add_organization_language', args: { organization_id: qaOrganizationId, locale: translationLocale } })
+      expect(addedLanguage.status()).toBe(200)
+      mcpData(await addedLanguage.json())
+      const languageReadback = await page.request.get(localeUrl)
+      expect(languageReadback.status()).toBe(200)
+      expect((await languageReadback.json()).languages).toContainEqual(expect.objectContaining({ locale: translationLocale, status: 'disabled', is_source: 0 }))
+      const localizationPath = `/api/editor/organizations/${qaOrganizationId}/localization/content_document/${createdId}/${translationLocale}`
+      // The second open reads the first authored translation back before it is
+      // revised. Q&A's canonical writer accepts a question and answer, without SEO.
+      for (const [index, translated] of [
+        { title: 'คำถามภาษาไทยเกี่ยวกับราคา', summary: 'คำตอบภาษาไทยสำหรับหน้าราคา' },
+        { title: 'คำถามภาษาไทยเกี่ยวกับราคาที่แก้ไข', summary: 'คำตอบภาษาไทยที่แก้ไขสำหรับหน้าราคา' },
+      ].entries()) {
+        await page.getByTestId('localize-resource').click()
+        await page.getByTestId('localize-language').click()
+        const [loadedTranslation] = await Promise.all([
+          page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === localizationPath),
+          page.getByRole('option', { name: /ไทย \(th\)/ }).click(),
+        ])
+        expect(loadedTranslation.status()).toBe(index === 0 ? 404 : 200)
+        if (index === 1) expect((await loadedTranslation.json()).localization).toMatchObject({ kind: 'qa', title: 'คำถามภาษาไทยเกี่ยวกับราคา', summary: 'คำตอบภาษาไทยสำหรับหน้าราคา', seo_keywords: null })
+        await page.getByTestId('localize-field-title').fill(translated.title)
+        await page.getByTestId('localize-field-summary').fill(translated.summary)
+        const [savedTranslation] = await Promise.all([
+          page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === localizationPath),
+          page.getByTestId('localize-save').click(),
+        ])
+        expect(savedTranslation.status(), await savedTranslation.text()).toBe(200)
+        await expect(page.getByTestId('localize-language')).toHaveCount(0)
+        const translatedReadback = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: qaOrganizationId, resource_type: 'content_document', resource_id: createdId, locale: translationLocale } })
+        expect(translatedReadback.status()).toBe(200)
+        expect(mcpData<{ localization: { kind: string; title: string; summary: string } }>(await translatedReadback.json()).localization).toMatchObject({ kind: 'qa', ...translated })
+      }
     } finally {
       try {
         if (createdId) {
@@ -664,7 +768,21 @@ test.describe('stateless MCP server', () => {
           expect((await after.json()).qa).toEqual([])
         }
       } finally {
-        await Promise.all([publicPage.close(), release()])
+        try {
+          if (originalLanguages && !originalLanguages.some(language => language.locale === translationLocale)) {
+            const languages = await page.request.get(localeUrl)
+            expect(languages.status()).toBe(200)
+            if ((await languages.json()).languages.some((language: { locale: string }) => language.locale === translationLocale)) {
+              const removedLanguage = await page.request.delete(`${localeUrl}/${translationLocale}`)
+              expect(removedLanguage.status(), await removedLanguage.text()).toBe(200)
+            }
+            const restoredLanguages = await page.request.get(localeUrl)
+            expect(restoredLanguages.status()).toBe(200)
+            expect((await restoredLanguages.json()).languages).toEqual(originalLanguages)
+          }
+        } finally {
+          await Promise.all([publicPage.close(), release()])
+        }
       }
     }
   })
@@ -673,11 +791,70 @@ test.describe('stateless MCP server', () => {
     // The large-batch spec asserts the demo tenant's whole catalogue under this
     // lock, so every test that adds a Product to it takes the same lock.
     let releaseTenantMutationLock: (() => Promise<void>) | undefined
+    let bookedSessionRestore: {
+      cleanupRequest: APIRequestContext
+      page: Page
+      baseURL: string
+      organizationId: string
+      productId: string | null
+      locationId: string
+    } | null = null
     test.beforeEach(async ({ request: _request }, testInfo) => {
       releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
     })
-    test.afterEach(async () => {
-      await releaseTenantMutationLock?.()
+    test.afterEach(async ({ request: _request }, testInfo) => {
+      const release = releaseTenantMutationLock
+      releaseTenantMutationLock = undefined
+      const restore = bookedSessionRestore
+      bookedSessionRestore = null
+      const failures: unknown[] = []
+      if (restore) {
+        try {
+          if (testInfo.status !== 'passed' && !restore.page.isClosed()) await restore.page.close()
+        } catch (error) { failures.push(error) }
+        if (restore.productId) {
+          // Preserve booking history while withdrawing the test-owned schedule
+          // and listing, even when the test request fixture has timed out.
+          const productId = restore.productId
+          for (const [toolName, args] of [
+            ['replace_product_weekly_schedule', { product_id: productId, location_id: restore.locationId, slots: [] }],
+            ['set_product_location', { product_id: productId, location_id: restore.locationId, active: false, published: false }],
+            ['set_product_publication', { product_id: productId, published: false }],
+          ] as const) {
+            try {
+              const response = await mcpRequest(restore.cleanupRequest, restore.baseURL, { method: 'tools/call', toolName, args: { organization_id: restore.organizationId, ...args } })
+              expect(response.status(), await response.text()).toBe(200)
+              mcpData(await response.json())
+            } catch (error) { failures.push(error) }
+          }
+          const url = `/api/editor/organizations/${restore.organizationId}/products/${productId}`
+          try {
+            const rules = await restore.cleanupRequest.get(`${url}/availability`, { params: { location_id: restore.locationId } })
+            expect(rules.status(), await rules.text()).toBe(200)
+            expect((await rules.json()).rules).toEqual([])
+          } catch (error) { failures.push(error) }
+          try {
+            const response = await mcpRequest(restore.cleanupRequest, restore.baseURL, { method: 'tools/call', toolName: 'get_product', args: { organization_id: restore.organizationId, product_id: productId } })
+            expect(response.status(), await response.text()).toBe(200)
+            const retained = mcpData<{ product: Product }>(await response.json()).product
+            expect(retained.locations.find(location => location.location_id === restore.locationId)).toMatchObject({ active: false, published: false })
+          } catch (error) { failures.push(error) }
+          try {
+            const response = await restore.cleanupRequest.get(url)
+            expect(response.status(), await response.text()).toBe(200)
+            const retained = (await response.json() as { product: Product }).product
+            expect(retained.locations.find(location => location.location_id === restore.locationId)).toMatchObject({ active: false, published: false })
+            expect(retained.publications).toEqual([{ organization_id: restore.organizationId, published: false }])
+          } catch (error) { failures.push(error) }
+        }
+        try {
+          await restore.cleanupRequest.dispose()
+        } catch (error) { failures.push(error) }
+      }
+      try {
+        await release?.()
+      } catch (error) { failures.push(error) }
+      if (failures.length) throw new AggregateError(failures, 'Booked-session authority cleanup failed')
     })
 
     test('HTTP and MCP share booking defaults, weekly replacement and authored Q&A', async ({ request, baseURL }) => {
@@ -792,7 +969,7 @@ test.describe('stateless MCP server', () => {
       }
     })
 
-    test('booked session authority survives CMS clear and MCP re-add', async ({ request, page, baseURL }) => {
+    test('booked session authority survives CMS clear and MCP re-add', async ({ request, page, baseURL }, testInfo) => {
       await loginAs(request, baseURL!)
       const organizationId = MCP_ORGANIZATION_ID
       const call = async (toolName: string, args: Record<string, unknown>) => {
@@ -803,64 +980,213 @@ test.describe('stateless MCP server', () => {
         return body
       }
       const { settings } = mcpData<{ settings: { default_currency: string } }>(await call('get_organization_settings', {}))
+      const { location } = mcpData<{ location: { id: string; title: string; timezone: string } }>(await call('get_location', { location_id: 'loc-demo' }))
+      expect(location.id).toBe('loc-demo')
+      expect(location.timezone).toBe('America/New_York')
+      const cleanupRequest = await playwrightRequest.newContext({ baseURL })
+      const restore = { cleanupRequest, page, baseURL: baseURL!, organizationId, productId: null as string | null, locationId: location.id }
+      bookedSessionRestore = restore
+      await loginAs(cleanupRequest, baseURL!)
       const created = mcpData<{ product: { id: string; slug: string } }>(await call('create_product', { kind: 'service', active: true, idempotency_key: crypto.randomUUID(),
-        name: 'MCP Session Authority Proof', variants: [{ name: 'Seat', prices: [{ unit_amount: 1000, currency: settings.default_currency }] }],
+        name: 'Family Estate Planning Consultation', variants: [{ name: 'Consultation', prices: [{ unit_amount: 1000, currency: settings.default_currency }] }],
       })).product
+      restore.productId = created.id
       const url = `${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`
       const slots = [{ weekday: 0, start_time: '14:00' }]
-      try {
-        await call('set_product_publication', { product_id: created.id, published: true })
-        await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: true })
-        await call('set_product_booking_config', { product_id: created.id, duration_minutes: 120, default_capacity: 10 })
-        await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
-        await loginAs(page.request, baseURL!)
-        // The location's schedule is the one Product editor's Booking, scoped to that location.
-        await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
-        await waitForNuxtHydration(page)
-        await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
-        await expect(page.getByRole('link', { name: 'Guest limit Up to 10 guests per session', exact: true })).toBeVisible()
-        await page.getByRole('link', { name: 'Weekly schedule Sunday', exact: true }).click()
-        await page.getByRole('link', { name: 'Sunday 2:00 PM', exact: true }).click()
-        await expect(page.getByLabel('Start time 1', { exact: true })).toHaveValue('14:00')
-        await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-        const read = async () => {
-          const response = await request.get(`${url}/sessions`)
-          expect(response.status(), await response.text()).toBe(200)
-          return (await response.json()).sessions as Array<{ id: string; location_id: string | null; source_occurrence_key: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string; claimed: number; remaining: number }>
-        }
-        const target = (await read()).find(row => row.location_id === 'loc-demo' && row.starts_at > new Date().toISOString())
-        expect(target).toBeTruthy()
-        const booked = await request.post(`${baseURL}/api/public/products/${created.slug}/book`, {
-          headers: tenantTestExtraHeaders(),
-          data: { session_id: target!.id, guest_name: 'Session Authority Guest', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
-        })
-        expect(booked.status(), await booked.text()).toBe(201)
-        const before = (await read()).find(row => row.id === target!.id)!
-        expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
-        await page.getByRole('button', { name: 'Remove start time 1', exact: true }).click()
-        await page.getByRole('button', { name: 'Save', exact: true }).click()
-        await expect(page.getByRole('link', { name: 'Sunday No sessions', exact: true })).toBeVisible()
-        const cleared = await request.get(`${url}/availability?location_id=loc-demo`)
-        expect(cleared.status()).toBe(200)
-        expect((await cleared.json()).rules).toEqual([])
-        await call('set_product_booking_config', { product_id: created.id, duration_minutes: 30, default_capacity: 2 })
-        await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
-        const after = (await read()).find(row => row.id === target!.id)!
-        for (const field of ['id', 'source_occurrence_key', 'timezone', 'starts_at', 'ends_at', 'capacity', 'status', 'claimed', 'remaining'] as const) expect(after[field]).toEqual(before[field])
-        const publicRead = await request.get(`${baseURL}/api/public/products/${created.slug}/sessions`, { headers: tenantTestExtraHeaders() })
-        expect(publicRead.status(), await publicRead.text()).toBe(200)
-        expect((await publicRead.json()).sessions.find((row: { id: string }) => row.id === target!.id)).toMatchObject({ remaining: 4, is_full: false, starts_at: target!.starts_at, ends_at: target!.ends_at, timezone: target!.timezone })
-      } finally {
-        // Preserve Booking history while withdrawing this test-owned schedule and listing.
-        await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots: [] })
-        await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: false, published: false })
-        await call('set_product_publication', { product_id: created.id, published: false })
-        const rules = await request.get(`${url}/availability?location_id=loc-demo`)
-        expect(rules.status(), await rules.text()).toBe(200)
-        expect((await rules.json()).rules).toEqual([])
-        const retained = mcpData<{ product: { locations: Array<{ location_id: string; active: boolean; published: boolean }> } }>(await call('get_product', { product_id: created.id })).product
-        expect(retained.locations.find(location => location.location_id === 'loc-demo')).toMatchObject({ active: false, published: false })
+      await call('set_product_publication', { product_id: created.id, published: true })
+      await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: true })
+      await call('set_product_booking_config', { product_id: created.id, duration_minutes: 120, default_capacity: 10 })
+      await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
+      await loginAs(page.request, baseURL!)
+      // The location's schedule is the one Product editor's Booking, scoped to that location.
+      await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
+      await waitForNuxtHydration(page)
+      await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Client limit Up to 10 clients per consultation', exact: true })).toBeVisible()
+      const scheduleConcern = page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-schedule')
+      await expect(scheduleConcern).toHaveAccessibleName(`Weekly schedule ${location.title} · Sunday`)
+      await expect(scheduleConcern).toHaveAttribute('href', `/dashboard/ember-slice-demo/products/${created.id}/booking/schedule?location_id=loc-demo`)
+      await scheduleConcern.click()
+      const sunday = page.locator('#dashboard-panel-booking-schedule').getByTestId('editor-row-sunday')
+      await expect(sunday).toHaveAccessibleName('Sunday 2:00 PM')
+      await sunday.click()
+      await expect(page.getByLabel('Start time 1', { exact: true })).toHaveValue('14:00')
+      await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      const read = async () => {
+        const response = await request.get(`${url}/sessions`)
+        expect(response.status(), await response.text()).toBe(200)
+        return (await response.json()).sessions as Array<{ id: string; location_id: string | null; source_occurrence_key: string; timezone: string; starts_at: string; ends_at: string; capacity: number; status: string; claimed: number; remaining: number }>
       }
+      const target = (await read()).find(row => row.location_id === 'loc-demo' && row.starts_at > new Date().toISOString())
+      expect(target).toBeTruthy()
+      const booked = await request.post(`${baseURL}/api/public/products/${created.slug}/book`, {
+        headers: tenantTestExtraHeaders(),
+        data: { session_id: target!.id, guest_name: 'Estate Planning Client', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
+      })
+      expect(booked.status(), await booked.text()).toBe(201)
+      const before = (await read()).find(row => row.id === target!.id)!
+      expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
+      await page.getByRole('button', { name: 'Remove start time 1', exact: true }).click()
+      await page.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(page.getByRole('link', { name: 'Sunday No consultations', exact: true })).toBeVisible()
+      const cleared = await request.get(`${url}/availability?location_id=loc-demo`)
+      expect(cleared.status()).toBe(200)
+      expect((await cleared.json()).rules).toEqual([])
+      await call('set_product_booking_config', { product_id: created.id, duration_minutes: 30, default_capacity: 2 })
+      await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
+      const after = (await read()).find(row => row.id === target!.id)!
+      for (const field of ['id', 'source_occurrence_key', 'timezone', 'starts_at', 'ends_at', 'capacity', 'status', 'claimed', 'remaining'] as const) expect(after[field]).toEqual(before[field])
+      const publicRead = await request.get(`${baseURL}/api/public/products/${created.slug}/sessions`, { headers: tenantTestExtraHeaders() })
+      expect(publicRead.status(), await publicRead.text()).toBe(200)
+      expect((await publicRead.json()).sessions.find((row: { id: string }) => row.id === target!.id)).toMatchObject({ remaining: 4, is_full: false, starts_at: target!.starts_at, ends_at: target!.ends_at, timezone: target!.timezone })
+
+      const sessionsBeforeDraft = await read()
+      const createRequests: string[] = []
+      const updateRequests: string[] = []
+      page.on('request', entry => {
+        if (new URL(entry.url()).pathname === new URL(`${url}/sessions`).pathname && entry.method() === 'POST') createRequests.push(entry.url())
+        if (new URL(entry.url()).pathname.startsWith(`${new URL(`${url}/sessions`).pathname}/`) && entry.method() === 'PATCH') updateRequests.push(entry.url())
+      })
+      const calendarPath = '/dashboard/ember-slice-demo/calendar'
+      const gapDate = '2027-03-14'
+      expect((await page.goto(`${calendarPath}/sessions/new?product_id=${created.id}&month=${gapDate.slice(0, 7)}&date=${gapDate}`))?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const draft = page.locator('#dashboard-panel-product-session')
+      const date = draft.getByLabel('Date', { exact: true })
+      const starts = draft.getByLabel('Starts', { exact: true })
+      const ends = draft.getByLabel('Ends', { exact: true })
+      const add = draft.getByRole('button', { name: 'Add to calendar', exact: true })
+      const locationChoice = draft.getByRole('combobox', { name: 'Office*', exact: true })
+      await expect(draft.getByRole('spinbutton', { name: 'Client limit', exact: true })).toHaveValue('2')
+      await locationChoice.click()
+      await expect(page.getByRole('listbox')).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(draft.getByText('Choose an office.', { exact: true })).toBeVisible()
+      await expect(locationChoice).toHaveAccessibleDescription('Choose an office.')
+      await expect(date).toHaveValue(gapDate)
+      await expect(starts).toBeDisabled()
+      await expect(ends).toBeDisabled()
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await locationChoice.click()
+      await page.getByRole('option', { name: location.title, exact: true }).click()
+      await expect(draft).toContainText(`Times are in ${location.timezone}.`)
+      await expect(date).toHaveValue(gapDate)
+      await date.fill('')
+      await date.press('Tab')
+      await expect(draft.getByText('Choose a date.', { exact: true })).toBeVisible()
+      await expect(date).toHaveAccessibleDescription('Choose a date.')
+      await expect(locationChoice).toContainText(location.title)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await date.fill(gapDate)
+      await starts.focus()
+      await ends.focus()
+      await expect(draft.getByText('Choose a start time.', { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription('Choose a start time.')
+      await expect(date).toHaveValue(gapDate)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await starts.fill('02:30')
+      const startGap = `This time does not exist because the clocks move forward. Choose another start time in ${location.timezone}.`
+      await expect(draft.getByText(startGap, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(startGap)
+      await expect(starts).toHaveValue('02:30')
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await page.screenshot({ path: testInfo.outputPath('experience-validation-desktop.jpg') })
+
+      await starts.fill('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T04:00`)
+      await ends.fill('')
+      await ends.press('Tab')
+      await expect(draft.getByText('Choose an end date and time.', { exact: true })).toBeVisible()
+      await expect(ends).toHaveAccessibleDescription('Choose an end date and time.')
+      await expect(date).toHaveValue(gapDate)
+      await expect(starts).toHaveValue('03:30')
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await ends.fill(`${gapDate}T04:30`)
+      await expect(draft.getByText(startGap, { exact: true })).toHaveCount(0)
+      await expect(add).toBeEnabled()
+      await ends.fill(`${gapDate}T02:30`)
+      const endGap = `This time does not exist because the clocks move forward. Choose another end time in ${location.timezone}.`
+      await expect(draft.getByText(endGap, { exact: true })).toBeVisible()
+      await expect(ends).toHaveAccessibleDescription(endGap)
+      await expect(draft.getByLabel('Date', { exact: true })).toHaveValue(gapDate)
+      await expect(starts).toHaveValue('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T02:30`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+
+      await ends.fill(`${gapDate}T03:00`)
+      const orderingError = 'End time must be after the start time.'
+      await expect(draft.getByText(orderingError, { exact: true })).toBeVisible()
+      await expect(ends).toHaveAccessibleDescription(orderingError)
+      await expect(starts).toHaveValue('03:30')
+      await expect(ends).toHaveValue(`${gapDate}T03:00`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+
+      await ends.fill(`${gapDate}T04:30`)
+      await expect(draft.getByText(orderingError, { exact: true })).toHaveCount(0)
+      await expect(add).toBeEnabled()
+      await draft.getByLabel('Date', { exact: true }).fill('2026-11-01')
+      await starts.fill('01:30')
+      const foldError = `This time occurs twice because the clocks move back. Choose another start time in ${location.timezone}.`
+      await expect(draft.getByText(foldError, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(foldError)
+      await expect(starts).toHaveValue('01:30')
+      await expect(ends).toHaveValue(`${gapDate}T04:30`)
+      await expect(add).toBeDisabled()
+      expect(createRequests).toEqual([])
+      await page.setViewportSize({ width: 390, height: 844 })
+      await expect(draft.getByText(foldError, { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription(foldError)
+      await expect(draft.getByText(foldError, { exact: true })).toBeInViewport({ ratio: 1 })
+      await page.screenshot({ path: testInfo.outputPath('experience-validation-phone.jpg') })
+      await draft.getByLabel('Date', { exact: true }).fill(gapDate)
+      await starts.fill('03:30')
+      await expect(draft.getByText(foldError, { exact: true })).toHaveCount(0)
+      await expect(ends).toHaveValue(`${gapDate}T04:30`)
+      await expect(add).toBeEnabled()
+      await draft.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === created.id)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: created.id, locationId: location.id, month: gapDate.slice(0, 7), date: gapDate })
+      expect(createRequests).toEqual([])
+      const sessionsAfterDraft = await read()
+      expect(sessionsAfterDraft.map(session => session.id)).toEqual(sessionsBeforeDraft.map(session => session.id))
+      expect(sessionsAfterDraft.find(session => session.id === target!.id)).toEqual(after)
+
+      const unclaimed = sessionsBeforeDraft.find(session => session.id !== target!.id && session.status === 'scheduled' && session.claimed === 0)
+      expect(unclaimed, 'the real weekly schedule has another unclaimed occurrence to edit').toBeDefined()
+      const unclaimedStart = localNow(unclaimed!.timezone, new Date(unclaimed!.starts_at))
+      const unclaimedEnd = localNow(unclaimed!.timezone, new Date(unclaimed!.ends_at))
+      expect((await page.goto(`${calendarPath}/sessions/${unclaimed!.id}?product_id=${created.id}&locationId=${location.id}&month=${unclaimedStart.date.slice(0, 7)}&date=${unclaimedStart.date}`))?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const save = draft.getByRole('button', { name: 'Save', exact: true })
+      await expect(save).toBeDisabled()
+      await starts.fill('')
+      await starts.press('Tab')
+      await expect(draft.getByText('Choose a start date and time.', { exact: true })).toBeVisible()
+      await expect(starts).toHaveAccessibleDescription('Choose a start date and time.')
+      await expect(ends).toHaveValue(`${unclaimedEnd.date}T${unclaimedEnd.time}`)
+      await expect(save).toBeDisabled()
+      await starts.press('Enter')
+      await expect(starts).toHaveValue('')
+      await expect(ends).toHaveValue(`${unclaimedEnd.date}T${unclaimedEnd.time}`)
+      expect(updateRequests).toEqual([])
+      await starts.fill(`${unclaimedStart.date}T${unclaimedStart.time}`)
+      await expect(draft.getByText('Choose a start date and time.', { exact: true })).toHaveCount(0)
+      await expect(save).toBeEnabled()
+      await draft.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === created.id)
+      expect(createRequests).toEqual([])
+      expect(updateRequests).toEqual([])
+      const sessionsAfterEdit = await read()
+      expect(sessionsAfterEdit.map(session => session.id)).toEqual(sessionsBeforeDraft.map(session => session.id))
+      expect(sessionsAfterEdit.find(session => session.id === unclaimed!.id)).toEqual(unclaimed)
+      expect(sessionsAfterEdit.find(session => session.id === target!.id)).toEqual(after)
     })
 
     test('MCP finishes the public menu and creates a separately bookable experience', async ({ request, page, baseURL }) => {
@@ -932,8 +1258,6 @@ test.describe('stateless MCP server', () => {
         const creation = { kind: 'experience', name, idempotency_key: crypto.randomUUID(), variants: [{ name: 'Per person', prices: [{ unit_amount: 13000, currency: settings.settings.default_currency }] }],
           booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false, assigned_member_id: host.memberId,
             sessions: [{ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3600000).toISOString(), capacity: 6 }] } }
-        const missing = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'create_product',args:{organization_id:organizationId,kind:'experience',name,idempotency_key:crypto.randomUUID()}})
-        expect((await missing.json()).result.isError).toBe(true)
         const { product } = await call<{ product: { id: string; slug: string; public_url: string; booking_readiness: { ready: boolean; missing: string[] } } }>('create_product', creation)
         experienceId = product.id
         expect(product.booking_readiness).toEqual({ ready: true, missing: [] })
@@ -951,8 +1275,118 @@ test.describe('stateless MCP server', () => {
         const sessions = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, {headers: tenantTestExtraHeaders()})
         expect(sessions.status(),await sessions.text()).toBe(200)
         expect((await sessions.json()).sessions).toEqual([expect.objectContaining({starts_at:start.toISOString(),remaining:6,is_full:false})])
+        let additionalSeating: { date: string; time: string } | undefined
+        for (let offset = 1; offset <= 7 && !additionalSeating; offset++) {
+          const date = addLocalDays(seating!.date, offset)
+          const time = generateReservationTimes(location.opening_hours, date, { lastSeatingBufferMinutes: 60, specialHours: location.special_hours })[0]
+          if (time) additionalSeating = { date, time }
+        }
+        expect(additionalSeating, 'the existing location has another open one-hour time on a later date').toBeDefined()
+        const additionalStart = localDateTimeToInstant(additionalSeating!.date, additionalSeating!.time, location.timezone)
+        const additionalEnd = new Date(additionalStart.getTime() + 60 * 60_000)
+        const additionalEndLocal = localNow(location.timezone, additionalEnd)
+        await loginAs(page.request, baseURL!)
+        await page.setExtraHTTPHeaders({})
+        const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
+        const calendarPath = '/dashboard/ember-slice-demo/calendar'
+        const sessionEndpoint = `/api/editor/organizations/${organizationId}/products/${product.id}/sessions`
+        expect((await page.goto(`${calendarPath}/sessions/new?product_id=${product.id}&locationId=${locationId}&month=${additionalSeating!.date.slice(0, 7)}&date=${additionalSeating!.date}`))?.status()).toBe(200)
+        await waitForNuxtHydration(page)
+        const availability = page.locator('#dashboard-panel-product-session')
+        await expect(availability.getByLabel('Date', { exact: true })).toHaveValue(additionalSeating!.date)
+        await expect(availability.getByLabel('Starts', { exact: true })).toHaveValue('')
+        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('6')
+        await availability.getByLabel('Starts', { exact: true }).fill(additionalSeating!.time)
+        await expect(availability.getByLabel('Ends', { exact: true })).toHaveValue(`${additionalEndLocal.date}T${additionalEndLocal.time}`)
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('4')
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        let creations = 0
+        const countCreation = (request: import('@playwright/test').Request) => {
+          if (new URL(request.url()).pathname === sessionEndpoint && request.method() === 'POST') creations++
+        }
+        page.on('request', countCreation)
+        const calendarFailure = 'The newly saved calendar could not be read for this verification.'
+        const interceptCalendar = (url: URL) => url.pathname === sessionEndpoint
+        await page.route(interceptCalendar, async route => {
+          if (route.request().method() !== 'GET') return route.continue()
+          // The failed read completes after the saved editor is visible, so
+          // a save handler left on a discarded /new instance cannot pass.
+          await expect(availability.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
+          await route.fulfill({ status: 503, json: { error: calendarFailure } })
+        })
+        const added = page.waitForResponse(response => new URL(response.url()).pathname === sessionEndpoint && response.request().method() === 'POST')
+        const refusedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
+        await availability.getByRole('button', { name: 'Add to calendar', exact: true }).click()
+        const addedResponse = await added
+        expect(addedResponse.status(), await addedResponse.text()).toBe(201)
+        const addedSessions = (await addedResponse.json() as { sessions: SessionAvailability[] }).sessions
+        expect(addedSessions).toHaveLength(1)
+        const addedId = addedSessions[0]!.id
+        expect((await refusedCalendar).status()).toBe(503)
+        await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/sessions/${addedId}`)
+        await expect(availability.getByText(calendarFailure, { exact: true })).toBeVisible()
+        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('4')
+        const beforeRetry = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+          product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
+        })
+        expect(beforeRetry.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 4, remaining: 4 })])
+        await page.unroute(interceptCalendar)
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('5')
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        const retried = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'PATCH')
+        const savedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
+        await availability.getByRole('button', { name: 'Save', exact: true }).click()
+        const retriedResponse = await retried
+        expect(retriedResponse.status(), await retriedResponse.text()).toBe(200)
+        expect((await savedCalendar).status()).toBe(200)
+        page.off('request', countCreation)
+        expect(creations).toBe(1)
+        await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('locationId') === locationId)
+        expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: product.id, locationId, month: additionalSeating!.date.slice(0, 7), date: additionalSeating!.date })
+        await expect(page.locator(`#dashboard-panel-org-calendar [data-session-id="${addedId}"]:visible`)).toBeVisible()
+        const persisted = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+          product_id: product.id,
+          from: localDateTimeToInstant(additionalSeating!.date, '00:00', location.timezone).toISOString(),
+          to: localDateTimeToInstant(addLocalDays(additionalSeating!.date, 1), '00:00', location.timezone).toISOString(),
+        })
+        expect(persisted.sessions).toEqual([expect.objectContaining({
+          id: addedId, organization_id: organizationId, product_id: product.id, location_id: locationId, timezone: location.timezone,
+          starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), capacity: 5, status: 'scheduled', claimed: 0, remaining: 5, is_full: false,
+        })])
+        const publicReadback = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, { headers: tenantTestExtraHeaders(), params: { location_id: locationId } })
+        expect(publicReadback.status(), await publicReadback.text()).toBe(200)
+        const publicSessions = (await publicReadback.json() as { sessions: Array<Pick<SessionAvailability, 'id' | 'starts_at' | 'ends_at' | 'location_id' | 'timezone' | 'remaining' | 'is_full'>> }).sessions
+        expect(publicSessions).toHaveLength(2)
+        expect(publicSessions.find(session => session.id === addedId)).toMatchObject({
+          id: addedId, location_id: locationId, timezone: location.timezone, starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), remaining: 5, is_full: false,
+        })
+        // Online is a public booking scope, not a physical Product location.
+        // Removing it from its own focused editor returns to the same Product
+        // and rereads saved state without following an invalid online address.
+        await call('set_product_publication', { product_id: product.id, published: false })
+        await call('set_product_booking_config', { product_id: product.id, held_online: true, scheduling_mode: 'provider' })
+        await page.goto(`${bookingPath}/location?location_id=online`)
+        const format = page.locator('#dashboard-panel-booking-location')
+        await expect(format.getByRole('switch', { name: 'Held online', exact: true })).toHaveAttribute('aria-checked', 'true')
+        await format.getByRole('switch', { name: 'Held online', exact: true }).click()
+        await format.getByRole('button', { name: 'Save', exact: true }).click()
+        await expect(page).toHaveURL(`${bookingPath}/duration`)
+        const offline = await call<{ product: Product }>('get_product', { product_id: product.id })
+        expect(offline.product.booking).toMatchObject({ held_online: false, scheduling_mode: 'provider', assigned_member_id: host.memberId })
+        expect(offline.product.locations).toEqual([{ location_id: locationId, active: true, published: true }])
+        await call('set_product_booking_config', { product_id: product.id, held_online: true })
+        await page.goto(`${bookingPath}/enabled?location_id=online`)
+        const calendar = page.locator('#dashboard-panel-booking-enabled')
+        await calendar.getByRole('switch', { name: 'Use a booking calendar', exact: true }).click()
+        await calendar.getByRole('button', { name: 'Save', exact: true }).click()
+        await expect(page).toHaveURL(`${bookingPath}/enabled`)
+        expect((await call<{ product: Product }>('get_product', { product_id: product.id })).product.booking).toBeNull()
       } finally {
-        if (experienceId) expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId})).deleted).toBe(true)
+        if (experienceId) {
+          expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId})).deleted).toBe(true)
+          const deleted = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${experienceId}`)
+          expect(deleted.status(), await deleted.text()).toBe(404)
+        }
         for (const section of menu?.sections.filter(section => section.collection.name.endsWith(stamp)) ?? []) {
           for (const product of section.products) expect((await call<{deleted:boolean}>('delete_product',{product_id:product.id})).deleted).toBe(true)
           expect((await call<{deleted:boolean}>('delete_collection',{collection_id:section.collection.id})).deleted).toBe(true)

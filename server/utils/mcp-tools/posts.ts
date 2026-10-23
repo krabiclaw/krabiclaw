@@ -16,7 +16,7 @@ import { renderStructuredResponse } from '~/server/utils/mcp-render'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { absolutizeOrganizationUrl, attachViewUrlToRecord, NOT_HANDLED, mutationContextPayload, omit, optionalString, requiredString } from './execution'
 
-const { media: postMediaSchema, ...postUpdateProperties } = postMutationJsonSchema.properties
+const { media: postMediaSchema, slug: postSlugSchema, ...postUpdateProperties } = postMutationJsonSchema.properties
 
 const publishTargetSchema = {
   anyOf: [
@@ -146,6 +146,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
     inputSchema: {
       idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'A value you make up once for this post, such as a UUID, and reuse only to retry this same request.' },
       ...postUpdateProperties,
+      slug: postSlugSchema,
       media: postMediaSchema,
     },
     required: ['idempotency_key'],

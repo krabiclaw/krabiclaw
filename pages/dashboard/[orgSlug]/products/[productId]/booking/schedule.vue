@@ -1,6 +1,9 @@
 <template>
-  <DashboardIndexPanel id="booking-schedule" title="Weekly schedule" :auto-open="groups[0]?.items[0]?.to ?? null">
-    <UAlert v-if="p.loadError.value || p.scheduleError.value" color="error" variant="soft" :description="p.loadError.value || p.scheduleError.value || ''" />
+  <DashboardIndexPanel id="booking-schedule" :title="p.product.value?.kind === 'experience' ? 'Repeating times' : 'Weekly schedule'" :auto-open="p.location.value?.status === 'active' && !scopeError ? groups[0]?.items[0]?.to ?? null : null">
+    <template v-if="p.locationId.value" #right><UButton :to="chooseLocationPath" :label="legal ? 'Change office' : 'Change location'" color="neutral" variant="outline" /></template>
+    <UAlert v-if="p.loadError.value || p.organizationLocationsError.value || scopeError" color="error" variant="soft" :description="p.loadError.value || p.organizationLocationsError.value || scopeError || ''" />
+    <p v-else-if="!p.product.value" role="status" class="text-muted">Loading offering…</p>
+    <UEmpty v-else-if="!groups[0]?.items.length" :title="legal ? 'No offices assigned' : 'No physical locations'" :description="`Add this offering to ${legal ? 'an office' : 'a location'} before setting its weekly times.`" :actions="[{ label: p.sectionLabels.locations, to: p.sectionPath('locations'), color: 'neutral' }]" />
     <EditorNavigationList v-else :groups="groups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
@@ -15,9 +18,32 @@ const p = inject(productEditorKey)!
 const level = useRouteLevel()
 const route = useRoute()
 const router = useRouter()
-const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'week', items: p.weekdays.map(day => ({
+const legal = computed(() => p.product.value?.kind === 'service')
+const chooseLocationPath = computed(() => router.resolve({ path: level.path.value, query: { ...route.query, location_id: undefined } }).fullPath)
+const scopeError = computed(() => p.locationId.value
+  ? p.location.value?.status !== 'active' ? `Choose an active ${legal.value ? 'office' : 'location'} for this weekly schedule.` : p.scheduleError.value
+  : null)
+const groups = computed<EditorNavigationGroup[]>(() => {
+  if (route.query.location_id === 'online') {
+    const config = p.product.value?.booking
+    return [{ id: 'online', items: config?.held_online ? [{
+      id: 'hours', label: 'Bookable times', icon: 'i-lucide-clock', summary: `Online ${legal.value ? 'consultations' : 'sessions'} follow ${config.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} working hours.`,
+      to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`,
+    }] : [] }]
+  }
+  if (!p.locationId.value) return [{ id: 'locations', items: (p.product.value?.locations ?? []).map(placement => {
+    const location = p.allOrganizationLocations.value.find(entry => entry.id === placement.location_id)
+    if (!location) throw new Error('A saved offering location could not be loaded')
+    return {
+      id: location.id, label: location.title, icon: 'i-lucide-map-pin',
+      summary: [location.status === 'active' ? location.timezone : `${legal.value ? 'Office' : 'Location'} inactive`, placement.published ? `Visible at this ${legal.value ? 'office' : 'location'}` : `Hidden at this ${legal.value ? 'office' : 'location'}`, placement.active ? legal.value ? 'Available at this office' : 'Accepting bookings' : legal.value ? 'Unavailable at this office' : 'Bookings paused'].join(' · '),
+      ...(location.status === 'active' ? { to: router.resolve({ path: level.path.value, query: { ...route.query, location_id: location.id } }).fullPath } : {}),
+    }
+  }) }]
+  return [{ id: 'week', items: p.weekdays.map(day => ({
   id: day.label.toLowerCase(), label: day.label,
-  summary: p.savedSlotsFor(day.value).length ? p.savedSlotsFor(day.value).map(slot => formatTime(slot.start_time, 'en-US')).join(', ') : 'No sessions',
+  summary: p.savedSlotsFor(day.value).length ? p.savedSlotsFor(day.value).map(slot => formatTime(slot.start_time, 'en-US')).join(', ') : legal.value ? 'No consultations' : 'No sessions',
   to: router.resolve({ path: `${level.path.value}/${day.label.toLowerCase()}`, query: route.query }).fullPath,
-})) }])
+  })) }]
+})
 </script>

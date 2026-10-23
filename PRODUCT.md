@@ -1,9 +1,10 @@
 # KrabiClaw
 
-KrabiClaw helps local and professional-service businesses build and manage a
-website through the dashboard and the ChatGPT app. Restaurant, experience and
-service businesses share one tenant backend for locations, products, content,
-media and guest activity. Public sites render on the server and use the template
+KrabiClaw helps restaurants, experience operators, law firms and lodging hosts
+build and manage a website through the dashboard and compatible MCP clients,
+including ChatGPT and Claude. All four verticals share one tenant backend for
+locations, products, content, media and guest activity. The `service` vertical is
+Legal Services. Public sites render on the server and use the template
 registry; the platform marketing site is an ordinary platform-template site.
 
 The dashboard handles onboarding, billing, organization settings and the guest
@@ -28,8 +29,28 @@ Google Cloud Console reports branding and data access verified as of 2026-10-04.
 Calendar uses non-sensitive scopes; the unused broad event scope was removed.
 Calendar qualification and scope boundaries are recorded in
 [Google Calendar](docs/integrations/google-calendar.md).
-Online payments are delivered by the separate Payments change; Calendar does
-not establish Checkout, refund or buyer-account availability.
+Online payments follow the [Payments contract](docs/payments/payments.md) and
+their own plan and connected-account requirements.
+
+## Lodging and direct stay bookings
+
+A home is a place to stay, represented by a Product of kind `stay`, with its own
+address, timezone, guest capacity, check-in window, checkout time, photos,
+amenities and stay rules. Its calendar holds nights from check-in up to, but not
+including, checkout. Hosts can set a base nightly price, override prices or
+close nights, and set minimum/maximum stays and arrival/departure restrictions.
+
+On the public site, guests choose available nights at a published home and pay
+in full. New customers need Business and a ready Stripe connected account for
+this direct booking flow. Checkout holds the selected nights; successful payment
+confirms the stay. Recording a stay taken by phone or recording money received
+outside KrabiClaw does not itself collect an online payment or send a guest email.
+
+A home is live when it is active at its active location and either published on
+the site or syncing through an enabled Channex mapping. Live homes count toward
+the plan's home allowance. Every other home is a free draft, with no draft
+limit. The home's location is excluded from the separate location count.
+See [Plans](#plans) and the [native app contract](docs/shared-auth-contract.md#34-live-homes).
 
 ## Guest inbox
 
@@ -64,30 +85,48 @@ A push that Apple refuses is recorded as failed.
 
 ## Airbnb listings
 
-A host connects their Airbnb account through Channex and imports a listing as a
-home. The import walks fixed stages, each resumed by the apps until it
-completes: the Channex property, room type and rate plan; the listing's next
-500 nights, pushed and verified; the Airbnb mapping and activation; future
-reservations; the listing's content; and the conversation feed. The content
-stage reads what the listing says about itself and writes it onto the home:
-its photos in Airbnb's order with their captions, its description from
-Airbnb's summary, space, neighbourhood and house rules, its arrival guide from
-the check-in instruction, access and interaction texts, the house manual, the
-directions and the wifi details, its bedroom, bed and bathroom counts, its
-amenities by Airbnb's own codes, and its check-in method where Airbnb's
-category has a verified counterpart. Airbnb's transit and other notes are not
-imported. Nothing is filled in: a text Airbnb has no value for leaves the
-home's own alone, a text over the home's limit is cut, an amenity code the
-home vocabulary lacks is not written, a photo the host has since deleted from
-the media library stays deleted, photos past the home's limit are not fetched,
-and Airbnb's rooms are not created as photo rooms because its photos name no
-room. Each of those is recorded in the
-import's content report, which the import progress and the listings carry so
-the apps can show the host what to finish by hand. A photo Airbnb cannot serve
-stops the stage naming the image; the retry keeps every photo already stored.
-A completed import can run its content stage again from the dashboard API, and
-`scripts/airbnb-content-backfill.mjs` does so for every home an organization
-imported before content was carried over.
+A host connects their Airbnb account through Channex and requests which listings
+to sync. The request checks the resulting live-home allowance before queuing
+anything. KrabiClaw imports new homes and completes their setup, mapping,
+activation, future reservations and conversation feed in the background; the
+app need not stay open or advance each stage. A draft is an intermediate state,
+not a separate activation decision. Progress and failures are read from the
+sync request's status. The import asks only for what Airbnb leaves out, using
+the organization's contact details where available. A listing without a check-in
+start or checkout time on Airbnb fails before creating a home, naming the field
+to set there before requesting sync again. This connection applies to the
+selected Airbnb account and listings, not every booking channel. See the
+[Airbnb sync contract](docs/shared-auth-contract.md#35-airbnb-listings-sync-in-the-background).
+
+The content stage copies the listing onto the home, one Airbnb field to one
+home field:
+
+- Airbnb's Listing description becomes the home's description. Its space,
+  guest access, interaction, other details, neighbourhood, getting around and
+  house rules become the home's sections of the same names. Airbnb's combined
+  description text is not used.
+- The check-in window (start, end or Flexible) and checkout come from Airbnb.
+- Airbnb's pets, events and smoking answers and its quiet hours become the
+  home's house rules.
+- The check-in instruction becomes the home's check-in instructions. The house
+  manual, directions and wifi details become the arrival guide's fields.
+- Bedroom, bed and bathroom counts, amenities by Airbnb's own codes, and the
+  check-in method where Airbnb's category has a verified counterpart.
+- Photos come in Airbnb's order with their captions, fetched at 2560 px.
+
+Nothing is filled in. A text Airbnb has no value for leaves the home's own
+alone. A text over the home's limit is cut. An amenity code the home
+vocabulary lacks is not written. A photo the host deleted stays deleted, and
+photos past the home's limit are not fetched. Airbnb's rooms are not created
+as photo rooms, because its photos name no room. Each of these is recorded in
+the import's content report, which the apps show the host. A photo Airbnb
+cannot serve stops the stage, naming the image and the address tried. The
+retry keeps every photo already stored.
+
+A completed import can run its content stage again from the dashboard API.
+`scripts/airbnb-content-backfill.mjs` does so for an organization's homes,
+fetching photos stored by earlier imports again at full size into the same
+photos.
 
 ## Team conversations
 
@@ -113,9 +152,11 @@ booking and managed advertising. Growth and Business include 2 locations, then $
 per additional location per month, and 2 homes, then $9 per additional home per
 month, both billed at the end of the period. A home (a place to stay) is a
 lodging unit counted as a home, not as a location: its location is not billed as
-a location. Basic includes 2 locations and 2 homes. Existing subscriptions
-without the homes price keep their prices. The iOS app is included with every account at no
-charge. Commerce ($89), Marketing ($99) and Business subscriptions on the earlier
+a location. Only live homes count; drafts are free and unlimited. Basic includes
+2 locations and 2 live homes and refuses a third of either. Existing subscriptions
+without the homes price keep their prices. The iOS app is a free companion to the
+account where distribution access is available; this does not establish a public
+App Store release. Commerce ($89), Marketing ($99) and Business subscriptions on the earlier
 $99 price remain existing contracts with their original prices and entitlements. One organization
 subscription covers its sites. Customer display names, Stripe product IDs, price IDs and lookup keys
 are separate concepts. Renaming a plan label does not authorize an ID migration.
@@ -139,8 +180,7 @@ billing projection; a declaration is not proof that a send or write enforces it.
 Review-request sending is currently paid; the owner question about Free remains
 open. WhatsApp business notifications require the paid `messaging` capability
 at recipient selection and the defensive sender; authentication OTP is separate.
-Saya and Blawby are both provisioned without a billing check, while Blawby's
-marketing currently describes Growth inclusion. Documentation and the help form
+Saya and Blawby are both included on every plan. Documentation and the help form
 exist; Community/Priority support wording does not establish a service promise.
 These discrepancies must be resolved before publishing comparison claims.
 

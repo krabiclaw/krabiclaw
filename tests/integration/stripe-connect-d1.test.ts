@@ -3,7 +3,10 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
+import { H3 } from 'nitro/h3'
+import { hashPassword } from 'better-auth/crypto'
 import {
+  buildAppPayoutsOnboardingUrls,
   buildStripeConnectOnboardingUrls,
   deriveStripeConnectStatus,
   getStripeConnectedAccount,
@@ -11,7 +14,9 @@ import {
   reserveStripeConnectedAccount,
   requireStripeCheckoutAcceptance,
 } from '../../server/utils/stripe-connect.ts'
-import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import connectStartRoute from '../../server/api/dashboard/connect/index.post.ts'
+import connectStatusRoute from '../../server/api/dashboard/connect/status.post.ts'
 import { processStripeWebhookEvent } from '../../server/utils/stripe-webhook-events.ts'
 
 async function withD1(run: (db: D1Database) => Promise<void>) {
@@ -100,6 +105,89 @@ test('Connect callback URLs are built only from the configured platform origin a
   )
   assert.throws(() => buildStripeConnectOnboardingUrls('http://krabiclaw.com', 'sun-and-sea'), /HTTPS/)
   assert.throws(() => buildStripeConnectOnboardingUrls('https://krabiclaw.com/path', 'sun-and-sea'), /origin/)
+  assert.deepEqual(buildAppPayoutsOnboardingUrls('https://krabiclaw.com'), {
+    returnUrl: 'https://krabiclaw.com/app/return/payouts?outcome=done',
+    refreshUrl: 'https://krabiclaw.com/app/return/payouts?outcome=refresh',
+  })
+  assert.throws(() => buildAppPayoutsOnboardingUrls('http://krabiclaw.com'), /HTTPS/)
+})
+
+test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect route with its bearer session', async t => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'payouts-app-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' } },
+  } }] })
+  try {
+    const db = await runtime.getD1Database('DB')
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    const env = {
+      ...await runtime.getBindings<CloudflareEnv>(), DB: db, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth',
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', STRIPE_SECRET_KEY: 'sk_test_payouts', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+    } as CloudflareEnv
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+      VALUES ('org', 'Cliff Stays', 'cliff', 'cliff', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'UTC')`).run()
+    await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('owner', 'Owner', 'owner@example.test', 1, 0, 0)").run()
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', 'org', 'owner', 'owner', 0)").run()
+    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('a-owner', 'owner', 'credential', 'owner', ?, 0, 0)").bind(await hashPassword('PayoutsProof123!')).run()
+    const app = new H3()
+    app.post('/api/dashboard/connect', connectStartRoute)
+    app.post('/api/dashboard/connect/status', connectStatusRoute)
+    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: 'PayoutsProof123!' }, asResponse: true })
+    const token = login.headers.get('set-auth-token')!
+    const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const call = async (path: string, headers: Record<string, string>, body?: unknown) => {
+      const response = await app.request(Object.assign(new Request(`https://proof.example/api/dashboard/connect${path}?org=cliff`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body ?? {}) }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      return { status: response.status, body: await response.json() as Record<string, unknown> }
+    }
+    // As the app calls: a bearer session, no cookie and no browser origin.
+    const app_ = { authorization: `Bearer ${token}` }
+
+    const links: Array<Record<string, unknown>> = []
+    let created = false
+    const account = { id: 'acct_payouts', object: 'v2.core.account', livemode: false, dashboard: 'express', identity: { country: 'US' },
+      defaults: { responsibilities: { fees_collector: 'application', losses_collector: 'stripe' } }, configuration: { merchant: { capabilities: { card_payments: { status: 'pending', status_details: [] } } } },
+      requirements: { entries: [{ awaiting_action_from: 'user', minimum_deadline: { status: 'currently_due' }, description: 'Provide a bank account for payouts', errors: [] }] } }
+    const originalFetch = globalThis.fetch
+    const fetchMock = t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(request instanceof Request ? request.url : String(request))
+      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+      const method = (request instanceof Request ? request.method : init?.method ?? 'GET').toUpperCase()
+      if (method === 'POST' && url.pathname === '/v2/core/accounts') { created = true; return Response.json(account) }
+      if (method === 'GET' && url.pathname === '/v2/core/accounts/acct_payouts') return Response.json(account)
+      if (method === 'POST' && url.pathname === '/v2/core/account_links') {
+        links.push(JSON.parse(String(request instanceof Request ? await request.text() : init?.body)) as Record<string, unknown>)
+        return Response.json({ object: 'v2.core.account_link', account: 'acct_payouts', url: 'https://connect.stripe.com/d/setup/e/acct_payouts/abc', expires_at: '2026-10-24T00:00:00.000Z', use_case: {} })
+      }
+      throw new Error(`unexpected Stripe request ${method} ${url.pathname}`)
+    })
+    try {
+      // Before onboarding there is no account to refresh: a coded refusal.
+      assert.deepEqual(await call('/status', app_), { status: 409, body: { status: 409, statusText: 'Stripe onboarding has not started', message: 'Stripe onboarding has not started', data: { code: 'CONNECT_NOT_STARTED' } } })
+      // A cookie session still needs a same-origin browser request; the app's bearer session does not.
+      assert.equal((await call('', { cookie })).status, 403)
+      assert.equal((await call('', app_, { returnTo: 'web' })).status, 422)
+      assert.equal(created, false)
+      const started = await call('', app_, { returnTo: 'app' })
+      assert.equal(started.status, 200)
+      assert.equal(started.body.onboardingUrl, 'https://connect.stripe.com/d/setup/e/acct_payouts/abc')
+      assert.equal((started.body.account as { stripeAccountId: string }).stripeAccountId, 'acct_payouts')
+      // Stripe takes only https returns, so the app's are a platform page that hands back to krabiclaw://payouts/<outcome>.
+      assert.deepEqual((links[0]!.use_case as { account_onboarding: Record<string, unknown> }).account_onboarding, {
+        collection_options: { fields: 'eventually_due', future_requirements: 'include' },
+        return_url: 'https://krabiclaw.test/app/return/payouts?outcome=done',
+        refresh_url: 'https://krabiclaw.test/app/return/payouts?outcome=refresh',
+      })
+      // The dashboard, same-origin with its cookie, keeps returning to Payments.
+      assert.equal((await call('', { cookie, origin: 'https://proof.example' })).status, 200)
+      assert.equal((links[1]!.use_case as { account_onboarding: { return_url: string } }).account_onboarding.return_url, 'https://krabiclaw.test/dashboard/cliff/payments?tab=payouts&stripe_connect=returned')
+      const status = await call('/status', app_)
+      assert.equal(status.status, 200)
+      assert.deepEqual((status.body.account as { requirements: unknown }).requirements, [{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due', description: 'Provide a bank account for payouts', errors: [] }])
+    } finally { fetchMock.mock.restore() }
+  } finally {
+    await runtime.dispose()
+  }
 })
 
 test('checkout uses Stripe seller country for Tax availability and preserves supported-country errors', async t => {

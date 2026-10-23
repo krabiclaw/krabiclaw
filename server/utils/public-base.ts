@@ -2,7 +2,9 @@ import { HTTPError } from 'nitro';
 import { oncePerRequest } from '~/server/utils/request-scope'
 
 import type { H3Event } from 'nitro'
-import { queryFirst } from '~/server/db'
+import { queryFirst, type DbClient } from '~/server/db'
+import type { CloudflareEnv } from '~/server/utils/auth'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
 import type { CurrencyCode } from '~/shared/currencies'
@@ -39,6 +41,23 @@ export function publicTenantVisibilitySql(alias: string, previewAuthorized: bool
   return previewAuthorized
     ? `${alias}.status <> 'suspended'`
     : `${alias}.status = 'active' AND ${alias}.onboarding_status = 'active'`
+}
+
+/** A saved public address exists only while the tenant and its canonical domain are public. */
+export async function resolvePublicTenantOrigin(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<string | null> {
+  const organization = await queryFirst<{ subdomain: string; canonical_domain: string }>(db, `
+    SELECT o.subdomain, d.domain AS canonical_domain
+      FROM organization o
+      JOIN organization_domains d ON d.organization_id = o.id AND d.role = 'canonical' AND d.status = 'active'
+     WHERE o.id = ? AND ${publicTenantVisibilitySql('o', false)} LIMIT 1
+  `, [organizationId])
+  if (!organization) return null
+  return tenantOrganizationOrigin({
+    platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+    freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+    subdomain: organization.subdomain,
+    canonicalDomain: organization.canonical_domain,
+  }) || null
 }
 
 export function loadPublicBase(

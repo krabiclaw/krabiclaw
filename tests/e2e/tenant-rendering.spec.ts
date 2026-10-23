@@ -7,6 +7,7 @@ import {
 import { testBaseUrl, tenantTestBaseUrl, tenantTestExtraHeaders } from './test-env'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' with { type: 'json' }
 import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
 
@@ -469,7 +470,7 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
 })
 
 for (const tenant of tenants) {
-  test(`${tenant.name} renders home and detail routes on desktop`, async ({ page }) => {
+  test(`${tenant.name} renders home and detail routes on desktop`, async ({ page, request, baseURL }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     const response = await openTenantPage(page, `${tenant.baseURL}/`, tenant.headers)
     expect(response?.status()).toBe(200)
@@ -483,6 +484,77 @@ for (const tenant of tenants) {
     // repaints the detail page in the platform default mid-load.
     await expect(page.locator(tenant.shell)).not.toHaveCSS(tenant.themeVar, '')
     for (const text of tenant.forbidden) await expect(page.locator('body')).not.toContainText(text)
+
+    // Only the local production copy is editable; deployed rendering stays read-only.
+    if (tenant.name === 'Pottery House') {
+      const shell = await request.get(`${tenant.baseURL}/api/public/shell`, { headers: tenant.headers })
+      expect(shell.status(), await shell.text()).toBe(200)
+      const socialImage = (await shell.json()).organization.social_image
+      expect(socialImage).toMatchObject({ width: 1200, height: 630 })
+      for (const path of ['/reviews', '/photos']) {
+        const aggregate = await openTenantPage(page, `${tenant.baseURL}${path}`, tenant.headers)
+        expect(aggregate?.status()).toBe(200)
+        await expect(page.locator('meta[property="og:image"]')).toHaveAttribute('content', socialImage.url)
+        await expect(page.locator('meta[property="og:image:width"]')).toHaveAttribute('content', '1200')
+        await expect(page.locator('meta[property="og:image:height"]')).toHaveAttribute('content', '630')
+      }
+    }
+
+    if (tenant.name !== 'North Carolina Legal Services' || process.env.PLAYWRIGHT_PREVIEW_URL) return
+    const organizationId = 'org-ncls-blawby'
+    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, organizationId)
+    type FeaturedImage = { asset_id: string; slot: string; public_url: string; alt_text: string | null }
+    type AuthoredPage = { page: { blocks: Array<{ id: string; type: string; media: FeaturedImage[] }> } }
+    try {
+      await loginAs(request, baseURL!, 'user-e2e-ncls-owner')
+      const source = await request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: '/' } })
+      expect(source.status(), await source.text()).toBe(200)
+      const cta = (await source.json() as AuthoredPage).page.blocks.find(block => ['cta', 'contact_cta'].includes(block.type) && block.media.some(media => media.slot === 'featured'))
+      expect(cta, 'The saved home page has an authored featured CTA image').toBeDefined()
+      const featured = cta!.media.find(media => media.slot === 'featured')!
+      const mediaPath = `${baseURL}/api/editor/organizations/${organizationId}/media`
+      const asset = await request.get(mediaPath, { params: { id: featured.asset_id } })
+      expect(asset.status(), await asset.text()).toBe(200)
+      const original = (await asset.json() as { media: Array<{ id: string; kind: string; alt_text: string | null; public_url: string }> }).media
+      expect(original).toHaveLength(1)
+      expect(original[0]).toMatchObject({ id: featured.asset_id, kind: 'image', public_url: featured.public_url, alt_text: featured.alt_text })
+      const authoredAlt = 'CMS-authored featured image description'
+      const picture = page.locator(`main [data-parity-section="consultation"] img[src=${JSON.stringify(featured.public_url)}]`)
+      try {
+        const written = await request.patch(`${mediaPath}/${featured.asset_id}`, { data: { alt_text: authoredAlt } })
+        expect(written.status(), await written.text()).toBe(200)
+        expect(await written.json()).toEqual({ updated: true })
+        const stored = await request.get(mediaPath, { params: { id: featured.asset_id } })
+        expect(stored.status(), await stored.text()).toBe(200)
+        expect((await stored.json()).media).toEqual([expect.objectContaining({ id: featured.asset_id, alt_text: authoredAlt })])
+        const publicRead = await request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: '/' } })
+        expect(publicRead.status(), await publicRead.text()).toBe(200)
+        expect((await publicRead.json() as AuthoredPage).page.blocks.find(block => block.id === cta!.id)?.media).toContainEqual(expect.objectContaining({ asset_id: featured.asset_id, slot: 'featured', public_url: featured.public_url, alt_text: authoredAlt }))
+        const rendered = await openTenantPage(page, `${tenant.baseURL}/`, tenant.headers)
+        expect(rendered?.status()).toBe(200)
+        await picture.scrollIntoViewIfNeeded()
+        await expect(picture).toBeVisible()
+        await expect(picture).toHaveAttribute('src', featured.public_url)
+        await expect(picture).toHaveAttribute('alt', authoredAlt)
+        await expect.poll(() => picture.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+      } finally {
+        const restored = await request.patch(`${mediaPath}/${featured.asset_id}`, { data: { alt_text: original[0]!.alt_text } })
+        expect(restored.status(), await restored.text()).toBe(200)
+        expect(await restored.json()).toEqual({ updated: true })
+        const assetRead = await request.get(mediaPath, { params: { id: featured.asset_id } })
+        expect(assetRead.status(), await assetRead.text()).toBe(200)
+        expect((await assetRead.json()).media).toEqual([expect.objectContaining({ id: featured.asset_id, alt_text: original[0]!.alt_text })])
+        const publicRead = await request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: '/' } })
+        expect(publicRead.status(), await publicRead.text()).toBe(200)
+        expect((await publicRead.json() as AuthoredPage).page.blocks.find(block => block.id === cta!.id)?.media).toContainEqual(expect.objectContaining({ asset_id: featured.asset_id, slot: 'featured', alt_text: original[0]!.alt_text }))
+        const rendered = await page.reload({ waitUntil: 'load' })
+        expect(rendered?.status()).toBe(200)
+        await expect(picture).toHaveAttribute('src', featured.public_url)
+        await expect(picture).toHaveAttribute('alt', original[0]!.alt_text ?? '')
+      }
+    } finally {
+      await releaseTenantMutationLock()
+    }
   })
 }
 

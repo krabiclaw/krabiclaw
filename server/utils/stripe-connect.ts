@@ -146,10 +146,7 @@ export function paymentsStripe(env: CloudflareEnv, livemode: boolean): Stripe {
   return createStripeClient(keys.secretKey, 'payments')
 }
 
-export function buildStripeConnectOnboardingUrls(
-  platformOrigin: string,
-  organizationSlug: string,
-): { returnUrl: string; refreshUrl: string } {
+function platformOriginUrl(platformOrigin: string): URL {
   let origin: URL
   try {
     origin = new URL(platformOrigin)
@@ -160,6 +157,25 @@ export function buildStripeConnectOnboardingUrls(
   if (origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) {
     throw new Error('Stripe Connect platform origin must be an origin without credentials, path, query, or fragment')
   }
+  return origin
+}
+
+/** Where Stripe-hosted onboarding started in the iPhone app returns: a platform page that hands back to the app. */
+export function buildAppPayoutsOnboardingUrls(platformOrigin: string): { returnUrl: string; refreshUrl: string } {
+  const origin = platformOriginUrl(platformOrigin)
+  const url = (outcome: 'done' | 'refresh') => {
+    const target = new URL('/app/return/payouts', origin)
+    target.searchParams.set('outcome', outcome)
+    return target.toString()
+  }
+  return { returnUrl: url('done'), refreshUrl: url('refresh') }
+}
+
+export function buildStripeConnectOnboardingUrls(
+  platformOrigin: string,
+  organizationSlug: string,
+): { returnUrl: string; refreshUrl: string } {
+  const origin = platformOriginUrl(platformOrigin)
   if (!organizationSlug.trim() || /[\/\\]/u.test(organizationSlug) || Array.from(organizationSlug).some(character => character.codePointAt(0)! < 32)) {
     throw new Error('Stripe Connect organization slug is invalid')
   }
@@ -494,6 +510,36 @@ export async function ensureStripeConnectedAccount(
   }
   const connected = await recordStripeConnectedAccountId(db, reservation, account.id)
   return await projectStripeConnectedAccount(db, accountProjection(connected, account))
+}
+
+/**
+ * Stripe-hosted onboarding for the organization's connected account: the
+ * account is created on first use, and the link returns to `urls`. Stripe's own
+ * refusal is what the owner sees.
+ */
+export async function startStripeConnectOnboarding(
+  db: DbClient,
+  env: CloudflareEnv,
+  input: { organization: { id: string; name: string; subdomain?: string | null }; contactEmail: string; country: string | null; urls: { returnUrl: string; refreshUrl: string } },
+): Promise<{ account: StripeConnectedAccount; url: string }> {
+  const livemode = organizationPaymentsLivemode(env, input.organization)
+  const stripe = paymentsStripe(env, livemode)
+  try {
+    const account = await ensureStripeConnectedAccount(db, stripe, {
+      organizationId: input.organization.id,
+      organizationName: input.organization.name,
+      contactEmail: input.contactEmail,
+      livemode,
+      country: input.country,
+    })
+    if (!account.stripeAccountId) throw new Error('Stripe connected account ID is missing after creation')
+    const url = await createStripeConnectOnboardingLink(stripe, { stripeAccountId: account.stripeAccountId, ...input.urls })
+    return { account, url }
+  } catch (error) {
+    if (error instanceof HTTPError) throw error
+    if (error instanceof stripe.errors.StripeError) throw new HTTPError({ statusCode: 502, statusMessage: error.message, data: { code: 'STRIPE_ONBOARDING_FAILED' }, cause: error })
+    throw error
+  }
 }
 
 export async function createStripeConnectOnboardingLink(

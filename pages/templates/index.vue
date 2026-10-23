@@ -6,7 +6,7 @@
         <h1>Your business.<br>Its own kind of beautiful.</h1>
       </div>
       <div class="templates-intro__copy">
-        <p>A table worth booking. An experience worth finding. A lawyer you can trust. Start with a website that understands your business.</p>
+        <p>A table worth booking. An experience worth finding. A place worth staying. A lawyer you can trust. Start with a website that understands your business.</p>
         <PlatformAccountCta label="Start free" size="xl" class="template-start" />
         <p class="templates-note">Both templates are included on every plan.</p>
       </div>
@@ -59,7 +59,7 @@ useSocialMetadata({
   path: '/templates',
   socialImage: organizationSocialImage,
   title: 'Templates',
-  description: 'Website templates for restaurants, experiences, and law firms. Explore Saya and Blawby, see real customer websites, and start free with KrabiClaw.',
+  description: 'Website templates for restaurants, experiences, lodging, and law firms. Explore Saya and Blawby, see real websites, and start free with KrabiClaw.',
   schemaPageType: 'CollectionPage',
   breadcrumbs: [
     { name: 'Home', url: '/' },

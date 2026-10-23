@@ -170,7 +170,7 @@ The `service` vertical is exclusively and canonically **Legal Services**. Do not
 
 **Catalog is where everything the business offers is found, as Airbnb's Your
 listings.** It navigates rather than edits: kind pills — All, Menu,
-Experiences, Products, Services, Places to stay, each only when the business
+Experiences, Services, Places to stay, each only when the business
 has one — over one grid of photo cards, full width on a phone. A menu belongs
 to a location, so the Menu is one card per location, opening that location's
 menu; every other offering is its own card, opening the one Product editor.
@@ -356,7 +356,7 @@ can need a long searchable list, and describing an accessibility feature can
 need an answer, photo evidence and guidelines. Splitting either into arbitrary
 levels would scatter the decision.
 
-The lodging reference distinguishes focused decisions from indexes:
+The captured host tools distinguish focused decisions from indexes:
 
 | Screen | The entire detail pane |
 | --- | --- |
@@ -365,7 +365,7 @@ The lodging reference distinguishes focused decisions from indexes:
 | Amenities | a searchable selection list, with filters that narrow the choices |
 | Pricing | one value row, one toggle, one link |
 | Hours by day | an index: one row per weekday previewing its hours; the day leaf is one switch and two time pickers |
-| Schedule | an index: one row per day previewing its start times; the day leaf is a list of times |
+| Repeating start times (KrabiClaw) | an index of saved weekly rules, reached from Availability; the day leaf edits that weekday's times |
 
 **Independent concerns belong behind their own saved summaries.** Airbnb's
 Description screen is not a form with five textareas; it is five rows —
@@ -419,8 +419,8 @@ A counter
 (`44/50 available`) sits above the field in `text-sm`. `hint` exists only for
 `Optional`.
 
-**The index shows saved facts; the leaf owns the draft.** The lodging listing
-and Restaurant dish editors use saved-summary cards in `EditorNavigationList`;
+**The index shows saved facts; the leaf owns the draft.** The lodging listing,
+Restaurant dish and Experience editors use saved-summary cards in `EditorNavigationList`;
 menu sections use the same component for their saved name, description and
 photo. Show the actual image, price, membership and state, including No photo,
 No price set, unavailable and unpublished. For a saved record, a draft must not
@@ -500,10 +500,11 @@ connection, a failed background refresh — is the shell's one banner above the
 navigation, never a box repeated inside each screen; a screen shows only its
 own failures.
 
-**Leaf width is fixed from `lg`.** Below `lg` a level is the whole screen or a
-drawer and uses all of it. From `lg` the content column is `max-w-xl`, so a
-field does not stretch across a wide pane; it caps the right edge, never the
-left. A leaf that needs more width is a grid editor and says so.
+**Controls fill their pane's inner width.** Below `lg` a level is the whole
+screen or a drawer; above it the native panel owns its width. Paired indexes
+and leaves have no second width cap inside that panel. The title, field and
+footer share its gutter. Explicit standalone `column` screens retain the
+shared reading or leaf width; a calendar or grid takes the available frame.
 
 **A level alone in the frame is one of three things, and the empty right side
 of a desktop window is never the fourth.** Content that scales — a grid, a
@@ -515,13 +516,18 @@ Only a list of records with nothing of its own to open — Notifications, Past
 activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
 booking's notes, a calendar day) stands alone as a column, and says which in
 `DashboardIndexPanel column`: `reading` for the records, `leaf` for the screen.
-Beside a child every index is `leaf`. The widths live in
+Beside a child every index fills its own pane. Standalone widths live in
 `dashboardColumnWidths`; a page never states one. A column's title heads it,
 as a leaf's does. Every level title is `dashboardTitleClass`.
 
-**Short text is bare.** A name, title, headline, slug or link renders as a
+**Focused writing is bare.** A name, title, headline or link renders as a
 borderless 22–26px field with a counter, the way Airbnb's title and custom
-link do. Long text is one bordered textarea.
+link do. A description uses the native textarea's `none` variant with no inner
+padding and native autoresize, filling its pane without a fixed-height scroll
+box. Pane-width changes invoke that same textarea sizing API. The live Airbnb
+listing-description editor was checked at phone and
+desktop breakpoints on October 21, 2026. Structured date, time and address
+controls retain their visible field boundaries.
 
 **Sizes come from the theme.** Controls are `lg` — 16px text, 44px tall, 8px
 radius — and the commit bar's Save is the one `xl` (48px). Body text is 16px
@@ -552,7 +558,7 @@ writing. It leads its level the way a photograph leads a product: the article
 first, then the rows that describe it.
 
 **The exception covers the writing and nothing around it.** Category, tags,
-excerpt, publishing time, visibility, slug, canonical URL and search appearance
+excerpt, publishing time, visibility and search appearance
 describe the post rather than being it. They are fields, and they obey leaf
 size: an index of rows, each previewing its value, each opening its own leaf.
 
@@ -866,11 +872,22 @@ snapshot leaves both sections unchanged, shows the conflict and offers Use
 current items; completion reads both saved orders through the full organization
 catalog. Visible location scope never replaces that membership owner.
 
-**Preview is the saved guest surface.** The lodging listing and Restaurant dish
-View action opens the real tenant page with its authorized preview token;
+**Preview belongs to customer-facing content.** A Product or Page can show what
+its customer will see. A price, assignment, working-hours rule or other
+operational concern does not get another preview of its own. Page Preview is a
+compact eye action beside its title; Product View retains the saved-summary
+editor's floating action. Neither needs a separate action row in the body.
+
+**Preview is the saved guest surface.** The lodging listing, Restaurant dish,
+Experience, Legal Services and Page actions use `DashboardContentPreview` to
+open the real tenant page with its authorized preview token;
 Desktop and Mobile change the viewport of that same page. It is not a second
 rendering of the form draft, and opening it does not publish the record or
-change its availability.
+change its availability. The full-screen preview temporarily covers the editor;
+it is not a leaf in the right pane. Its Share action uses the saved, eligible
+public address from the canonical read, never the iframe URL or its preview
+credential. Private content says Private preview. A paused booking calendar
+does not make an otherwise published Page private.
 
 A dish preview needs an explicit active location where that dish is offered.
 Keep a location already targeted by the editor; otherwise ask the owner to
@@ -878,6 +895,71 @@ choose from its actual assigned locations. Never substitute the first
 candidate. Inactive locations retain their name and state, and an invalid
 location or unreadable page produces a visible failure. Closing preview returns
 to the same editor concern and restores its View control.
+
+An Experience uses its real `/experiences/:slug` page. Preserve the editor's
+explicit physical or online scope; an unscoped preview uses that page's existing
+booking-scope chooser. The website preview token requires organization-wide
+content access; an assigned host keeps their Product editor without receiving
+a token for other unpublished pages.
+
+**Legal content keeps its real owner.** The Legal Services Product index uses
+the same saved-summary cards and focused editors. A practice area without a
+booking configuration does not imply an attorney assignment or available
+consultations. Configured consultations use the existing Product booking owner,
+attorneys or legal teams, clients and offices. Page content links to the bound
+Page editor, and Preview uses that Page's saved path; a Product slug does not
+invent a second legal page. Assigned attorneys retain their authorized Product
+work without gaining organization-wide Page editing, preview or translations.
+
+**Translations edit content in another language.** Use the compact Translations
+action on its owning record, with the language named in the editor. Added
+languages can be authored while private; saving a translation does not publish
+the language. Preserve the complete saved translation, including fields the
+current editor does not display. Dashboard and MCP use the same canonical
+translation operations and version checks.
+
+**Public addresses are assigned, not a tenant setting.** Do not dedicate a row
+or leaf to editing a slug or path. Renaming a Product, Page, Article, Post or
+Location preserves its saved address, as does editing an existing translation.
+New translations receive their source's canonical address in the chosen
+language; historical authored translation addresses remain intact. Canonical
+writes enforce this for dashboard and MCP, including reconciliation. This does
+not prohibit the existing semantic operation of changing a Product kind or an
+Article's Blog/Docs collection. Show a public address through Preview and Share
+when it is useful, rather than making routing another authoring task.
+
+**Experience details are guest decisions, not another model.** What you’ll do
+edits Product description. Where to meet, What is included, What to bring,
+Before you arrive and Cancellation policy open the existing Product detail
+editors directly. A cancellation description explains the host's terms; it
+does not configure an automatic refund policy.
+
+**Experience availability uses the shared Calendar destination.** The Offering
+selector switches between bookings, nightly stays and configured experiences or
+legal consultations. Experiences use Calendar's existing month, list, year and
+day views with actual saved sessions, rather than a second Product calendar.
+Add availability opens the existing occurrence editor under Calendar;
+Repeating times opens the existing location-owned weekly rules. Month and
+date live in the URL. A successful write requires a fresh calendar read in
+the occurrence's month before its editor closes. Empty dates do not invent
+occurrences from rules or imply that an unmaterialized rule is unavailable.
+
+Physical start times belong to an explicit saved location. Location filtering
+changes scope, never membership; inactive locations remain visible.
+Add availability remains available across locations; its editor requires an
+explicit active physical location and its timezone before a time can be saved.
+Saved occurrences retain their own timezones when Location settings change.
+Online sessions use the assigned host's existing working hours; `online` is a
+public booking scope, never a physical Location or Price ID.
+An online-only offering leads to Bookable times even with All locations
+selected. Switching to All bookings clears that virtual Online scope.
+
+Airbnb's [Experience calendar guide](https://www.airbnb.com/help/article/2645)
+describes Calendar → Add availability and optional daily or weekly repetition.
+The live account has only an in-progress Experience, so its published calendar
+has not been visually verified. KrabiClaw's continuing weekday rules have no
+bounded series or repeat-until date; do not present controls or “this and
+following” changes that those canonical operations cannot honor.
 
 **A control must not be able to build an invalid state.** If the server rejects
 a combination, the form should make it unrepresentable rather than allow it and
@@ -994,7 +1076,8 @@ items, tabs and some modes their own URLs (`house-rules?feature=checkInOut`,
 ## Naming
 
 Use the owner's vocabulary, not the schema's. The catalog's words are fixed,
-whatever the template: Catalog; Menu, Experiences, Services; a menu's
+whatever the template: Catalog; Menu, Experiences, Places to stay, and
+Practice areas & consultations; a menu's
 **sections** and its **items**; a **variant** is a purchasable version of one
 offering, never a section. Collection is the model's name and never appears in
 the menu workflow; blog categories classify articles and are not part of the

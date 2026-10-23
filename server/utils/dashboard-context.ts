@@ -369,8 +369,9 @@ export async function listDashboardLocations(
     SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address, l.stay_map_sharing, l.latitude, l.longitude
     FROM business_locations l
     WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
-      ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
-        WHERE pl.organization_id = l.organization_id AND pl.location_id = l.id AND (${ASSIGNED_SERVICE_SQL})) OR ${assignedLocationSql('l')})` : ''}
+      ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM products p WHERE p.organization_id = l.organization_id AND (${ASSIGNED_SERVICE_SQL})
+        AND (EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = l.id)
+          OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))) OR ${assignedLocationSql('l')})` : ''}
     ORDER BY l.title ASC
   `, assignedUserId ? [organizationId, assignedUserId, assignedUserId, assignedUserId, assignedUserId] : [organizationId])
   const [media, organizationPlacements] = await Promise.all([

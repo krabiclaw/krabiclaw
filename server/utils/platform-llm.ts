@@ -425,7 +425,7 @@ export function buildLlmsTxt(
   const lines = [
     `# ${options.title || 'KrabiClaw'}`,
     '',
-    `> ${options.intro || 'KrabiClaw is an AI website builder for restaurants and local businesses, with public docs and a platform blog available as HTML and Markdown mirrors.'}`,
+    `> ${options.intro || 'KrabiClaw is an AI website and business platform for restaurants, experiences, lodging, and law firms. Lodging businesses can publish home listings and take direct stay bookings. Public docs and the platform blog are available as HTML and Markdown mirrors.'}`,
     '',
     'Prefer the Markdown URLs below when you need compact machine-readable context. Canonical HTML URLs remain the source for public citation and browsing.',
     '',

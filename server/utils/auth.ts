@@ -235,6 +235,9 @@ export function localDevelopmentOrigin(value: string | undefined): string | null
   return origin
 }
 
+/** Where Stripe Checkout hands a host back to the iPhone app. */
+export const NATIVE_BILLING_RETURN_ORIGIN = 'krabiclaw://billing'
+
 function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Request) => string[]) {
   const origins = new Set<string>()
   const authOrigin = normalizeOrigin(env.BETTER_AUTH_URL)
@@ -243,6 +246,11 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   for (const origin of [authOrigin, platformOrigin, freeOrganizationOrigin, wildcardOrigin(freeOrganizationOrigin)]) {
     if (origin) origins.add(origin)
   }
+  // The iPhone app opens Stripe Checkout with its own session and takes the
+  // checkout's success, cancel and portal returns at krabiclaw://billing/…
+  // Better Auth matches a custom scheme by scheme and authority, so only the
+  // billing returns are trusted, not any krabiclaw:// address.
+  origins.add(NATIVE_BILLING_RETURN_ORIGIN)
   if (import.meta.dev || env.E2E_ALLOW_DEV_ROUTES === 'true') {
     const port = env.PORT || '3000'
     if (import.meta.dev) {

@@ -3,12 +3,12 @@ import { STAY_SAFETY_DETAIL_FIELDS, STAY_SAFETY_FIELDS, STAY_SAFETY_DETAIL_KEYS 
 import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, type StayAmenityAnswer } from './stay-listing.ts'
 
 /** Named product facts shared by validation, CMS, MCP, localization and templates. */
-export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'item', 'stay'] as const
-export const PRODUCT_KIND_LABELS = { dish: 'Food or drink', experience: 'Experience or class', service: 'Service or appointment', item: 'Physical item', stay: 'Place to stay' } as const
+export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'stay'] as const
+export const PRODUCT_KIND_LABELS = { dish: 'Food or drink', experience: 'Experience or class', service: 'Practice area or consultation', stay: 'Place to stay' } as const
 export type ProductKind = typeof PRODUCT_KINDS[number]
 /** The recognizable kind choices used by the CMS. */
 export const PRODUCT_KIND_ICONS = {
-  dish: 'i-lucide-utensils', experience: 'i-lucide-compass', service: 'i-lucide-scale', item: 'i-lucide-package', stay: 'i-lucide-house',
+  dish: 'i-lucide-utensils', experience: 'i-lucide-compass', service: 'i-lucide-scale', stay: 'i-lucide-house',
 } as const satisfies Record<ProductKind, string>
 export type ProductDetailValue = string | string[] | boolean
 export type ProductDetails = Partial<Record<ProductDetailKey, ProductDetailValue>>
@@ -76,9 +76,6 @@ const DETAIL_FIELDS = {
   quiet_hours_start: { name: 'Quiet hours start time', description: 'Local start of quiet hours, required with quiet hours and its end time.', value_type: 'single_line_text', localizable: false, validations: { choices: STAY_QUIET_HOUR_TIMES }, kinds: ['stay'] },
   quiet_hours_end: { name: 'Quiet hours end time', description: 'Local end of quiet hours, required with quiet hours and its start time.', value_type: 'single_line_text', localizable: false, validations: { choices: STAY_QUIET_HOUR_TIMES }, kinds: ['stay'] },
   ...STAY_SAFETY_DETAIL_FIELDS,
-  materials: { icon: 'i-lucide-layers', name: 'Materials', description: 'Materials the item is made from, shown in its details.', value_type: 'list.single_line_text', kinds: ['item'] },
-  dimensions: { icon: 'i-lucide-ruler', name: 'Dimensions', description: 'Item measurements including their units, shown in its details.', value_type: 'single_line_text', kinds: ['item'] },
-  care_instructions: { icon: 'i-lucide-hand-heart', name: 'Care instructions', description: 'How to care for the item, shown in its details.', value_type: 'multi_line_text', kinds: ['item'] },
 } as const
 export type ProductDetailKey = keyof typeof DETAIL_FIELDS
 /** The additional sections of a home's Description; its introduction is Product.description. */
@@ -96,7 +93,7 @@ export function productDetailFields(kind: ProductKind): ProductDetailField[] {
 export function productDetailKey(field: Pick<ProductDetailField, 'key'>): ProductDetailKey { return field.key }
 export function isProductDetailLocalizable(field: ProductDetailField): boolean { return field.localizable }
 export function assertProductKind(value: unknown): ProductKind {
-  if (typeof value !== 'string' || !PRODUCT_KINDS.includes(value as ProductKind)) throw new ProductDetailError('kind must be dish, experience, service, item or stay')
+  if (typeof value !== 'string' || !PRODUCT_KINDS.includes(value as ProductKind)) throw new ProductDetailError('kind must be dish, experience, service or stay')
   return value as ProductKind
 }
 export function validateProductDetails(kind: ProductKind, value: unknown, localizableOnly = false): ProductDetails {

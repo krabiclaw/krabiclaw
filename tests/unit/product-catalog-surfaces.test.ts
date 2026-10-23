@@ -142,7 +142,6 @@ test('a card names what it opens by the product kind', () => {
   assert.equal(productCtaKey('stay'), 'stay.check_availability')
   assert.equal(productCtaKey('dish'), 'site.common.view_dish')
   assert.equal(productCtaKey('experience'), 'site.common.view_experience')
-  assert.equal(productCtaKey('item'), 'site.common.view_item')
 })
 
 test('catalog navigation links each section where the site\'s vertical lists it, and a site without a vertical is refused', () => {

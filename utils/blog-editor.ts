@@ -138,17 +138,3 @@ export function firstImageAssetId(blocks: EditorContentBlock[]) {
   const image = blocks.find(block => block.type === 'image' && block.data.status !== 'inactive')
   return image?.media?.find(item => item.slot === 'media')?.asset_id ?? null
 }
-
-export function resolveSlugMutation(input: {
-  requestedSlug: string | null | undefined
-  title: string
-  currentSlug: string
-  manuallyOverridden: boolean
-}) {
-  if (input.requestedSlug === null) return { slug: normalizeBlogSlug(input.title), manuallyOverridden: false }
-  if (typeof input.requestedSlug === 'string') return { slug: normalizeBlogSlug(input.requestedSlug), manuallyOverridden: true }
-  return {
-    slug: input.manuallyOverridden ? input.currentSlug : normalizeBlogSlug(input.title),
-    manuallyOverridden: input.manuallyOverridden,
-  }
-}

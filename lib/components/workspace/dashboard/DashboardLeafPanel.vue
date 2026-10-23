@@ -55,8 +55,8 @@
     </template>
 
     <template #body>
-      <!-- One column width for every leaf: fields do not stretch to the pane. -->
-      <div class="w-full" :class="dashboardColumnWidths.leaf">
+      <!-- The panel owns the column; fields use its full inner gutter width. -->
+      <div class="w-full">
         <!-- The one place a leaf explains itself. A field never carries a sentence. -->
         <p v-if="lead" class="mb-8 text-base text-muted">{{ lead }}</p>
 
@@ -93,7 +93,7 @@
 
 <script setup lang="ts">
 import { isNavigationFailure } from 'vue-router'
-import { dashboardColumnWidths, dashboardGutterClass, dashboardLeafParentKey, dashboardOverlayOpenKey } from './dashboardPanelContext'
+import { dashboardGutterClass, dashboardLeafParentKey, dashboardOverlayOpenKey } from './dashboardPanelContext'
 import { getErrorMessage } from '~/utils/errors'
 
 /*

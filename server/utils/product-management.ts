@@ -14,11 +14,11 @@ import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
+import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
-import { executeWithinCapacity } from '~/server/utils/billing'
+import { executeWithinCapacity, liveHomeSql } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
@@ -35,7 +35,8 @@ import {
   type PriceSelection,
 } from '~/shared/prices'
 import { assertProductKind, patchProductDetails, validateProductDetails, validateStayAlarmDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
-import type { CatalogCounts } from '~/utils/product-presentation'
+import { presentationForProduct, type CatalogCounts } from '~/utils/product-presentation'
+import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
 import type {
   Collection,
   CreateCollectionInput,
@@ -121,14 +122,18 @@ async function stayBookingReadiness(db: DbClient, organizationId: string, produc
 
 type Row = Record<string, unknown>
 
-/** The product as the public site serves it; its booking and stay settings lose who on the team looks after them. */
+/** The product as the public site serves it; its booking and stay settings lose who on the team looks after them, and a home whether it is billed. */
 export function publicProduct<T extends Product>(product: T): PublicProduct<T> {
   const { booking, stay, ...rest } = product
   const strip = <C extends Record<StaffAssignment, string | null>>(config: C): Omit<C, StaffAssignment> => {
     const { assigned_member_id: _member, assigned_team_id: _team, ...shown } = config
     return shown
   }
-  return { ...rest, booking: booking ? strip(booking) : null, stay: stay ? strip(stay) : null }
+  const publicStay = (config: ProductStayConfig): Omit<ProductStayConfig, StaffAssignment | 'live'> => {
+    const { live: _live, ...shown } = strip(config)
+    return shown
+  }
+  return { ...rest, booking: booking ? strip(booking) : null, stay: stay ? publicStay(stay) : null }
 }
 
 function notFound(message = 'Product not found'): never {
@@ -264,10 +269,11 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type_group, property_type,
-        listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit, bedrooms, beds, bathrooms, amenities,
-        cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id FROM product_stay_configs
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+    { query: `SELECT c.product_id, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
+        c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
+        c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.assigned_team_id, ${liveHomeSql('p')} AS live
+      FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
+      WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
   const optionRows = rowsAt(0)
@@ -285,11 +291,13 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     if (product) product.stay = {
       photo_rooms: photoRooms.get(product.id) ?? [],
       accessibility: accessibility.get(product.id)!,
-      location_id: String(row.location_id), check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time),
+      location_id: String(row.location_id), check_in_time: String(row.check_in_time),
+      check_in_end_time: row.check_in_end_time === null ? null : String(row.check_in_end_time), check_out_time: String(row.check_out_time),
       max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
+      live: Number(row.live) === 1,
     }
     if (product?.stay) validateStayAlarmDetails(product.details, product.stay.amenity_answers)
   }
@@ -396,6 +404,35 @@ export async function getProduct(db: DbClient, organizationId: string, productId
   if (!row) notFound()
   const [product] = await hydrate(db, organizationId, [mapProductRow(row)])
   return product!
+}
+
+/** The saved routes a guest may open, shared by MCP and both dashboard editor scopes. */
+export async function productPublicPresentation(db: DbClient, env: CloudflareEnv, organizationId: string, product: Product) {
+  const readiness = product.kind === 'experience' || product.kind === 'stay' || product.booking
+    ? await productBookingReadiness(db, organizationId, product, { env }) : null
+  const published = await queryFirst(db, `SELECT p.id FROM products p
+    JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+    WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`, [organizationId, product.id])
+  const origin = published ? await resolvePublicTenantOrigin(db, env, organizationId) : null
+  const siteProduct = product.kind === 'experience' || product.kind === 'stay'
+  const path = siteProduct
+    ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
+  // An authored Page remains readable when its offering cannot be booked.
+  // Its publication owner also proves the saved binding and source address.
+  const page = !siteProduct && product.page
+    ? await resolvePublishedTenantPageIdentity(db, organizationId, product.page.path) : null
+  const publicPath = siteProduct ? path && (!readiness || readiness.ready) ? path : null
+    : page && page.id === product.page?.id && page.product_id === product.id ? page.path : null
+  const publicUrls: Record<string, string> = {}
+  if (origin && product.kind === 'dish') {
+    const locations = await queryAll<{ id: string; slug: string }>(db, `
+      SELECT l.id, l.slug FROM business_locations l
+      JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
+      WHERE l.organization_id = ? AND pl.product_id = ? AND l.status = 'active' AND pl.published = 1
+    `, [organizationId, product.id])
+    for (const location of locations) publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
+  }
+  return { readiness, publicUrl: origin && publicPath ? new URL(publicPath, origin).toString() : null, publicUrls }
 }
 
 export async function listProducts(db: DbClient, organizationId: string): Promise<Product[]> {
@@ -717,7 +754,7 @@ interface PlannedProduct {
   variants: PlannedVariant[]
   details: Record<string, ProductDetailValue>
   source: ProductSource
-  stay: Omit<ProductStayConfig, 'photo_rooms' | 'accessibility'> | null
+  stay: Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null
 }
 
 const STAY_TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -730,7 +767,7 @@ function stayUnitLabel(kind: ProductKind, unitLabel: string | null): string | nu
 }
 
 /** A place to stay is at one location of this organization, with stay settings the calendar and channels enforce. */
-async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility'> | null> {
+async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null> {
   if (kind !== 'stay') {
     if (value !== undefined && value !== null) invalid('Only a place to stay takes stay settings')
     return null
@@ -742,6 +779,9 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   for (const field of ['check_in_time', 'check_out_time'] as const) {
     if (typeof stay[field] !== 'string' || !STAY_TIME.test(stay[field] as string)) invalid(`stay.${field} must be a 24-hour HH:MM time`)
   }
+  const checkInEnd = stay.check_in_end_time ?? null
+  if (checkInEnd !== null && (typeof checkInEnd !== 'string' || !STAY_TIME.test(checkInEnd))) invalidStayField('check_in_end_time', 'stay.check_in_end_time must be a 24-hour HH:MM time, or null for a flexible end')
+  if (checkInEnd === stay.check_in_time) invalidStayField('check_in_end_time', 'stay.check_in_end_time must differ from stay.check_in_time')
   const maxGuests = stay.max_guests
   if (typeof maxGuests !== 'number' || !Number.isInteger(maxGuests) || maxGuests < 1 || maxGuests > 99) invalid('stay.max_guests must be a whole number from 1 to 99')
   const minNights = stay.min_nights ?? 1
@@ -752,7 +792,7 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   const assignedTeamId = stay.assigned_team_id ?? null
   if (assignedMemberId !== null && (typeof assignedMemberId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM member WHERE organizationId = ? AND id = ?', [organizationId, assignedMemberId]))) notFound('stay.assigned_member_id is not a member of this organization')
   if (assignedTeamId !== null && (typeof assignedTeamId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM team WHERE organizationId = ? AND id = ?', [organizationId, assignedTeamId]))) notFound('stay.assigned_team_id is not a team of this organization')
-  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights,
+  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights,
     ...planStayListing(stay), assigned_member_id: assignedMemberId as string | null, assigned_team_id: assignedTeamId as string | null }
 }
 
@@ -986,6 +1026,7 @@ async function planProduct(
   context: {
     organizationId?: string
     existingId?: string
+    existingSlug?: string
     defaultCurrency?: CurrencyCode | null
     takenSlugs?: Set<string>
     /** Preloaded answers for a batch: same rules, one round trip instead of per product. */
@@ -1037,7 +1078,7 @@ async function planProduct(
   return {
     id: context.existingId ?? crypto.randomUUID(),
     name,
-    slug: await createProductSlug(db, organizationId, name, context.existingId, context.takenSlugs, context.knownSlugs),
+    slug: context.existingSlug ?? await createProductSlug(db, organizationId, name, context.existingId, context.takenSlugs, context.knownSlugs),
     // An empty description is a real choice, not a missing field. Only its
     // length is constrained.
     description: normalizeOptionalProductString(input.description, 'description', PRODUCT_LIMITS.description) ?? '',
@@ -1098,7 +1139,7 @@ function productWrites(
   // unrelated save never restates settings someone else changed.
   if (planned.stay && (options.stayFields === undefined || options.stayFields.length)) {
     const columns = [
-      'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'property_type_group', 'property_type',
+      'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'property_type_group', 'property_type',
       'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
       'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id',
     ] as const satisfies readonly (keyof ProductStayConfig)[]
@@ -1113,13 +1154,13 @@ function productWrites(
                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
-      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights,
+      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights,
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
                  bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
-      params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_out_time,
+      params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_in_end_time, planned.stay.check_out_time,
         planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type,
         planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
         planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
@@ -1561,6 +1602,7 @@ async function planProductUpdate(db: DbClient, input: {
   cacheInvalidations: BatchQuery[]
 }): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct }> {
   const { current, patch, organizationId } = input
+  if ('slug' in patch && patch.slug !== undefined && patch.slug !== current.slug) invalid('A product keeps its saved slug')
   if (patch.expected_updated_at !== undefined) {
     if (typeof patch.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(patch.expected_updated_at))) invalid('expected_updated_at must be the Product updated_at value from the latest read')
     if (patch.expected_updated_at !== current.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'The product changed while you were editing. Nothing was changed; read it again before saving.', data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: current.id } })
@@ -1619,12 +1661,9 @@ async function planProductUpdate(db: DbClient, input: {
   if (current.stay && patchedLocation !== undefined && patchedLocation !== current.stay.location_id) conflict('A place to stay keeps its location; create a new place to stay instead')
   if ((current.kind === 'stay') !== (merged.kind === 'stay')) invalid('A place to stay keeps its kind, and another kind cannot become one; create a new place to stay instead')
   const planned = await planProduct(db, organizationId, merged, {
-    organizationId: input.organizationId, existingId: productId, defaultCurrency: input.defaultCurrency,
+    organizationId: input.organizationId, existingId: productId, existingSlug: current.slug, defaultCurrency: input.defaultCurrency,
     takenSlugs: input.takenSlugs, idOwners: input.idOwners, knownSlugs: input.knownSlugs,
   })
-  // A patch that does not rename keeps the slug it has: a public path is not
-  // re-derived because something else about the product changed.
-  planned.slug = patch.name === undefined ? current.slug : planned.slug
   planned.source = current.source
   assertVariantPricesConsistent(planned)
 
@@ -1795,10 +1834,11 @@ export async function updateProduct(db: DbClient, input: {
   const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
   const complete = async (product: Product): Promise<ProductMutation> => {
     let channelPush: ChannelPushCompletion = null
-    if (product.kind === 'stay' && reprice && !input.deferStayNightPush) {
+    const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
+    const settings = touchesAirbnbSettings(input.patch)
+    if (product.kind === 'stay' && (reprice || settings !== null) && !input.deferStayNightPush) {
       if (!env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
-      const { pushStayHomeNights } = await import('~/server/domain/stays')
-      channelPush = await pushStayHomeNights(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
+      channelPush = await pushStayHomeChannel(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: reprice, settings })
     }
     return completeChannelPush(channelPush, { product_id: product.id, updated_at: product.updated_at }, async () => {
       if (photoPlan) await photoPlan.complete()
@@ -1818,6 +1858,10 @@ export async function updateProduct(db: DbClient, input: {
   }
   const earlier = await replay()
   if (earlier) return complete(earlier)
+  if (input.patch.stay) {
+    const { requireAirbnbAcceptable } = await import('~/server/domain/stays')
+    await requireAirbnbAcceptable(db, input.organizationId, input.productId, input.patch)
+  }
   if (input.booking && !dedupeKey) invalid('An idempotency key is required when configuring bookable sessions')
   const current = await getProduct(db, input.organizationId, input.productId)
   const roomChanged = (): never => {
@@ -2090,7 +2134,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
 }
 
 export async function setProductPublication(db: DbClient, input: {
-  organizationId: string; productId: string; published: boolean; actor: Actor; env?: CloudflareEnv
+  organizationId: string; productId: string; published: boolean; actor: Actor; env: CloudflareEnv
 }): Promise<void> {
   const product = await requireOrganizationProduct(db, input)
   if (input.published) await assertStayBookable(db, input.organizationId, product)
@@ -2102,24 +2146,20 @@ export async function setProductPublication(db: DbClient, input: {
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: product.id, missing: readiness.missing } })
   }
   const now = new Date().toISOString()
-  await executeBatch(db, [{
+  // A home published goes live, so it is billed and held to Basic's limit; one withdrawn reports its count again.
+  const writes: BatchQuery[] = [{
     query: `INSERT INTO product_publications (organization_id, product_id, published, created_at, updated_at, created_by, updated_by)
             VALUES (?, ?, CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.organization_id=? AND p.id=? AND p.updated_at=?) ${readiness?.allocation ? `AND (${readiness.allocation.query})` : ''} ${alreadyPublished ? 'AND EXISTS(SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1)' : ''} THEN ? ELSE NULL END, ?, ?, ?, ?)
             ON CONFLICT (product_id, organization_id) DO UPDATE SET published = excluded.published, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
     params: [input.organizationId, input.productId, input.organizationId, input.productId, product.updated_at, ...(readiness?.allocation?.params ?? []), ...(alreadyPublished ? [input.organizationId, input.productId] : []), input.published ? 1 : 0, now, now, input.actor.actorId, input.actor.actorId],
-  }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed')], { operation: 'Set product publication' }).catch(error => {
+  }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed')]
+  const operation = 'Set product publication'
+  await (product.kind === 'stay'
+    ? executeWithinCapacity(input.env, db, input.organizationId, writes, { operation, action: 'publish it' })
+    : executeBatch(db, writes, { operation })).catch(error => {
     if (/NOT NULL constraint failed: product_publications\.published/.test(error instanceof Error ? error.message : String(error))) throw new HTTPError({statusCode:409,statusMessage:'The offering or its availability changed before publication. Review it and retry.',cause:error})
     throw error
   })
-}
-
-export async function removeProductPublication(db: DbClient, input: {
-  organizationId: string; productId: string
-}): Promise<void> {
-  await executeBatch(db, [
-    { query: 'DELETE FROM product_publications WHERE organization_id = ? AND product_id = ?', params: [input.organizationId, input.productId] },
-    publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed'),
-  ], { operation: 'Remove product publication' })
 }
 
 export async function setProductLocation(db: DbClient, input: {
@@ -2524,16 +2564,15 @@ export async function reconcileProducts(db: DbClient, input: {
     if (typeof product !== 'object' || product === null || Array.isArray(product)) throw new HTTPError({ statusCode: 400, message: `products[${index}] must be an object`, data: { code: 'INVALID_PRODUCT_FIELD', field: `products[${index}]` } })
   })
   const reprice = new Set(input.products.flatMap(product => product.product_id && (product.variants !== undefined || product.stay?.min_nights !== undefined) ? [product.product_id] : []))
+  const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
+  const settings = new Map(input.products.flatMap(product => { const sections = product.product_id ? touchesAirbnbSettings(product as UpdateProductInput) : null; return sections ? [[product.product_id!, sections] as const] : [] }))
   const complete = async (products: Product[]): Promise<ProductMutation[]> => {
     const results: Array<{ product: Product; channelPush: ChannelPushCompletion }> = []
     for (const product of products) {
       let channelPush: ChannelPushCompletion = null
-      if (product.kind === 'stay' && reprice.has(product.id)) {
+      if (product.kind === 'stay' && (reprice.has(product.id) || settings.has(product.id))) {
         if (!input.env) channelPush = new Error('The saved home requires its organization environment to update the channel')
-        else {
-          const { pushStayHomeNights } = await import('~/server/domain/stays')
-          channelPush = await pushStayHomeNights(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
-        }
+        else channelPush = await pushStayHomeChannel(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: reprice.has(product.id), settings: settings.get(product.id) ?? null })
       }
       results.push({ product, channelPush })
     }

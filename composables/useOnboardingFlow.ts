@@ -154,7 +154,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   },
   {
     id: 'products', section: 'offer',
-    applies: state => state.vertical !== 'service',
+    applies: state => state.vertical === 'restaurant' || state.vertical === 'experience',
     title: state => state.vertical === 'restaurant'
       ? 'What is on the menu?'
       : state.vertical === 'experience' ? 'What can guests book?' : 'What do you offer?',
@@ -178,6 +178,12 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
 
 export function onboardingStep(id: string | undefined): OnboardingStep | null {
   return ONBOARDING_STEPS.find(step => step.id === id) ?? null
+}
+
+export function selectOnboardingVertical(state: OnboardingFlowState, vertical: OrganizationVertical) {
+  state.vertical = vertical
+  // Changing the business type also removes answers its flow no longer asks.
+  if (onboardingStep('products')?.applies?.(state) === false) state.products = []
 }
 
 function emptyState(): OnboardingFlowState {

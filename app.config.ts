@@ -125,7 +125,14 @@ export default defineAppConfig({
       panelOpen: 'i-lucide-panel-left-open'
     },
     input: field,
-    textarea: field,
+    textarea: {
+      ...field,
+      compoundVariants: [
+        ...field.compoundVariants,
+        // Focused description writing starts on the panel gutter and grows in place.
+        { variant: 'none', class: { base: 'rounded-none p-0' } }
+      ]
+    },
     select: field,
     // One pill control for the whole CMS: Today's range switcher, the organization
     // and location tab rows, the experiences editor.

@@ -175,6 +175,7 @@ const props = withDefaults(defineProps<{ section?: 'platform' | 'docs' | 'blog' 
 const SOLUTION_ITEMS = [
   { label: 'Restaurants', to: '/restaurants' },
   { label: 'Experiences', to: '/experiences' },
+  { label: 'Lodging', to: '/lodging' },
   { label: 'Law firms', to: '/legal' },
 ] as const
 

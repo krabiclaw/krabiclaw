@@ -2,6 +2,7 @@ import type { OrganizationSettings } from '../../shared/organization-settings'
 import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/organization-settings'
 import type { MediaCategory } from '~/shared/media-placement-contract'
 import { sql } from "drizzle-orm"
+import { PRODUCT_KINDS } from "../../shared/product-details"
 import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
@@ -431,7 +432,7 @@ export const products = sqliteTable("products", {
 	unique("products_org_slug_unique").on(table.organization_id, table.slug),
 	check("products_name_not_blank_check", sql`trim(name) <> ''`),
 	check("products_slug_check", sql`slug <> '' AND slug = lower(slug) AND slug NOT GLOB '*[^a-z0-9-]*' AND slug NOT LIKE '-%' AND slug NOT LIKE '%-' AND slug NOT LIKE '%--%'`),
-	check("products_kind_check", sql`kind IN ('dish', 'experience', 'service', 'item', 'stay')`),
+	check("products_kind_check", sql`kind IN (${sql.raw(PRODUCT_KINDS.map(kind => `'${kind}'`).join(', '))})`),
 	check("products_active_check", sql`active IN (0, 1)`),
 	check("products_marketing_features_check", sql`json_valid(marketing_features) AND json_type(marketing_features) = 'array'`),
 	check("products_details_json_check", sql`json_valid(details_json) AND json_type(details_json) = 'object'`),
@@ -1113,6 +1114,8 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	location_id: text().notNull(),
 	check_in_time: text().notNull(),
+	// The end of the check-in window, local HH:MM; null is a flexible end. Earlier than check_in_time means after midnight.
+	check_in_end_time: text(),
 	check_out_time: text().notNull(),
 	max_guests: integer().notNull(),
 	min_nights: integer().default(1).notNull(),
@@ -1158,11 +1161,12 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	foreignKey({ columns: [table.organization_id, table.assigned_team_id], foreignColumns: [team.organizationId, team.id], name: "product_stay_configs_team_scope_fk" }).onDelete("no action"),
 	unique("product_stay_configs_org_product_unique").on(table.organization_id, table.product_id),
 	check("product_stay_configs_times_check", sql`check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'`),
+	check("product_stay_configs_check_in_end_check", sql`check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')`),
 	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
 	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
 	check("product_stay_configs_instructions_check", sql`check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)`),
 	check("product_stay_configs_property_type_group_check", sql`property_type_group IS NULL OR property_type_group IN ('apartments', 'houses', 'secondary_units', 'unique_homes', 'bnb', 'boutique_hotels_and_more')`),
-	check("product_stay_configs_property_type_check", sql`(property_type IS NULL AND property_type_group IS NULL) OR property_type_group || ':' || property_type IN ('apartments:apartment', 'apartments:condominium', 'apartments:serviced_apartment', 'apartments:loft', 'houses:house', 'houses:townhouse', 'houses:bungalow', 'houses:cabin', 'houses:chalet', 'houses:earthhouse', 'houses:hut', 'houses:lighthouse', 'houses:villa', 'houses:dome', 'houses:cottage', 'houses:farmstay', 'houses:houseboat', 'houses:tiny_house', 'secondary_units:guesthouse', 'secondary_units:private_suite', 'secondary_units:farmstay', 'unique_homes:boat', 'unique_homes:castle', 'unique_homes:cave', 'unique_homes:earthhouse', 'unique_homes:hut', 'unique_homes:igloo', 'unique_homes:island', 'unique_homes:lighthouse', 'unique_homes:plane', 'unique_homes:rv', 'unique_homes:tent', 'unique_homes:tipi', 'unique_homes:train', 'unique_homes:treehouse', 'unique_homes:yurt', 'unique_homes:other', 'unique_homes:dome', 'unique_homes:barn', 'unique_homes:campsite', 'unique_homes:farmstay', 'unique_homes:houseboat', 'unique_homes:tiny_house', 'unique_homes:windmill', 'unique_homes:bus', 'unique_homes:holiday_park', 'unique_homes:ranch', 'unique_homes:religious_building', 'unique_homes:riad', 'unique_homes:shipping_container', 'unique_homes:tower', 'bnb:bnb', 'bnb:nature_eco_lodge', 'bnb:farmstay', 'boutique_hotels_and_more:boutique_hotel', 'boutique_hotels_and_more:nature_eco_lodge', 'boutique_hotels_and_more:hostel', 'boutique_hotels_and_more:serviced_apartment', 'boutique_hotels_and_more:aparthotel', 'boutique_hotels_and_more:hotel', 'boutique_hotels_and_more:resort')`),
+	check("product_stay_configs_property_type_check", sql`(property_type IS NULL AND property_type_group IS NULL) OR (property_type IS NOT NULL AND property_type_group IS NOT NULL AND property_type_group || ':' || property_type IN ('apartments:apartment', 'apartments:condominium', 'apartments:serviced_apartment', 'apartments:loft', 'houses:house', 'houses:townhouse', 'houses:bungalow', 'houses:cabin', 'houses:chalet', 'houses:earthhouse', 'houses:hut', 'houses:lighthouse', 'houses:villa', 'houses:dome', 'houses:cottage', 'houses:farmstay', 'houses:houseboat', 'houses:tiny_house', 'secondary_units:guesthouse', 'secondary_units:private_suite', 'secondary_units:farmstay', 'unique_homes:boat', 'unique_homes:castle', 'unique_homes:cave', 'unique_homes:earthhouse', 'unique_homes:hut', 'unique_homes:igloo', 'unique_homes:island', 'unique_homes:lighthouse', 'unique_homes:plane', 'unique_homes:rv', 'unique_homes:tent', 'unique_homes:tipi', 'unique_homes:train', 'unique_homes:treehouse', 'unique_homes:yurt', 'unique_homes:other', 'unique_homes:dome', 'unique_homes:barn', 'unique_homes:campsite', 'unique_homes:farmstay', 'unique_homes:houseboat', 'unique_homes:tiny_house', 'unique_homes:windmill', 'unique_homes:bus', 'unique_homes:holiday_park', 'unique_homes:ranch', 'unique_homes:religious_building', 'unique_homes:riad', 'unique_homes:shipping_container', 'unique_homes:tower', 'bnb:bnb', 'bnb:nature_eco_lodge', 'bnb:farmstay', 'boutique_hotels_and_more:boutique_hotel', 'boutique_hotels_and_more:nature_eco_lodge', 'boutique_hotels_and_more:hostel', 'boutique_hotels_and_more:serviced_apartment', 'boutique_hotels_and_more:aparthotel', 'boutique_hotels_and_more:hotel', 'boutique_hotels_and_more:resort'))`),
 	check("product_stay_configs_bedrooms_check", sql`bedrooms IS NULL OR bedrooms BETWEEN 0 AND 50`),
 	check("product_stay_configs_listing_type_check", sql`listing_type IS NULL OR listing_type IN ('entire_place', 'private_room', 'shared_room')`),
 	check("product_stay_configs_total_floors_check", sql`total_floors IS NULL OR (typeof(total_floors) = 'integer' AND total_floors BETWEEN 1 AND 9007199254740991)`),
@@ -1528,7 +1532,8 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 // A place to stay as Channex and Airbnb know it, and how far its import got.
 // The Airbnb listing and channel are known from the start; the Channex
 // property, room type and rate plan are filled in as the import creates them,
-// stage by stage. import_property holds the listing details the host approved
+// stage by stage; at `draft` the home is built and nothing syncs until it is
+// activated, and only then is the mapping enabled. import_property holds the listing details the host approved
 // (what the Channex property, room type and rate plan are created from), and
 // import_calendar the Airbnb calendar the inventory stage writes and verifies;
 // both are cleared when the import completes. Deleting the home deletes the mapping.
@@ -1541,11 +1546,15 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	property_id: text(),
 	room_type_id: text(),
 	rate_plan_id: text(),
-	import_stage: text().$type<'property' | 'room' | 'rate' | 'inventory' | 'verify_inventory' | 'mapping' | 'activate' | 'reservations' | 'content' | 'messages' | 'complete'>().notNull(),
+	import_stage: text().$type<'property' | 'room' | 'rate' | 'inventory' | 'verify_inventory' | 'content' | 'draft' | 'mapping' | 'activate' | 'reservations' | 'messages' | 'complete'>().notNull(),
 	import_property: text(),
 	import_calendar: text(),
 	// What the content stage left out, as JSON (ImportContentReport); null until it ran.
 	import_content: text(),
+	// SHA-256 of each text and count the content stage last wrote, as JSON
+	// { field: hash }: a later refresh writes only a field still holding it,
+	// so a host's own edit is never overwritten. Null until the stage ran.
+	import_written: text(),
 	enabled: integer({ mode: "boolean" }).default(false).notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -1558,13 +1567,51 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	uniqueIndex("product_channel_mappings_rate_plan_unique").on(table.provider, table.rate_plan_id).where(sql`rate_plan_id IS NOT NULL`),
 	index("product_channel_mappings_org_idx").on(table.organization_id),
 	check("product_channel_mappings_provider_check", sql`provider = 'channex'`),
-	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'content', 'messages', 'complete')`),
+	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')`),
 	check("product_channel_mappings_ids_check", sql`(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)`),
 	check("product_channel_mappings_calendar_check", sql`import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')`),
 	check("product_channel_mappings_property_json_check", sql`import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')`),
 	check("product_channel_mappings_content_json_check", sql`import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')`),
-	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'content', 'messages', 'complete'))`),
+	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))`),
 	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
+
+// What a host asked KrabiClaw to do with each Airbnb listing of its connected
+// account, done in the background: `sync` imports the listing as a home if it
+// is not one yet and makes it live; `stop` takes its home back to a free draft.
+// One row per listing; a new request for it replaces the row. Leased and
+// retried by the airbnb-sync cron task the way google_calendar_cleanup_jobs
+// are: `error` (a transient provider failure) is retried after
+// next_attempt_at up to a cap, `failed` waits for a new request, `done` is
+// finished. product_id is the home once it exists.
+export const airbnb_sync_jobs = sqliteTable("airbnb_sync_jobs", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	listing_id: text().notNull(),
+	product_id: text(),
+	action: text({ enum: ["sync", "stop"] }).notNull(),
+	// The listing fields the host supplied for a sync, as JSON { field: value }: what Airbnb leaves out and the organization does not fill.
+	details: text(),
+	state: text({ enum: ["pending", "error", "done", "failed"] }).default("pending").notNull(),
+	requested_by: text().references(() => user.id, { onDelete: "set null" }),
+	attempts: integer().default(0).notNull(),
+	last_error_code: text(),
+	last_error: text(),
+	next_attempt_at: text(),
+	lease_token: text(),
+	lease_until: text(),
+	completed_at: text(),
+	created_at: text().notNull(),
+	updated_at: text().notNull(),
+}, table => [
+	uniqueIndex("airbnb_sync_jobs_listing_unique").on(table.organization_id, table.listing_id),
+	index("airbnb_sync_jobs_due_idx").on(table.state, table.next_attempt_at),
+	check("airbnb_sync_jobs_action_check", sql`action IN ('sync', 'stop')`),
+	check("airbnb_sync_jobs_state_check", sql`state IN ('pending', 'error', 'done', 'failed')`),
+	// A retried row keeps its last error until it succeeds; an error or failure always names one.
+	check("airbnb_sync_jobs_error_check", sql`state NOT IN ('error', 'failed') OR (last_error_code IS NOT NULL AND last_error IS NOT NULL)`),
+	check("airbnb_sync_jobs_lease_check", sql`(lease_token IS NULL) = (lease_until IS NULL)`),
+	check("airbnb_sync_jobs_details_check", sql`details IS NULL OR (action = 'sync' AND json_valid(details) AND json_type(details) = 'object')`),
 ]);
 
 // Every exchange with a channel that changed or refused something: a booking
