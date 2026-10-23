@@ -99,7 +99,7 @@ gh issue create \
 ## Editorial Brief & Human Writer Handoff
 
 ### 1. Audience & Core Outcome
-- **Audience:** [Target business vertical: Restaurants, Experience Operators, or Law Firms]
+- **Audience:** [Target business vertical: Restaurants, Experience Operators, Law Firms, or Lodging Hosts]
 - **Core Outcome:** [Single-sentence customer result]
 - **Angle:** [Why this matters now and what friction it removes]
 
@@ -110,7 +110,7 @@ gh issue create \
 4. **Beat 4: Next Steps / Horizon** — [CTA and preview of upcoming features]
 
 ### 3. Factual & Technical Boundaries
-- **Plan Entitlement:** [e.g. Business ($149/mo) required for online payments; Basic/Growth retain free bookings]
+- **Plan Entitlement:** [e.g. Business ($149/month) required for direct paid stay bookings; distinguish manual stay records from guest payment collection]
 - **Geographic / Currency Limits:** [e.g. US Stripe Connect vs Thailand THB local payouts]
 - **Verified Sources:** [Links to documentation and canonical specs]
 
@@ -216,9 +216,20 @@ as brand new again. Read [Google Calendar](../../../docs/integrations/google-cal
 and [Payments](../../../docs/payments/payments.md) plus current qualification
 records.
 
-Plan entitlement: Online payments and direct stay bookings require the **Business plan**
-($149/month). Basic (free) and Growth ($49/month) retain bookings without online payments.
-Legacy Commerce ($89/month) remains an active grandfathered contract.
+Plan entitlement: New customers need **Business ($149/month)** for online payments
+and direct paid stay bookings, plus a ready Stripe connected account. Basic (free)
+and Growth ($49/month) retain supported bookings without online payments; a manually
+recorded stay is not a guest payment. Legacy Commerce ($89/month) remains an active
+grandfathered contract.
+
+Growth and Business include 2 business locations, then $49 per additional location
+per month, and separately 2 live homes, then $9 per additional home per month,
+billed at period end. A home's location does not count again as a business
+location. Basic includes 2 of each and refuses a third. Live means active at an
+active location and published on the site or syncing through an enabled Channex
+mapping. Draft homes are free and unlimited; existing subscriptions without the
+homes price keep their contracted prices. Read the target environment's catalog
+before publishing pricing.
 
 Multi-vertical reality and geographic boundaries:
 - **Experiences (Pottery House, Kikuzuki):** Experience operators can collect pre-payments
@@ -228,8 +239,13 @@ Multi-vertical reality and geographic boundaries:
   regulatory requirements.
 - **Legal Services (Blawby / NCLS):** Solo attorneys and law firms can require pre-payment
   for initial legal case evaluations and consultations in USD.
-- **Lodging on the Horizon:** Direct stay bookings and arrival guides are currently expanding,
-  with lodging pre-payments positioned as an upcoming capability.
+- **Lodging:** Hosts manage homes, nightly prices, availability and stay rules,
+  direct paid stay bookings, private arrival guides and scheduled guest messages.
+  A configured Airbnb connection through Channex applies to the selected account
+  and mapped homes. Demonstrate the actual connection and delivery outcome; do
+  not promise every booking channel or label direct stay payments as upcoming.
+  The iOS app is a free account companion where distribution access is available;
+  verify access before linking a download or announcing an App Store release.
 
 A focused writer outline follows an operator configuring their bookable session,
 a guest reserving and paying, and the confirmed calendar hold converting to a confirmed booking,

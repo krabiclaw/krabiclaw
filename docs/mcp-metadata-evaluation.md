@@ -1,9 +1,11 @@
 # MCP metadata evaluation corpus
 
-This corpus covers all 112 retained public tools for the resubmission work in
-#1302. It is internal coverage, separate from the five positive and three
-negative portal scenarios. **Live ChatGPT selection checks are pending.** A
-catalog check or annotation unit test does not establish host selection behavior.
+This corpus contains prepared prompts from resubmission work in #1302 and
+focused lodging cases. It is not a complete inventory of the current catalog;
+the [generated tool reference](https://staging.krabiclaw.com/docs/mcp-tool-reference)
+defines the deployed tools. These are internal checks, separate from the portal
+scenarios. **Live ChatGPT selection checks are pending.** A catalog check or
+annotation unit test does not establish host selection behavior.
 
 Run each prompt in a fresh conversation against the refreshed submitted endpoint
 and prepared reviewer records. The business, location, record and permitted
@@ -134,6 +136,40 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `update_qa` | Change this authored FAQ answer to the supplied wording. | Our parking answer is outdated. Replace just that answer. | Edit an imported Google answer or a translation through this tool. |
 | `update_reservation_policy` | Set this location's table capacity and reservation advance notice. | We can take 20 dinner guests at one start time and need a day's notice. Save that policy. | Change a class's session defaults or collect a reservation deposit in chat. |
 | `update_site_page` | Replace this page with the supplied complete version, retaining all unrequested sections. | Here's the revised About page. Keep every section we didn't ask to remove. | Remove omitted blocks without the page's explicit removal confirmation. |
+
+## Lodging cases
+
+Name an existing authorized home and use the current IDs, versions and image
+evidence from reads. A stay taken by the host, a stay paid on the site and an
+Airbnb stay are distinct fixtures; never create one to stand in for another.
+
+| Expected operation | Direct prompt | Indirect prompt | Nearby negative prompt / forbidden substitution |
+| --- | --- | --- | --- |
+| `list_stays` | List stays at this home overlapping next month. | Who is coming to this home next month? | List class bookings instead of overnight stays. |
+| `get_stay` | Read this stay's dates, guest and recorded payments. | What exactly is recorded for this guest's stay? | Treat a recorded external payment as a Stripe transaction. |
+| `get_stay_calendar` | Show every night, price and stay rule at this home next month. | Which nights could a guest book, and what would each cost? | Use an organization's appointment calendar as this home's nightly availability. |
+| `create_stay` | Record this phone reservation at this home with these dates, guests and total. | A repeat guest booked directly with me; hold these nights. | Charge the guest or claim an acknowledgement email was sent by recording the stay. |
+| `update_stay` | Change this host-owned stay to these dates using its current version. | This direct guest is arriving a day later; update their stay. | Change a channel-owned Airbnb reservation locally. |
+| `cancel_stay` | Cancel this unpaid host-owned stay using its current version. | This direct guest will not come; release their nights. | Claim a paid site's refund has completed through a non-financial MCP operation. |
+| `record_stay_payment` | Record this cash payment I already received for this direct stay. | The guest paid by bank transfer; add the payment record. | Initiate a bank transfer or collect an online card payment. |
+| `delete_stay_payment` | Remove this mistaken external payment record from this stay. | That cash entry was recorded twice; delete this exact duplicate entry. | Delete the actual Stripe payment or issue a refund. |
+| `set_stay_nights` | Set these nights to this price and close these explicitly named dates at this home. | We have a holiday rate and a maintenance closure; update this home's calendar. | Announce Airbnb synchronization succeeded when `channel_push` failed or has no configured mapping. |
+| `add_stay_photo_room` | Add a bedroom group to this home's photo tour. | I need a room heading to organize these listing photos. | Increase the home's declared bedroom or bed count by creating a photo group. |
+| `remove_stay_photo_room` | Remove this authored photo-tour room, keeping its photos. | We no longer want this room group in the tour. | Delete its photos from the media library. |
+| `move_stay_photos` | Move these photos from their current room IDs to this named room. | Group these existing listing photos under the kitchen. | Replace the cover or invent a current room assignment. |
+| `update_stay_photo_room` | Save this room's sleeping arrangements under its current details version. | Record these beds in this existing bedroom group. | Claim an accessibility feature is verified without the required image evidence. |
+| `update_stay_accessibility` | Save this listing accessibility answer with these existing evidence images and the current Product timestamp. | We have photos showing this home feature; record the answer. | Certify accessibility or save a positive answer without evidence. |
+| `get_guest_messaging_context` | Read the home and stay behind this guest conversation. | Which arrival instructions belong to this guest's actual home? | Substitute another home's guide when the conversation has no mapped home. |
+| `update_stay_arrival_guide` | Save these wifi and checkout instructions privately for this home. | Keep these arrival details ready for this home's guests. | Publish the private guide or send it automatically merely because it was saved. |
+| `list_scheduled_guest_messages` | Show pending messages and failures for this guest conversation. | Has this stay's check-in message been sent or does it need attention? | Infer delivery from the scheduled time instead of reading conversation receipts. |
+| `cancel_scheduled_guest_message` | Cancel this exact pending automatic guest message. | Do not send that queued arrival message. | Cancel or resend a message already sending, sent or requiring review. |
+
+Verify home publication against the live-home allowance separately: Basic includes
+2 live homes and refuses a third; drafts remain free and unlimited. Growth and
+Business include 2 live homes, then $9 per additional home per month, separately
+from business locations. For a connected home, read both the saved calendar and
+the channel result. For a public paid stay, inspect the guest receipt, confirmed
+stay, held nights and recorded Stripe payment; a manual stay is no substitute.
 
 For booking writes, inspect guest email/inbox delivery and retries as well as
 status and capacity. For proposed changes, verify that the original record stays

@@ -1,0 +1,74 @@
+{
+  "verified_on": "2026-10-23",
+  "timezone": "Asia/Bangkok",
+  "environment": "https://staging.krabiclaw.com",
+  "organization_id": "platform",
+  "capture_source": "Fictional Saltleaf staging demo; root agent captured the running Arrival guide overview and Directions editor without changing demo data.",
+  "articles": [
+    {
+      "id": "f887983b-e7a8-45c4-8244-b1ca9af01aea",
+      "url": "https://staging.krabiclaw.com/docs/prepare-arrival-guides-and-guest-messages",
+      "operation": "created and published",
+      "updated_at": "2026-10-23T07:14:43.581Z",
+      "blocks": 15,
+      "images": 2,
+      "introduction_first": true,
+      "cover": null
+    },
+    {
+      "id": "d822a380-a3cb-4523-9b1b-86e3d7719970",
+      "url": "https://staging.krabiclaw.com/docs/what-you-can-edit-through-chatgpt",
+      "operation": "updated existing article, preserving both block IDs",
+      "updated_at": "2026-10-23T07:15:12.691Z"
+    },
+    {
+      "id": "4cd75dc0-378f-4618-a0d3-5f7f60c9b005",
+      "url": "https://staging.krabiclaw.com/docs/handle-inquiries-and-reservation-requests",
+      "operation": "updated existing article, preserving all 12 block IDs",
+      "updated_at": "2026-10-23T07:15:19.669Z"
+    },
+    {
+      "id": "ac25c8a9-160a-4c6b-bf6c-35941d80236a",
+      "url": "https://staging.krabiclaw.com/docs/connect-your-accounts-to-krabiclaw",
+      "operation": "updated existing integration overview, preserving all 11 block IDs",
+      "updated_at": "2026-10-23T07:19:34.319Z"
+    },
+    {
+      "id": "doc-016",
+      "url": "https://staging.krabiclaw.com/docs/customize-brand-theme",
+      "operation": "updated existing branding overview, preserving its block ID",
+      "updated_at": "2026-10-23T07:19:36.894Z"
+    }
+  ],
+  "screenshots": [
+    {
+      "source_file": "arrival-directions.png",
+      "upload_file": "arrival-directions.avif",
+      "asset_id": "17c31d0bed20bb54cd27f691cfe13c8273925b066b59456c79ecc841312de4b4",
+      "public_url": "https://staging.krabiclaw.com/__media/organizations/platform/media/17c31d0bed20bb54cd27f691cfe13c8273925b066b59456c79ecc841312de4b4.avif",
+      "public_http_status": 200,
+      "content_type": "image/avif",
+      "decoded_rgb_pixels_identical_after_conversion": true,
+      "placement": "Image immediately after preparation instructions"
+    },
+    {
+      "source_file": "arrival-guide.png",
+      "upload_file": "arrival-guide.avif",
+      "asset_id": "09715ffb566c50193f0bdac3342bb3c19f3b19aa607e2de2c49e9b5820ba644e",
+      "public_url": "https://staging.krabiclaw.com/__media/organizations/platform/media/09715ffb566c50193f0bdac3342bb3c19f3b19aa607e2de2c49e9b5820ba644e.avif",
+      "public_http_status": 200,
+      "content_type": "image/avif",
+      "decoded_rgb_pixels_identical_after_conversion": true,
+      "placement": "Image immediately after private-preview instructions"
+    }
+  ],
+  "verification": {
+    "cms_readback": "New guide published with two images, introductory markdown first and no cover; existing article IDs and block IDs retained.",
+    "rendered_pages": "All five public article pages loaded in Chrome; new guide reviewed at desktop and 390px widths. Viewport override reset afterward.",
+    "proof_files": ["arrival-article-desktop.jpg", "arrival-article-mobile.jpg"],
+    "projections": "New guide and changed text verified in docs index, Markdown mirrors and llms-full.txt.",
+    "sitemap": "Staging sitemap is intentionally empty: robots.txt disallows all indexing and server/plugins/sitemap.ts excludes non-indexable hosts.",
+    "related_workflow_links": "set-up-a-lodging-website and manage-nightly-availability-and-airbnb both returned HTTP 200.",
+    "scope": "Only platform staging documentation and its screenshot media were written. No guest messages, demo settings, payments, blog posts, social posts or broadcasts were created."
+  }
+}

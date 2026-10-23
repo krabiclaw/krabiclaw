@@ -194,7 +194,7 @@ export function resolvePublicTemplate(input: {
 // ─────────────────────────────────────────────────────────────────────────
 //
 // Saya and Blawby are the names KrabiClaw sells its two starting recipes
-// under at krabiclaw.com/templates — a restaurant or experience site, and a
+// under at krabiclaw.com/templates — a restaurant, experience or lodging site, and a
 // law firm site. They are marketing names only: a customer site built from
 // either renders with the same components as every other.
 
@@ -240,9 +240,9 @@ export const publicTemplateMarketing: Record<MarketedTemplateSlug, TemplateMarke
     slug: 'saya',
     displayName: 'Saya',
     tagline: 'Make your place\ntheir next stop.',
-    summary: 'A website for the food you serve, the things you make, and the experiences people come back for.',
-    description: 'Bring your restaurant or experience to life with generous photography, thoughtful menus, and a clear path to visit or book. Saya puts the details guests need alongside the story that makes your place yours.',
-    supportedVerticals: ['Restaurants', 'Experiences'],
+    summary: 'A website for the food you serve, the experiences you host, and the places your guests stay.',
+    description: 'Bring your restaurant, experience or lodging business to life with photography, practical details, and a clear path to visit, book an experience or reserve a stay. Saya puts menus, home listings and the details guests need alongside the story that makes your place yours.',
+    supportedVerticals: ['Restaurants', 'Experiences', 'Lodging'],
     status: 'available',
     published: true,
     priceLabel: 'Included on every plan',
@@ -267,10 +267,15 @@ export const publicTemplateMarketing: Record<MarketedTemplateSlug, TemplateMarke
         label: 'Make the next step obvious.',
         description: 'Introduce a class or experience with photos and practical details, then guide guests toward available times and booking. Give restaurant guests a clear way to request a table.',
       },
+      {
+        label: 'Welcome your next overnight guest.',
+        description: 'Present each home with photos, amenities and stay details. Offer direct paid stay booking with Business and completed Stripe setup. Manage availability, arrivals, departures and guest conversations from your dashboard.',
+      },
     ],
     included: [
       'Restaurant menus and dish pages',
       'Experience pages and booking flows',
+      'Home listings and nightly availability',
       'Location pages with hours and directions',
       'Photos, reviews, and guest questions',
       'Posts, articles, and your brand story',
@@ -278,8 +283,8 @@ export const publicTemplateMarketing: Record<MarketedTemplateSlug, TemplateMarke
     ],
     sortOrder: 1,
     seo: {
-      title: 'Saya — Restaurant and Experience Website Template',
-      description: 'Create a restaurant or experience website with Saya. Showcase menus, locations, and bookable experiences. Included on every KrabiClaw plan.',
+      title: 'Saya — Restaurant, Experience and Lodging Website Template',
+      description: 'Build a restaurant, experience or lodging website with Saya. Show menus, home listings and nightly availability. Template included on every plan.',
     },
   },
   blawby: {
