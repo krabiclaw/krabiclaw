@@ -676,6 +676,7 @@ export async function createBlogPost(
     if (record.requestHash !== requestHash) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency_key was already used for a different article' })
     const existing = await queryFirst<{ id: string }>(db, "SELECT id FROM content_documents WHERE id = ? AND kind = 'article' AND row_role = 'root'", [record.entityId])
     if (!existing) throw new HTTPError({ statusCode: 410, statusMessage: 'The article this idempotency_key created has been deleted; it is not created again' })
+    await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: record.entityId }, actorId: authorId })
     return await createdArticleResult(db, record.entityId, organizationId, env)
   }
   const earlier = await replay()

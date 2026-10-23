@@ -168,7 +168,14 @@ final local browser journeys pass bulk-home creation, arrival-guide schema and
 independent readbacks, cleaner scope and photos. The live local catalog has
 163 unique tools with exact generated metadata/schema equality. All 333 unit
 tests, full typecheck, lint and the canonical build pass. The full current
-189-case browser run and deployed verification remain required before promotion. Its staging Worker deployed, but
+189-case browser run passed 185 cases with four existing skips at `52d0d074d`.
+Follow-up scheduling changes pass 19 D1 cases: HTTP starts one step and cron
+leaves launch headroom without counting a normal yield as failure. Real draft
+preparation also exposed an AVIF prefilter and incomplete article-create replay.
+The canonical image decoder now owns the format, and replay completes the same
+social-card operation. Native local AVIF-to-JPEG, full PNG rendering and persisted
+same-key repair pass through the existing D1 test. The full final D1 suite,
+refreshed build and deployed verification remain required before promotion. Its staging Worker deployed, but
 [run 39927646225](https://github.com/krabiclaw/krabiclaw/actions/runs/39927646225)
 failed the published-guide check for two articles; read-only tenant rendering
 was skipped. Do not record that run as a completed staging qualification.

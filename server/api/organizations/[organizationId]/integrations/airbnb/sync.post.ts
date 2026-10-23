@@ -16,7 +16,8 @@ export default defineHandler(async (event) => {
   const waitUntil = getCloudflareWaitUntil(event)
   if (!waitUntil) throw new HTTPError({ statusCode: 500, message: 'Airbnb sync requires the Worker execution context', data: { code: 'EXECUTION_CONTEXT_REQUIRED' } })
   const listings = await requestAirbnbSync(env, env.DB, organization.id, session.user.id, body)
-  // The first steps start now; the airbnb-sync task carries on every two minutes.
-  waitUntil(runAirbnbSyncJobs(env, Date.now() + REQUEST_SLICE_MS, organization.id))
+  // One step gets the request's full slice; cron carries on without launching
+  // another provider step against the tail of this short waitUntil deadline.
+  waitUntil(runAirbnbSyncJobs(env, Date.now() + REQUEST_SLICE_MS, organization.id, { maxSteps: 1, startReserveMs: 0 }))
   return jsonResponse({ listings }, { status: 202 })
 })

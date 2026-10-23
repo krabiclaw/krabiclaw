@@ -238,22 +238,26 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
     assert.deepEqual((await log()).slice(-3).map(row => [(row as { kind: string }).kind, (row as { status: string }).status]), [['restrictions', 'needs_review'], ['restrictions', 'pushed'], ['availability', 'needs_review']])
 
-    // A broken HTTP body is a raw failure, with no confirmed review outcome.
-    // Its committed closure survives and the channel's persisted state stays pending.
+    // A broken provider body leaves the saved closure and an explicit, persisted
+    // review outcome: Channex may have applied the POST before its body failed.
     const interruptedReason = 'The Channex response body was interrupted.'
+    const interruptedDetail = `Channex did not confirm the restrictions update; its outcome is unknown. Channex could not be reached for POST /restrictions: ${interruptedReason}`
     channex.answer['/restrictions'] = () => new Response(new ReadableStream({
       start(controller) { controller.error(new Error(interruptedReason)) },
     }), { status: 200 })
     await assert.rejects(setStayNights(db, env, manager, { product_id: connected, from: day(35), to: day(36), closed: true }),
       (error: { status?: number; data?: Record<string, unknown> }) => {
         assert.equal(error.status, 503)
-        assert.partialDeepStrictEqual(error.data, { code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: connected, reason: interruptedReason, channel_outcome: 'unknown' })
-        assert.deepEqual(error.data?.ranges, [{ from: day(35), to: day(36) }])
-        assert.equal(Object.hasOwn(error.data ?? {}, 'channel_push'), false)
+        const { updated_at, ...outcome } = error.data ?? {}
+        assert.equal(typeof updated_at, 'string')
+        assert.deepEqual(outcome, { code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: connected,
+          reason: interruptedDetail, ranges: [{ from: day(35), to: day(36) }], channel_push: { state: 'needs_review', detail: interruptedDetail } })
         return true
       })
     const interrupted = await readStayCalendar(db, manager, { productId: connected, from: day(35), to: day(36) })
-    assert.deepEqual(interrupted.nights.map(night => [night.date, night.closed, night.available, night.channel]), [[day(35), true, false, { state: 'pending', detail: null }]])
+    assert.deepEqual(interrupted.nights.map(night => [night.date, night.closed, night.available, night.channel]), [[day(35), true, false, { state: 'needs_review', detail: interruptedDetail }]])
+    assert.deepEqual((await db.prepare("SELECT date, state, detail FROM channel_night_pushes WHERE product_id = ? AND date = ?").bind(connected, day(35)).all()).results,
+      [{ date: day(35), state: 'needs_review', detail: interruptedDetail }])
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions'])
 
     // A new base price on a connected home reaches every night ahead that has no price of its own.

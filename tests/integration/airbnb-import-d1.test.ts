@@ -601,9 +601,20 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
 
     // With the missing contact in the request's details, the same listing imports, a few photos per step, and goes live.
     channex.extraPhotos = 8
+    const propertyCreatesBefore = channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING, details: form.missingDetails }] })).status, 202)
     await settle()
+    const queuedId = await db.prepare('SELECT id FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first('id')
+    const yielded = { state: 'pending', attempts: 0, lease_token: null, lease_until: null, last_error_code: null }
+    assert.deepEqual(await db.prepare('SELECT state, attempts, lease_token, lease_until, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
+    assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings').first('import_stage'), 'property')
+    assert.equal(channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length, propertyCreatesBefore, 'the HTTP slice does not launch the second provider step')
+    // A cron invocation inside its 30-second launch reserve does not start this step.
+    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 29_000), { stepped: 0, done: 0, failed: 0 })
+    assert.deepEqual(await db.prepare('SELECT state, attempts, lease_token, lease_until, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), yielded)
+    assert.equal(channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length, propertyCreatesBefore)
     await cron()
+    assert.equal(await db.prepare('SELECT id FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first('id'), queuedId, 'cron resumes the same yielded request generation')
     const done = await job()
     assert.deepEqual({ ...done, product_id: null }, { action: 'sync', state: 'done', product_id: null, last_error_code: null, attempts: 0 })
     const productId = done!.product_id as string
@@ -677,7 +688,7 @@ test('a full-plan sync swap stops its old home before activation and reconnects 
     const queued = await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: 'listing-99' }], stop: [first.product_id] })
     assert.equal(queued.length, 2)
     await db.prepare('UPDATE airbnb_sync_jobs SET next_attempt_at = ? WHERE action = ?').bind(new Date(Date.now() + 60_000).toISOString(), 'stop').run()
-    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000), { stepped: 0, done: 0, failed: 0 })
+    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, undefined, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
     assert.equal((await readStayHome(db, manager, replacement.product_id)).live, false, 'a delayed stop retains the home allowance until it finishes')
     await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = NULL WHERE action = 'stop'").run()
     const totals = await runAirbnbSyncJobs(env, Date.now() + 60_000)
@@ -728,7 +739,7 @@ test('slice deadlines cancel provider reads and photo bodies, and uncertain writ
     }
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
     stalled(url => url.pathname === '/api/v1/channels/chan-1')
-    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000)).failed, 1)
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000, undefined, { startReserveMs: 0 })).failed, 1)
     assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
     assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections').first(), { status: 'connected', operation_id: null, pending_step: null })
 
@@ -737,7 +748,7 @@ test('slice deadlines cancel provider reads and photo bodies, and uncertain writ
     assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings').first('import_stage'), 'content')
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
     stalled(url => url.origin === CDN, true)
-    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000)).failed, 1)
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000, undefined, { startReserveMs: 0 })).failed, 1)
     assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
     assert.equal(await count(db, 'media_assets'), 0)
     assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
@@ -751,11 +762,11 @@ test('slice deadlines cancel provider reads and photo bodies, and uncertain writ
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
     let sent = 0
     stalled((url, init) => { if (url.pathname === '/api/v1/channels/chan-1/mappings' && init.method === 'POST') { sent++; return true } return false })
-    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000)).failed, 1)
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 1_000, undefined, { startReserveMs: 0 })).failed, 1)
     assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
     assert.equal(await db.prepare('SELECT status FROM channex_connections').first('status'), 'needs_review')
     assert.equal(await db.prepare('SELECT pending_step FROM channex_connections').first('pending_step'), 'map_airbnb_listing')
-    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000), { stepped: 0, done: 0, failed: 0 })
+    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, undefined, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
     assert.equal(sent, 1)
   } finally {
     globalThis.fetch = realFetch
@@ -796,12 +807,12 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     const job = () => db.prepare('SELECT state, last_error_code, attempts, lease_token, lease_until FROM airbnb_sync_jobs').first()
     const retry = async () => { await db.prepare("UPDATE airbnb_sync_jobs SET next_attempt_at = '2000-01-01T00:00:00.000Z'").run() }
     await requestAirbnbSync(env, db, ORG, OWNER, { sync: [{ listing_id: LISTING }] })
-    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 2_000)).failed, 1)
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 2_000, undefined, { startReserveMs: 0 })).failed, 1)
     assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 1, lease_token: null, lease_until: null })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'reservations', enabled: 1 })
     assert.equal(requests, 1, 'the SDK does not retry beyond the operation deadline')
     await retry()
-    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 2_000)).failed, 1)
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 2_000, undefined, { startReserveMs: 0 })).failed, 1)
     assert.deepEqual(await job(), { state: 'error', last_error_code: 'SYNC_SLICE_ENDED', attempts: 2, lease_token: null, lease_until: null })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'complete', enabled: 1 })
     assert.equal(requests, 2)
@@ -840,7 +851,7 @@ test('a failed verification read retains the completed provider write for review
     assert.deepEqual(await db.prepare('SELECT state, last_error_code, lease_token, lease_until FROM airbnb_sync_jobs').first(), { state: 'failed', last_error_code: 'CHANNEX_REQUEST_FAILED', lease_token: null, lease_until: null })
     assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'needs_review', pending_step: 'map_airbnb_listing' })
     assert.equal(channex.channel.ratePlans.length, 1, 'the provider applied the write whose verification failed')
-    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000), { stepped: 0, done: 0, failed: 0 })
+    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, undefined, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
     assert.equal(mappings, 1)
   } finally {
     globalThis.fetch = realFetch
@@ -899,7 +910,7 @@ test('an in-flight stop cannot mark a newer sync request done', { timeout: 120_0
       if (!reclaimed && init.method === 'DELETE' && url.pathname.includes('/mappings/')) {
         reclaimed = true
         await db.prepare("UPDATE airbnb_sync_jobs SET lease_until = '2000-01-01T00:00:00.000Z'").run()
-        assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000), { stepped: 0, done: 0, failed: 0 })
+        assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, undefined, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
       }
       return channex.fetch(input, init)
     }
