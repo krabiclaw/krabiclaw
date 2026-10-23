@@ -268,6 +268,9 @@ for (const vertical of ['experience', 'lodging'] as const) {
     await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
     const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
     expect(discarded.status(), await discarded.text()).toBe(200)
+    const empty = await page.request.get('/api/dashboard/onboarding/drafts/active')
+    expect(empty.status(), await empty.text()).toBe(200)
+    expect(await empty.json()).toEqual({ success: true, draft: null })
     try {
       const created = await page.request.post('/api/dashboard/onboarding/drafts/active', {
         data: { sourceType: 'manual', vertical, name: `E2E ${vertical} ${Date.now().toString(36)}`, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', phone: '+66812345678' } },
@@ -305,6 +308,9 @@ for (const vertical of ['experience', 'lodging'] as const) {
     } finally {
       const removed = await page.request.delete('/api/dashboard/onboarding/drafts/active')
       expect(removed.status(), await removed.text()).toBe(200)
+      const discardedDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
+      expect(discardedDraft.status(), await discardedDraft.text()).toBe(200)
+      expect(await discardedDraft.json()).toEqual({ success: true, draft: null })
     }
   })
 }
