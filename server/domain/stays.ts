@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
@@ -267,12 +267,15 @@ export interface StayNight {
   source: 'host' | 'import' | null
   /** When a guest's checkout hold on this night lapses; null when no guest is paying for it. A held night is not available. */
   held_until: string | null
+  /** The linked calendar (Vrbo) that shows this night taken; null when no linked calendar holds it. Such a night is not available. */
+  calendar: StayCalendarChannel | null
   /** What the connected channel last took for this night; null when the home has no channel or the night was never pushed. */
   channel: { state: 'pending' | 'pushed' | 'needs_review'; detail: string | null } | null
 }
 
 const MAX_LIST_DAYS = 400
 const MAX_CALENDAR_DAYS = 500
+const MAX_CALENDAR_BYTES = 2_000_000
 const MAX_STAY_NIGHTS = 365
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -711,12 +714,12 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     if (price !== null) patch.variants = [{ id: variant.id, prices: [base ? { id: base.id, unit_amount: price } : { unit_amount: price }] }]
     else if (base) patch.variants = [{ id: variant.id, prices_mode: 'replace', prices: variant.prices.filter(other => other.id !== base.id).map(other => ({ id: other.id })) }]
   }
-  const pushes = pricing || nights !== null
-  const settings = touchesAirbnbSettings(patch)
+  const pushes = pricing || (nights !== null && nights !== home.min_nights)
   // Clearing an already absent base price still asks for channel completion,
   // but creates no product pricing patch for updateProduct to preflight.
   if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
-  if (Object.keys(patch).length) await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true })
+  const saved = Object.keys(patch).length ? await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true }) : null
+  const settings = saved ? touchesAirbnbSettings({ stay: saved.stay ?? undefined }, { stay: home }) : null
   // The product's checks are the ones a valid request can still fail, so it is written first.
   if ((zone !== null && zone !== home.timezone) || Object.keys(location).length) {
     const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { ...location, ...(zone !== null && zone !== home.timezone ? { timezone: zone } : {}) }, access.actorId, env)
@@ -1234,8 +1237,9 @@ const LAPSED_HOLD_CLAIM_SQL = `stay_nights.hold_id IS NOT NULL AND NOT EXISTS (S
 async function homeNights(db: DbClient, organizationId: string, home: StayHome, from: string, to: string): Promise<StayNight[]> {
   const [overrides, claims, pushes] = await Promise.all([
     queryAll<Record<string, unknown>>(db, 'SELECT * FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [organizationId, home.product_id, from, to]),
-    queryAll<{ date: string; stay_id: string | null; held_until: string | null }>(db, `SELECT stay_nights.date, stay_nights.stay_id, h.expires_at AS held_until FROM stay_nights
+    queryAll<{ date: string; stay_id: string | null; held_until: string | null; calendar: StayCalendarChannel | null }>(db, `SELECT stay_nights.date, stay_nights.stay_id, h.expires_at AS held_until, k.channel AS calendar FROM stay_nights
       LEFT JOIN payment_checkout_holds h ON h.id = stay_nights.hold_id
+      LEFT JOIN stay_calendar_links k ON k.id = stay_nights.calendar_link_id
       WHERE stay_nights.organization_id = ? AND stay_nights.product_id = ? AND stay_nights.date >= ? AND stay_nights.date < ? AND NOT (${LAPSED_HOLD_CLAIM_SQL})`, [organizationId, home.product_id, from, to]),
     queryAll<{ date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [organizationId, home.product_id, from, to]),
   ])
@@ -1260,6 +1264,7 @@ async function homeNights(db: DbClient, organizationId: string, home: StayHome, 
       closed_to_departure: Number(row?.closed_to_departure ?? 0) === 1,
       source: row ? row.source as 'host' | 'import' : null,
       held_until: heldUntil,
+      calendar: claim?.calendar ?? null,
       channel: pushByDate.get(night) ?? null,
     })
   }
@@ -1297,14 +1302,15 @@ const AIRBNB_CANCELLATION: Partial<Record<StayCancellationPolicy, string>> = {
 }
 
 /**
- * Refuse, before anything is written, a value a home syncing with Airbnb could
- * not send: a short-term cancellation policy Airbnb does not offer.
+ * Refuse, before anything is written, settings a home syncing with Airbnb
+ * cannot send. The same mapper validates and sends the normalized values.
  */
-export async function requireAirbnbAcceptable(db: DbClient, organizationId: string, productId: string, patch: UpdateProductInput): Promise<void> {
-  const policy = patch.stay?.cancellation_policy
-  if (!policy || AIRBNB_CANCELLATION[policy]) return
+export async function requireAirbnbAcceptable(db: DbClient, organizationId: string, productId: string, product: { stay: AirbnbHomeSettings | null; details: Product['details'] }, sections: AirbnbSettingSections | null): Promise<void> {
+  if (!product.stay || !sections) return
+  const settings = airbnbListingSettings(product.stay, product.details, sections)
+  if (!('refusal' in settings)) return
   const syncing = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1", [organizationId, productId])
-  if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', `Airbnb has no ${STAY_CANCELLATION_POLICIES[policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, 'cancellation_policy')
+  if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', settings.refusal, settings.field)
 }
 const AIRBNB_LONG_TERM_CANCELLATION: Record<StayLongTermCancellationPolicy, string> = { firm: 'CANCEL_LONG_TERM_FAIR', strict: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD' }
 /** House rules Airbnb takes as guest controls, by product detail. */
@@ -1312,14 +1318,17 @@ const AIRBNB_GUEST_CONTROLS = { pets_allowed: 'allows_pets_as_host', smoking_all
 /** Which of a connected home's Airbnb listing settings a product write changes, by section. */
 export type AirbnbSettingSections = { [Section in keyof AirbnbListingSettings]: boolean }
 
-export function touchesAirbnbSettings(patch: UpdateProductInput): AirbnbSettingSections | null {
+/** Compare complete normalized snapshots to select the sections this write changes. */
+export function touchesAirbnbSettings(patch: UpdateProductInput, previous: UpdateProductInput): AirbnbSettingSections | null {
   const sections = {
-    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined)
-      || Object.keys(AIRBNB_GUEST_CONTROLS).some(key => patch.details?.[key as keyof typeof AIRBNB_GUEST_CONTROLS] !== undefined),
-    availability: patch.stay?.min_nights !== undefined,
+    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined && patch.stay[field] !== previous.stay?.[field])
+      || (Object.keys(AIRBNB_GUEST_CONTROLS) as Array<keyof typeof AIRBNB_GUEST_CONTROLS>).some(key => patch.details?.[key] !== previous.details?.[key]),
+    availability: patch.stay?.min_nights !== undefined && patch.stay.min_nights !== previous.stay?.min_nights,
   }
   return sections.booking || sections.availability ? sections : null
 }
+
+type AirbnbHomeSettings = Pick<StayHome, 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'cancellation_policy' | 'long_term_cancellation_policy' | 'min_nights'>
 
 /**
  * A home's Airbnb listing settings, or why one of its values cannot be one.
@@ -1329,38 +1338,38 @@ export function touchesAirbnbSettings(patch: UpdateProductInput): AirbnbSettingS
  * Airbnb has it. Prices are not listing settings here: every night's price,
  * the base price's included, already reaches Airbnb with the nightly calendar.
  */
-function airbnbListingSettings(home: StayHome, details: Product['details'], sections: AirbnbSettingSections): AirbnbListingSettings | { refusal: string } {
+function airbnbListingSettings(home: AirbnbHomeSettings, details: Product['details'], sections: AirbnbSettingSections): AirbnbListingSettings | { refusal: string; field: string } {
   const booking = sections.booking ? airbnbBookingSettings(home, details) : {}
-  if ('refusal' in booking) return booking as { refusal: string }
+  if ('refusal' in booking) return booking as { refusal: string; field: string }
   return { booking, availability: sections.availability ? { default_min_nights: home.min_nights } : {} }
 }
 
-function airbnbBookingSettings(home: StayHome, details: Product['details']): Record<string, unknown> | { refusal: string } {
-  const hour = (time: string, field: string): number | { refusal: string } => {
+function airbnbBookingSettings(home: AirbnbHomeSettings, details: Product['details']): Record<string, unknown> | { refusal: string; field: string } {
+  const hour = (time: string, field: string, label: string): number | { refusal: string; field: string } => {
     const [hh, mm] = time.split(':')
-    return mm === '00' ? Number(hh) : { refusal: `Airbnb takes ${field} in whole hours; ${time} was saved but not sent to Airbnb` }
+    return mm === '00' ? Number(hh) : { refusal: `Airbnb takes ${label} in whole hours; ${time} cannot be sent to Airbnb`, field }
   }
-  const start = hour(home.check_in_time, 'the check-in start')
+  const start = hour(home.check_in_time, 'check_in_time', 'the check-in start')
   if (typeof start !== 'number') return start
   const startHour = start < 8 ? start + 24 : start
-  if (startHour > 26) return { refusal: `Airbnb's check-in start is between 08:00 and 02:00; ${home.check_in_time} was saved but not sent to Airbnb` }
+  if (startHour > 26) return { refusal: `Airbnb's check-in start is between 08:00 and 02:00; ${home.check_in_time} cannot be sent to Airbnb`, field: 'check_in_time' }
   const booking: Record<string, unknown> = { check_in_time_start: String(startHour) }
   if (home.check_in_end_time === null) booking.check_in_time_end = 'FLEXIBLE'
   else {
-    const end = hour(home.check_in_end_time, 'the check-in end')
+    const end = hour(home.check_in_end_time, 'check_in_end_time', 'the check-in end')
     if (typeof end !== 'number') return end
     // An end earlier than the start is the next day, as is every end of a start after midnight.
     const endHour = startHour >= 24 || end <= start ? end + 24 : end
-    if (endHour > 27 || endHour <= startHour) return { refusal: `Airbnb's check-in end is after the start and no later than 03:00; ${home.check_in_end_time} was saved but not sent to Airbnb` }
+    if (endHour > 27 || endHour <= startHour) return { refusal: `Airbnb's check-in end is after the start and no later than 03:00; ${home.check_in_end_time} cannot be sent to Airbnb`, field: 'check_in_end_time' }
     booking.check_in_time_end = String(endHour)
   }
-  const checkout = hour(home.check_out_time, 'checkout')
+  const checkout = hour(home.check_out_time, 'check_out_time', 'checkout')
   if (typeof checkout !== 'number') return checkout
   booking.check_out_time = checkout
   const controls = Object.fromEntries((Object.entries(AIRBNB_GUEST_CONTROLS) as Array<[keyof typeof AIRBNB_GUEST_CONTROLS, string]>).flatMap(([key, control]) => typeof details[key] === 'boolean' ? [[control, details[key]]] : []))
   if (Object.keys(controls).length) booking.guest_controls = controls
   const category = home.cancellation_policy ? AIRBNB_CANCELLATION[home.cancellation_policy] : undefined
-  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy; it was saved but not sent to Airbnb` }
+  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, field: 'cancellation_policy' }
   const cancellation = {
     ...(category ? { cancellation_policy_category: category } : {}),
     ...(home.long_term_cancellation_policy ? { lts_cancellation_policy_id: AIRBNB_LONG_TERM_CANCELLATION[home.long_term_cancellation_policy] } : {}),
@@ -1519,7 +1528,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
       ...(payment ? stayPaymentInsert(access, { id, currency: home.currency, location_id: home.location_id }, payment, `${key}:payment`, now) : []),
     ], { operation: 'Create stay' })
   } catch (error) {
-    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
     if (/UNIQUE constraint failed: stays\.organization_id, stays\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
       const concurrent = await replay()
       if (concurrent) return pushed(concurrent)
@@ -1568,7 +1577,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
       ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
     ], { operation: 'Update stay' })
   } catch (error) {
-    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay or a linked calendar already holds one of these nights', 'check_in_date')
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
@@ -2351,4 +2360,285 @@ export async function readCheckoutStay(db: DbClient, organizationId: string, sta
   const [home] = await stayHomesWhere(db, organizationId, stay.product_id, { sql: '1 = 1', params: [] })
   if (!home) throw new Error(`Stay ${stayId} has no home`)
   return { ...stay, home }
+}
+
+/**
+ * Linked calendars. A home listed on Vrbo links its Vrbo calendar by iCal
+ * address: the nights Vrbo shows taken are claimed here like any stay's, so a
+ * host stay or site checkout on them is refused, an Airbnb booking on them
+ * lands overbooked, and Airbnb is told they are taken. Vrbo reads the home's
+ * own taken nights from its export address. iCal carries dates only.
+ */
+export type StayCalendarChannel = 'vrbo'
+
+export interface StayCalendarLink {
+  channel: StayCalendarChannel
+  /** The address KrabiClaw reads the Vrbo calendar from. */
+  import_url: string
+  /** The address to paste into Vrbo: this home's taken nights, other than Vrbo's own. */
+  export_url: string
+  /** When the Vrbo calendar was last read; null until the first read. */
+  synced_at: string | null
+  /** Why the last read failed; null when it succeeded or has not run. */
+  sync_error: string | null
+  /** Future nights Vrbo shows taken that another stay here already holds: double bookings for the host to resolve. */
+  conflicts: string[]
+}
+
+interface StayCalendarLinkRow { id: string; organization_id: string; product_id: string; channel: StayCalendarChannel; import_url: string; export_token: string; blocked_json: string; synced_at: string | null; sync_error: string | null }
+
+const CALENDAR_LINK_COLUMNS = 'id, organization_id, product_id, channel, import_url, export_token, blocked_json, synced_at, sync_error'
+
+type CalendarLinkEnv = StayMutationEnv & { BETTER_AUTH_URL?: string }
+
+/** The export address on the app's own origin. */
+function exportUrl(env: CalendarLinkEnv, token: string): string {
+  const origin = env.BETTER_AUTH_URL?.replace(/\/$/, '')
+  if (!origin) fail(500, 'BETTER_AUTH_URL_REQUIRED', 'BETTER_AUTH_URL is required to address a calendar export', 'export_url')
+  return `${origin}/api/public/stay-calendars/${token}.ics`
+}
+
+function blockedRanges(row: StayCalendarLinkRow): Array<[string, string]> {
+  const parsed: unknown = JSON.parse(row.blocked_json)
+  if (!Array.isArray(parsed) || !parsed.every(range => Array.isArray(range) && range.length === 2 && range.every(day => typeof day === 'string' && DATE.test(day)))) {
+    fail(500, 'STAY_CALENDAR_LINK_INVALID', 'The linked calendar\'s saved nights are not readable', 'blocked_json')
+  }
+  return parsed as Array<[string, string]>
+}
+
+/** Each night of the ranges, from `from` (inclusive) to `to` (exclusive). */
+function rangeNights(ranges: ReadonlyArray<readonly [string, string]>, from: string, to: string): string[] {
+  const nights = new Set<string>()
+  for (const [start, end] of ranges) {
+    for (let night = start < from ? from : start; night < end && night < to; night = addDays(night, 1)) nights.add(night)
+  }
+  return [...nights].sort()
+}
+
+/** Consecutive nights as [start, end) ranges. */
+function nightRuns(nights: readonly string[]): Array<[string, string]> {
+  const runs: Array<[string, string]> = []
+  for (const night of [...nights].sort()) {
+    const last = runs.at(-1)
+    if (last && last[1] === night) last[1] = addDays(night, 1)
+    else runs.push([night, addDays(night, 1)])
+  }
+  return runs
+}
+
+async function calendarLinkView(db: DbClient, env: CalendarLinkEnv, row: StayCalendarLinkRow, timezone: string): Promise<StayCalendarLink> {
+  const today = homeToday(timezone)
+  const wanted = rangeNights(blockedRanges(row), today, addDays(today, MAX_CALENDAR_DAYS))
+  const conflicts = wanted.length ? await queryAll<{ date: string }>(db, `SELECT date FROM stay_nights
+      WHERE organization_id = ? AND product_id = ? AND date IN (SELECT value FROM json_each(?)) AND calendar_link_id IS NOT ?
+        AND NOT (${LAPSED_HOLD_CLAIM_SQL}) ORDER BY date`, [row.organization_id, row.product_id, JSON.stringify(wanted), row.id]) : []
+  return {
+    channel: row.channel, import_url: row.import_url, export_url: exportUrl(env, row.export_token),
+    synced_at: row.synced_at, sync_error: row.sync_error, conflicts: conflicts.map(night => night.date),
+  }
+}
+
+async function homeCalendarLink(db: DbClient, organizationId: string, productId: string): Promise<StayCalendarLinkRow | null> {
+  return queryFirst<StayCalendarLinkRow>(db, `SELECT ${CALENDAR_LINK_COLUMNS} FROM stay_calendar_links WHERE organization_id = ? AND product_id = ? AND channel = 'vrbo'`, [organizationId, productId])
+}
+
+/** The home's linked Vrbo calendar; null when the home has none. */
+export async function readStayCalendarLink(db: DbClient, env: CalendarLinkEnv, access: StayAccess, productId: string): Promise<StayCalendarLink | null> {
+  // Both addresses are credentials to the calendars; only a manager sees them.
+  requireManager(access)
+  const home = await readStayHome(db, access, productId)
+  const row = await homeCalendarLink(db, access.organizationId, home.product_id)
+  return row ? calendarLinkView(db, env, row, home.timezone) : null
+}
+
+/** An iCal DATE value (RFC 5545 3.3.4) as YYYY-MM-DD. */
+function icalDate(line: string): string {
+  const value = line.slice(line.indexOf(':') + 1).trim()
+  const params = line.slice(0, line.indexOf(':')).split(';').slice(1)
+  if (params.some(param => /^VALUE=/i.test(param) && param.toUpperCase() !== 'VALUE=DATE') || !/^\d{8}$/.test(value)) {
+    throw new Error(`The calendar has a time where a date belongs (${line.slice(0, 80)}); only all-day dates are read`)
+  }
+  const day = `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`
+  if (new Date(`${day}T00:00:00Z`).toISOString().slice(0, 10) !== day) throw new Error(`The calendar has an invalid date (${value})`)
+  return day
+}
+
+/** The [start, end) date ranges of an iCal calendar's events, other than cancelled ones. */
+export function parseIcalRanges(text: string): Array<[string, string]> {
+  const lines = text.replace(/\r\n?/g, '\n').replace(/\n[ \t]/g, '').split('\n')
+  if (lines[0]?.trim() !== 'BEGIN:VCALENDAR') throw new Error('The address did not return an iCal calendar')
+  const ranges: Array<[string, string]> = []
+  let event: { start?: string; end?: string; cancelled: boolean } | null = null
+  let closed = false
+  for (const line of lines) {
+    if (line === 'END:VCALENDAR') { closed = true; break }
+    const name = line.split(/[;:]/, 1)[0]!.toUpperCase()
+    if (line === 'BEGIN:VEVENT') event = { cancelled: false }
+    else if (!event) continue
+    else if (name === 'DTSTART') event.start = icalDate(line)
+    else if (name === 'DTEND') event.end = icalDate(line)
+    else if (name === 'STATUS') event.cancelled = line.slice(line.indexOf(':') + 1).trim().toUpperCase() === 'CANCELLED'
+    else if (line === 'END:VEVENT') {
+      if (!event.start) throw new Error('The calendar has an event without a start date')
+      // RFC 5545 3.6.1: an all-day event without DTEND lasts its start day.
+      const end = event.end ?? addDays(event.start, 1)
+      if (end <= event.start) throw new Error(`The calendar has an event ending before it starts (${event.start})`)
+      if (!event.cancelled) ranges.push([event.start, end])
+      event = null
+    }
+  }
+  if (event || !closed) throw new Error('The calendar ended before END:VCALENDAR; it was not read whole')
+  return ranges
+}
+
+/**
+ * Read the linked Vrbo calendar and claim the nights it shows taken from today
+ * on; nights it no longer shows are released. Airbnb is told the nights that
+ * changed. A failed read is recorded on the link and thrown; the earlier
+ * claims stay, as the last calendar Vrbo served.
+ */
+async function syncCalendarLink(db: DbClient, env: CalendarLinkEnv, row: StayCalendarLinkRow): Promise<StayCalendarLink & { channel_push: SuccessfulChannelPush | null }> {
+  const access: StayAccess = { organizationId: row.organization_id, actorId: 'system', manage: true }
+  const home = await readStayHome(db, access, row.product_id)
+  const recordFailure = async (message: string, code: string, cause?: unknown): Promise<never> => {
+    await execute(db, 'UPDATE stay_calendar_links SET sync_error = ?, updated_at = ? WHERE id = ? AND import_url = ? AND synced_at IS ?', [message, new Date().toISOString(), row.id, row.import_url, row.synced_at])
+    throw new HTTPError({ statusCode: 502, message: `The Vrbo calendar could not be read. ${message}`, data: { code, field: 'import_url', product_id: row.product_id, committed: true }, cause })
+  }
+  let ranges: Array<[string, string]>
+  try {
+    const response = await fetch(row.import_url, { headers: { accept: 'text/calendar' } })
+    if (!response.ok || !response.body) return await recordFailure(`Vrbo answered HTTP ${response.status}${response.body ? '' : ' with no calendar'}.`, 'STAY_CALENDAR_READ_FAILED')
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let size = 0
+    for (let part = await reader.read(); !part.done; part = await reader.read()) {
+      size += part.value.byteLength
+      if (size > MAX_CALENDAR_BYTES) {
+        await reader.cancel()
+        return await recordFailure(`The calendar is larger than ${MAX_CALENDAR_BYTES / 1_000_000} MB.`, 'STAY_CALENDAR_TOO_LARGE')
+      }
+      chunks.push(part.value)
+    }
+    const body = new Uint8Array(size)
+    chunks.reduce((offset, chunk) => { body.set(chunk, offset); return offset + chunk.byteLength }, 0)
+    ranges = parseIcalRanges(new TextDecoder().decode(body))
+  } catch (error) {
+    if (error instanceof HTTPError) throw error
+    return await recordFailure(error instanceof Error ? error.message : String(error), 'STAY_CALENDAR_INVALID', error)
+  }
+  const today = homeToday(home.timezone)
+  const nights = rangeNights(ranges, today, addDays(today, MAX_CALENDAR_DAYS))
+  const claimed = async () => (await queryAll<{ date: string }>(db, 'SELECT date FROM stay_nights WHERE calendar_link_id = ? ORDER BY date', [row.id])).map(night => night.date)
+  const before = await claimed()
+  const now = new Date().toISOString()
+  const wanted = JSON.stringify(nights)
+  // Every write applies only while the link still holds the address and last read this read
+  // started from, so a slower read (of a replaced address, or one another read overtook)
+  // changes nothing and tells no channel.
+  const current = 'EXISTS (SELECT 1 FROM stay_calendar_links WHERE id = ? AND import_url = ? AND synced_at IS ?)'
+  const guard = [row.id, row.import_url, row.synced_at]
+  const results = await executeBatch(db, [
+    { query: `DELETE FROM stay_nights WHERE product_id = ? AND date IN (SELECT value FROM json_each(?)) AND ${LAPSED_HOLD_CLAIM_SQL} AND ${current}`, params: [row.product_id, wanted, ...guard] },
+    { query: `DELETE FROM stay_nights WHERE calendar_link_id = ? AND date NOT IN (SELECT value FROM json_each(?)) AND ${current}`, params: [row.id, wanted, ...guard] },
+    {
+      query: `INSERT INTO stay_nights (organization_id, product_id, date, calendar_link_id) SELECT ?, ?, value, ? FROM json_each(?) WHERE ${current}
+              ON CONFLICT (product_id, date) DO NOTHING`,
+      params: [row.organization_id, row.product_id, row.id, wanted, ...guard],
+    },
+    { query: 'UPDATE stay_calendar_links SET blocked_json = ?, synced_at = ?, sync_error = NULL, updated_at = ? WHERE id = ? AND import_url = ? AND synced_at IS ?', params: [JSON.stringify(ranges), now, now, ...guard] },
+  ], { operation: 'Sync linked calendar' })
+  const applied = results[3]?.meta.changes
+  if (applied !== 0 && applied !== 1) fail(500, 'STAY_CALENDAR_WRITE_RESULT_REQUIRED', 'The linked calendar write did not report its affected row count', 'changes')
+  const after = await claimed()
+  const changed = nightRuns([...before.filter(night => !after.includes(night)), ...after.filter(night => !before.includes(night))])
+  const saved = await homeCalendarLink(db, row.organization_id, row.product_id)
+  if (!saved) fail(409, 'STAY_CALENDAR_LINK_REMOVED', 'The linked calendar was removed while it was being read', 'import_url')
+  // Another read finished first and owns the claims and their channel push.
+  if (applied === 0) return { ...await calendarLinkView(db, env, saved, home.timezone), channel_push: null }
+  if (!changed.length) return { ...await calendarLinkView(db, env, saved, home.timezone), channel_push: null }
+  const channelPush = await pushNights(db, env, access, row.product_id, changed)
+  return completeChannelPush(channelPush, { product_id: row.product_id, updated_at: now, ranges: changed }, async () => {
+    await publishStayInvalidation(env, { type: 'nights.changed', organizationId: row.organization_id, locationId: home.location_id, productId: row.product_id, stayId: null }, { updated_at: now })
+    return calendarLinkView(db, env, saved, home.timezone)
+  })
+}
+
+/** Link the home's Vrbo calendar, or change its address, and read it now. */
+export async function setStayCalendarLink(db: DbClient, env: CalendarLinkEnv, access: StayAccess, productId: string, input: Record<string, unknown>): Promise<StayCalendarLink & { channel_push: SuccessfulChannelPush | null }> {
+  requireManager(access)
+  const home = await readStayHome(db, access, productId)
+  const url = typeof input.import_url === 'string' ? input.import_url.trim() : ''
+  const parsed = url.length <= 2000 && URL.canParse(url) ? new URL(url) : null
+  if (!parsed || parsed.protocol !== 'https:') fail(422, 'INVALID_STAY_CALENDAR_URL', 'import_url must be the https iCal address Vrbo shows under Calendar sync (Export calendar)', 'import_url')
+  await requireChannelPush(db, env, access.organizationId, home.product_id)
+  const now = new Date().toISOString()
+  const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+  await executeBatch(db, [
+    {
+      query: `INSERT INTO stay_calendar_links (id, organization_id, product_id, channel, import_url, export_token, created_at, updated_at, created_by, updated_by)
+              VALUES (?, ?, ?, 'vrbo', ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (product_id, channel) DO UPDATE SET import_url = excluded.import_url, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+      params: [crypto.randomUUID(), access.organizationId, home.product_id, parsed.href, token, now, now, access.actorId, access.actorId],
+    },
+    organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.calendar_linked', entityType: 'product', entityId: home.product_id, metadata: { channel: 'vrbo' } }),
+  ], { operation: 'Link stay calendar' })
+  const row = await homeCalendarLink(db, access.organizationId, home.product_id)
+  if (!row) fail(500, 'STAY_CALENDAR_LINK_NOT_READABLE', 'The linked calendar could not be read back', 'import_url')
+  return syncCalendarLink(db, env, row)
+}
+
+/** Unlink the home's Vrbo calendar: its nights are released and Airbnb is told. */
+export async function removeStayCalendarLink(db: DbClient, env: StayMutationEnv, access: StayAccess, productId: string): Promise<{ channel_push: SuccessfulChannelPush | null }> {
+  requireManager(access)
+  const home = await readStayHome(db, access, productId)
+  const row = await homeCalendarLink(db, access.organizationId, home.product_id)
+  if (!row) fail(404, 'STAY_CALENDAR_LINK_NOT_FOUND', 'This home has no linked Vrbo calendar', 'product_id')
+  await requireChannelPush(db, env, access.organizationId, home.product_id)
+  const released = (await queryAll<{ date: string }>(db, 'SELECT date FROM stay_nights WHERE calendar_link_id = ? ORDER BY date', [row.id])).map(night => night.date)
+  const now = new Date().toISOString()
+  await executeBatch(db, [
+    { query: 'DELETE FROM stay_calendar_links WHERE id = ?', params: [row.id] },
+    organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.calendar_unlinked', entityType: 'product', entityId: home.product_id, metadata: { channel: row.channel } }),
+  ], { operation: 'Unlink stay calendar' })
+  const ranges = nightRuns(released)
+  const channelPush = ranges.length ? await pushNights(db, env, access, home.product_id, ranges) : null
+  return completeChannelPush(channelPush, { product_id: home.product_id, updated_at: now, ranges }, async () => {
+    if (ranges.length) await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: now })
+    return {}
+  })
+}
+
+/** Read every linked calendar at once, so a slow site holds up no other; failures are reported after all have finished. */
+export async function syncStayCalendarLinks(db: DbClient, env: CalendarLinkEnv): Promise<{ synced: number }> {
+  const rows = await queryAll<StayCalendarLinkRow>(db, `SELECT ${CALENDAR_LINK_COLUMNS} FROM stay_calendar_links`)
+  const failures = (await Promise.allSettled(rows.map(row => syncCalendarLink(db, env, row))))
+    .flatMap(result => result.status === 'rejected' ? [result.reason] : [])
+  if (failures.length) throw new AggregateError(failures, `${failures.length} of ${rows.length} linked calendars could not be synced. ${failures.map(error => error instanceof Error ? error.message : String(error)).join(' ')}`)
+  return { synced: rows.length }
+}
+
+/**
+ * The home's taken nights, from today, as the iCal calendar Vrbo reads from
+ * the export address. Nights the Vrbo calendar itself holds are left out, so
+ * Vrbo never reads its own bookings back. Nothing about the guest is shown.
+ */
+export async function stayCalendarExport(db: DbClient, token: string): Promise<string> {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(token)) fail(404, 'STAY_CALENDAR_NOT_FOUND', 'This calendar address does not exist', 'token')
+  const row = await queryFirst<StayCalendarLinkRow>(db, `SELECT ${CALENDAR_LINK_COLUMNS} FROM stay_calendar_links WHERE export_token = ?`, [token])
+  if (!row) fail(404, 'STAY_CALENDAR_NOT_FOUND', 'This calendar address does not exist', 'token')
+  const [home] = await stayHomesWhere(db, row.organization_id, row.product_id, { sql: '1 = 1', params: [] })
+  if (!home) fail(404, 'STAY_CALENDAR_NOT_FOUND', 'This calendar address does not exist', 'token')
+  const today = homeToday(home.timezone)
+  const nights = await homeNights(db, row.organization_id, home, today, addDays(today, MAX_CALENDAR_DAYS))
+  const taken = nights.filter(night => !night.available && night.calendar !== row.channel).map(night => night.date)
+  const compact = (day: string) => day.replaceAll('-', '')
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
+  return [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//KrabiClaw//Stay calendar//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    ...nightRuns(taken).flatMap(([start, end]) => [
+      'BEGIN:VEVENT', `UID:${row.product_id}-${compact(start)}@krabiclaw.com`, `DTSTAMP:${stamp}`,
+      `DTSTART;VALUE=DATE:${compact(start)}`, `DTEND;VALUE=DATE:${compact(end)}`, 'SUMMARY:Not available', 'END:VEVENT',
+    ]),
+    'END:VCALENDAR', '',
+  ].join('\r\n')
 }

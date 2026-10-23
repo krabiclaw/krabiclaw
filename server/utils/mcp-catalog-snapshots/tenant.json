@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:ebca05ea7d8bc036b3c86e56c45077e70a194c193c95a1635a643d07e774e7a4",
-  "documentationFingerprint": "sha256:a2b4aa8ef5b2138dfd63c3c28ecd817fa34ee380febb46f0de420df0c3e155a4",
+  "fingerprint": "sha256:fe68ff9904dc5f454e046695dff33bf5a540e927509aa72e126c5cd174202d77",
+  "documentationFingerprint": "sha256:99507f9e62ed427bb8b0cc500da09ba52ae8c22ee9880f9a0c9b8e7785f794c5",
   "tools": [
     {
       "name": "add_organization_language",
@@ -112,7 +112,7 @@
     {
       "name": "add_stay_photo_room",
       "title": "Add stay photo room",
-      "description": "Add an authored room or space to a home’s photo tour. Does not change bedrooms, beds, bathrooms or amenities. Returns the created room’s authoritative ID and the updated home.",
+      "description": "Add an authored room or space to a home’s photo tour. Does not change bedrooms, beds, bathrooms or amenities. Returns the created room’s authoritative ID and the updated home. Saved in KrabiClaw; the connected Airbnb listing’s photo tour and accessibility details are edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -291,6 +291,21 @@
                 ],
                 "type": [
                   "object",
+                  "null"
+                ]
+              },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
                   "null"
                 ]
               },
@@ -1505,6 +1520,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -7391,7 +7408,7 @@
     {
       "name": "attach_media",
       "title": "Attach media",
-      "description": "Attach one existing media asset to an ordered collection placement (a gallery or a compliance document list), appending it after the current last item. An existing attachment stays in place; a full collection rejects a new attachment. For a single-valued placement (a cover, hero, or logo) use set_media instead.",
+      "description": "Attach one existing media asset to an ordered collection placement (a gallery or a compliance document list), appending it after the current last item. An existing attachment stays in place; a full collection rejects a new attachment. For a single-valued placement (a cover, hero, or logo) use set_media instead. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -8560,6 +8577,610 @@
                     "null"
                   ]
                 },
+                "stay": {
+                  "additionalProperties": false,
+                  "description": "Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.",
+                  "properties": {
+                    "amenities": {
+                      "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                      "items": {
+                        "enum": [
+                          "ac",
+                          "dryer",
+                          "essentials",
+                          "heating",
+                          "hot_water",
+                          "kitchen",
+                          "tv",
+                          "washer",
+                          "wireless_internet",
+                          "bathtub",
+                          "bidet",
+                          "body_soap",
+                          "cleaning_products",
+                          "conditioner",
+                          "hair_dryer",
+                          "alfresco_shower",
+                          "shampoo",
+                          "shower_gel",
+                          "bed_linens",
+                          "wardrobe_or_closet",
+                          "clothes_drying_rack",
+                          "extra_pillows_and_blankets",
+                          "hangers",
+                          "iron",
+                          "mosquito_net",
+                          "room_darkening_shades",
+                          "safe",
+                          "arcade_machine",
+                          "batting_cage",
+                          "books",
+                          "bowling_alley",
+                          "climbing_wall",
+                          "ethernet_connection",
+                          "exercise_equipment",
+                          "game_console",
+                          "laser_tag",
+                          "life_size_games",
+                          "mini_golf",
+                          "home_theater",
+                          "piano",
+                          "ping_pong_table",
+                          "pool_table",
+                          "record_player",
+                          "skate_ramp",
+                          "sound_system",
+                          "theme_room",
+                          "baby_bath",
+                          "baby_monitor",
+                          "childrens_bike",
+                          "playroom",
+                          "stair_gates",
+                          "babysitter_recommendations",
+                          "board_games",
+                          "changing_table",
+                          "childrens_books_and_toys",
+                          "childrens_dinnerware",
+                          "crib",
+                          "fireplace_guards",
+                          "high_chair",
+                          "playground",
+                          "outlet_covers",
+                          "pack_n_play_travel_crib",
+                          "table_corner_guards",
+                          "window_guards",
+                          "ceiling_fan",
+                          "fireplace",
+                          "portable_fans",
+                          "carbon_monoxide_detector",
+                          "fire_extinguisher",
+                          "first_aid_kit",
+                          "smoke_detector",
+                          "laptop_friendly_workspace",
+                          "pocket_wifi",
+                          "baking_sheet",
+                          "barbeque_utensils",
+                          "bread_maker",
+                          "blender",
+                          "coffee",
+                          "coffee_maker",
+                          "cooking_basics",
+                          "dining_table",
+                          "dishes_and_silverware",
+                          "dishwasher",
+                          "freezer",
+                          "hot_water_kettle",
+                          "kitchenette",
+                          "microwave",
+                          "mini_fridge",
+                          "oven",
+                          "refrigerator",
+                          "rice_maker",
+                          "stove",
+                          "toaster",
+                          "trash_compacter",
+                          "wine_glasses",
+                          "beach_access",
+                          "lake_access",
+                          "laundromat_nearby",
+                          "private_entrance",
+                          "resort_access",
+                          "ski_in_ski_out",
+                          "waterfront",
+                          "garden_or_backyard",
+                          "bbq_area",
+                          "beach_essentials",
+                          "bicycle",
+                          "boat_slip",
+                          "fire_pit",
+                          "hammock",
+                          "kayak",
+                          "alfresco_dining",
+                          "outdoor_seating",
+                          "outdoor_kitchen",
+                          "patio_or_belcony",
+                          "sun_loungers",
+                          "free_parking",
+                          "street_parking",
+                          "paid_parking_on_premises",
+                          "paid_parking",
+                          "free_parking_off_premises",
+                          "elevator",
+                          "ev_charger",
+                          "hockey_rink",
+                          "gym",
+                          "jacuzzi",
+                          "pool",
+                          "private_living_room",
+                          "sauna",
+                          "single_level_home",
+                          "ebike_charger",
+                          "solar_power",
+                          "recycling",
+                          "composting",
+                          "doorman",
+                          "gated_community",
+                          "breakfast",
+                          "cleaning_before_checkout",
+                          "long_term_stays_allowed",
+                          "luggage_dropoff_allowed",
+                          "bay_view",
+                          "beach_view",
+                          "canal_view",
+                          "city_view",
+                          "courtyard_view",
+                          "desert_view",
+                          "garden_view",
+                          "golf_view",
+                          "harbor_view",
+                          "lake_view",
+                          "marina_view",
+                          "mountain_view",
+                          "ocean_view",
+                          "park_view",
+                          "pool_view",
+                          "resort_view",
+                          "river_view",
+                          "sea_view",
+                          "valley_view",
+                          "vineyard_view",
+                          "landmark_view"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "amenity_answers": {
+                      "description": "Sparse amenity answer patch: true offers it, false explicitly reports absence, null clears to unknown. Omitted codes remain. Positive-list edits preserve false reports and remove omitted positive reports to unknown. Contradictions between amenities and amenity_answers are refused.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "available": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "code": {
+                            "enum": [
+                              "ac",
+                              "dryer",
+                              "essentials",
+                              "heating",
+                              "hot_water",
+                              "kitchen",
+                              "tv",
+                              "washer",
+                              "wireless_internet",
+                              "bathtub",
+                              "bidet",
+                              "body_soap",
+                              "cleaning_products",
+                              "conditioner",
+                              "hair_dryer",
+                              "alfresco_shower",
+                              "shampoo",
+                              "shower_gel",
+                              "bed_linens",
+                              "wardrobe_or_closet",
+                              "clothes_drying_rack",
+                              "extra_pillows_and_blankets",
+                              "hangers",
+                              "iron",
+                              "mosquito_net",
+                              "room_darkening_shades",
+                              "safe",
+                              "arcade_machine",
+                              "batting_cage",
+                              "books",
+                              "bowling_alley",
+                              "climbing_wall",
+                              "ethernet_connection",
+                              "exercise_equipment",
+                              "game_console",
+                              "laser_tag",
+                              "life_size_games",
+                              "mini_golf",
+                              "home_theater",
+                              "piano",
+                              "ping_pong_table",
+                              "pool_table",
+                              "record_player",
+                              "skate_ramp",
+                              "sound_system",
+                              "theme_room",
+                              "baby_bath",
+                              "baby_monitor",
+                              "childrens_bike",
+                              "playroom",
+                              "stair_gates",
+                              "babysitter_recommendations",
+                              "board_games",
+                              "changing_table",
+                              "childrens_books_and_toys",
+                              "childrens_dinnerware",
+                              "crib",
+                              "fireplace_guards",
+                              "high_chair",
+                              "playground",
+                              "outlet_covers",
+                              "pack_n_play_travel_crib",
+                              "table_corner_guards",
+                              "window_guards",
+                              "ceiling_fan",
+                              "fireplace",
+                              "portable_fans",
+                              "carbon_monoxide_detector",
+                              "fire_extinguisher",
+                              "first_aid_kit",
+                              "smoke_detector",
+                              "laptop_friendly_workspace",
+                              "pocket_wifi",
+                              "baking_sheet",
+                              "barbeque_utensils",
+                              "bread_maker",
+                              "blender",
+                              "coffee",
+                              "coffee_maker",
+                              "cooking_basics",
+                              "dining_table",
+                              "dishes_and_silverware",
+                              "dishwasher",
+                              "freezer",
+                              "hot_water_kettle",
+                              "kitchenette",
+                              "microwave",
+                              "mini_fridge",
+                              "oven",
+                              "refrigerator",
+                              "rice_maker",
+                              "stove",
+                              "toaster",
+                              "trash_compacter",
+                              "wine_glasses",
+                              "beach_access",
+                              "lake_access",
+                              "laundromat_nearby",
+                              "private_entrance",
+                              "resort_access",
+                              "ski_in_ski_out",
+                              "waterfront",
+                              "garden_or_backyard",
+                              "bbq_area",
+                              "beach_essentials",
+                              "bicycle",
+                              "boat_slip",
+                              "fire_pit",
+                              "hammock",
+                              "kayak",
+                              "alfresco_dining",
+                              "outdoor_seating",
+                              "outdoor_kitchen",
+                              "patio_or_belcony",
+                              "sun_loungers",
+                              "free_parking",
+                              "street_parking",
+                              "paid_parking_on_premises",
+                              "paid_parking",
+                              "free_parking_off_premises",
+                              "elevator",
+                              "ev_charger",
+                              "hockey_rink",
+                              "gym",
+                              "jacuzzi",
+                              "pool",
+                              "private_living_room",
+                              "sauna",
+                              "single_level_home",
+                              "ebike_charger",
+                              "solar_power",
+                              "recycling",
+                              "composting",
+                              "doorman",
+                              "gated_community",
+                              "breakfast",
+                              "cleaning_before_checkout",
+                              "long_term_stays_allowed",
+                              "luggage_dropoff_allowed",
+                              "bay_view",
+                              "beach_view",
+                              "canal_view",
+                              "city_view",
+                              "courtyard_view",
+                              "desert_view",
+                              "garden_view",
+                              "golf_view",
+                              "harbor_view",
+                              "lake_view",
+                              "marina_view",
+                              "mountain_view",
+                              "ocean_view",
+                              "park_view",
+                              "pool_view",
+                              "resort_view",
+                              "river_view",
+                              "sea_view",
+                              "valley_view",
+                              "vineyard_view",
+                              "landmark_view"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "available"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "assigned_member_id": {
+                      "description": "Member who looks after the home; their assigned access shows its stays.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "assigned_team_id": {
+                      "description": "Team who look after the home, such as cleaners.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "bathrooms": {
+                      "description": "Whole and half baths, such as 1.5.",
+                      "maximum": 50,
+                      "minimum": 0,
+                      "multipleOf": 0.5,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "bedrooms": {
+                      "description": "Bedrooms; 0 is a studio.",
+                      "maximum": 50,
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "beds": {
+                      "maximum": 50,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "cancellation_policy": {
+                      "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                      "enum": [
+                        "flexible",
+                        "moderate",
+                        "limited",
+                        "firm",
+                        "strict",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "check_in_end_time": {
+                      "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "check_in_time": {
+                      "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": "string"
+                    },
+                    "check_out_time": {
+                      "description": "Local 24-hour time guests leave by.",
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": "string"
+                    },
+                    "listing_floor": {
+                      "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "listing_type": {
+                      "description": "Whether guests book the entire place, a private room or a shared room. Null when not said.",
+                      "enum": [
+                        "entire_place",
+                        "private_room",
+                        "shared_room",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "location_id": {
+                      "type": "string"
+                    },
+                    "long_term_cancellation_policy": {
+                      "description": "Policy shown to guests for stays of 28 nights or more.",
+                      "enum": [
+                        "firm",
+                        "strict",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "max_guests": {
+                      "maximum": 99,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "min_nights": {
+                      "description": "Default minimum nights; individual nights may set their own.",
+                      "maximum": 365,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "property_size": {
+                      "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
+                      "exclusiveMinimum": 0,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "property_size_unit": {
+                      "description": "The unit of property_size. Size and unit must both be set or both null.",
+                      "enum": [
+                        "square_meters",
+                        "square_feet",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "property_type": {
+                      "description": "Airbnb property type, one the property_type_group offers. Null with property_type_group when not said.",
+                      "enum": [
+                        "apartment",
+                        "condominium",
+                        "serviced_apartment",
+                        "loft",
+                        "house",
+                        "townhouse",
+                        "bungalow",
+                        "cabin",
+                        "chalet",
+                        "earthhouse",
+                        "hut",
+                        "lighthouse",
+                        "villa",
+                        "dome",
+                        "cottage",
+                        "farmstay",
+                        "houseboat",
+                        "tiny_house",
+                        "guesthouse",
+                        "private_suite",
+                        "boat",
+                        "castle",
+                        "cave",
+                        "igloo",
+                        "island",
+                        "plane",
+                        "rv",
+                        "tent",
+                        "tipi",
+                        "train",
+                        "treehouse",
+                        "yurt",
+                        "other",
+                        "barn",
+                        "campsite",
+                        "windmill",
+                        "bus",
+                        "holiday_park",
+                        "ranch",
+                        "religious_building",
+                        "riad",
+                        "shipping_container",
+                        "tower",
+                        "bnb",
+                        "nature_eco_lodge",
+                        "boutique_hotel",
+                        "hostel",
+                        "aparthotel",
+                        "hotel",
+                        "resort",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "property_type_group": {
+                      "description": "Airbnb's property group: apartments (Apartment: apartment, condominium, serviced_apartment, loft); houses (House: house, townhouse, bungalow, cabin, chalet, earthhouse, hut, lighthouse, villa, dome, cottage, farmstay, houseboat, tiny_house); secondary_units (Secondary unit: guesthouse, private_suite, farmstay); unique_homes (Unique space: boat, castle, cave, earthhouse, hut, igloo, island, lighthouse, plane, rv, tent, tipi, train, treehouse, yurt, other, dome, barn, campsite, farmstay, houseboat, tiny_house, windmill, bus, holiday_park, ranch, religious_building, riad, shipping_container, tower); bnb (Bed and breakfast: bnb, nature_eco_lodge, farmstay); boutique_hotels_and_more (Boutique hotel: boutique_hotel, nature_eco_lodge, hostel, serviced_apartment, aparthotel, hotel, resort). Set with property_type, both or neither.",
+                      "enum": [
+                        "apartments",
+                        "houses",
+                        "secondary_units",
+                        "unique_homes",
+                        "bnb",
+                        "boutique_hotels_and_more",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "total_floors": {
+                      "description": "Total floors in the property; null when not said.",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "year_built": {
+                      "description": "Year the property was built; null when not said.",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "location_id",
+                    "check_in_time",
+                    "check_out_time",
+                    "max_guests"
+                  ],
+                  "type": "object"
+                },
                 "tax_code": {
                   "type": [
                     "string",
@@ -8577,7 +9198,7 @@
                   "description": "Omit to create a single default variant. Required once the product has options.",
                   "items": {
                     "additionalProperties": false,
-                    "description": "One buyable configuration. A product with no options still has exactly one. Keep the id when editing: a variant that keeps its id keeps its bookings.",
+                    "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
                     "properties": {
                       "active": {
                         "type": "boolean"
@@ -11713,7 +12334,7 @@
     {
       "name": "cancel_stay",
       "title": "Cancel stay",
-      "description": "Cancel a stay the host took and free its nights. Refunds are recorded separately with record_stay_payment as a negative amount.",
+      "description": "Cancel a host-entered stay under its current version, free its nights, cancel pending automatic guest messages and update availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that cancellation was saved. If a website payment needs a refund, returns financial_action_required with an authenticated dashboard link before cancellation or financial writes. Offline refunds can be recorded separately with record_stay_payment; that record moves no money.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -12137,7 +12758,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       },
       "securitySchemes": [
@@ -12332,118 +12953,6 @@
       "domain": "bookings",
       "minimumRole": "admin",
       "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "clone_google_ads_campaign",
-      "title": "Clone google ads campaign",
-      "description": "Clone an existing Google Ads campaign structure for a new landing page or blog post, copying keywords, updating destination URL, and adapting ad headlines and daily budget.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "additional_keywords": {
-            "description": "Optional additional keywords to include.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "contains_eu_political_advertising": {
-            "description": "Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.",
-            "type": "boolean"
-          },
-          "daily_budget_micros": {
-            "description": "Optional daily budget in micros. Defaults to the source campaign budget.",
-            "minimum": 1000000,
-            "type": "integer"
-          },
-          "headline_replacements": {
-            "description": "Optional mapping of text patterns to replace in source ad headlines (e.g. {\"Old Title\": \"New Title\"}).",
-            "type": "object"
-          },
-          "new_campaign_name": {
-            "description": "Name for the cloned campaign.",
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
-            "type": "string"
-          },
-          "source_campaign_id": {
-            "description": "Google Ads campaign ID of the template campaign to clone.",
-            "type": "string"
-          },
-          "status": {
-            "description": "Initial status of the cloned campaign (default PAUSED).",
-            "enum": [
-              "ENABLED",
-              "PAUSED"
-            ],
-            "type": "string"
-          },
-          "target_url": {
-            "description": "Destination landing page or blog post URL for the new campaign.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "source_campaign_id",
-          "new_campaign_name",
-          "target_url",
-          "contains_eu_political_advertising"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "properties": {
-          "ad_group_resource_name": {
-            "type": "string"
-          },
-          "ad_resource_name": {
-            "type": "string"
-          },
-          "budget_resource_name": {
-            "type": "string"
-          },
-          "campaign_id": {
-            "type": "string"
-          },
-          "resource_name": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "resource_name",
-          "budget_resource_name",
-          "ad_group_resource_name",
-          "ad_resource_name",
-          "status"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "google_ads",
-      "minimumRole": "admin",
-      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -18047,7 +18556,7 @@
     {
       "name": "create_google_ads_search_campaign",
       "title": "Create google ads search campaign",
-      "description": "Create and launch a new Google Ads Search campaign with an atomic mutate batch including daily budget, campaign, ad group, keywords, and responsive search ad.",
+      "description": "Create a Google Ads Search campaign from supplied keywords, ad copy, destination URL and daily budget. Creates one ad group and responsive search ad. Starts PAUSED unless ENABLED is explicitly requested; enabled campaigns can spend the connected account’s advertising budget.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -18064,24 +18573,28 @@
             "description": "Descriptions for Responsive Search Ad (2 to 4, max 90 chars each).",
             "items": {
               "maxLength": 90,
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 4,
             "minItems": 2,
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "headlines": {
             "description": "Headlines for Responsive Search Ad (3 to 15, max 30 chars each).",
             "items": {
               "maxLength": 30,
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 15,
             "minItems": 3,
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "keywords": {
-            "description": "Keywords to target with optional match type (defaults to PHRASE).",
+            "description": "Keywords to target with optional match type (default PHRASE).",
             "items": {
               "properties": {
                 "match_type": {
@@ -18093,6 +18606,7 @@
                   "type": "string"
                 },
                 "text": {
+                  "minLength": 1,
                   "type": "string"
                 }
               },
@@ -18105,6 +18619,8 @@
           },
           "name": {
             "description": "Campaign name.",
+            "minLength": 1,
+            "pattern": "\\S",
             "type": "string"
           },
           "organization_id": {
@@ -18168,8 +18684,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       },
@@ -24654,7 +25169,7 @@
             "description": "Omit to create a single default variant. Required once the product has options.",
             "items": {
               "additionalProperties": false,
-              "description": "One buyable configuration. A product with no options still has exactly one. Keep the id when editing: a variant that keeps its id keeps its bookings.",
+              "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
               "properties": {
                 "active": {
                   "type": "boolean"
@@ -27368,7 +27883,7 @@
     {
       "name": "create_site_page",
       "title": "Create site page",
-      "description": "Create an authored site page in the named language, returning its document, blocks and editor information. A secondary language must name an existing source page. Supply the actual content for that language; no translation is generated. Pages on a live site can become public immediately; blog articles and short announcements use their own tools.",
+      "description": "Add a new authored site page or a new language version of an existing source page. Existing document IDs and occupied language paths are refused; existing pages and their content are retained. Supply the actual content for the named language; no translation is generated. Pages on a live site can become public immediately. Returns the new document, blocks and editor information.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -29012,7 +29527,7 @@
         "additionalProperties": false,
         "properties": {
           "blocks": {
-            "description": "Complete canonical block array. Each existing block must retain its id unless its removal is explicitly confirmed. Block data never contains asset IDs or delivery URLs. Omit media to preserve that block's current placements; provide media explicitly to replace them, or call set_media with owner_type \"content_block\", the block id, and the intended slot.",
+            "description": "Ordered blocks for the new page. Existing pages and their blocks are not replaced. Block data contains no asset IDs or delivery URLs; use each block’s media field for its saved media placements.",
             "items": {
               "additionalProperties": false,
               "anyOf": [
@@ -30961,6 +31476,7 @@
             "type": "array"
           },
           "locale": {
+            "description": "Authored language of the new page version. Omit or use null for the site’s source language.",
             "type": [
               "string",
               "null"
@@ -30971,7 +31487,7 @@
             "type": "string"
           },
           "pageType": {
-            "description": "The page's type. Send the page_type from the last read unless you are changing it.",
+            "description": "Type of a new source page. A language version inherits its source page’s type; omit this field or supply the same type.",
             "enum": [
               "custom",
               "recipe",
@@ -30981,28 +31497,29 @@
             "type": "string"
           },
           "page_id": {
+            "description": "Existing source page ID only when adding a new secondary-language version. Omit or use null for a new source page.",
             "type": [
               "string",
               "null"
             ]
           },
           "path": {
-            "description": "The saved page path. A page keeps this address when its content or title changes.",
+            "description": "New unused path in this language. An occupied path or redirect is refused; creation does not move an existing page.",
             "type": "string"
           },
           "recipe": {
-            "description": "The template section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
+            "description": "Template section a new source page fills, or null for none. A language version inherits its source page’s recipe when omitted; an explicit value, including null, must match the source.",
             "type": [
               "string",
               "null"
             ]
           },
           "sortOrder": {
-            "description": "The page's position in the site's page list. Send the sort_order from the last read unless you are reordering.",
+            "description": "Position of a new source page in the site’s page list. Language versions inherit the source page’s position and must omit this field.",
             "type": "number"
           },
           "summary": {
-            "description": "Omit to preserve on update; null clears it.",
+            "description": "Summary of the new page; null means no summary.",
             "type": [
               "string",
               "null"
@@ -31013,6 +31530,7 @@
             "type": "string"
           },
           "variant_id": {
+            "description": "Optional new document ID. An existing document ID is refused.",
             "type": [
               "string",
               "null"
@@ -34714,7 +35232,7 @@
     {
       "name": "create_stay",
       "title": "Create stay",
-      "description": "Add a stay the host took directly (phone, repeat guest) at a place to stay. It holds its nights; a night another stay already holds refuses it with STAY_OVERLAP. Takes no payment. Applies existing automatic guest-message schedules and updates connected Airbnb availability through Channex. CHANNEL_PUSH_FAILED with committed:true means the stay was saved; inspect the calendar before retrying.",
+      "description": "Add a stay the host took directly, such as by phone, and hold its nights. A night another stay already holds refuses it with STAY_OVERLAP. Takes no payment. Applies existing automatic guest-message schedules and updates availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that the stay was saved; retry with the same idempotency key.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -35209,7 +35727,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       },
       "securitySchemes": [
@@ -44773,12 +45291,13 @@
     {
       "name": "get_google_ads_campaign",
       "title": "Get google ads campaign",
-      "description": "Read full details of a Google Ads campaign, including its budget, ad groups, criteria/keywords, and responsive search ad headlines, descriptions, and final URLs.",
+      "description": "Read a campaign in the connected Google Ads account when inspecting its status, budget, ad groups, keywords, responsive search ad copy or destination URLs.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "campaign_id": {
             "description": "Numeric Google Ads campaign ID.",
+            "pattern": "^[0-9]+$",
             "type": "string"
           },
           "organization_id": {
@@ -44867,6 +45386,9 @@
                 "matchType": {
                   "type": "string"
                 },
+                "negative": {
+                  "type": "boolean"
+                },
                 "status": {
                   "type": [
                     "string",
@@ -44879,7 +45401,9 @@
               },
               "required": [
                 "text",
-                "matchType"
+                "matchType",
+                "status",
+                "negative"
               ],
               "type": "object"
             },
@@ -45381,6 +45905,21 @@
                 ],
                 "type": [
                   "object",
+                  "null"
+                ]
+              },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
                   "null"
                 ]
               },
@@ -46595,6 +47134,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -47578,7 +48119,7 @@
     {
       "name": "get_member_scheduling",
       "title": "Get member scheduling",
-      "description": "List accessible members and their scheduling when member_id is omitted, or read one member’s hours, time off, explicitly approved public profile and Calendar status. Ordinary members can read only their own scheduling record; owners/admins can inspect their team. No Google event content or credentials are returned.",
+      "description": "List accessible members and their scheduling when member_id is omitted, or read one member’s hours, time off, explicitly approved public profile and Calendar status. Ordinary members can read only their own scheduling record; owners/admins can inspect their team. Before hours are authored, timezone, weekly and time_off are null. No Google event content or credentials are returned.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -47752,10 +48293,16 @@
                         ],
                         "type": "object"
                       },
-                      "type": "array"
+                      "type": [
+                        "array",
+                        "null"
+                      ]
                     },
                     "timezone": {
-                      "type": "string"
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     },
                     "updated_at": {
                       "type": "string"
@@ -47785,7 +48332,10 @@
                         ],
                         "type": "object"
                       },
-                      "type": "array"
+                      "type": [
+                        "array",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -47944,10 +48494,16 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "timezone": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "updated_at": {
                 "type": "string"
@@ -47977,7 +48533,10 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -63415,6 +63974,21 @@
                   "null"
                 ]
               },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "amenities": {
                 "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                 "items": {
@@ -64626,6 +65200,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -64677,6 +65253,17 @@
               "properties": {
                 "available": {
                   "type": "boolean"
+                },
+                "calendar": {
+                  "description": "The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.",
+                  "enum": [
+                    "vrbo",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "channel": {
                   "properties": {
@@ -64779,6 +65366,7 @@
                 "closed_to_departure",
                 "source",
                 "held_until",
+                "calendar",
                 "channel"
               ],
               "type": "object"
@@ -65504,312 +66092,6 @@
       "domain": "organizations",
       "minimumRole": "admin",
       "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "launch_omnichannel_campaign",
-      "title": "Launch omnichannel campaign",
-      "description": "Launch and coordinate an omnichannel marketing campaign across Google Ads (search campaign create or clone), social channels (Instagram, Facebook, Discord), and on-site visitor announcements.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "campaign_title": {
-            "description": "Human-readable name or theme for the marketing campaign.",
-            "type": "string"
-          },
-          "google_ads": {
-            "description": "Optional Google Ads Search campaign creation or cloning configuration.",
-            "properties": {
-              "additional_keywords": {
-                "description": "Optional additional keywords to include.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "contains_eu_political_advertising": {
-                "description": "Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.",
-                "type": "boolean"
-              },
-              "daily_budget_micros": {
-                "description": "Daily budget in micros (e.g. 10000000 for 10 units in account currency).",
-                "minimum": 1000000,
-                "type": "integer"
-              },
-              "descriptions": {
-                "description": "Responsive Search Ad descriptions (min 2) when mode is \"create\".",
-                "items": {
-                  "maxLength": 90,
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "headline_replacements": {
-                "description": "Optional keyword/phrase replacements for ad copy headlines when cloning.",
-                "type": "object"
-              },
-              "headlines": {
-                "description": "Responsive Search Ad headlines (min 3) when mode is \"create\".",
-                "items": {
-                  "maxLength": 30,
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "keywords": {
-                "description": "Keywords to target when mode is \"create\".",
-                "items": {
-                  "properties": {
-                    "match_type": {
-                      "enum": [
-                        "EXACT",
-                        "PHRASE",
-                        "BROAD"
-                      ],
-                      "type": "string"
-                    },
-                    "text": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "text"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "mode": {
-                "description": "Whether to clone an existing high-performing campaign or create a new search campaign.",
-                "enum": [
-                  "clone",
-                  "create"
-                ],
-                "type": "string"
-              },
-              "new_campaign_name": {
-                "description": "Optional campaign name. Defaults to \"<campaign_title> - Search\".",
-                "type": "string"
-              },
-              "source_campaign_id": {
-                "description": "Numeric campaign ID of the template campaign to clone (required when mode is \"clone\").",
-                "type": "string"
-              },
-              "status": {
-                "description": "Initial campaign status (defaults to PAUSED).",
-                "enum": [
-                  "ENABLED",
-                  "PAUSED"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "mode",
-              "contains_eu_political_advertising"
-            ],
-            "type": "object"
-          },
-          "organization_id": {
-            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
-            "type": "string"
-          },
-          "social_post": {
-            "description": "Optional social media broadcast across Facebook, Instagram, or Discord.",
-            "properties": {
-              "caption": {
-                "description": "Post text / caption for social channels.",
-                "type": "string"
-              },
-              "channels": {
-                "description": "Target social channels. Defaults to all currently connected channels.",
-                "items": {
-                  "enum": [
-                    "facebook",
-                    "instagram",
-                    "discord"
-                  ],
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "media_asset_id": {
-                "description": "Optional media asset ID to attach as post image or video.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "caption"
-            ],
-            "type": "object"
-          },
-          "target_url": {
-            "description": "Destination URL (e.g. newly published blog post, product, or landing page).",
-            "type": "string"
-          },
-          "website_announcement": {
-            "description": "Optional on-site visitor announcement banner/popup.",
-            "properties": {
-              "cta_label": {
-                "description": "Call-to-action button text.",
-                "type": "string"
-              },
-              "cta_url": {
-                "description": "Call-to-action link destination (defaults to target_url).",
-                "type": "string"
-              },
-              "description": {
-                "description": "Optional announcement message details.",
-                "type": "string"
-              },
-              "dismissible": {
-                "description": "Whether the announcement can be dismissed by visitors (default true).",
-                "type": "boolean"
-              },
-              "enabled": {
-                "description": "Whether the announcement is active immediately (default true).",
-                "type": "boolean"
-              },
-              "format": {
-                "description": "Whether to present as a top banner or a popup modal (default modal).",
-                "enum": [
-                  "modal",
-                  "banner"
-                ],
-                "type": "string"
-              },
-              "headline": {
-                "description": "Announcement modal title.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "headline"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "campaign_title",
-          "target_url"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "properties": {
-          "campaign_title": {
-            "type": "string"
-          },
-          "google_ads": {
-            "properties": {
-              "campaign_id": {
-                "type": "string"
-              },
-              "error": {
-                "type": "string"
-              },
-              "resource_name": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              }
-            },
-            "type": "object"
-          },
-          "ok": {
-            "type": "boolean"
-          },
-          "social": {
-            "properties": {
-              "error": {
-                "type": "string"
-              },
-              "outcomes": {
-                "items": {
-                  "properties": {
-                    "channel": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "public_url": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "status": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "channel",
-                    "status"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "post_id": {
-                "type": "string"
-              },
-              "published": {
-                "type": "boolean"
-              }
-            },
-            "type": "object"
-          },
-          "target_url": {
-            "type": "string"
-          },
-          "website_announcement": {
-            "properties": {
-              "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "error": {
-                "type": "string"
-              },
-              "headline": {
-                "type": "string"
-              }
-            },
-            "type": "object"
-          }
-        },
-        "required": [
-          "ok",
-          "campaign_title",
-          "target_url"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "marketing",
-      "minimumRole": "admin",
-      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -66566,7 +66848,7 @@
     {
       "name": "list_google_ads_campaigns",
       "title": "List google ads campaigns",
-      "description": "List Google Ads campaigns for the connected Google Ads account, including status, daily budget, spend, impressions, clicks, and conversions.",
+      "description": "List up to 100 non-removed campaigns in the connected Google Ads account, ordered by all-time spend, when reviewing campaign status, daily budget, spend, impressions, clicks and conversions.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -66575,7 +66857,7 @@
             "type": "string"
           },
           "status": {
-            "description": "Filter campaigns by status: ENABLED, PAUSED, or ALL (default: ALL).",
+            "description": "Filter campaigns by status: ENABLED, PAUSED, or ALL non-removed campaigns (default: ALL).",
             "enum": [
               "ENABLED",
               "PAUSED",
@@ -70817,7 +71099,7 @@
     {
       "name": "move_stay_photos",
       "title": "Move stay photos",
-      "description": "Move selected Product photos together to room_id, null for Additional photos, or a new room of new_room_type. Supply exactly one destination. Every photo needs its expected_room_id from photo_rooms; a changed source or removed photo refuses the entire move, including new room creation.",
+      "description": "Move selected Product photos together to room_id, null for Additional photos, or a new room of new_room_type. Supply exactly one destination. Every photo needs its expected_room_id from photo_rooms; a changed source or removed photo refuses the entire move, including new room creation. Saved in KrabiClaw; the connected Airbnb listing’s photo tour and accessibility details are edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -71028,6 +71310,21 @@
                 ],
                 "type": [
                   "object",
+                  "null"
+                ]
+              },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
                   "null"
                 ]
               },
@@ -72242,6 +72539,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -85757,7 +86056,7 @@
     {
       "name": "reconcile_products",
       "title": "Reconcile products",
-      "description": "Synchronize complete catalog entries in one atomic write. Existing product IDs preserve identity; supplied variants, prices and options replace their lists. Omitted products stay unchanged unless deactivate_missing disables them. Repeat the same idempotency key for an identical retry. Use update_menu for a restaurant menu and update_product for a partial edit.",
+      "description": "Synchronize complete catalog entries in one atomic local write. Existing product IDs preserve identity; supplied variants, prices and options replace their lists. Omitted products stay unchanged unless deactivate_missing disables them. A new home requires stay settings. Changed connected-home settings and nightly prices are pushed to Airbnb through Channex after saving. Unsupported connected-listing settings are refused before any local writes; a failed channel completion reports committed changes with CHANNEL_PUSH_FAILED. Repeat the same idempotency key for an identical retry. Use update_menu for a restaurant menu and update_product for a partial edit.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -86334,6 +86633,610 @@
                   "minLength": 1,
                   "type": "string"
                 },
+                "stay": {
+                  "additionalProperties": false,
+                  "description": "Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.",
+                  "properties": {
+                    "amenities": {
+                      "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                      "items": {
+                        "enum": [
+                          "ac",
+                          "dryer",
+                          "essentials",
+                          "heating",
+                          "hot_water",
+                          "kitchen",
+                          "tv",
+                          "washer",
+                          "wireless_internet",
+                          "bathtub",
+                          "bidet",
+                          "body_soap",
+                          "cleaning_products",
+                          "conditioner",
+                          "hair_dryer",
+                          "alfresco_shower",
+                          "shampoo",
+                          "shower_gel",
+                          "bed_linens",
+                          "wardrobe_or_closet",
+                          "clothes_drying_rack",
+                          "extra_pillows_and_blankets",
+                          "hangers",
+                          "iron",
+                          "mosquito_net",
+                          "room_darkening_shades",
+                          "safe",
+                          "arcade_machine",
+                          "batting_cage",
+                          "books",
+                          "bowling_alley",
+                          "climbing_wall",
+                          "ethernet_connection",
+                          "exercise_equipment",
+                          "game_console",
+                          "laser_tag",
+                          "life_size_games",
+                          "mini_golf",
+                          "home_theater",
+                          "piano",
+                          "ping_pong_table",
+                          "pool_table",
+                          "record_player",
+                          "skate_ramp",
+                          "sound_system",
+                          "theme_room",
+                          "baby_bath",
+                          "baby_monitor",
+                          "childrens_bike",
+                          "playroom",
+                          "stair_gates",
+                          "babysitter_recommendations",
+                          "board_games",
+                          "changing_table",
+                          "childrens_books_and_toys",
+                          "childrens_dinnerware",
+                          "crib",
+                          "fireplace_guards",
+                          "high_chair",
+                          "playground",
+                          "outlet_covers",
+                          "pack_n_play_travel_crib",
+                          "table_corner_guards",
+                          "window_guards",
+                          "ceiling_fan",
+                          "fireplace",
+                          "portable_fans",
+                          "carbon_monoxide_detector",
+                          "fire_extinguisher",
+                          "first_aid_kit",
+                          "smoke_detector",
+                          "laptop_friendly_workspace",
+                          "pocket_wifi",
+                          "baking_sheet",
+                          "barbeque_utensils",
+                          "bread_maker",
+                          "blender",
+                          "coffee",
+                          "coffee_maker",
+                          "cooking_basics",
+                          "dining_table",
+                          "dishes_and_silverware",
+                          "dishwasher",
+                          "freezer",
+                          "hot_water_kettle",
+                          "kitchenette",
+                          "microwave",
+                          "mini_fridge",
+                          "oven",
+                          "refrigerator",
+                          "rice_maker",
+                          "stove",
+                          "toaster",
+                          "trash_compacter",
+                          "wine_glasses",
+                          "beach_access",
+                          "lake_access",
+                          "laundromat_nearby",
+                          "private_entrance",
+                          "resort_access",
+                          "ski_in_ski_out",
+                          "waterfront",
+                          "garden_or_backyard",
+                          "bbq_area",
+                          "beach_essentials",
+                          "bicycle",
+                          "boat_slip",
+                          "fire_pit",
+                          "hammock",
+                          "kayak",
+                          "alfresco_dining",
+                          "outdoor_seating",
+                          "outdoor_kitchen",
+                          "patio_or_belcony",
+                          "sun_loungers",
+                          "free_parking",
+                          "street_parking",
+                          "paid_parking_on_premises",
+                          "paid_parking",
+                          "free_parking_off_premises",
+                          "elevator",
+                          "ev_charger",
+                          "hockey_rink",
+                          "gym",
+                          "jacuzzi",
+                          "pool",
+                          "private_living_room",
+                          "sauna",
+                          "single_level_home",
+                          "ebike_charger",
+                          "solar_power",
+                          "recycling",
+                          "composting",
+                          "doorman",
+                          "gated_community",
+                          "breakfast",
+                          "cleaning_before_checkout",
+                          "long_term_stays_allowed",
+                          "luggage_dropoff_allowed",
+                          "bay_view",
+                          "beach_view",
+                          "canal_view",
+                          "city_view",
+                          "courtyard_view",
+                          "desert_view",
+                          "garden_view",
+                          "golf_view",
+                          "harbor_view",
+                          "lake_view",
+                          "marina_view",
+                          "mountain_view",
+                          "ocean_view",
+                          "park_view",
+                          "pool_view",
+                          "resort_view",
+                          "river_view",
+                          "sea_view",
+                          "valley_view",
+                          "vineyard_view",
+                          "landmark_view"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
+                    "amenity_answers": {
+                      "description": "Sparse amenity answer patch: true offers it, false explicitly reports absence, null clears to unknown. Omitted codes remain. Positive-list edits preserve false reports and remove omitted positive reports to unknown. Contradictions between amenities and amenity_answers are refused.",
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "available": {
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "code": {
+                            "enum": [
+                              "ac",
+                              "dryer",
+                              "essentials",
+                              "heating",
+                              "hot_water",
+                              "kitchen",
+                              "tv",
+                              "washer",
+                              "wireless_internet",
+                              "bathtub",
+                              "bidet",
+                              "body_soap",
+                              "cleaning_products",
+                              "conditioner",
+                              "hair_dryer",
+                              "alfresco_shower",
+                              "shampoo",
+                              "shower_gel",
+                              "bed_linens",
+                              "wardrobe_or_closet",
+                              "clothes_drying_rack",
+                              "extra_pillows_and_blankets",
+                              "hangers",
+                              "iron",
+                              "mosquito_net",
+                              "room_darkening_shades",
+                              "safe",
+                              "arcade_machine",
+                              "batting_cage",
+                              "books",
+                              "bowling_alley",
+                              "climbing_wall",
+                              "ethernet_connection",
+                              "exercise_equipment",
+                              "game_console",
+                              "laser_tag",
+                              "life_size_games",
+                              "mini_golf",
+                              "home_theater",
+                              "piano",
+                              "ping_pong_table",
+                              "pool_table",
+                              "record_player",
+                              "skate_ramp",
+                              "sound_system",
+                              "theme_room",
+                              "baby_bath",
+                              "baby_monitor",
+                              "childrens_bike",
+                              "playroom",
+                              "stair_gates",
+                              "babysitter_recommendations",
+                              "board_games",
+                              "changing_table",
+                              "childrens_books_and_toys",
+                              "childrens_dinnerware",
+                              "crib",
+                              "fireplace_guards",
+                              "high_chair",
+                              "playground",
+                              "outlet_covers",
+                              "pack_n_play_travel_crib",
+                              "table_corner_guards",
+                              "window_guards",
+                              "ceiling_fan",
+                              "fireplace",
+                              "portable_fans",
+                              "carbon_monoxide_detector",
+                              "fire_extinguisher",
+                              "first_aid_kit",
+                              "smoke_detector",
+                              "laptop_friendly_workspace",
+                              "pocket_wifi",
+                              "baking_sheet",
+                              "barbeque_utensils",
+                              "bread_maker",
+                              "blender",
+                              "coffee",
+                              "coffee_maker",
+                              "cooking_basics",
+                              "dining_table",
+                              "dishes_and_silverware",
+                              "dishwasher",
+                              "freezer",
+                              "hot_water_kettle",
+                              "kitchenette",
+                              "microwave",
+                              "mini_fridge",
+                              "oven",
+                              "refrigerator",
+                              "rice_maker",
+                              "stove",
+                              "toaster",
+                              "trash_compacter",
+                              "wine_glasses",
+                              "beach_access",
+                              "lake_access",
+                              "laundromat_nearby",
+                              "private_entrance",
+                              "resort_access",
+                              "ski_in_ski_out",
+                              "waterfront",
+                              "garden_or_backyard",
+                              "bbq_area",
+                              "beach_essentials",
+                              "bicycle",
+                              "boat_slip",
+                              "fire_pit",
+                              "hammock",
+                              "kayak",
+                              "alfresco_dining",
+                              "outdoor_seating",
+                              "outdoor_kitchen",
+                              "patio_or_belcony",
+                              "sun_loungers",
+                              "free_parking",
+                              "street_parking",
+                              "paid_parking_on_premises",
+                              "paid_parking",
+                              "free_parking_off_premises",
+                              "elevator",
+                              "ev_charger",
+                              "hockey_rink",
+                              "gym",
+                              "jacuzzi",
+                              "pool",
+                              "private_living_room",
+                              "sauna",
+                              "single_level_home",
+                              "ebike_charger",
+                              "solar_power",
+                              "recycling",
+                              "composting",
+                              "doorman",
+                              "gated_community",
+                              "breakfast",
+                              "cleaning_before_checkout",
+                              "long_term_stays_allowed",
+                              "luggage_dropoff_allowed",
+                              "bay_view",
+                              "beach_view",
+                              "canal_view",
+                              "city_view",
+                              "courtyard_view",
+                              "desert_view",
+                              "garden_view",
+                              "golf_view",
+                              "harbor_view",
+                              "lake_view",
+                              "marina_view",
+                              "mountain_view",
+                              "ocean_view",
+                              "park_view",
+                              "pool_view",
+                              "resort_view",
+                              "river_view",
+                              "sea_view",
+                              "valley_view",
+                              "vineyard_view",
+                              "landmark_view"
+                            ],
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "available"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "assigned_member_id": {
+                      "description": "Member who looks after the home; their assigned access shows its stays.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "assigned_team_id": {
+                      "description": "Team who look after the home, such as cleaners.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "bathrooms": {
+                      "description": "Whole and half baths, such as 1.5.",
+                      "maximum": 50,
+                      "minimum": 0,
+                      "multipleOf": 0.5,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "bedrooms": {
+                      "description": "Bedrooms; 0 is a studio.",
+                      "maximum": 50,
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "beds": {
+                      "maximum": 50,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "cancellation_policy": {
+                      "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                      "enum": [
+                        "flexible",
+                        "moderate",
+                        "limited",
+                        "firm",
+                        "strict",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "check_in_end_time": {
+                      "description": "Local 24-hour end of the check-in window; null is a flexible end. A time earlier than check_in_time is after midnight.",
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "check_in_time": {
+                      "description": "Local 24-hour time guests may arrive from, in the location’s timezone.",
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": "string"
+                    },
+                    "check_out_time": {
+                      "description": "Local 24-hour time guests leave by.",
+                      "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                      "type": "string"
+                    },
+                    "listing_floor": {
+                      "description": "The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "listing_type": {
+                      "description": "Whether guests book the entire place, a private room or a shared room. Null when not said.",
+                      "enum": [
+                        "entire_place",
+                        "private_room",
+                        "shared_room",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "location_id": {
+                      "type": "string"
+                    },
+                    "long_term_cancellation_policy": {
+                      "description": "Policy shown to guests for stays of 28 nights or more.",
+                      "enum": [
+                        "firm",
+                        "strict",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "max_guests": {
+                      "maximum": 99,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "min_nights": {
+                      "description": "Default minimum nights; individual nights may set their own.",
+                      "maximum": 365,
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "property_size": {
+                      "description": "Property area in property_size_unit. Size and unit must both be set or both null.",
+                      "exclusiveMinimum": 0,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "property_size_unit": {
+                      "description": "The unit of property_size. Size and unit must both be set or both null.",
+                      "enum": [
+                        "square_meters",
+                        "square_feet",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "property_type": {
+                      "description": "Airbnb property type, one the property_type_group offers. Null with property_type_group when not said.",
+                      "enum": [
+                        "apartment",
+                        "condominium",
+                        "serviced_apartment",
+                        "loft",
+                        "house",
+                        "townhouse",
+                        "bungalow",
+                        "cabin",
+                        "chalet",
+                        "earthhouse",
+                        "hut",
+                        "lighthouse",
+                        "villa",
+                        "dome",
+                        "cottage",
+                        "farmstay",
+                        "houseboat",
+                        "tiny_house",
+                        "guesthouse",
+                        "private_suite",
+                        "boat",
+                        "castle",
+                        "cave",
+                        "igloo",
+                        "island",
+                        "plane",
+                        "rv",
+                        "tent",
+                        "tipi",
+                        "train",
+                        "treehouse",
+                        "yurt",
+                        "other",
+                        "barn",
+                        "campsite",
+                        "windmill",
+                        "bus",
+                        "holiday_park",
+                        "ranch",
+                        "religious_building",
+                        "riad",
+                        "shipping_container",
+                        "tower",
+                        "bnb",
+                        "nature_eco_lodge",
+                        "boutique_hotel",
+                        "hostel",
+                        "aparthotel",
+                        "hotel",
+                        "resort",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "property_type_group": {
+                      "description": "Airbnb's property group: apartments (Apartment: apartment, condominium, serviced_apartment, loft); houses (House: house, townhouse, bungalow, cabin, chalet, earthhouse, hut, lighthouse, villa, dome, cottage, farmstay, houseboat, tiny_house); secondary_units (Secondary unit: guesthouse, private_suite, farmstay); unique_homes (Unique space: boat, castle, cave, earthhouse, hut, igloo, island, lighthouse, plane, rv, tent, tipi, train, treehouse, yurt, other, dome, barn, campsite, farmstay, houseboat, tiny_house, windmill, bus, holiday_park, ranch, religious_building, riad, shipping_container, tower); bnb (Bed and breakfast: bnb, nature_eco_lodge, farmstay); boutique_hotels_and_more (Boutique hotel: boutique_hotel, nature_eco_lodge, hostel, serviced_apartment, aparthotel, hotel, resort). Set with property_type, both or neither.",
+                      "enum": [
+                        "apartments",
+                        "houses",
+                        "secondary_units",
+                        "unique_homes",
+                        "bnb",
+                        "boutique_hotels_and_more",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "total_floors": {
+                      "description": "Total floors in the property; null when not said.",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "year_built": {
+                      "description": "Year the property was built; null when not said.",
+                      "maximum": 9007199254740991,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "location_id",
+                    "check_in_time",
+                    "check_out_time",
+                    "max_guests"
+                  ],
+                  "type": "object"
+                },
                 "tax_code": {
                   "type": [
                     "string",
@@ -86351,7 +87254,7 @@
                   "description": "Omit to create a single default variant. Required once the product has options.",
                   "items": {
                     "additionalProperties": false,
-                    "description": "One buyable configuration. A product with no options still has exactly one. Keep the id when editing: a variant that keeps its id keeps its bookings.",
+                    "description": "One priced choice, such as Six pieces or Twelve pieces. Named choices may stand alone or select declared option values. Omitting variants on creation creates one default choice. Keep the id when editing to preserve its bookings.",
                     "properties": {
                       "active": {
                         "type": "boolean"
@@ -89356,7 +90259,7 @@
     {
       "name": "remove_media",
       "title": "Remove media",
-      "description": "Detach one media asset from an ordered collection placement (a gallery or a compliance document list). Removing an asset that is not attached changes nothing; other attached assets keep their order.",
+      "description": "Detach one media asset from an ordered collection placement (a gallery or a compliance document list). Removing an asset that is not attached changes nothing; other attached assets keep their order. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -92213,7 +93116,7 @@
     {
       "name": "remove_stay_photo_room",
       "title": "Remove stay photo room",
-      "description": "Delete one authored photo-tour room. Its photos return to Additional photos; the Product’s cover/gallery and library files are retained.",
+      "description": "Delete one authored photo-tour room. Its photos return to Additional photos; the Product’s cover/gallery and library files are retained. Saved in KrabiClaw; the connected Airbnb listing’s photo tour and accessibility details are edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -92351,6 +93254,21 @@
                 ],
                 "type": [
                   "object",
+                  "null"
+                ]
+              },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
                   "null"
                 ]
               },
@@ -93565,6 +94483,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -94222,7 +95142,7 @@
     {
       "name": "reorder_media",
       "title": "Reorder media",
-      "description": "Move attached gallery or compliance assets before or after an attached neighbor. Omitted anchors move the asset to the end; invalid assets or anchors reject the call.",
+      "description": "Move attached gallery or compliance assets before or after an attached neighbor. Omitted anchors move the asset to the end; invalid assets or anchors reject the call. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -103349,7 +104269,7 @@
     {
       "name": "set_media",
       "title": "Set media",
-      "description": "Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping.",
+      "description": "Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping. Product photos are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -104084,7 +105004,7 @@
     {
       "name": "set_member_busy_calendars",
       "title": "Set member busy calendars",
-      "description": "Select busy-input calendars on the member’s already-linked Google account, returning scheduling and check status. Stale or disconnected selected calendars block availability; no selection uses internal scheduling.",
+      "description": "After working hours are authored, select busy-input calendars on the member’s already-linked Google account, returning scheduling and check status. Stale or disconnected selected calendars block availability; no selection uses internal scheduling.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -104250,10 +105170,16 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "timezone": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "updated_at": {
                 "type": "string"
@@ -104283,7 +105209,10 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -104325,7 +105254,7 @@
     {
       "name": "set_member_scheduling",
       "title": "Set member scheduling",
-      "description": "Replace a member’s own timezone, weekly working hours and UTC time-off intervals using the latest updated_at. Owner/admin may oversee any member and approve public profile. Profile edits revoke approval unless explicitly approved by an admin. Existing Booking assignments and times stay fixed. Returns the saved scheduling record; no guest messages are sent.",
+      "description": "Update only the supplied member settings using the latest updated_at, or null for a new record. Omitted fields retain their values. Profile fields accept null to clear them and may be saved before hours exist. The first hours save requires timezone, weekly and time_off together; explicit empty arrays mean no working hours or time off. Later hours changes may name only the changed fields. Owner/admin may oversee any member and approve their public profile. Profile edits revoke approval unless explicitly approved by an admin. Profile-only saves leave availability and Calendar inputs unchanged. Existing Booking assignments and times stay fixed; no guest messages are sent.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -104416,9 +105345,6 @@
         },
         "required": [
           "member_id",
-          "timezone",
-          "weekly",
-          "time_off",
           "expected_updated_at"
         ],
         "type": "object"
@@ -104554,10 +105480,16 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               },
               "timezone": {
-                "type": "string"
+                "type": [
+                  "string",
+                  "null"
+                ]
               },
               "updated_at": {
                 "type": "string"
@@ -104587,7 +105519,10 @@
                   ],
                   "type": "object"
                 },
-                "type": "array"
+                "type": [
+                  "array",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -109392,6 +110327,21 @@
                   "null"
                 ]
               },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "amenities": {
                 "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                 "items": {
@@ -110603,6 +111553,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -110654,6 +111606,17 @@
               "properties": {
                 "available": {
                   "type": "boolean"
+                },
+                "calendar": {
+                  "description": "The linked calendar (Vrbo) that shows this night taken; null when none does. Such a night is not available.",
+                  "enum": [
+                    "vrbo",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "channel": {
                   "properties": {
@@ -110756,6 +111719,7 @@
                 "closed_to_departure",
                 "source",
                 "held_until",
+                "calendar",
                 "channel"
               ],
               "type": "object"
@@ -116708,20 +117672,49 @@
     {
       "name": "update_google_ads_campaign",
       "title": "Update google ads campaign",
-      "description": "Update the status (ENABLED/PAUSED) or daily budget of an existing Google Ads campaign.",
+      "description": "Pause, enable or change the daily budget of a selected campaign in the connected Google Ads account. Supply status, or both budget_id and daily_budget_micros. Enabling or raising a budget can increase advertising spend; changing a shared budget affects every campaign using it.",
       "inputSchema": {
         "additionalProperties": false,
+        "oneOf": [
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "budget_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "daily_budget_micros"
+                  ]
+                }
+              ]
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "required": [
+              "budget_id",
+              "daily_budget_micros"
+            ]
+          }
+        ],
         "properties": {
           "budget_id": {
-            "description": "Optional budget ID when updating daily budget.",
+            "description": "Budget ID returned for this campaign by get_google_ads_campaign or list_google_ads_campaigns. Required with daily_budget_micros; shared budget changes affect every campaign using it.",
+            "pattern": "^[0-9]+$",
             "type": "string"
           },
           "campaign_id": {
             "description": "Google Ads campaign ID to update.",
+            "pattern": "^[0-9]+$",
             "type": "string"
           },
           "daily_budget_micros": {
-            "description": "Optional new daily budget in micros.",
+            "description": "New daily budget in micros. Required with budget_id.",
             "minimum": 1000000,
             "type": "integer"
           },
@@ -117292,7 +118285,7 @@
     {
       "name": "update_media_asset",
       "title": "Update media asset",
-      "description": "Change the selected asset’s alt text or library category. At least one field is required. Category organizes the library and does not assign media to a page.",
+      "description": "Change the selected asset’s alt text or library category. At least one field is required. Category organizes the library and does not assign media to a page. Airbnb photo captions are edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -121553,7 +122546,7 @@
     {
       "name": "update_product",
       "title": "Update product",
-      "description": "Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering.",
+      "description": "Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -133465,7 +134458,7 @@
     {
       "name": "update_stay",
       "title": "Update stay",
-      "description": "Change a stay the host took: dates, party, guest details, total or notes. Fields left out keep their values. Stays from Airbnb or another channel change only on that channel.",
+      "description": "Change a host-entered stay’s dates, party, guest details, total or notes under its current version. Omitted fields keep their values. Replans pending automatic guest messages and updates availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that the stay edit was saved. Stays from another channel must be changed on that channel.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -133953,7 +134946,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       },
       "securitySchemes": [
@@ -133973,7 +134966,7 @@
     {
       "name": "update_stay_accessibility",
       "title": "Update stay accessibility",
-      "description": "Save one listing accessibility answer under the Product updated_at value from the latest read. Other feature answers and authored rooms are retained. True requires active same-organization image evidence and atomically appends selected library images to Product photos, preserving existing cover/order and room groups. False/null requires []; null clears to unknown. Evidence photos cannot be removed until replaced or the answer cleared. No review or approval is implied. A stale Product or photo order refuses every change.",
+      "description": "Save one listing accessibility answer under the Product updated_at value from the latest read. Other feature answers and authored rooms are retained. True requires active same-organization image evidence and atomically appends selected library images to Product photos, preserving existing cover/order and room groups. False/null requires []; null clears to unknown. Evidence photos cannot be removed until replaced or the answer cleared. No review or approval is implied. A stale Product or photo order refuses every change. Saved in KrabiClaw; the connected Airbnb listing’s photo tour and accessibility details are edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -134180,6 +135173,21 @@
                   "null"
                 ]
               },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "amenities": {
                 "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                 "items": {
@@ -135391,6 +136399,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -135465,7 +136475,7 @@
     {
       "name": "update_stay_arrival_guide",
       "title": "Update stay arrival guide",
-      "description": "Save one home's private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site.",
+      "description": "Save one home's private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site. For a connected Airbnb home, supplied check-in, wifi, directions and house-manual fields return editor links in airbnb_unsynced for the host to check and edit in Airbnb. Checkout instructions are saved only in KrabiClaw.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -135576,6 +136586,54 @@
       "outputSchema": {
         "$defs": {},
         "properties": {
+          "airbnb_unsynced": {
+            "description": "Airbnb editor links for supplied fields that have a mapped editor page. Each entry identifies a field saved in KrabiClaw for the host to check and edit in Airbnb. Empty when no mapped fields were supplied or the home is not connected.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "airbnb_url": {
+                  "format": "uri",
+                  "type": "string"
+                },
+                "field": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "airbnb_url"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "channel_push": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "type": "null"
+                  },
+                  "state": {
+                    "const": "pushed"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
+              }
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "home": {
             "properties": {
               "accessibility": {
@@ -135690,6 +136748,21 @@
                   "null"
                 ]
               },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "amenities": {
                 "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                 "items": {
@@ -136901,6 +137974,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -136949,7 +138024,9 @@
           }
         },
         "required": [
-          "home"
+          "home",
+          "channel_push",
+          "airbnb_unsynced"
         ],
         "type": "object"
       },
@@ -136975,7 +138052,7 @@
     {
       "name": "update_stay_photo_room",
       "title": "Update stay photo room",
-      "description": "Update one authored room under its details_version: sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer. Omitted concerns and other feature answers are retained. Beds allocate the declared listing total; selected amenities join the global listing set while deselection only unassigns. Accessibility true requires image evidence and atomically appends selected library images to Product photos without changing existing cover/order or tour groups. False/null requires no evidence; null clears to unknown. Referenced photos cannot be removed until evidence is replaced or the answer cleared. No review or approval is implied. A stale version or invalid combination refuses every change.",
+      "description": "Update one authored room under its details_version: sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer. Omitted concerns and other feature answers are retained. Beds allocate the declared listing total; selected amenities join the global listing set while deselection only unassigns. Accessibility true requires image evidence and atomically appends selected library images to Product photos without changing existing cover/order or tour groups. False/null requires no evidence; null clears to unknown. Referenced photos cannot be removed until evidence is replaced or the answer cleared. No review or approval is implied. A stale version or invalid combination refuses every change. Saved in KrabiClaw; the connected Airbnb listing’s photo tour and accessibility details are edited in Airbnb.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -137423,6 +138500,21 @@
                   "null"
                 ]
               },
+              "airbnb_editor_url": {
+                "description": "The mapped listing’s Airbnb editor, or null when no listing is mapped.",
+                "format": "uri",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "airbnb_listing_id": {
+                "description": "Mapped Airbnb listing ID; null when no listing is mapped.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "amenities": {
                 "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
                 "items": {
@@ -138634,6 +139726,8 @@
               "location_id",
               "timezone",
               "currency",
+              "airbnb_listing_id",
+              "airbnb_editor_url",
               "base_price_minor",
               "base_price_tax_behavior",
               "check_in_time",
@@ -139195,18 +140289,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
+        "create_product": "sha256:579bd761b254d24f5bd0d68a961113510dbf4aa01be571a8d8d9e2de89326598",
         "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:cc4fdac62f5da6e406f16fc6016f0180702e39ad213e71f26ba7375010ce4a1a",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:377dea6cfdf87123a78cebc6e4e5182cd26ccf71e03ba6877b4569d3a1b007d7",
+        "reconcile_products": "sha256:414494212b383e36a35d77dadda1d5a92429d001b1b66f7adf74cf2525569166",
         "reorder_collections": "sha256:76c649e913d6bda4e000b36748b4899a2aae89625a0c1c354b2d149998f9528a",
         "set_collection_products": "sha256:dc4ea7d0380826d81e8a9a170a679d1695a933a4621aeae67ff42177b6a1610f",
         "update_menu": "sha256:f68c72c72504a0df3cdd77685f526413e1c0883b56f63f4e4911b7502cefb1d5",
-        "update_product": "sha256:1efb9dc30855a0d16cc9d5db0ee6f8aebffc183d149875b11b7e8866b0240412"
+        "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528"
       }
     },
     {
@@ -139250,8 +140344,8 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
-        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
+        "attach_media": "sha256:fb767338cefb7392e96c8d7cb09a9af397665f7217d7e26c401e858e5876ed57",
+        "create_product": "sha256:579bd761b254d24f5bd0d68a961113510dbf4aa01be571a8d8d9e2de89326598",
         "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -139293,14 +140387,14 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and get_organization_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
+        "attach_media": "sha256:fb767338cefb7392e96c8d7cb09a9af397665f7217d7e26c401e858e5876ed57",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
-        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
-        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
+        "remove_media": "sha256:3acbf051ac7a7ddecfd26f0c010c17a2f6a6b8f156ad2fe9843c1b78f2ddee35",
+        "reorder_media": "sha256:ef32f1e9cd46f5e97b726d70eb9496b685d5495627411775ac8a6ecbabd162b7",
+        "set_media": "sha256:8061a4584c3deae1b0babbbad9a13e5916a6b07128569833592b7158b353500f",
         "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
@@ -139313,14 +140407,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
+        "attach_media": "sha256:fb767338cefb7392e96c8d7cb09a9af397665f7217d7e26c401e858e5876ed57",
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
-        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f"
+        "set_media": "sha256:8061a4584c3deae1b0babbbad9a13e5916a6b07128569833592b7158b353500f"
       }
     },
     {
@@ -139332,7 +140426,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
+        "create_product": "sha256:579bd761b254d24f5bd0d68a961113510dbf4aa01be571a8d8d9e2de89326598",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
@@ -139366,7 +140460,7 @@
         "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:c007ea9559df74ac50714b2adf181eb57053b53523366adb89d0df9fff291b3b",
-        "update_product": "sha256:1efb9dc30855a0d16cc9d5db0ee6f8aebffc183d149875b11b7e8866b0240412",
+        "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -139379,14 +140473,14 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, get_organization_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
+        "attach_media": "sha256:fb767338cefb7392e96c8d7cb09a9af397665f7217d7e26c401e858e5876ed57",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
-        "update_product": "sha256:1efb9dc30855a0d16cc9d5db0ee6f8aebffc183d149875b11b7e8866b0240412",
+        "set_media": "sha256:8061a4584c3deae1b0babbbad9a13e5916a6b07128569833592b7158b353500f",
+        "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528",
         "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
@@ -139409,7 +140503,7 @@
         "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:1efb9dc30855a0d16cc9d5db0ee6f8aebffc183d149875b11b7e8866b0240412"
+        "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528"
       }
     }
   ],
@@ -139422,7 +140516,7 @@
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
-        "get_stay_calendar": "sha256:c1c91c46762a25780eda52e16af31b0e42a7204269a2bf1fdbfbc7ab5fc1c9e2",
+        "get_stay_calendar": "sha256:b986029677f658eb1a45a4fa5cbea68e0fb1da8ecf71ed736ec8a01cf0069f8e",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
@@ -139430,7 +140524,7 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
-        "set_stay_nights": "sha256:bed6702d3bbfed16c579a05cbe5617c126d49d8284fded330d07a863f0be435c",
+        "set_stay_nights": "sha256:b2258cacc2c579029f9c667bc50fb66136b85d522bbd2fc9a424a03bcebd2c07",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
@@ -139458,7 +140552,7 @@
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
         "create_product_booking": "sha256:a05bb23c5fca92ad866321dd97cab8364ef398b0c4c46240d8457965c7727494",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
-        "get_member_scheduling": "sha256:fe4a81a1b928b2e8ea93577b47cbbdb67be60a83586b5d57dec9524322bbd6fd",
+        "get_member_scheduling": "sha256:2037ed8e9f0206c9d7bc443263331ffed77e8ee14994aa244de8bd739a2626e3",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
@@ -139467,7 +140561,7 @@
         "reject_product_booking": "sha256:557fcf98b488029ac8081da295552e9ee2569dfc54a0ba561418a5ca7b8492d4",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "request_product_booking_change": "sha256:da50fa96ac71952ddaa8d3097a319ae2965b6e0ec0a3b52208b22cc5f6d95025",
-        "set_member_scheduling": "sha256:4917424bba3a8e887e87f7af783ae042161e738962e5e4b02c9d21b1ae946134",
+        "set_member_scheduling": "sha256:6612da7ae2b999d774ecb3d72ea891588ff02662ee87b08b58824c44c69e152c",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
     },
@@ -139475,14 +140569,14 @@
       "slug": "add-photos-and-video",
       "contentHash": "sha256:12d4c163d18a26ef149addaaf3ee345df1a5db52168d3c611513a27dfcbded2c",
       "toolContracts": {
-        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
+        "attach_media": "sha256:fb767338cefb7392e96c8d7cb09a9af397665f7217d7e26c401e858e5876ed57",
         "delete_media_asset": "sha256:7cd7618939616504dc9e0ec08771cc009b09671c40b69c23485dfb172b18ec2e",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
-        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "remove_media": "sha256:3acbf051ac7a7ddecfd26f0c010c17a2f6a6b8f156ad2fe9843c1b78f2ddee35",
+        "reorder_media": "sha256:ef32f1e9cd46f5e97b726d70eb9496b685d5495627411775ac8a6ecbabd162b7",
         "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
-        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
-        "update_media_asset": "sha256:25902033f7e73a819b6c9660c6a2e70b4ab3dfb972a49b594f1c3a34d8a1a8f7"
+        "set_media": "sha256:8061a4584c3deae1b0babbbad9a13e5916a6b07128569833592b7158b353500f",
+        "update_media_asset": "sha256:1618985d6f6e0b507bdef018732f8dcd386e3d4364ca0e67b150b688cea444a5"
       }
     },
     {
@@ -139507,7 +140601,7 @@
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "create_table_reservation": "sha256:9c27873124240d1f214c93c3e7ba73db383038fd555d7b93da570781ca2a4a18",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
-        "get_guest_messaging_context": "sha256:353544113fe7167fced9984c09c605e2a0a103b31a8854a2c396f96122c993e4",
+        "get_guest_messaging_context": "sha256:bf2305be7071f5ec29d9f289c7814b87632bbfad917317ab1818a9295d7311ea",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",

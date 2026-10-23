@@ -37,18 +37,19 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
    * since the shell outside an organization's routes is the active one.
    */
   const activeMemberRole = authClient.useActiveMemberRole()
-  const showBilling = computed(() => {
+  const memberRole = computed(() => {
     const routed = dashboard.organization.value
-    const role = routed && routed.id === organization.value?.id ? routed.role : activeMemberRole.value.data?.role
-    return Boolean(role) && authClient.organization.checkRolePermission({ role: role as keyof typeof organizationRoles, permissions: { billing: ['read'] } })
+    return routed && routed.id === organization.value?.id ? routed.role : activeMemberRole.value.data?.role
   })
+  const showBilling = computed(() => Boolean(memberRole.value) && authClient.organization.checkRolePermission({ role: memberRole.value as keyof typeof organizationRoles, permissions: { billing: ['read'] } }))
+  const showTeam = computed(() => Boolean(memberRole.value) && authClient.organization.checkRolePermission({ role: memberRole.value as keyof typeof organizationRoles, permissions: { members: ['read'] } }))
 
   const items = computed(() => {
     if (!base.value) return []
     return [
       { id: 'website', icon: 'i-lucide-panels-top-left', label: 'Website', to: `${base.value}/website` },
       { id: 'locations', icon: 'i-lucide-map-pin', label: 'Locations', to: `${base.value}/locations` },
-      { id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` },
+      ...(showTeam.value ? [{ id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` }] : []),
       { id: 'integrations', icon: 'i-lucide-plug', label: 'Integrations', to: `${base.value}/integrations` },
       // What the organization pays KrabiClaw. Owners change it and admins read it; members have no row.
       ...(showBilling.value ? [{ id: 'billing', icon: 'i-lucide-receipt', label: 'Plan and billing', to: `${base.value}/billing` }] : []),

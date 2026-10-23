@@ -8,11 +8,11 @@
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
     :save-label="p.saveLabel.value"
-    :error="p.loadError.value || removeError || p.saveError.value || ''"
-    @cancel="p.revert"
-    @save="p.save(level.to.value ?? undefined)"
+    :error="p.loadError.value || removeError || p.saveError.value || mappingError"
+    @cancel="cancel"
+    @save="save"
   >
-    <div v-if="option && !removing" class="space-y-6">
+    <div v-if="option" class="space-y-6">
       <UFormField label="Name">
         <UInput v-model="option.name" placeholder="Size" :maxlength="PRODUCT_LIMITS.optionName" autofocus class="w-full" />
       </UFormField>
@@ -31,6 +31,17 @@
           @update:model-value="p.setOptionValues(index, $event as string[])"
         />
       </UFormField>
+      <template v-if="requiresMapping">
+        <UFormField v-for="variant in savedVariants" :key="variant.id ?? variant.key" :label="variant.name">
+          <USelect
+            :model-value="variant.selections[option.id]"
+            :items="option.values.map(value => ({ label: value.value, value: value.id ?? value.value }))"
+            :placeholder="`Choose ${option.name || 'a value'}`"
+            class="w-full"
+            @update:model-value="p.setOptionSelection(variant, option.id, $event as string)"
+          />
+        </UFormField>
+      </template>
       <UButton color="error" variant="soft" icon="i-lucide-trash-2" :label="`Remove ${option.name || 'choice'}`" :loading="p.saving.value" @click="remove" />
     </div>
   </DashboardLeafPanel>
@@ -50,29 +61,48 @@ const level = useRouteLevel()
 const optionId = computed(() => String(route.params.optionId))
 const index = computed(() => p.form.options.findIndex(entry => entry.id === optionId.value))
 const option = computed(() => p.form.options[index.value] ?? null)
+const savedVariants = computed(() => p.form.variants.filter(variant => variant.id))
+const requiresMapping = computed(() => Boolean(option.value && p.product.value && (!p.product.value.options.some(saved => saved.id === option.value!.id) || !p.validChoiceSelections(savedVariants.value))))
+const mappingError = computed(() => {
+  if (!p.form.options.every(option => option.name.trim() && option.values.length) || p.validChoiceSelections(savedVariants.value)) return ''
+  const missing = p.form.options.filter(option => savedVariants.value.some(variant => !option.values.some(value => (value.id ?? value.value) === variant.selections[option.id])))
+  if (missing.length) return `Set ${missing.map(option => option.name).join(' and ')} for each saved priced choice before saving.`
+  const selections = savedVariants.value.map(variant => JSON.stringify(p.form.options.map(option => variant.selections[option.id])))
+  return new Set(selections).size === selections.length ? '' : 'Choose a different combination for each priced choice.'
+})
 
 // An option the product does not have is not a page (DESIGN.md).
-// Removing it empties this leaf on purpose, on the way back to the list.
-const removing = ref(false)
+// Cancel, removal and the saved draft-to-ID transition leave this leaf.
+const leaving = ref(false)
 watchEffect(() => {
-  if (p.product.value && !p.loadError.value && !option.value && !removing.value) showError(createError({ statusCode: 404, statusMessage: 'Choice not found' }))
+  if (p.product.value && !p.loadError.value && !option.value && !leaving.value) showError(createError({ statusCode: 404, statusMessage: 'Choice not found' }))
 })
+
+function cancel() {
+  leaving.value = true
+  p.revert()
+}
+async function save() {
+  leaving.value = true
+  await p.save(level.to.value ?? undefined)
+  if (p.saveError.value) leaving.value = false
+}
 
 const removeError = ref('')
 // Removing commits, because the list it leaves has no Save of its own. A new
 // product has nothing to commit yet, so its draft just loses the option.
 async function remove() {
   removeError.value = ''
-  removing.value = true
+  leaving.value = true
   const options = [...p.form.options]
   const variants = [...p.form.variants]
   p.removeOption(index.value)
   if (!p.isNew.value) {
     if (p.saveDisabled.value) {
-      removeError.value = 'Every choice needs a name and at least one value before this can be saved.'
+      removeError.value = 'Give each choice a name and values, and choose a different combination for each priced choice before saving.'
       p.form.options = options
       p.form.variants = variants
-      removing.value = false
+      leaving.value = false
       return
     }
     // A refused save stays here with its reason; Cancel puts the option back.
@@ -80,7 +110,7 @@ async function remove() {
     if (p.saveError.value) {
       p.form.options = options
       p.form.variants = variants
-      removing.value = false
+      leaving.value = false
     }
     return
   }

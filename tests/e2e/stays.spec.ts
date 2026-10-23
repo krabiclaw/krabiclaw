@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page, type Request, type WebSocket } from '@playwright/test'
+import Ajv from 'ajv'
 import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
@@ -104,7 +105,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   })
   expect(stay.error).toBeNull()
   const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
-  expect(overlap.error).toContain('Another stay already holds one of these nights')
+  expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
 
   // Today lists the arrival and opens the stay.
   await page.goto(`/dashboard/${slug}`)
@@ -879,7 +880,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     expect(featuredResponse.status(), await featuredResponse.text()).toBe(200)
     expect(featuredResponse.request().postDataJSON().details_mode).toBe('merge')
     expect(featuredResponse.request().postDataJSON().details).toEqual({ featured: false })
-    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/attributes`)
+    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/photo`)
     const savedAttributeSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedAttributeSafety.error).toBeNull()
     expect(savedAttributeSafety.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: false })
@@ -2684,12 +2685,39 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       base_price_minor: 320_000, idempotency_key: crypto.randomUUID() } })
     expect(madeHome.status(), await madeHome.text()).toBe(201)
     const assignedHome = (await madeHome.json() as { home: { product_id: string; location_id: string } }).home
-    const otherHome = await call<{ product: { id: string } }>('create_product', { kind: 'stay', name: 'Other Cabin', idempotency_key: crypto.randomUUID(), stay: {
+    const otherHomeInput = { kind: 'stay', name: 'Other Cabin', stay: {
       location_id: locations.data!.locations[0]!.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
       assigned_member_id: null, assigned_team_id: null,
-    } })
-    expect(otherHome.error).toBeNull()
-    const homes = [assignedHome, { product_id: otherHome.data!.product.id, location_id: locations.data!.locations[0]!.id }]
+    } }
+    const otherHomeRequest = { idempotency_key: crypto.randomUUID(), products: [otherHomeInput] }
+    const discovery = await mcpRequest(page.request, baseURL!, { method: 'tools/list' })
+    expect(discovery.status()).toBe(200)
+    const catalog = await discovery.json() as { result: { tools: Array<{ name: string; inputSchema: object; outputSchema: object }> } }
+    const batchTool = catalog.result.tools.find(tool => tool.name === 'batch_create_products')
+    const reconcileTool = catalog.result.tools.find(tool => tool.name === 'reconcile_products')
+    const calendarTool = catalog.result.tools.find(tool => tool.name === 'get_stay_calendar')
+    const arrivalTool = catalog.result.tools.find(tool => tool.name === 'update_stay_arrival_guide')
+    for (const definition of [batchTool, reconcileTool, calendarTool, arrivalTool]) expect(definition).toBeDefined()
+    const ajv = new Ajv({ strict: false, allErrors: true })
+    const validateBatchInput = ajv.compile(batchTool!.inputSchema)
+    const validateBatchOutput = ajv.compile(batchTool!.outputSchema)
+    const validateReconcileInput = ajv.compile(reconcileTool!.inputSchema)
+    const validateCalendar = ajv.compile(calendarTool!.outputSchema)
+    const validateArrival = ajv.compile(arrivalTool!.outputSchema)
+    const completeHomeRequest = { organization_id: organizationId, ...otherHomeRequest }
+    expect(validateBatchInput(completeHomeRequest), JSON.stringify(validateBatchInput.errors)).toBe(true)
+    expect(validateReconcileInput(completeHomeRequest), JSON.stringify(validateReconcileInput.errors)).toBe(true)
+    const otherHomes = await call<{ products: Array<{ id: string }> }>('batch_create_products', otherHomeRequest)
+    expect(otherHomes.error).toBeNull()
+    expect(validateBatchOutput(otherHomes.data), JSON.stringify(validateBatchOutput.errors)).toBe(true)
+    expect(otherHomes.data!.products).toHaveLength(1)
+    const otherHome = otherHomes.data!.products[0]!
+    const unpricedCalendar = await call<{ home: { product_id: string; base_price_minor: number | null; airbnb_listing_id: string | null; airbnb_editor_url: string | null }; nights: Array<{ price_minor: number | null }> }>('get_stay_calendar', { product_id: otherHome.id, from: localDay(0), to: localDay(2) })
+    expect(unpricedCalendar.error).toBeNull()
+    expect(validateCalendar(unpricedCalendar.data), JSON.stringify(validateCalendar.errors)).toBe(true)
+    expect(unpricedCalendar.data!.home).toMatchObject({ product_id: otherHome.id, base_price_minor: null, airbnb_listing_id: null, airbnb_editor_url: null })
+    expect(unpricedCalendar.data!.nights.map(night => night.price_minor)).toEqual([null, null])
+    const homes = [assignedHome, { product_id: otherHome.id, location_id: locations.data!.locations[0]!.id }]
     const assigned = await call('update_product', { product_id: homes[0]!.product_id, stay: { assigned_member_id: memberId } })
     expect(assigned.error).toBeNull()
     const stays: Array<{ id: string }> = []
@@ -3059,7 +3087,12 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
 
       const guideRead = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
       expect(guideRead.error).toBeNull()
+      expect(validateCalendar(guideRead.data), JSON.stringify(validateCalendar.errors)).toBe(true)
       expect(guideRead.data!.home).toMatchObject(guide)
+      const guideSaved = await call<{ home: Record<string, unknown>; channel_push: unknown; airbnb_unsynced: unknown[] }>('update_stay_arrival_guide', { product_id: assignedHome.product_id, directions: guide.directions })
+      expect(guideSaved.error).toBeNull()
+      expect(validateArrival(guideSaved.data), JSON.stringify(validateArrival.errors)).toBe(true)
+      expect(guideSaved.data).toMatchObject({ home: { ...guide, product_id: assignedHome.product_id, airbnb_listing_id: null, airbnb_editor_url: null }, channel_push: null, airbnb_unsynced: [] })
       const managerGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
       expect(managerGuide.status(), await managerGuide.text()).toBe(200)
       expect(managerGuide.headers()['cache-control']).toBe('private, no-store, max-age=0')
@@ -3169,7 +3202,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const memberWrite = await cleaner.request.patch(api(`stay-homes/${assignedHome.product_id}`), { data: { wifi_password: 'A member must not replace this' } })
       expect(memberWrite.status()).toBe(403)
       expect(await memberWrite.json()).toMatchObject({ data: { code: 'STAY_ROLE_REQUIRED' } })
-      const hiddenGuide = await cleaner.request.get(api(`stay-homes/${otherHome.data!.product.id}`))
+      const hiddenGuide = await cleaner.request.get(api(`stay-homes/${otherHome.id}`))
       expect(hiddenGuide.status()).toBe(404)
       expect(await hiddenGuide.json()).toMatchObject({ data: { code: 'HOME_NOT_FOUND' } })
       const outsider = await browser.newContext({ baseURL: baseURL! })

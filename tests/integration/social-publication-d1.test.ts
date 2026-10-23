@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import test from 'node:test'
 import { Miniflare } from 'miniflare'
+import sharp from 'sharp'
 import { H3 } from 'nitro/h3'
 import { HTTPError } from 'nitro'
 import { handlePostsTools } from '../../server/utils/mcp-tools/posts.ts'
@@ -22,6 +24,9 @@ import deauthorizeCallback from '../../server/api/integrations/meta/deauthorize.
 import { loadInstagramInsights } from '../../server/utils/instagram-insights.ts'
 import deleteCallback from '../../server/api/integrations/meta/data-deletion.post.ts'
 import deletionStatus from '../../server/api/integrations/meta/data-deletion.get.ts'
+import { createBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
+import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
+import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -72,7 +77,11 @@ class FakeMeta {
       if (fault.kind === 'missing') return json({ error: { message: 'Unsupported get request. Object does not exist', code: 100, error_subcode: 33, fbtrace_id: 'trace-missing' } }, 400)
       return json({ error: { message: 'Invalid parameter', code: 100, fbtrace_id: 'trace-reject' } }, 400)
     }
-    if (url.hostname === 'api.cloudflare.com') return json({ success: true, result: { id: this.id('img-') } })
+    if (url.hostname === 'api.cloudflare.com') {
+      const id = init.body instanceof FormData ? init.body.get('id') : this.id('img-')
+      assert.equal(typeof id, 'string')
+      return json({ success: true, result: { id } })
+    }
     if (url.hostname === 'graph.facebook.com') return this.facebook(method, url.pathname.replace('/v25.0/', ''), url.searchParams, body)
     if (url.hostname === 'rupload.facebook.com') {
       const video = this.fbVideos.get(url.pathname.split('/').pop()!)
@@ -188,7 +197,7 @@ async function setUp() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'social-publication-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' }, MEDIA_BUCKET: { type: 'r2' } },
+    env: { DB: { type: 'd1' }, MEDIA_BUCKET: { type: 'r2' }, IMAGES: { type: 'images' } },
   } }] })
   const db = await runtime.getD1Database('DB')
   const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: { tag: string }[] }
@@ -225,9 +234,8 @@ async function setUp() {
   globalThis.fetch = meta.fetch as typeof fetch
   const asset = async (id: string, mime: string, kind: 'image' | 'video' = 'image', dimensions: { width: number; height: number; duration: number } | null = null) => run(`INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, thumbnail_url, mime_type, file_size, width, height, duration)
     VALUES ('${id}', 'org-a', '${kind}', 'cloudflare_images', 'uploaded', 'https://imagedelivery.example.test/hash/${id}/public', ${kind === 'video' ? `'https://imagedelivery.example.test/hash/${id}-poster/public'` : 'NULL'}, '${mime}', 1000, ${dimensions?.width ?? 'NULL'}, ${dimensions?.height ?? 'NULL'}, ${dimensions ? dimensions.duration : kind === 'video' ? 20 : 'NULL'})`)
-  // Social cards are rendered by the Worker's Images binding, which this Node
-  // runtime does not have; writes that refresh a card run where Cloudflare
-  // Images is not configured, and so skip it, exactly as local development does.
+  // Ordinary publication cases run without production Images credentials, as
+  // local development does. The card contract below uses the native binding.
   const { CLOUDFLARE_IMAGES_API_TOKEN: _token, ...cardless } = env as unknown as Record<string, unknown>
   return { runtime, db, env, cardless: cardless as unknown as CloudflareEnv, meta, run, asset, restore: () => { globalThis.fetch = realFetch } }
 }
@@ -237,6 +245,79 @@ const targets = {
   facebook: (organization = 'org-a') => ({ channel: 'facebook', target_id: PAGE, connection_revision: `fb-rev-${organization}` }) as PublishTarget,
   instagram: (organization = 'org-a') => ({ channel: 'instagram', target_id: IG, connection_revision: `ig-rev-${organization}` }) as PublishTarget,
 }
+
+test('an AVIF article picture renders through native Images and a create replay repairs its failed social card', async () => {
+  const { runtime, db, env, meta, asset, restore } = await setUp()
+  try {
+    const source = readFileSync(new URL('../../docs/marketing/publishing-assets/lodging-2026-10-23/new-home.avif', import.meta.url))
+    const sourceUrl = 'https://imagedelivery.example.test/hash/avif-source/public'
+    const images = await runtime.getImagesBinding('IMAGES')
+    const uploads = new Map<string, Uint8Array>()
+    let unavailable = false
+    let cancelFailure = false
+    globalThis.fetch = async (input, init = {}) => {
+      const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+      if (url.href === sourceUrl) {
+        if (cancelFailure) return new Response(new ReadableStream({ cancel() { throw new Error('Image response cancellation refused') } }), { headers: { 'content-type': 'text/plain' } })
+        return unavailable ? new Response('Picture unavailable', { headers: { 'content-type': 'text/plain' } })
+          : new Response(source, { headers: { 'content-type': 'image/avif', 'content-length': String(source.byteLength) } })
+      }
+      if (uploads.has(url.href)) return new Response(init.method === 'HEAD' ? null : uploads.get(url.href), { headers: { 'content-type': 'image/png' } })
+      if (url.hostname === 'api.cloudflare.com' && init.body instanceof FormData) {
+        const file = init.body.get('file')
+        assert(file instanceof Blob)
+        const response = await meta.fetch(input, init)
+        const uploaded = await response.clone().json() as { result: { id: string } }
+        uploads.set(`https://imagedelivery.example.test/hash/${uploaded.result.id}/public`, new Uint8Array(await file.arrayBuffer()))
+        return response
+      }
+      return meta.fetch(input, init)
+    }
+    cancelFailure = true
+    await assert.rejects(fetchTransformedImageAsDataUri(images, sourceUrl, {}, { format: 'image/jpeg' }), /Image response cancellation refused/)
+    cancelFailure = false
+    const jpegUri = await fetchTransformedImageAsDataUri(images, sourceUrl, { width: 1200, height: 630, fit: 'cover' }, { format: 'image/jpeg', quality: 85 })
+    assert(jpegUri?.startsWith('data:image/jpeg;base64,'))
+    const jpeg = await sharp(Buffer.from(jpegUri.split(',')[1]!, 'base64')).raw().toBuffer({ resolveWithObject: true })
+    assert.deepEqual([jpeg.info.width, jpeg.info.height], [1200, 630])
+    const require = createRequire(import.meta.url)
+    const png = await renderOgImagePng({ template: 'tenant', title: 'A home with an AVIF picture', organizationName: 'org-a', backgroundImageUrl: sourceUrl }, {
+      images, publicOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN!,
+      wasmModule: await WebAssembly.compile(readFileSync(require.resolve('@resvg/resvg-wasm/index_bg.wasm'))),
+      yogaModule: await WebAssembly.compile(readFileSync(require.resolve('satori/yoga.wasm'))),
+    })
+    const rendered = await sharp(png).raw().toBuffer({ resolveWithObject: true })
+    assert.deepEqual([rendered.info.width, rendered.info.height], [1200, 630])
+
+    await asset('avif-source', 'image/avif')
+    const input = { idempotency_key: 'avif-article', title: 'A home with an AVIF picture', content_blocks: [{ type: 'image' as const, data: { caption: 'The actual new-home editor' }, media: [{ asset_id: 'avif-source', slot: 'media' }] }] }
+    unavailable = true
+    await assert.rejects(createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env), /OG page media could not be loaded/)
+    const saved = await db.prepare("SELECT id, status, updated_at FROM content_documents WHERE organization_id = 'org-a' AND kind = 'article' AND row_role = 'root'").first<{ id: string; status: string; updated_at: string }>()
+    assert(saved)
+    assert.equal(saved.status, 'draft')
+    await assert.rejects(createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env), /OG page media could not be loaded/)
+    assert.equal(uploads.size, 0)
+    unavailable = false
+    const repaired = await createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env)
+    assert.equal(repaired.id, saved.id)
+    const read = await getBlogPost(db, saved.id, 'org-a', env)
+    assert.deepEqual([read.status, read.updated_at], ['draft', saved.updated_at])
+    const card = await db.prepare("SELECT ma.public_url, ma.mime_type, ma.width, ma.height FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'social_card' AND mp.status = 'active'").bind(saved.id).first<{ public_url: string; mime_type: string; width: number; height: number }>()
+    assert(card)
+    assert.deepEqual([card.mime_type, card.width, card.height], ['image/png', 1200, 630])
+    const served = await fetch(card.public_url)
+    assert.equal(served.status, 200)
+    const decoded = await sharp(new Uint8Array(await served.arrayBuffer())).raw().toBuffer({ resolveWithObject: true })
+    assert.deepEqual([decoded.info.width, decoded.info.height], [1200, 630])
+    assert.equal((await createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env)).id, saved.id)
+    assert.equal(uploads.size, 1, 'a completed replay reuses the one independently served card')
+    assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE organization_id = 'org-a' AND kind = 'article' AND row_role = 'root'").first('count(*)'), 1)
+  } finally {
+    restore()
+    await runtime.dispose()
+  }
+})
 
 test('publication: one result, one external post per target, and no blind resend under any fault', async () => {
   const { runtime, db, env, cardless, meta, run, asset, restore } = await setUp()

@@ -10,18 +10,23 @@ import { ChannexDataError, object, resource, type JsonRecord, type Resource } fr
 export interface ChannexEnv {
   CHANNEX_BASE_URL?: string
   CHANNEX_API_KEY?: string
+  /** The current operation's deadline; omitted for callers without a bounded background slice. */
+  requestSignal?: AbortSignal
 }
 
 export class ChannexError extends Error {
   readonly status: number
   readonly statusCode: number
   readonly uncertain: boolean
+  /** Only an unsent or explicitly refused write proves a pending mutation did not apply. */
+  readonly writeRefused: boolean
   readonly data: { code: string; field: string; resource?: string; uncertain: boolean }
-  constructor(message: string, status: number, uncertain: boolean, context?: { code: string; field: string; resource?: string }) {
+  constructor(message: string, status: number, uncertain: boolean, context?: { code: string; field: string; resource?: string }, writeRefused = false) {
     super(message)
     this.status = status
     this.statusCode = status
     this.uncertain = uncertain
+    this.writeRefused = writeRefused
     this.data = { ...(context ?? { code: 'CHANNEX_REQUEST_FAILED', field: 'provider_response' }), uncertain }
   }
 }
@@ -33,25 +38,35 @@ const MAX_RESPONSE_BYTES = 10_000_000
 export async function channexRequest(env: ChannexEnv, path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', body?: JsonRecord): Promise<JsonRecord> {
   const baseUrl = env.CHANNEX_BASE_URL?.trim().replace(/\/$/, '')
   const apiKey = env.CHANNEX_API_KEY?.trim()
-  if (!baseUrl || !apiKey) throw new ChannexError('CHANNEX_BASE_URL and CHANNEX_API_KEY are required', 500, false)
+  if (!baseUrl || !apiKey) throw new ChannexError('CHANNEX_BASE_URL and CHANNEX_API_KEY are required', 500, false, undefined, method !== 'GET')
   const label = `${method} ${path.split('?')[0]}`
-  let response: Response
+  if (env.requestSignal?.aborted) throw new ChannexError(`The background slice ended before ${label} was sent`, 504, false, { code: 'SYNC_SLICE_ENDED', field: 'background_slice' }, method !== 'GET')
+  let response: Response | undefined
+  let text: string
   try {
     response = await fetch(`${baseUrl}${path}`, {
       method,
       headers: { 'user-api-key': apiKey, 'content-type': 'application/json', accept: 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
       redirect: 'manual',
+      signal: env.requestSignal,
     })
+    const length = Number(response.headers.get('content-length'))
+    if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
+      const refused = method !== 'GET' && REFUSED.has(response.status)
+      throw new ChannexError(`Channex's answer to ${label} exceeds 10 MB`, 502, method !== 'GET' && !refused, undefined, refused)
+    }
+    text = await response.text()
   } catch (error) {
-    throw new ChannexError(`Channex could not be reached for ${label}: ${error instanceof Error ? error.message : String(error)}`, 502, method !== 'GET')
+    if (error instanceof ChannexError) throw error
+    const refused = method !== 'GET' && response !== undefined && REFUSED.has(response.status)
+    if (env.requestSignal?.aborted) throw new ChannexError(`The background slice ended while waiting for ${label}`, 504, method !== 'GET' && !refused, { code: 'SYNC_SLICE_ENDED', field: 'background_slice' }, refused)
+    throw new ChannexError(`Channex could not be reached for ${label}: ${error instanceof Error ? error.message : String(error)}`, 502, method !== 'GET' && !refused, undefined, refused)
   }
   if (!response.ok) {
-    throw new ChannexError(`Channex answered ${response.status} to ${label}: ${(await response.text()).slice(0, 500)}`, response.status, method !== 'GET' && !REFUSED.has(response.status))
+    const refused = method !== 'GET' && REFUSED.has(response.status)
+    throw new ChannexError(`Channex answered ${response.status} to ${label}: ${text.slice(0, 500)}`, response.status, method !== 'GET' && !refused, undefined, refused)
   }
-  const length = Number(response.headers.get('content-length'))
-  if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) throw new ChannexError(`Channex's answer to ${label} exceeds 10 MB`, 502, method !== 'GET')
-  const text = await response.text()
   if (text.length > MAX_RESPONSE_BYTES) throw new ChannexError(`Channex's answer to ${label} exceeds 10 MB`, 502, method !== 'GET')
   let parsed: unknown
   try {

@@ -63,8 +63,6 @@ export async function renderOgImagePng(
     }, {
       format: 'image/jpeg',
       quality: 85,
-    }, {
-      acceptedContentTypes: ['image/png', 'image/jpeg', 'image/webp'],
     }),
     resolveLogoDataUri(deps.images, payload.logoUrl, deps.publicOrigin),
   ])

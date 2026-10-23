@@ -21,7 +21,7 @@ const groups=computed<EditorNavigationGroup[]>(()=>[
  { id: 'seats', icon: 'i-lucide-armchair', label:'Seats per time slot',summary:seatsSummary(editor.reservationForm.value.slot_capacity),to:to('seats')},
  { id: 'deposit', icon: 'i-lucide-wallet', label:'Reservation deposit',summary:editor.reservationForm.value.deposit_required ? 'Required' : 'Not required',to:to('deposit')},
  ]}]:[]),
- {id:'personal',items:[{ id: 'your-availability', icon: 'i-lucide-calendar-clock', label:'Your availability',to:`/dashboard/account/profile/calendar/${encodeURIComponent(organizationId)}`}]},
- {id:'connect',label:'Connect calendars',items:[{id:'google-calendar',label:'Google Calendar',lead:{icon:'i-logos-google-calendar'},to:to('google-calendar')}]},
+ {id:'personal',items:[{ id: 'your-availability', icon: 'i-lucide-calendar-clock', label:'Profile & availability',to:`/dashboard/account/profile/calendar/${encodeURIComponent(organizationId)}`}]},
+ {id:'connect',items:[{id:'google-calendar',label:'Google Calendar',lead:{icon:'i-logos-google-calendar'},to:to('google-calendar')}]},
 ])
 </script>

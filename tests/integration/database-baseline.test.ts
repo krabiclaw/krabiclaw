@@ -39,6 +39,68 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('the profile Hours migration preserves every authored member field and admits only unknown or complete Hours', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const migration = journal.entries.findIndex(entry => entry.tag === '0003_member_profile_hours')
+    assert.notEqual(migration, -1)
+    for (const entry of journal.entries.slice(0, migration)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    for (const id of ['practice', 'other']) database.prepare('INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES (?, ?, ?, ?, ?)').run(id, id, id, 'USD', 'America/New_York')
+    for (const id of ['attorney', 'closed', 'profile']) {
+      database.prepare('INSERT INTO user (id, name, email) VALUES (?, ?, ?)').run(id, id, `${id}@proof.example`)
+      database.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES (?, 'practice', ?, 'member')").run(`member-${id}`, id)
+    }
+    database.prepare("INSERT INTO account (id, accountId, providerId, userId, scope) VALUES ('linked-calendar', 'google-subject', 'google', 'attorney', 'calendar.events.freebusy')").run()
+    database.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until,
+      public_name, public_photo_url, public_bio, public_approved, calendar_account_id, calendar_ids_json, calendar_revision,
+      busy_json, busy_from, busy_until, busy_checked_at, busy_error, updated_at, updated_by)
+      VALUES ('member-attorney', 'practice', 'America/New_York', ?, ?, ?, '2028-01-01T00:00:00.000Z',
+        'Attorney Rivera', 'https://example.test/attorney.jpg', 'Authored attorney biography', 1, 'linked-calendar', ?, 'calendar-revision',
+        ?, '2027-01-01T00:00:00.000Z', '2027-04-01T00:00:00.000Z', '2027-01-01T12:00:00.000Z', 'Visible calendar failure', '2027-01-01T12:01:00.001Z', 'attorney')`)
+      .run('[ { "weekday": 1, "start": "09:00", "end": "17:00" } ]',
+        '[{"start":"2027-02-01T14:00:00.000Z","end":"2027-02-01T15:00:00.000Z"}]',
+        '[{"start":"2027-02-01T14:00:00.000Z","end":"2027-02-01T22:00:00.000Z"}]',
+        '["primary","shared@example.test"]', '[{"start":"2027-02-01T18:00:00.000Z","end":"2027-02-01T19:00:00.000Z"}]')
+    database.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until,
+      public_name, public_photo_url, public_bio, public_approved, calendar_account_id, calendar_ids_json, calendar_revision, busy_json, updated_at, updated_by)
+      VALUES ('member-closed', 'practice', 'UTC', '[]', '[]', '[]', '2028-01-01T00:00:00.000Z', NULL, NULL, '', 0, NULL, '[]', 'disconnected-revision', '[]', '2027-01-01T12:00:00.000Z', 'closed')`).run()
+    const schedules = database.prepare('SELECT * FROM member_scheduling ORDER BY member_id').all()
+    const members = database.prepare('SELECT * FROM member ORDER BY id').all()
+    const accounts = database.prepare('SELECT * FROM account ORDER BY id').all()
+
+    database.exec(readFileSync(`migrations/${journal.entries[migration]!.tag}.sql`, 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT * FROM member_scheduling ORDER BY member_id').all(), schedules, 'the leaf rebuild retains profile, Hours, approval, calendar, busy and revision bytes')
+    assert.deepEqual(database.prepare('SELECT * FROM member ORDER BY id').all(), members)
+    assert.deepEqual(database.prepare('SELECT * FROM account ORDER BY id').all(), accounts)
+    assert.equal(database.pragma('foreign_keys', { simple: true }), 1)
+    assert(database.prepare("SELECT 1 FROM sqlite_schema WHERE type='index' AND name='member_scheduling_org_idx'").get())
+    database.prepare(`INSERT INTO member_scheduling (member_id, organization_id, public_name, public_approved, calendar_revision, updated_at, updated_by)
+      VALUES ('member-profile', 'practice', 'Profile without Hours', 0, 'profile-calendar-revision', '2027-01-01T13:00:00.000Z', 'profile')`).run()
+    const hours = ['timezone', 'weekly_json', 'time_off_json', 'windows_json', 'windows_until']
+    const unknown = database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-profile'").get() as Record<string, unknown>
+    assert.deepEqual(hours.map(field => unknown[field]), [null, null, null, null, null])
+    assert.equal(unknown.public_approved, 0)
+    assert.equal(unknown.calendar_ids_json, '[]')
+    const authored = database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-attorney'").get() as Record<string, string>
+    const updateHours = database.prepare(`UPDATE member_scheduling SET ${hours.map(field => `${field}=?`).join(',')} WHERE member_id='member-profile'`)
+    for (let mask = 1; mask < 31; mask++) {
+      assert.throws(() => updateHours.run(...hours.map((field, bit) => mask & (1 << bit) ? authored[field] : null)), /member_scheduling_hours_check/, `partial Hours mask ${mask} must fail rather than pass SQL NULL`)
+    }
+    assert.deepEqual(database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-profile'").get(), unknown)
+    updateHours.run(...hours.map(field => authored[field]))
+    assert.deepEqual(database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-profile'").get(), { ...unknown, ...Object.fromEntries(hours.map(field => [field, authored[field]])) })
+    assert.throws(() => database.prepare("UPDATE member_scheduling SET organization_id='other' WHERE member_id='member-profile'").run(), /FOREIGN KEY constraint failed/)
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+    database.prepare("DELETE FROM member WHERE id='member-profile'").run()
+    assert.equal(database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-profile'").get(), undefined)
+    assert.deepEqual(database.prepare('SELECT * FROM member_scheduling ORDER BY member_id').all(), schedules)
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally { database.close() }
+})
+
 test('room migrations preserve authored facts and photo memberships without deriving room facts from listing totals or amenities', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')

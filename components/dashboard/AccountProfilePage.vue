@@ -53,7 +53,7 @@ export const DETAIL_LABELS: Record<string, string> = {
   login: 'Login & security',
   notifications: 'Notifications',
   appearance: 'Appearance',
-  calendar: 'Your availability',
+  calendar: 'Profile & availability',
 }
 
 /** The signed-in person's account, for the three leaves that edit parts of it. */
@@ -124,7 +124,10 @@ const organizationsSummary = computed(() => {
 const profilePath = level.path
 const session = authClient.useSession()
 const sessionData = computed(() => session.value.data)
-const refreshSession = () => session.value.refetch()
+async function refreshSession() {
+  await session.value.refetch()
+  if (session.value.error) throw new Error(session.value.error.message || 'Your session could not be refreshed.')
+}
 
 const { logOut, organization } = useDashboardMenu()
 const { formatExactDateTime } = useHumanTime()
@@ -207,25 +210,28 @@ async function pickPhoto(event: Event) {
   if (!file) return
   photoSaving.value = true
   photoError.value = ''
+  let imageSaved = false
   const body = new FormData()
   body.append('file', file)
   try {
-    const result = await applicationFetch<{ image: string }>('/api/user/avatar', {
+    const result = await applicationFetch<{ image: string; previousImageCleanupError?: string }>('/api/user/avatar', {
       method: 'POST',
       body,
-      validate: (value): value is { image: string } => isRecord(value) && typeof value.image === 'string',
+      validate: (value): value is { image: string; previousImageCleanupError?: string } => isRecord(value)
+        && typeof value.image === 'string' && Boolean(value.image.trim())
+        && (!Object.hasOwn(value, 'previousImageCleanupError') || typeof value.previousImageCleanupError === 'string'),
     })
     photoPreview.value = result.image
+    imageSaved = true
+    photoError.value = result.previousImageCleanupError ?? ''
+    await refreshSession()
+    editing.value = null
   } catch (cause) {
-    photoError.value = cause instanceof Error ? cause.message : 'Upload failed. Please try again.'
-    return
+    const reason = cause instanceof Error ? cause.message : 'Upload failed. Please try again.'
+    photoError.value = [photoError.value, imageSaved ? `Your new photo is saved, but your session could not be refreshed: ${reason}` : reason].filter(Boolean).join(' ')
   } finally {
     photoSaving.value = false
   }
-  // Separate from the upload: the photo is already stored by now, so a failed
-  // refresh is a stale header, not a failed save, and must not read as one.
-  await refreshSession()
-  editing.value = null
 }
 
 // Display Name
@@ -271,7 +277,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [
       { id: 'login', icon: 'i-lucide-shield-check', label: 'Login & security', summary: sessionData.value?.user?.email ?? '', to: `${profilePath.value}/login` },
       { id: 'notifications', icon: 'i-lucide-bell', label: 'Notifications', summary: notificationSummary.value, to: `${profilePath.value}/notifications` },
       // Inside an organization, availability is that organization's; Personal names one first.
-      { id: 'calendar', icon: 'i-lucide-calendar-clock', label: 'Your availability', summary: 'Hours, time off and Google Calendar', to: organization.value ? `${profilePath.value}/calendar/${encodeURIComponent(organization.value.id)}` : `${profilePath.value}/calendar` },
+      { id: 'calendar', icon: 'i-lucide-calendar-clock', label: 'Profile & availability', summary: 'Public profile, hours, time off and Google Calendar', to: organization.value ? `${profilePath.value}/calendar/${encodeURIComponent(organization.value.id)}` : `${profilePath.value}/calendar` },
       { id: 'appearance', icon: 'i-lucide-sun-moon', label: 'Appearance', summary: `${themePreference.value.charAt(0).toUpperCase()}${themePreference.value.slice(1)} theme`, to: `${profilePath.value}/appearance` },
       { id: 'payments', icon: 'i-lucide-credit-card', label: 'Payments', summary: 'Your payments and refunds', to: `${profilePath.value}/payments` },
       { id: 'organizations', icon: 'i-lucide-building-2', label: 'Organizations', summary: organizationsSummary.value, to: `${profilePath.value}/organizations` },
@@ -280,7 +286,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [
   },
 ])
 
-// The row whose screen is open. Your availability opens an organization's
+// The row whose screen is open. Profile & availability opens an organization's
 // screen below its own URL, so the open row is the one the path sits under.
 const route = useRoute()
 const openRow = computed(() => groups.value[0]!.items.find(item => item.to && (route.path === item.to || route.path.startsWith(`${item.to}/`)))?.id ?? null)
@@ -321,7 +327,7 @@ async function saveName() {
   nameSaving.value = true
   nameError.value = null
   try {
-    await authClient.updateUser({ name: nameInput.value.trim() })
+    await authClient.updateUser({ name: nameInput.value.trim() }, { throw: true })
     await refreshSession()
     return true
   } catch (_err) {

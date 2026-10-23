@@ -363,7 +363,7 @@ async function savePageLocalization(locale: string, submitted: Record<string, un
     summary: typeof submitted.summary === 'string' ? submitted.summary : '',
     pageType: source.page_type,
     recipe: source.recipe || null,
-    sortOrder: source.sort_order,
+    ...(state.variant ? { sortOrder: source.sort_order } : {}),
     blocks,
     expectedUpdatedAt: state.variant?.document.updated_at,
   }

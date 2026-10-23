@@ -146,7 +146,7 @@ are sent. Provider mutations use `sendUpdates=none`.
    `calendar.events.freebusy`; Better Auth owns these incremental grants.
 4. Connect Google Calendar in Calendar → Settings → Availability. The business
    calendar is created automatically; no export policy is chosen. In My account
-   → Your availability, connect Google and use Avoid double bookings for personal
+   → Profile & availability, connect Google and use Avoid double bookings for personal
    conflicts.
 5. Perform real consent/provider verification only against a separately
    authorized disposable Google calendar. Implementation tests intercept Google

@@ -1,7 +1,7 @@
 import { expect, request as playwrightRequest, test, type APIRequestContext, type Page } from '@playwright/test'
 import { blawbyBaseURL, blawbyExtraHeaders, dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './helpers'
-import { loginAs } from './helpers/auth'
-import { MCP_ORGANIZATION_ID, mcpRequest, mcpData, publishOwnHostProfile } from './helpers/mcp'
+import { authRequestHeaders, loginAs } from './helpers/auth'
+import { MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
 import { E2E_POTTERY_ORGANIZATION_ID, tenantTestExtraHeaders } from './test-env'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
@@ -9,6 +9,8 @@ import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../
 import type { OrganizationMembersData } from '../../utils/organization-members'
 import type { Product } from '../../server/types/products'
 import type { SessionAvailability } from '../../server/utils/availability'
+import type { readMemberScheduling } from '../../server/domain/member-scheduling'
+import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
 // for why. This group covers the bulk of an owner's MCP tool surface: site
@@ -1193,8 +1195,8 @@ test.describe('stateless MCP server', () => {
       await loginAs(request, baseURL!)
       const organizationId = MCP_ORGANIZATION_ID
       const locationId = 'loc-demo'
-      const call = async <T>(toolName: string, args: Record<string, unknown> = {}) => {
-        const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, ...args } })
+      const call = async <T>(toolName: string, args: Record<string, unknown> = {}, context = request) => {
+        const response = await mcpRequest(context, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, ...args } })
         expect(response.status(), await response.text()).toBe(200)
         return mcpData<T>(await response.json())
       }
@@ -1207,9 +1209,14 @@ test.describe('stateless MCP server', () => {
         { name: `Desserts ${stamp}`, items: [item('Matcha cake', 900)] },
       ] }
       type Menu = { sections: Array<{ collection: { id: string; name: string }; products: Array<{ id: string; name: string }> }>; replayed: boolean }
+      type Scheduling = Awaited<ReturnType<typeof readMemberScheduling>>
       let menu: Menu | null = null
       let experienceId: string | null = null
-      let host: Awaited<ReturnType<typeof publishOwnHostProfile>> | null = null
+      let hostMemberId: string | null = null
+      let invitationId: string | null = null
+      let hostRequest: APIRequestContext | null = null
+      let originalHost: { memberId: string; scheduling: Scheduling } | null = null
+      const cleanupRequest = await playwrightRequest.newContext({ baseURL, storageState: await request.storageState() })
       try {
         menu = await call<Menu>('update_menu', args)
         const written = menu.sections.filter(section => section.collection.name.endsWith(stamp))
@@ -1253,10 +1260,37 @@ test.describe('stateless MCP server', () => {
         expect(seating, 'the existing location has an open one-hour seating within the chosen week').toBeTruthy()
         const start = localDateTimeToInstant(seating!.date, seating!.time, location.timezone)
         const name = `Omakase ${stamp}`
-        // Setting up bookings publishes the experience, and guests see who hosts it.
-        host = await publishOwnHostProfile(request, baseURL!, organizationId, 'Omakase host')
+        // This host joins only for this Experience. Its own business and Hours
+        // remain untouched when this membership and its authored Hours leave.
+        const actor = findE2eAuthFixture('user-e2e-pottery-location-owner')
+        hostRequest = await playwrightRequest.newContext({ baseURL })
+        await loginAs(hostRequest, baseURL!, actor.id)
+        const originalMembers = await hostRequest.get(`${baseURL}/api/organizations/${E2E_POTTERY_ORGANIZATION_ID}/members/scheduling`)
+        expect(originalMembers.status(), await originalMembers.text()).toBe(200)
+        const originalMember = (await originalMembers.json() as { members: Array<{ id: string; self: boolean; scheduling: Scheduling }> }).members.find(member => member.self)
+        expect(originalMember).toBeDefined()
+        originalHost = { memberId: originalMember!.id, scheduling: originalMember!.scheduling }
+        const beforeInvitation = await call<{ members: Array<{ userId: string }> }>('list_organization_members')
+        expect(beforeInvitation.members.some(member => member.userId === actor.id)).toBe(false)
+        const invited = await call<{ invitation: { id: string; status: string; delivery: { status: string } } }>('invite_organization_member', { email: actor.email, role: 'member' })
+        invitationId = invited.invitation.id
+        expect(invited.invitation).toMatchObject({ status: 'pending', delivery: { status: 'sent' } })
+        const accepted = await hostRequest.post(`${baseURL}/api/auth/organization/accept-invitation`, { headers: authRequestHeaders(baseURL!), data: { invitationId } })
+        expect(accepted.status(), await accepted.text()).toBe(200)
+        hostMemberId = (await accepted.json() as { member: { id: string } }).member.id
+        invitationId = null
+        const joinedMembers = await hostRequest.get(`${baseURL}/api/organizations/${organizationId}/members/scheduling`)
+        expect(joinedMembers.status(), await joinedMembers.text()).toBe(200)
+        expect((await joinedMembers.json()).members).toEqual([expect.objectContaining({ id: hostMemberId, self: true, scheduling: null })])
+        // A published profile does not claim working hours. Physical sessions
+        // remain bookable from the Product's own explicitly authored times.
+        const profile = await call<{ scheduling: NonNullable<Scheduling> }>('set_member_scheduling', { member_id: hostMemberId, expected_updated_at: null, public_name: 'Omakase host', public_approved: true })
+        const profileRead = await request.get(`${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`)
+        expect(profileRead.status(), await profileRead.text()).toBe(200)
+        expect((await profileRead.json()).scheduling).toEqual(profile.scheduling)
+        expect(profile.scheduling).toMatchObject({ public_name: 'Omakase host', public_approved: 1, timezone: null, weekly: null, time_off: null })
         const creation = { kind: 'experience', name, idempotency_key: crypto.randomUUID(), variants: [{ name: 'Per person', prices: [{ unit_amount: 13000, currency: settings.settings.default_currency }] }],
-          booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false, assigned_member_id: host.memberId,
+          booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false, assigned_member_id: hostMemberId,
             sessions: [{ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3600000).toISOString(), capacity: 6 }] } }
         const { product } = await call<{ product: { id: string; slug: string; public_url: string; booking_readiness: { ready: boolean; missing: string[] } } }>('create_product', creation)
         experienceId = product.id
@@ -1264,7 +1298,7 @@ test.describe('stateless MCP server', () => {
         expect((await call<{product:{id:string}}>('create_product', creation)).product.id).toBe(product.id)
         const readback = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
         expect(readback.status()).toBe(200)
-        expect((await readback.json()).product).toMatchObject({ kind: 'experience', booking: { duration_minutes: 60, confirmation_mode: 'review', assigned_member_id: host.memberId }, locations: [{ location_id: locationId, active: true, published: true }] })
+        expect((await readback.json()).product).toMatchObject({ kind: 'experience', booking: { duration_minutes: 60, confirmation_mode: 'review', assigned_member_id: hostMemberId }, locations: [{ location_id: locationId, active: true, published: true }] })
         await page.reload()
         await expect(page.getByText(name, {exact:true})).toHaveCount(0)
         expect((await page.goto(`${baseURL}/experiences`))?.status()).toBe(200)
@@ -1396,6 +1430,12 @@ test.describe('stateless MCP server', () => {
         // Removing it from its own focused editor returns to the same Product
         // and rereads saved state without following an invalid online address.
         await call('set_product_publication', { product_id: product.id, published: false })
+        const authoredHours = { timezone: location.timezone, weekly: [{ weekday: new Date(`${seating!.date}T12:00:00Z`).getUTCDay(), start: '09:00', end: '10:00' }], time_off: [] }
+        const hours = await call<{ scheduling: NonNullable<Scheduling> }>('set_member_scheduling', { member_id: hostMemberId, expected_updated_at: profile.scheduling.updated_at, ...authoredHours })
+        const hoursRead = await request.get(`${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`)
+        expect(hoursRead.status(), await hoursRead.text()).toBe(200)
+        expect((await hoursRead.json()).scheduling).toEqual(hours.scheduling)
+        expect(hours.scheduling).toMatchObject({ ...authoredHours, public_name: 'Omakase host', public_approved: 1 })
         await call('set_product_booking_config', { product_id: product.id, held_online: true, scheduling_mode: 'provider' })
         await page.goto(`${bookingPath}/location?location_id=online`)
         const format = page.locator('#dashboard-panel-booking-location')
@@ -1404,7 +1444,7 @@ test.describe('stateless MCP server', () => {
         await format.getByRole('button', { name: 'Save', exact: true }).click()
         await expect(page).toHaveURL(`${bookingPath}/duration`)
         const offline = await call<{ product: Product }>('get_product', { product_id: product.id })
-        expect(offline.product.booking).toMatchObject({ held_online: false, scheduling_mode: 'provider', assigned_member_id: host.memberId })
+        expect(offline.product.booking).toMatchObject({ held_online: false, scheduling_mode: 'provider', assigned_member_id: hostMemberId })
         expect(offline.product.locations).toEqual([{ location_id: locationId, active: true, published: true }])
         await call('set_product_booking_config', { product_id: product.id, held_online: true })
         await page.goto(`${bookingPath}/enabled?location_id=online`)
@@ -1414,17 +1454,38 @@ test.describe('stateless MCP server', () => {
         await expect(page).toHaveURL(`${bookingPath}/enabled`)
         expect((await call<{ product: Product }>('get_product', { product_id: product.id })).product.booking).toBeNull()
       } finally {
+        try {
         if (experienceId) {
-          expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId})).deleted).toBe(true)
-          const deleted = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${experienceId}`)
+          expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId},cleanupRequest)).deleted).toBe(true)
+          const deleted = await cleanupRequest.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${experienceId}`)
           expect(deleted.status(), await deleted.text()).toBe(404)
         }
         for (const section of menu?.sections.filter(section => section.collection.name.endsWith(stamp)) ?? []) {
-          for (const product of section.products) expect((await call<{deleted:boolean}>('delete_product',{product_id:product.id})).deleted).toBe(true)
-          expect((await call<{deleted:boolean}>('delete_collection',{collection_id:section.collection.id})).deleted).toBe(true)
+          for (const product of section.products) expect((await call<{deleted:boolean}>('delete_product',{product_id:product.id},cleanupRequest)).deleted).toBe(true)
+          expect((await call<{deleted:boolean}>('delete_collection',{collection_id:section.collection.id},cleanupRequest)).deleted).toBe(true)
         }
-        if (original.collections.length) await call('reorder_collections',{location_id:locationId,collection_ids:original.collections.map(collection=>collection.id)})
-        await host?.restore()
+        if (original.collections.length) await call('reorder_collections',{location_id:locationId,collection_ids:original.collections.map(collection=>collection.id)},cleanupRequest)
+        } finally {
+          try {
+            if (hostMemberId) {
+              expect((await call<{ member: { id: string } }>('remove_organization_member', { member_id: hostMemberId }, cleanupRequest)).member.id).toBe(hostMemberId)
+              const remaining = await call<{ members: Array<{ id: string }> }>('list_organization_members', {}, cleanupRequest)
+              expect(remaining.members.some(member => member.id === hostMemberId)).toBe(false)
+              const removed = await cleanupRequest.get(`${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`)
+              expect(removed.status(), await removed.text()).toBe(404)
+            } else if (invitationId) {
+              expect((await call<{ invitation: { status: string } }>('cancel_organization_invitation', { invitation_id: invitationId }, cleanupRequest)).invitation.status).toBe('canceled')
+            }
+            if (hostRequest && originalHost) {
+              const retained = await hostRequest.get(`${baseURL}/api/organizations/${E2E_POTTERY_ORGANIZATION_ID}/members/scheduling`)
+              expect(retained.status(), await retained.text()).toBe(200)
+              expect((await retained.json()).members.find((member: { self: boolean }) => member.self)).toMatchObject({ id: originalHost.memberId, scheduling: originalHost.scheduling })
+            }
+          } finally {
+            try { await hostRequest?.dispose() }
+            finally { await cleanupRequest.dispose() }
+          }
+        }
       }
     })
     test('MCP teams and invitation delivery use the same Better Auth records as the dashboard', async ({request,baseURL}) => {

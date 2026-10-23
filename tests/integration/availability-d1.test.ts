@@ -647,20 +647,31 @@ test('an online offering is booked in its provider\'s hours, in the provider\'s 
   const { runtime, db } = await boot()
   const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR }
   try {
-    const { workingWindows } = await import('../../server/domain/member-scheduling.ts')
+    const { writeMemberScheduling } = await import('../../server/domain/member-scheduling.ts')
     const zone = 'America/Los_Angeles'
     await db.prepare("INSERT INTO user (id, name, email) VALUES ('host-user', 'Host', 'host@example.com')").run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('host', ?, 'host-user', 'member')").bind(ORG).run()
-    const hours = (end: string) => workingWindows(zone, [1, 2, 3, 4, 5].map(weekday => ({ weekday, start: '09:00', end })))
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('member-actor', ?, ?, 'owner')").bind(ORG, ACTOR).run()
+    await db.prepare("INSERT INTO team (id, name, organizationId, createdAt) VALUES ('host-team', 'Host team', ?, 0)").bind(ORG).run()
+    await db.prepare("INSERT INTO teamMember (id, teamId, userId, createdAt) VALUES ('host-team-member', 'host-team', 'host-user', 0)").run()
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
+    const hostActor = { env, organizationId: ORG, userId: 'host-user' }
+    const profile = await writeMemberScheduling(hostActor, 'host', { expected_updated_at: null, public_name: 'Authored host' })
+    assert.equal(profile.timezone, null)
+    await setProductBookingConfig(db, { ...scope, env, patch: { assigned_team_id: 'host-team', scheduling_mode: 'legacy' } })
+    assert.equal(await db.prepare('SELECT assigned_team_id FROM product_booking_configs WHERE product_id=?').bind(PRODUCT).first('assigned_team_id'), 'host-team', 'a host team does not need provider hours for physical sessions')
+    await assert.rejects(setProductBookingConfig(db, { ...scope, env, patch: { scheduling_mode: 'provider' } }), /at least one member who has set working hours/)
+    await assert.rejects(setProductBookingConfig(db, { ...scope, env, patch: { scheduling_mode: 'provider', assigned_team_id: null, assigned_member_id: 'host' } }), /Set working hours for this member/)
+    assert.equal(await db.prepare('SELECT scheduling_mode FROM product_booking_configs WHERE product_id=?').bind(PRODUCT).first('scheduling_mode'), 'legacy', 'a profile-only member cannot become a provider candidate')
     const tuesday = (() => { let date = addLocalDays(localNow(zone).date, 2); while (new Date(`${date}T12:00:00Z`).getUTCDay() !== 2) date = addLocalDays(date, 1); return date })()
     const away = { start: localDateTimeToInstant(tuesday, '09:00', zone).toISOString(), end: localDateTimeToInstant(tuesday, '10:00', zone).toISOString() }
-    const write = (end: string, timeOff: Array<{ start: string; end: string }>) => {
-      const windows = hours(end)
-      return db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, calendar_revision, updated_at, updated_by) VALUES ('host', ?, ?, '[]', ?, ?, ?, 'r', ?, ?)
-        ON CONFLICT (member_id) DO UPDATE SET time_off_json = excluded.time_off_json, windows_json = excluded.windows_json`).bind(ORG, zone, JSON.stringify(timeOff), JSON.stringify(windows.intervals), windows.until, NOW, ACTOR).run()
-    }
+    const write = async (end: string, timeOff: Array<{ start: string; end: string }>) => writeMemberScheduling(hostActor, 'host', {
+      timezone: zone, weekly: [1, 2, 3, 4, 5].map(weekday => ({ weekday, start: '09:00', end })), time_off: timeOff,
+      expected_updated_at: (await db.prepare("SELECT updated_at FROM member_scheduling WHERE member_id='host'").first<string>('updated_at'))!,
+    })
     await write('12:00', [away])
-    await db.prepare("UPDATE product_booking_configs SET duration_minutes = 60, default_capacity = 1, held_online = 1, scheduling_mode = 'provider', assigned_member_id = 'host' WHERE product_id = ?").bind(PRODUCT).run()
+    await setProductBookingConfig(db, { ...scope, env, patch: { duration_minutes: 60, default_capacity: 1, held_online: true, scheduling_mode: 'provider', assigned_team_id: null, assigned_member_id: 'host' } })
     await materializeSessions(db, { ...scope, throughDate: addLocalDays(localNow(zone).date, 30) })
     const online = async () => (await db.prepare("SELECT id, starts_at, timezone, assigned_member_id, status FROM product_sessions WHERE location_id IS NULL ORDER BY starts_at").all<{ id: string; starts_at: string; timezone: string; assigned_member_id: string; status: string }>()).results
     const local = (instant: string) => new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(instant))
@@ -674,14 +685,12 @@ test('an online offering is booked in its provider\'s hours, in the provider\'s 
     const claimed = first.find(session => local(session.starts_at) === '11:00')!
     await claimSessionCapacity(db, { ...scope, sessionId: claimed.id, productVariantId: 'var-adult', partySize: 1 })
     await write('10:00', [away])
-    await materializeSessions(db, { ...scope, throughDate: addLocalDays(localNow(zone).date, 30) })
     const shorter = await online()
     assert.equal(shorter.filter(session => session.status === 'scheduled' && local(session.starts_at) === '10:00').length, 0, 'unclaimed slots the hours no longer cover are retired')
     assert.equal(shorter.find(session => session.id === claimed.id)?.status, 'scheduled', 'a claimed slot is a commitment and stays')
 
     // The longer day comes back: the retired slots reopen in place rather than gaining twins.
     await write('12:00', [away])
-    await materializeSessions(db, { ...scope, throughDate: addLocalDays(localNow(zone).date, 30) })
     const restored = await online()
     assert.equal(restored.length, shorter.length, 'no duplicate sessions')
     assert.equal(restored.filter(session => session.status === 'scheduled').length, first.length)

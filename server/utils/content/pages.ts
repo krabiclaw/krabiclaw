@@ -722,6 +722,7 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
   // it, but only to agree with the source; it does not get to pick a different
   // one, and omitting it does not mean "choose for me".
   if (existingPage) {
+    if (input.data.sortOrder !== undefined) badRequest('Set sortOrder on the source page, not a translation')
     const statedRecipe = input.data.recipe === undefined ? undefined : input.data.recipe?.trim() || null
     if ((input.data.pageType !== undefined && input.data.pageType !== existingPage.page_type)
       || (statedRecipe !== undefined && statedRecipe !== existingPage.recipe)) {
