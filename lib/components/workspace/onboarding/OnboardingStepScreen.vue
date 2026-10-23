@@ -82,7 +82,7 @@ import { useOnboardingState, type OnboardingPlacePreview, type OnboardingStep } 
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
 import { currencyForCountry } from '~/shared/currencies'
 import { singleTimezoneForCountry } from '~/utils/timezone'
-import type { OrganizationVertical } from '~/utils/vertical-copy'
+import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
  * One step of the new-site flow, rendered.
@@ -95,11 +95,13 @@ const emit = defineEmits<{ advance: [] }>()
 
 const state = useOnboardingState()
 
-const VERTICAL_CHOICES = [
-  { value: 'restaurant', label: 'Restaurant, café or bar', icon: 'i-lucide-utensils' },
-  { value: 'experience', label: 'Experience or activity', icon: 'i-lucide-ticket' },
-  { value: 'service', label: 'Professional services', icon: 'i-lucide-briefcase' },
-]
+const VERTICAL_PRESENTATION: Record<OrganizationVertical, { label: string; icon: string }> = {
+  restaurant: { label: 'Restaurant, café or bar', icon: 'i-lucide-utensils' },
+  experience: { label: 'Experience or activity', icon: 'i-lucide-ticket' },
+  service: { label: 'Law firm or legal practice', icon: 'i-lucide-briefcase' },
+  lodging: { label: 'Lodging or vacation rentals', icon: 'i-lucide-house' },
+}
+const VERTICAL_CHOICES = ALL_VERTICALS.map(value => ({ value, ...VERTICAL_PRESENTATION[value] }))
 
 // A single-choice step has nothing left to confirm once the card is pressed, so
 // the press is the answer and the flow moves on.

@@ -25,6 +25,11 @@ export default defineHandler(async (event) => {
         { title: 'Reservations', path: '/reservations', description: 'Table bookings and online reservation availability.' },
         { title: 'Locations', path: '/locations', description: 'Physical branch locations, opening hours, and contact details.' },
       )
+    } else if (vertical === 'lodging') {
+      coreLinks.push(
+        { title: 'Places to stay', path: '/stays', description: 'Home listings, stay details, nightly availability, and direct booking.' },
+        { title: 'Contact', path: '/contact', description: 'Contact the host about a stay.' },
+      )
     } else if (vertical === 'service') {
       coreLinks.push(
         { title: 'Contact', path: '/contact', description: 'Office location, consultation inquiry, and contact details.' },
@@ -65,5 +70,18 @@ export default defineHandler(async (event) => {
 
   return textResponse(
     buildLlmsTxt(
-      origin, buildPlatformDocLinkEntries(docs ?? [], origin), buildPlatformBlogLinkEntries(posts ?? [], origin), ), )
+      origin,
+      buildPlatformDocLinkEntries(docs ?? [], origin),
+      buildPlatformBlogLinkEntries(posts ?? [], origin),
+      {
+        coreHeading: 'Solutions',
+        coreLinks: [
+          { title: 'Restaurants', path: '/restaurants', description: 'Restaurant websites, menus, and table reservations.' },
+          { title: 'Experiences', path: '/experiences', description: 'Experience websites, dated sessions, and ticketed bookings.' },
+          { title: 'Lodging', path: '/lodging', description: 'Lodging websites, home listings, nightly availability, and direct stay booking.' },
+          { title: 'Law firms', path: '/legal', description: 'Law firm websites, practice areas, and legal consultation requests.' },
+        ],
+      },
+    ),
+  )
 })

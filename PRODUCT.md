@@ -1,9 +1,10 @@
 # KrabiClaw
 
-KrabiClaw helps local and professional-service businesses build and manage a
-website through the dashboard and the ChatGPT app. Restaurant, experience and
-service businesses share one tenant backend for locations, products, content,
-media and guest activity. Public sites render on the server and use the template
+KrabiClaw helps restaurants, experience operators, law firms and lodging hosts
+build and manage a website through the dashboard and compatible MCP clients,
+including ChatGPT and Claude. All four verticals share one tenant backend for
+locations, products, content, media and guest activity. The `service` vertical is
+Legal Services. Public sites render on the server and use the template
 registry; the platform marketing site is an ordinary platform-template site.
 
 The dashboard handles onboarding, billing, organization settings and the guest
@@ -28,8 +29,28 @@ Google Cloud Console reports branding and data access verified as of 2026-10-04.
 Calendar uses non-sensitive scopes; the unused broad event scope was removed.
 Calendar qualification and scope boundaries are recorded in
 [Google Calendar](docs/integrations/google-calendar.md).
-Online payments are delivered by the separate Payments change; Calendar does
-not establish Checkout, refund or buyer-account availability.
+Online payments follow the [Payments contract](docs/payments/payments.md) and
+their own plan and connected-account requirements.
+
+## Lodging and direct stay bookings
+
+A home is a place to stay, represented by a Product of kind `stay`, with its own
+address, timezone, guest capacity, check-in window, checkout time, photos,
+amenities and stay rules. Its calendar holds nights from check-in up to, but not
+including, checkout. Hosts can set a base nightly price, override prices or
+close nights, and set minimum/maximum stays and arrival/departure restrictions.
+
+On the public site, guests choose available nights at a published home and pay
+in full. New customers need Business and a ready Stripe connected account for
+this direct booking flow. Checkout holds the selected nights; successful payment
+confirms the stay. Recording a stay taken by phone or recording money received
+outside KrabiClaw does not itself collect an online payment or send a guest email.
+
+A home is live when it is active at its active location and either published on
+the site or syncing through an enabled Channex mapping. Live homes count toward
+the plan's home allowance. Every other home is a free draft, with no draft
+limit. The home's location is excluded from the separate location count.
+See [Plans](#plans) and the [native app contract](docs/shared-auth-contract.md#34-live-homes).
 
 ## Guest inbox
 
@@ -68,11 +89,13 @@ A host connects their Airbnb account through Channex and imports a listing as a
 home. The import asks only for what Airbnb leaves out (the organization's
 contact details, until it has them) and takes everything else from Airbnb. A
 listing without a check-in start or checkout time on Airbnb is refused, naming
-the field to set there. The import walks fixed stages, each resumed by the
-apps until it completes: the Channex property, room type and rate plan; the
-listing's next 500 nights, pushed and verified; the Airbnb mapping and
-activation; future reservations; the listing's content; and the conversation
-feed.
+the field to set there. Import first prepares the Channex property, room type and
+rate plan, calendar and listing content, then stops at a free draft. The host
+explicitly activates the import after reviewing the home allowance. The apps
+then advance mapping, activation, future reservations and the conversation feed
+until complete. A draft import does not sync with Airbnb; activation checks the
+plan before mapping the listing. This connection applies to the selected
+Airbnb account and mapped homes, not every booking channel.
 
 The content stage copies the listing onto the home, one Airbnb field to one
 home field:
@@ -128,9 +151,11 @@ booking and managed advertising. Growth and Business include 2 locations, then $
 per additional location per month, and 2 homes, then $9 per additional home per
 month, both billed at the end of the period. A home (a place to stay) is a
 lodging unit counted as a home, not as a location: its location is not billed as
-a location. Basic includes 2 locations and 2 homes. Existing subscriptions
-without the homes price keep their prices. The iOS app is included with every account at no
-charge. Commerce ($89), Marketing ($99) and Business subscriptions on the earlier
+a location. Only live homes count; drafts are free and unlimited. Basic includes
+2 locations and 2 live homes and refuses a third of either. Existing subscriptions
+without the homes price keep their prices. The iOS app is a free companion to the
+account where distribution access is available; this does not establish a public
+App Store release. Commerce ($89), Marketing ($99) and Business subscriptions on the earlier
 $99 price remain existing contracts with their original prices and entitlements. One organization
 subscription covers its sites. Customer display names, Stripe product IDs, price IDs and lookup keys
 are separate concepts. Renaming a plan label does not authorize an ID migration.

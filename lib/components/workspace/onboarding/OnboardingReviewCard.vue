@@ -26,7 +26,7 @@
 
 <script setup lang="ts">
 import { formatPhone } from '~/utils/phone'
-import { useOnboardingState } from '~/composables/useOnboardingFlow'
+import { useOnboardingState, useOnboardingSteps } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
@@ -49,12 +49,11 @@ const liveHost = computed(() => {
   }).replace(/^https?:\/\//, '')
 })
 
-// A service business is never asked what it sells — the products step declares
-// `applies: state => state.vertical !== 'service'` — so the ledger does not
-// list a row for it. It used to, permanently unfinished, for a question the
-// wizard never put.
-const asksForProducts = computed(() => state.value.vertical !== 'service')
-const productsLabel = computed(() => state.value.vertical === 'restaurant' ? 'Menu' : 'Products')
+// The ledger follows the flow's applicability, so it never lists an unfinished
+// products question that a law firm or lodging workspace was not asked.
+const { steps } = useOnboardingSteps()
+const asksForProducts = computed(() => steps.value.some(step => step.id === 'products'))
+const productsLabel = computed(() => state.value.vertical === 'restaurant' ? 'Menu' : 'Experiences')
 
 // Add-location collects the place and nothing else: there is no menu and no
 // brand on a location, so those rows are not part of that flow's ledger.

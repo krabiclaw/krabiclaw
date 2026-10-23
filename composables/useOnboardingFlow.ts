@@ -154,7 +154,7 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   },
   {
     id: 'products', section: 'offer',
-    applies: state => state.vertical !== 'service',
+    applies: state => state.vertical === 'restaurant' || state.vertical === 'experience',
     title: state => state.vertical === 'restaurant'
       ? 'What is on the menu?'
       : state.vertical === 'experience' ? 'What can guests book?' : 'What do you offer?',

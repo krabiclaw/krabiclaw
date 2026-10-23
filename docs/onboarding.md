@@ -12,6 +12,12 @@ Global first, local second, persistent after that.
 
 The flow is draft-first, and this is the one and only new-site creation path:
 
+The business types are restaurant, experience, Legal Services (`service`) and
+lodging, from `ALL_VERTICALS` in `utils/vertical-copy.ts`. Lodging uses the shared
+customer-site renderer and its stay routes. Creating the site does not create a
+home or enable online payments: homes and their calendars are configured after
+site setup, and direct paid stay bookings require Business and Stripe setup.
+
 One screen per question, one question per URL, under `/dashboard/onboarding`: `type → language → business → location → hours → currency → contact → [products] → look → review`. `ONBOARDING_STEPS` in `composables/useOnboardingFlow.ts` is the only place that order is written down — Back, Next, the skipped steps and where a resumed draft lands all read it. `composables/useOnboardingDraft.ts` owns every server call; the step screens own presentation and nothing else.
 
 - The `business` step is one search, `lib/components/workspace/location/GooglePlacePicker.vue`, the same picker add-location and Settings → Integrations → Google Maps use. It calls Places API (New) Autocomplete through `POST /api/dashboard/google-places/autocomplete` and, for the chosen prediction, Place Details through `POST /api/dashboard/google-places/details`, both with one client-generated session token that the Details call ends; the API key stays on the server. Picking a prediction is the confirmation: it records the `placeId` and seeds the location, contact and hours screens, which stay editable. "Enter details manually", under the predictions, keeps the typed name instead. No surface accepts a Google Maps link.
@@ -34,7 +40,7 @@ Generated placeholder rows are no longer part of onboarding or site creation. Te
 | 2 | Site preview (the pending site on its own subdomain, preview token) | Alongside every step, in the preview pane | `https://<subdomain>/` |
 | 3 | Brand and homepage hero — colour, logo, photo, headline, description | Optional (skippable) | `/dashboard/onboarding/look` |
 | 4 | Operations — timezone (before the first save), notification phone | Required | `/dashboard/onboarding/hours` |
-| 5 | Core offering — menu (restaurant), experiences (experience vertical); professional-service offerings | Optional here, deep-linkable to the dashboard CMS later | `/dashboard/onboarding/products` |
+| 5 | Initial catalog entries — restaurant menu items or experience offerings; Legal Services and lodging skip this step | Optional; lodging homes and their stay settings are added in Catalog after site setup | `/dashboard/onboarding/products` |
 | 7 | Story — about, founder story, FAQ seeds | Optional | Dashboard CMS |
 | 8 | Channels — Facebook/Instagram, ChatGPT app install, ChowBot intro | Optional | Dashboard (not part of the onboarding flow) |
 | 9 | Team — invite admins/editors | Optional, explicitly skippable | Dashboard settings |
@@ -48,6 +54,14 @@ Only asked again on **add-location** (the `add-location` flow), which never re-c
 - Notification routing for this location
 - Location hero/media (uses location media only; it remains empty until supplied)
 - Optional location-specific notes
+
+Lodging homes have their own addresses and timezones. Add a home as a draft,
+configure its listing and nightly calendar, then publish it or explicitly
+activate its Airbnb import. Drafts are free and unlimited. Every plan includes
+2 live homes; Growth and Business then charge $9 per additional home per month
+at period end. Homes are counted separately from the 2 included business
+locations; a home's location does not also count as a business location. See
+[Plans](../PRODUCT.md#plans) and [live homes](shared-auth-contract.md#34-live-homes).
 
 ## Deleting a tenant
 
