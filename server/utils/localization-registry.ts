@@ -151,11 +151,16 @@ export function validateLocalizedValues(
   return Object.fromEntries(Object.entries(input).sort(([left], [right]) => left.localeCompare(right)))
 }
 
-export function validateLocalizedRoutePath(resourceType: LocalizedResourceType, locale: string, routePath: unknown, canonicalSlug?: string): string | null {
+export function validateLocalizedRoutePath(resourceType: LocalizedResourceType, locale: string, routePath: unknown, canonicalSlug?: string, savedRoutePath?: string | null): string | null {
   const definition = RESOURCE_LOCALIZATION_REGISTRY[resourceType]
   if (definition.route !== 'stored') {
     if (routePath !== undefined && routePath !== null) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', resourceType + ' does not accept route_path')
     return null
+  }
+  if (savedRoutePath !== undefined) {
+    if (!savedRoutePath) localizationError(500, 'LOCALIZATION_VALIDATION_FAILED', 'The location translation has no saved route')
+    if (routePath !== undefined && routePath !== savedRoutePath) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'A translation keeps its canonical path')
+    return savedRoutePath
   }
   if (!canonicalSlug || /[/?#]/.test(canonicalSlug)) localizationError(500, 'LOCALIZATION_VALIDATION_FAILED', 'The location has no valid canonical slug')
   const path = `/${locale}/locations/${canonicalSlug}`

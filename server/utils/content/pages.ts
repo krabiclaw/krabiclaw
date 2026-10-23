@@ -341,72 +341,6 @@ export async function assertTenantPagePathAvailable(
   return path
 }
 
-async function assertTenantPageRedirectWritable(
-  db: DbClient,
-  input: { organizationId: string; locale: string; fromPath: string; variantId: string },
-) {
-  const sourceLocale = await resolveLocale(db, input.organizationId)
-  const existing = await queryFirst<{ owner_id: string | null; source: string } | null>(db, `
-    SELECT owner_id, source
-      FROM organization_redirects
-      WHERE organization_id = ? AND locale = ? AND from_path = ?
-     LIMIT 1
-  `, [ input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale, sourceLocale)])
-  if (existing && (existing.owner_id !== input.variantId || existing.source !== 'tenant-pages')) {
-    conflict('A manual tenant redirect already owns this path')
-  }
-}
-
-async function assertTenantPageRedirectLocale(
-  db: DbClient,
-  input: { organizationId: string; locale: string; fromPath: string; variantId: string },
-) {
-  const owner = await queryFirst<{ locale: string } | null>(db, `
-    SELECT locale
-      FROM content_documents
-     WHERE row_role IN ('root','representation') AND kind = 'page' AND organization_id = ? AND locale = ? AND path = ?
-         AND id <> ?
-     LIMIT 1
-  `, [input.organizationId, input.locale, input.fromPath, input.variantId])
-  if (owner) conflict('A locale-specific redirect cannot replace a path still published by another locale')
-}
-
-async function prepareTenantPageRedirectFlatten(
-  db: DbClient,
-  input: {
-    organizationId: string
-    locale: string
-    fromPath: string
-    toPath: string | null
-  },
-  now: string,
-): Promise<BatchQuery[]> {
-  const sourceLocale = await resolveLocale(db, input.organizationId)
-  const incoming = await queryAll<{ from_path: string; source: string; behavior: string }>(db, `
-    SELECT from_path, source, behavior
-      FROM organization_redirects
-      WHERE organization_id = ? AND locale = ? AND to_path = ?
-       AND behavior = 'redirect'
-  `, [ input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale, sourceLocale)])
-  if (!input.toPath) {
-    if (incoming.length) conflict('Cannot archive a page while another redirect points to it')
-    return []
-  }
-  if (incoming.some(redirect => redirect.from_path === formatTenantLocalePath(input.toPath!, input.locale, sourceLocale))) {
-    conflict('Changing this page path would create a redirect cycle')
-  }
-  if (incoming.some(redirect => redirect.source !== 'tenant-pages')) {
-    conflict('A manual tenant redirect points to this page and cannot be rewritten automatically')
-  }
-  if (!incoming.length) return []
-  return [{
-    query: `UPDATE organization_redirects
-       SET to_path = ?, updated_at = ?
-     WHERE organization_id = ? AND locale = ? AND to_path = ? AND behavior = 'redirect'`,
-    params: [formatTenantLocalePath(input.toPath, input.locale, sourceLocale), now, input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale, sourceLocale)],
-  }]
-}
-
 /**
  * The identity an update writes: what the caller stated, checked against the
  * rule that a translated variant cannot diverge from its source.
@@ -970,9 +904,7 @@ export async function deleteTenantPage(db: DbClient, variantId: string, input: {
 }
 
 export async function updateTenantPage(db: DbClient, variantId: string, input: { userId: string | null; data: TenantPageEditorInput; scope: TenantPageScope; env: CloudflareEnv }) {
-  // An update replaces the document, so the caller states the path and title it
-  // wants written. Both are required on the input type; say so to the caller
-  // that sent neither instead of failing later on a value it never supplied.
+  // A complete editor snapshot states the saved path and the title to write.
   if (typeof input.data.path !== 'string' || !input.data.path.trim()) badRequest('path is required')
   if (typeof input.data.title !== 'string' || !input.data.title.trim()) badRequest('title is required')
   // sortOrder is the page's position in its site's page list. An update writes
@@ -987,6 +919,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   if (input.data.recipe === undefined) badRequest('recipe is required, and may be null')
   const row = await getPageRepresentation(db, variantId, input.scope)
   if (!row) notFound('Tenant page variant not found')
+  if (input.data.path !== row.path) badRequest('A page keeps its saved path')
   const document = await getContentDocumentById(db, row.id)
   if (!document) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page content document not found' })
   if (!input.data.expectedUpdatedAt || document.updated_at !== input.data.expectedUpdatedAt) conflict('Tenant page content was updated by another writer')
@@ -1009,8 +942,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   // a path the caller never named. pageType and recipe are the page's identity,
   // resolved above against the source-locale rule, not content the caller omits.
   const effectiveInput = { ...input.data, pageType, recipe: identity.recipe }
-  const { template } = await loadOrganizationTemplate(db, row.organization_id)
-  const path = await assertTenantPagePathAvailable(db, { organizationId: row.organization_id, locale: row.locale, path: input.data.path, excludeVariantId: variantId, template })
+  const path = row.path
   const metadata = metadataForInput(effectiveInput, row.locale, path)
   const blocks = normalizeTenantPageBlocks(preserveOmittedBlockMedia(input.data.blocks, currentBlocks))
   await assertTenantPageSupport(input.env, db, row.organization_id, effectiveInput, blocks, { checkCustomPageEntitlement: row.page_type !== 'custom' && pageType === 'custom' })
@@ -1030,31 +962,6 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   }
   const now = new Date().toISOString()
   const placementQueries = await tenantPagePlacementQueries(db, input.scope.organizationId, blocks, now)
-  const pathChanged = path !== row.path
-  if (pathChanged) {
-    await assertTenantPageRedirectLocale(db, { organizationId: row.organization_id, locale: row.locale, fromPath: row.path, variantId })
-    await assertTenantPageRedirectWritable(db, {
-      organizationId: row.organization_id,
-      locale: row.locale,
-      fromPath: row.path,
-      variantId,
-    })
-  }
-  const sourceLocale = await resolveLocale(db, row.organization_id)
-  const redirectQueries = pathChanged
-    ? [
-        ...await prepareTenantPageRedirectFlatten(db, {
-          organizationId: row.organization_id,
-          locale: row.locale,
-          fromPath: row.path,
-          toPath: path,
-        }, now),
-        {
-          query: "INSERT INTO organization_redirects (id, organization_id, locale, owner_type, owner_id, from_path, to_path, status_code, behavior, reason, source, created_at, updated_at) VALUES (?, ?, ?, 'content_document', ?, ?, ?, 301, 'redirect', 'tenant_page_path_change', 'tenant-pages', ?, ?) ON CONFLICT(organization_id, locale, from_path) DO UPDATE SET owner_type = excluded.owner_type, owner_id = excluded.owner_id, to_path = excluded.to_path, status_code = excluded.status_code, behavior = excluded.behavior, reason = excluded.reason, source = excluded.source, updated_at = excluded.updated_at",
-          params: [crypto.randomUUID(), row.organization_id, row.locale, variantId, formatTenantLocalePath(row.path, row.locale, sourceLocale), formatTenantLocalePath(path, row.locale, sourceLocale), now, now],
-        },
-      ]
-    : []
   const updateVariant: BatchQuery = {
     query: 'UPDATE content_documents SET path = ?, title = ?, summary = ?, updated_by = ? WHERE id = ? AND organization_id = ?',
     params: [path, metadata.title, metadata.summary, input.userId, variantId, input.scope.organizationId],
@@ -1068,7 +975,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   }
   await updateContentDocument(db, variantId, {
     blocks: blocksAsInputs(blocks), expected_updated_at: input.data.expectedUpdatedAt,
-    additionalQueriesAfter: [...placementQueries, updateVariant, updatePage, ...bindingQueries, ...redirectQueries, publicResourceCacheInvalidationQuery(input.scope.organizationId, 'tenant-page-update')],
+    additionalQueriesAfter: [...placementQueries, updateVariant, updatePage, ...bindingQueries, publicResourceCacheInvalidationQuery(input.scope.organizationId, 'tenant-page-update')],
   })
   // The home page has no card of its own, and the organization's card draws
   // the share image rather than anything on the page.

@@ -1,6 +1,6 @@
 <template>
   <DashboardLeafPanel :id="`booking-schedule-${route.params.weekday}`" :title="day?.label ?? ''" :lead="lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || !dirty || Boolean(scopeError || p.scheduleError.value)" :error="p.loadError.value ?? p.saveError.value ?? scopeError ?? p.scheduleError.value ?? ''" @cancel="p.revert" @save="save">
-    <UButton v-if="scopeError" :to="chooseLocationPath" color="neutral" variant="outline">Choose a location</UButton>
+    <UButton v-if="scopeError" :to="chooseLocationPath" color="neutral" variant="outline">Choose {{ legal ? 'an office' : 'a location' }}</UButton>
     <div v-else-if="day && p.product.value" class="space-y-4">
       <div v-for="(slot, index) in slots" :key="index" class="flex items-end gap-3">
         <UFormField :label="`Start time ${index + 1}`" class="flex-1">
@@ -27,7 +27,8 @@ const level = useRouteLevel()
 const chooseLocationPath = computed(() => router.resolve({ path: router.resolve(p.sectionPath('booking/schedule')).path, query: { ...route.query, location_id: undefined } }).fullPath)
 const day = computed(() => p.weekdays.find(day => day.label.toLowerCase() === route.params.weekday))
 const slots = computed(() => day.value ? p.slotsFor(day.value.value) : [])
-const scopeError = computed(() => !p.locationId.value || p.location.value?.status !== 'active' ? 'Choose an active physical location before editing repeating times.' : null)
+const legal = computed(() => p.product.value?.kind === 'service')
+const scopeError = computed(() => !p.locationId.value || p.location.value?.status !== 'active' ? `Choose an active ${legal.value ? 'office' : 'physical location'} before editing repeating times.` : null)
 const lead = computed(() => `These times repeat every ${day.value?.label ?? 'week'}${p.location.value ? ` in ${timezoneLabel(p.location.value.timezone)}` : ''}. Removing a time leaves appointments with booking history unchanged.`)
 const valid = computed(() => slots.value.every(slot => MINUTE_TIME_PATTERN.test(slot.start_time)) && new Set(slots.value.map(slot => slot.start_time)).size === slots.value.length)
 const dirty = computed(() => day.value && JSON.stringify(slots.value) !== JSON.stringify(p.savedSlotsFor(day.value.value)))

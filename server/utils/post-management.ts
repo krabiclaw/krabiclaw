@@ -412,6 +412,8 @@ export async function updatePost(
   if (!existing) return null
   if (existing.updated_at !== input.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, statusMessage: 'The post changed since it was read; read it again' })
   const data: PostMutation = parsePostInput(input.changes, 'update')
+  if (data.slug !== undefined && data.slug !== existing.slug) throw new PostValidationError('A post keeps its saved slug')
+  delete data.slug
   if (!Object.keys(data).length) throw new PostValidationError('Name at least one field to change')
   // A field sent with its existing value does not wait on a publication.
   if (data.title !== undefined && data.title === existing.title) delete data.title
@@ -430,11 +432,6 @@ export async function updatePost(
   if (data.location_id !== undefined) changes.location_id = data.location_id
   if (data.call_to_action) changes.metadata = { call_to_action: data.call_to_action }
   if (contentChanged) changes.source = 'manual'
-  if (data.slug !== undefined) {
-    // A published post's address is what every share of it points at.
-    if (existing.status === 'published' && data.slug !== existing.slug) throw new PostValidationError('A published post keeps its slug')
-    if (data.slug) changes.slug = await allocatePostSlug(db, organizationId, postId, data.slug, null, null)
-  }
   await updateContentDocument(db, postId, {
     expected_updated_at: input.expectedUpdatedAt, changes,
     additionalQueriesBefore: payloadChanged ? [postPublicationIdleQuery(organizationId, postId)] : [],

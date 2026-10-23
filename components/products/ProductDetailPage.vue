@@ -45,7 +45,7 @@
               <span v-if="stayPlaceName" aria-hidden="true">·</span>
             </template>
             <span v-if="stayPlaceName" class="underline">{{ stayPlaceName }}</span>
-            <ShareButton class="ml-auto" :title="displayTitle" />
+            <ShareButton v-if="!previewAuthorized" class="ml-auto" :title="displayTitle" :url="publicShareUrl" />
           </div>
         </header>
 
@@ -91,7 +91,7 @@
               </div>
             </li>
           </ul>
-          <ShareButton class="mt-5" :title="displayTitle" />
+          <ShareButton v-if="!previewAuthorized" class="mt-5" :title="displayTitle" :url="publicShareUrl" />
           <slot name="actions" />
         </header>
         </div>
@@ -1012,6 +1012,9 @@ const structuredDataType = computed(() => {
 // request the way the breadcrumbs are, so a tenant's markup stays on the
 // tenant's own domain.
 const requestURL = useRequestURL()
+const { previewAuthorized } = useTenantOrganization()
+const publicRoute = useRoute()
+const publicShareUrl = computed(() => new URL(publicRoute.path, requestURL.origin).toString())
 // A place to stay has no external link: it is booked on this page, which is its canonical URL.
 const canonicalProductUrl = computed(() => new URL(
   props.product.order_url || localePath(props.presentation.productPath(props.location?.slug ?? '', props.product.slug)),

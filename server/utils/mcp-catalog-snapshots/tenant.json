@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:db51d271ab8fe7da587bf6a234b3cd43edb9e6d9e4e59561996e544f4a3ae5b8",
-  "documentationFingerprint": "sha256:d6cf725539dfd7674b98c3536e72da8a3acb0f88800057c455fd678291bec3db",
+  "fingerprint": "sha256:3529439c8716318abeabc290f74485f52e4204dbd9e57df3c5009e7e69ec8859",
+  "documentationFingerprint": "sha256:bfad5dc879a68dc5f480cbdbdc8846bcd38b4ee0b226c8a8be10dc330397834a",
   "tools": [
     {
       "name": "add_organization_language",
@@ -19389,7 +19389,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional route segment for /posts/<slug>. Allocated from the title or body when omitted, and fixed once the post is published."
+            "description": "Optional route segment for /posts/<slug>. Allocated from the title or body when omitted, and fixed when the post is created."
           },
           "title": {
             "anyOf": [
@@ -31061,7 +31061,7 @@
             ]
           },
           "path": {
-            "description": "The page path to write. Send the current path unless you are moving the page; a different path moves it and creates the locale-scoped redirect.",
+            "description": "The saved page path. A page keeps this address when its content or title changes.",
             "type": "string"
           },
           "recipe": {
@@ -77023,7 +77023,7 @@
     {
       "name": "put_resource_localization",
       "title": "Put resource localization",
-      "description": "Replace an exact translation. Existing documents require expected_updated_at. Documents require route_path; authored Q&A uses title and summary without a route or blocks. Imported Q&A remains read-only.",
+      "description": "Replace an exact translation. Existing documents require expected_updated_at. Document addresses are assigned from their source and remain stable; authored Q&A uses title and summary without blocks. Imported Q&A remains read-only.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -80643,13 +80643,6 @@
             ],
             "type": "string"
           },
-          "route_path": {
-            "description": "Document path including the language prefix. Resource routes are automatic.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "values": {
             "additionalProperties": false,
             "properties": {
@@ -81109,12 +81102,6 @@
               },
               "short_description": {
                 "type": "string"
-              },
-              "slug": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "summary": {
                 "type": [
@@ -113060,20 +113047,6 @@
             "description": "Post id or slug.",
             "type": "string"
           },
-          "redirect_old_slug": {
-            "description": "Defaults true after first publish.",
-            "type": "boolean"
-          },
-          "reset_slug_override": {
-            "type": "boolean"
-          },
-          "slug": {
-            "description": "Manual URL slug override. Published slug changes preserve a permanent redirect by default.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "title": {
             "type": "string"
           },
@@ -117147,7 +117120,7 @@
     {
       "name": "update_location",
       "title": "Update location",
-      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
+      "description": "Update a location's own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -117371,13 +117344,6 @@
               "null"
             ]
           },
-          "slug": {
-            "description": "URL slug for the location page. Normalized, and suffixed -2, -3… when another location already uses it. Changes the public URL.",
-            "maxLength": 200,
-            "minLength": 1,
-            "pattern": "\\S",
-            "type": "string"
-          },
           "special_hours": {
             "anyOf": [
               {
@@ -117515,7 +117481,7 @@
             "type": "string"
           },
           "title": {
-            "description": "Location name shown to guests. Changing it regenerates the slug from the new name unless slug is given in the same call.",
+            "description": "Location name shown to guests. Renaming keeps its saved public address.",
             "maxLength": 200,
             "minLength": 1,
             "pattern": "\\S",
@@ -121599,17 +121565,6 @@
           },
           "post_id": {
             "type": "string"
-          },
-          "slug": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional route segment for /posts/<slug>. Allocated from the title or body when omitted, and fixed once the post is published."
           },
           "title": {
             "anyOf": [
@@ -130197,7 +130152,7 @@
             "type": "string"
           },
           "path": {
-            "description": "The page path to write. Send the current path unless you are moving the page; a different path moves it and creates the locale-scoped redirect.",
+            "description": "The saved page path. A page keeps this address when its content or title changes.",
             "type": "string"
           },
           "product_id": {
@@ -139680,7 +139635,7 @@
         "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
       },
       "toolContracts": {
-        "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
+        "create_post": "sha256:b92f874ccdfc79c9f47f353fec0f017f51fe58263b056a02aba6a71a737bf46e",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843"
@@ -139752,7 +139707,7 @@
         "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
         "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
         "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
-        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
+        "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
     {
@@ -139796,7 +139751,7 @@
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
         "update_menu": "sha256:cb030295915c9e476e9628bff6ec5053391d87849f723e32e1c08219a3d054e0",
         "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
-        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
+        "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
     {
@@ -139838,7 +139793,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_product": "sha256:2e8f3eeadd94a2df523cbdf0e1c0ffa0310adce9e31ea1a17710fc5f72bed8ce",
-        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
+        "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
     {
@@ -139850,7 +139805,7 @@
         "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
-        "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
+        "create_post": "sha256:b92f874ccdfc79c9f47f353fec0f017f51fe58263b056a02aba6a71a737bf46e",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:9cefa0a9158269dbd5b5e5d1b69b2cad708446df5edfb4e8619dc02c0c2b72aa",
         "get_product": "sha256:483b9429c6158eb5149757074d388d2a04e9935b26c966dc0c577dbb4352f73e",
@@ -139939,14 +139894,14 @@
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
         "create_blog_post": "sha256:04ebcf9dff460dd7c58bee894fff23a76431073dc3e2deb1ac1be33be6d37150",
-        "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
+        "create_post": "sha256:b92f874ccdfc79c9f47f353fec0f017f51fe58263b056a02aba6a71a737bf46e",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
         "publish_blog_post": "sha256:844a8eb04331dba2c4b7e738b192222e3f68e0b3d24ca3555dd7c7b7a5c17440",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
-        "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"
+        "update_post": "sha256:1b604fc6ccdf57844a762edd34dbb9bbc85721df0d54e586f513d5ce90a57724"
       }
     },
     {

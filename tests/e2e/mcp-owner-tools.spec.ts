@@ -109,6 +109,38 @@ test.describe('stateless MCP server', () => {
         blocks: Array<{ id: string; type: string; level: number | null; parent_block_id: string | null; source_block_id: string | null; data: Record<string, unknown>; media: unknown[] }>
       }
     }>(await pageBefore.json()).page
+    const pageSnapshot = {
+      path: pageBeforeData.path, title: pageBeforeData.title,
+      sortOrder: pageBeforeData.sort_order, pageType: pageBeforeData.page_type, recipe: pageBeforeData.recipe,
+      blocks: pageBeforeData.blocks.map(({ id, type, level, parent_block_id, source_block_id, data, media }) =>
+        ({ id, type, level, parent_block_id, source_block_id, data, media })),
+    }
+    const pageEditorPath = `${baseURL}/api/editor/organizations/${organizationId}/pages/${homeVariant!.id}`
+    const editorPageBefore = await request.get(pageEditorPath)
+    expect(editorPageBefore.status()).toBe(200)
+    const savedPageBefore = (await editorPageBefore.json()).page
+    const pathChange = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'update_site_page', args: {
+        organization_id: organizationId, variant_id: homeVariant!.id, expected_updated_at: pageBeforeData.updated_at,
+        ...pageSnapshot, path: '/another-home-address', title: 'Must not be saved',
+      },
+    })
+    expect(pathChange.status()).toBe(200)
+    const pathChangeResult = (await pathChange.json()).result
+    expect(pathChangeResult.isError).toBe(true)
+    expect(pathChangeResult.content).toHaveLength(1)
+    expect(pathChangeResult.content[0].type).toBe('text')
+    expect(JSON.parse(pathChangeResult.content[0].text)).toEqual({ status: 400, message: 'A page keeps its saved path' })
+    const unchangedPageRead = await request.get(pageEditorPath)
+    expect(unchangedPageRead.status()).toBe(200)
+    expect((await unchangedPageRead.json()).page).toEqual(savedPageBefore)
+    const httpPathChange = await request.patch(pageEditorPath, { data: {
+      ...pageSnapshot, expectedUpdatedAt: pageBeforeData.updated_at, path: '/another-home-address', title: 'Must not be saved',
+    } })
+    expect(httpPathChange.status()).toBe(400)
+    const unchangedHttpPageRead = await request.get(pageEditorPath)
+    expect(unchangedHttpPageRead.status()).toBe(200)
+    expect((await unchangedHttpPageRead.json()).page).toEqual(savedPageBefore)
     for (const [type, data, message] of [
       ['showcase', { items: [{ title: ' ' }] }, /title/],
       ['steps', { items: [{}] }, /required.*title/],
@@ -135,6 +167,7 @@ test.describe('stateless MCP server', () => {
     // update_site_page replaces the document, so the writer states the path,
     // title and identity it read rather than leaving them to be filled in from
     // the stored row. Order is the array's; there is no position to send.
+    const renamedPageTitle = `MCP page title ${Date.now()}`
     const contentUpdate = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'update_site_page',
@@ -143,7 +176,7 @@ test.describe('stateless MCP server', () => {
         variant_id: homeVariant!.id,
         expected_updated_at: pageBeforeData.updated_at,
         path: pageBeforeData.path,
-        title: pageBeforeData.title,
+        title: renamedPageTitle,
         sortOrder: pageBeforeData.sort_order,
         pageType: pageBeforeData.page_type,
         recipe: pageBeforeData.recipe,
@@ -172,6 +205,9 @@ test.describe('stateless MCP server', () => {
     const mergedBody = await contentRead.json()
     const mergedHero = mcpData<{ page: { blocks: Array<{ type: string; data: Record<string, unknown> }> } }>(mergedBody).page.blocks.find(item => item.type === 'hero')
     expect(mergedHero?.data.title).toContain('MCP Hero')
+    const renamedPage = await request.get(pageEditorPath)
+    expect(renamedPage.status()).toBe(200)
+    expect((await renamedPage.json()).page).toMatchObject({ path: pageBeforeData.path, title: renamedPageTitle })
 
     const settingsBefore = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
@@ -493,6 +529,19 @@ test.describe('stateless MCP server', () => {
       args: { organization_id: organizationId, location_id: locationId },
     })
     expect(locationRead.status()).toBe(200)
+    const originalLocation = mcpData<{ location: { title: string; slug: string; phone: string | null; updated_at: string } }>(await locationRead.json()).location
+    const locationApiPath = `${baseURL}/api/organizations/${organizationId}/locations/${locationId}`
+    const locationBefore = await request.get(locationApiPath)
+    expect(locationBefore.status()).toBe(200)
+    const originalLocationRead = await locationBefore.json()
+    for (const path of [locationApiPath, `${baseURL}/api/dashboard/locations/${locationId}`]) {
+      const moved = await request.patch(path, { data: { slug: 'another-location-address', title: 'Must not be saved' } })
+      expect(moved.status()).toBe(400)
+      expect(await moved.json()).toMatchObject({ error: 'A location keeps its saved slug', code: 'INVALID_LOCATION_FIELD', field: 'slug' })
+      const unchanged = await request.get(locationApiPath)
+      expect(unchanged.status()).toBe(200)
+      expect(await unchanged.json()).toEqual(originalLocationRead)
+    }
 
     // Unique per run. A constant would pass on a value a previous run had left
     // on the row, which is the exact failure this read-back exists to catch.
@@ -515,11 +564,12 @@ test.describe('stateless MCP server', () => {
     })
     expect(afterRefusal.status()).toBe(200)
     expect(mcpData<{ location: { phone: string | null } }>(await afterRefusal.json()).location.phone)
-      .toBe(mcpData<{ location: { phone: string | null } }>(await locationRead.json()).location.phone)
+      .toBe(originalLocation.phone)
+    const renamedLocationTitle = `${originalLocation.title} ${Date.now()}`
     const locationUpdate = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'update_location',
-      args: { organization_id: organizationId, location_id: locationId, phone: updatedPhone },
+      args: { organization_id: organizationId, location_id: locationId, phone: updatedPhone, title: renamedLocationTitle },
     })
     expect(locationUpdate.status()).toBe(200)
     // A 200 is the tool answering, not the row changing. updateTenantPage
@@ -533,7 +583,15 @@ test.describe('stateless MCP server', () => {
     })
     expect(locationAfter.status()).toBe(200)
     expect(mcpData<{ location: { phone: string } }>(await locationAfter.json()).location)
-      .toMatchObject({ phone: `+1202555${lineNumber}` })
+      .toMatchObject({ phone: `+1202555${lineNumber}`, title: renamedLocationTitle, slug: originalLocation.slug })
+    const independentlyReadLocation = await request.get(locationApiPath)
+    expect(independentlyReadLocation.status()).toBe(200)
+    expect((await independentlyReadLocation.json()).location).toMatchObject({ title: renamedLocationTitle, slug: originalLocation.slug, phone: `+1202555${lineNumber}` })
+    const restoredTitle = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'update_location', args: { organization_id: organizationId, location_id: locationId, title: originalLocation.title },
+    })
+    expect(restoredTitle.status()).toBe(200)
+    expect(mcpData<{ ok: boolean }>(await restoredTitle.json()).ok).toBe(true)
 
     const reviewsList = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
@@ -886,7 +944,7 @@ test.describe('stateless MCP server', () => {
       await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
       await waitForNuxtHydration(page)
       await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
-      await expect(page.getByRole('link', { name: 'Guest limit Up to 10 guests per session', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Client limit Up to 10 clients per consultation', exact: true })).toBeVisible()
       const scheduleConcern = page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-schedule')
       await expect(scheduleConcern).toHaveAccessibleName(`Weekly schedule ${location.title} · Sunday`)
       await expect(scheduleConcern).toHaveAttribute('href', `/dashboard/ember-slice-demo/products/${created.id}/booking/schedule?location_id=loc-demo`)
@@ -912,7 +970,7 @@ test.describe('stateless MCP server', () => {
       expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
       await page.getByRole('button', { name: 'Remove start time 1', exact: true }).click()
       await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page.getByRole('link', { name: 'Sunday No sessions', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Sunday No consultations', exact: true })).toBeVisible()
       const cleared = await request.get(`${url}/availability?location_id=loc-demo`)
       expect(cleared.status()).toBe(200)
       expect((await cleared.json()).rules).toEqual([])
@@ -940,12 +998,13 @@ test.describe('stateless MCP server', () => {
       const starts = draft.getByLabel('Starts', { exact: true })
       const ends = draft.getByLabel('Ends', { exact: true })
       const add = draft.getByRole('button', { name: 'Add to calendar', exact: true })
-      const locationChoice = draft.getByRole('combobox', { name: 'Location*', exact: true })
+      const locationChoice = draft.getByRole('combobox', { name: 'Office*', exact: true })
+      await expect(draft.getByRole('spinbutton', { name: 'Client limit', exact: true })).toHaveValue('2')
       await locationChoice.click()
       await expect(page.getByRole('listbox')).toBeVisible()
       await page.keyboard.press('Escape')
-      await expect(draft.getByText('Choose a location.', { exact: true })).toBeVisible()
-      await expect(locationChoice).toHaveAccessibleDescription('Choose a location.')
+      await expect(draft.getByText('Choose an office.', { exact: true })).toBeVisible()
+      await expect(locationChoice).toHaveAccessibleDescription('Choose an office.')
       await expect(date).toHaveValue(gapDate)
       await expect(starts).toBeDisabled()
       await expect(ends).toBeDisabled()

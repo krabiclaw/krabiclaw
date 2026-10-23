@@ -199,7 +199,7 @@ test('Kikuzuki Brand translations open from their URL in the stored language', a
   }
 })
 
-test('Kikuzuki Localize preserves its translated address', async ({ browser, playwright }) => {
+test('Kikuzuki translations preserve published addresses and save an added language privately', async ({ browser, playwright }) => {
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   try {
@@ -231,6 +231,74 @@ test('Kikuzuki Localize preserves its translated address', async ({ browser, pla
       // Saving leaves the mode, so the URL no longer reopens it.
       await expect(cms).not.toHaveURL(/editMode=/)
       await expect(cms.getByTestId('localize-language')).toHaveCount(0)
+
+      const languagesResponse = await owner.get(`/api/editor/organizations/${organizationId}/locales`)
+      await expectStatus(languagesResponse, 200)
+      const beforeLanguages = await languagesResponse.json() as {
+        languages: Array<{ locale: string; status: string; is_source: boolean }>
+        available_catalogs: Array<{ locale: string; label: string }>
+      }
+      const privateLanguage = beforeLanguages.available_catalogs.find(candidate => !beforeLanguages.languages.some(language => language.locale === candidate.locale))
+      expect(privateLanguage, 'Kikuzuki has an unadded platform language for private authoring').toBeTruthy()
+      const privateLocale = privateLanguage!.locale
+      try {
+        const added = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'add_organization_language', args: { organization_id: organizationId, locale: privateLocale } })
+        expect(added.status()).toBe(200)
+        expect((await added.json()).result.structuredContent.locales).toEqual(expect.arrayContaining([expect.objectContaining({ locale: privateLocale, status: 'disabled' })]))
+        await cms.goto(`${baseURL}${settingsPath}?editMode=translations`)
+        await waitForNuxtHydration(cms)
+        await cms.getByTestId('localize-language').click()
+        await expect(cms.getByRole('option', { name: /English \(en\)/ })).toHaveCount(0)
+        await cms.getByRole('option', { name: `${privateLanguage!.label} (${privateLocale}) · Not published`, exact: true }).click()
+        await expect(cms.getByTestId('translation-publication-state')).toContainText('Not published')
+        await cms.getByTestId('localize-field-title').fill('Private Kikuzuki translation')
+        await cms.getByTestId('localize-field-address.addressLines').fill('325 private translation')
+        const privateSave = await Promise.all([
+          cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes(`/localization/business_location/loc-kikuzuki/${privateLocale}`)),
+          cms.getByTestId('localize-save').click(),
+        ]).then(([response]) => response)
+        expect(privateSave.status()).toBe(200)
+        expect(privateSave.request().postDataJSON()).toEqual({ values: { title: 'Private Kikuzuki translation', address: { addressLines: ['325 private translation'] } } })
+        const persisted = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: 'loc-kikuzuki', locale: privateLocale } })
+        expect(persisted.status()).toBe(200)
+        const persistedBody = await persisted.json()
+        expect(persistedBody.result.structuredContent).toMatchObject({ localization: { values: { title: 'Private Kikuzuki translation', address: { addressLines: ['325 private translation'] } } } })
+        const productId = 'item-kiku-tuna-sushi'
+        const productTranslationUrl = `/api/editor/organizations/${organizationId}/localization/product/${productId}/${privateLocale}`
+        const authoredValues = { name: 'Private tuna translation', description: '', marketing_features: ['Prepared to order'], unit_label: 'serving', details: { ingredients: [], allergens: ['Fish'] } }
+        const authored = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'put_resource_localization', args: { organization_id: organizationId, resource_type: 'product', resource_id: productId, locale: privateLocale, values: authoredValues } })
+        expect(authored.status()).toBe(200)
+        expect((await authored.json()).result.structuredContent.localization.values).toEqual(authoredValues)
+        // Resource translations use omission for clearing. Empty text and lists
+        // are valid values; null and false must be rejected without replacing it.
+        await expectStatus(await owner.put(productTranslationUrl, { data: { values: { ...authoredValues, unit_label: null } } }), 422)
+        await expectStatus(await owner.put(productTranslationUrl, { data: { values: { ...authoredValues, description: false } } }), 422)
+        await cms.goto(`${baseURL}/dashboard/${organizationId}/products/${productId}?editMode=translations&locale=${privateLocale}`)
+        await waitForNuxtHydration(cms)
+        await expect(cms.getByTestId('localize-field-name')).toHaveValue(authoredValues.name)
+        await expect(cms.getByTestId('localize-field-description')).toHaveValue('')
+        await expect(cms.getByTestId('localize-field-detail:ingredients')).toHaveValue('')
+        await expect(cms.getByTestId('localize-field-detail:allergens')).toHaveValue('Fish')
+        await cms.getByTestId('localize-field-name').fill('Updated private tuna translation')
+        await cms.getByTestId('localize-field-detail:allergens').fill('')
+        const productSave = await Promise.all([
+          cms.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === productTranslationUrl),
+          cms.getByTestId('localize-save').click(),
+        ]).then(([response]) => response)
+        expect(productSave.status()).toBe(200)
+        const savedValues = { ...authoredValues, name: 'Updated private tuna translation', details: { ingredients: [] } }
+        expect(productSave.request().postDataJSON()).toEqual({ values: savedValues })
+        const savedProduct = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'product', resource_id: productId, locale: privateLocale } })
+        expect(savedProduct.status()).toBe(200)
+        expect((await savedProduct.json()).result.structuredContent.localization.values).toEqual(savedValues)
+        const afterLanguagesResponse = await owner.get(`/api/editor/organizations/${organizationId}/locales`)
+        await expectStatus(afterLanguagesResponse, 200)
+        const afterLanguages = await afterLanguagesResponse.json() as typeof beforeLanguages
+        expect(afterLanguages.languages.find(language => language.locale === privateLocale)?.status).toBe('disabled')
+        expect(afterLanguages.languages.filter(language => language.locale !== privateLocale).map(({ locale, status }) => ({ locale, status })).sort((left, right) => left.locale.localeCompare(right.locale))).toEqual(beforeLanguages.languages.map(({ locale, status }) => ({ locale, status })).sort((left, right) => left.locale.localeCompare(right.locale)))
+      } finally {
+        await expectStatus(await owner.delete(`/api/editor/organizations/${organizationId}/locales/${privateLocale}`), 200)
+      }
     } finally {
       await cms.close()
       await dashboardContext.close()

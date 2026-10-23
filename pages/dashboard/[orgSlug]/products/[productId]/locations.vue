@@ -19,11 +19,12 @@ definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
 const level = useRouteLevel()
-const paused = computed(() => p.product.value?.booking || ['experience', 'service', 'stay'].includes(p.product.value?.kind ?? '') ? 'Bookings paused' : 'Orders paused')
+const legal = computed(() => p.product.value?.kind === 'service')
+const paused = computed(() => legal.value ? 'Unavailable at this office' : p.product.value?.booking || ['experience', 'stay'].includes(p.product.value?.kind ?? '') ? 'Bookings paused' : 'Orders paused')
 function summary(locationId: string) {
   const entry = p.product.value?.locations.find(entry => entry.location_id === locationId)
   if (!entry) return 'Not offered here'
-  return [entry.published ? 'Visible at this location' : 'Hidden at this location', ...(entry.active ? [] : [paused.value])].join(' · ')
+  return [entry.published ? `Visible at this ${legal.value ? 'office' : 'location'}` : `Hidden at this ${legal.value ? 'office' : 'location'}`, ...(entry.active ? [] : [paused.value])].join(' · ')
 }
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'locations',
@@ -31,7 +32,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
     id: location.id,
     label: location.title,
     icon: 'i-lucide-map-pin',
-    summary: `${location.status === 'active' ? '' : 'Location inactive · '}${summary(location.id)}`,
+    summary: `${location.status === 'active' ? '' : `${legal.value ? 'Office' : 'Location'} inactive · `}${summary(location.id)}`,
     placeholder: !p.product.value?.locations.some(entry => entry.location_id === location.id),
     to: p.sectionPath(`locations/${encodeURIComponent(location.id)}`),
   })),

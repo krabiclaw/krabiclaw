@@ -1,24 +1,26 @@
 <template>
-  <UButton
-    v-if="!rowTrigger"
-    color="neutral"
-    variant="outline"
-    icon="i-lucide-languages"
-    label="Localize"
-    :to="modePath"
-    :disabled="disabled || !resourceId"
-    data-testid="localize-resource"
-  />
+  <UTooltip v-if="!rowTrigger" text="Translations">
+    <UButton
+      color="neutral"
+      variant="ghost"
+      icon="i-lucide-languages"
+      aria-label="Translations"
+      :to="modePath"
+      :disabled="disabled || !resourceId"
+      class="size-10 rounded-full"
+      data-testid="localize-resource"
+    />
+  </UTooltip>
 
   <UModal
     v-model:open="modalOpen"
-    :title="`Localize ${resourceLabel}`"
+    :title="`${resourceLabel} translations`"
     :dismissible="!saving"
     :ui="{ content: 'max-w-3xl' }"
   >
     <template #body>
       <div class="space-y-6">
-        <UFormField label="Language">
+        <UFormField label="Translation language">
           <USelect
             v-model="selectedLocale"
             :items="localeOptions"
@@ -29,6 +31,7 @@
             data-testid="localize-language"
           />
         </UFormField>
+        <p v-if="localeOptions.find(option => option.value === locale)?.status === 'disabled'" class="text-sm text-muted" data-testid="translation-publication-state">Not published. Saving this translation keeps the language private.</p>
 
         <div v-if="loadingLanguages" class="space-y-3">
           <USkeleton class="h-16 rounded-lg" />
@@ -42,7 +45,7 @@
           :description="languageError"
         />
         <div v-else-if="localeOptions.length === 0" class="space-y-3">
-          <p class="text-sm text-muted">Enable another language in Localization settings before translating this content.</p>
+          <p class="text-sm text-muted">Add another language in Languages before translating this content.</p>
           <UButton v-if="languageSettingsPath" color="neutral" variant="soft" label="Manage languages" :to="languageSettingsPath" />
         </div>
 
@@ -58,10 +61,10 @@
               :ui="{ body: 'grid gap-3 sm:grid-cols-2' }"
             >
               <div>
-                <p class="text-xs font-semibold uppercase tracking-wide text-muted">Source · {{ sourceLocale }}</p>
+                <p class="text-xs font-semibold uppercase tracking-wide text-muted">Source language · {{ sourceLocale }}</p>
                 <p class="mt-2 whitespace-pre-wrap text-sm text-highlighted">{{ sourceText(field) }}</p>
               </div>
-              <UFormField :label="field.label">
+              <UFormField :label="`${field.label} · ${locale}`">
                 <UTextarea
                   v-if="field.multiline || field.kind === 'string-list'"
                   v-model="draft[field.key]"
@@ -132,12 +135,6 @@ const props = defineProps<{
   resourceId: string
   resourceLabel: string
   fields: readonly LocalizationField[]
-  /**
-   * The localized public path for a resource that stores one. The writer
-   * requires it for those resources and rejects it for the rest, so the caller
-   * that owns a route passes this and nobody else does.
-   */
-  routePath?: (locale: string) => string
   languageSettingsPath?: string
   disabled?: boolean
   /** Opened by a row in a settings list that links to this mode; draws no button of its own. */
@@ -165,7 +162,7 @@ const modePath = computed(() => router.resolve({ path: level.path.value, query: 
 const open = computed(() => route.query.editMode === 'translations' && level.mode.value === 'index')
 const locale = computed(() => open.value && typeof route.query.locale === 'string' ? route.query.locale : '')
 const sourceLocale = ref('')
-const localeOptions = ref<Array<{ label: string, value: string }>>([])
+const localeOptions = ref<Array<{ label: string, value: string, status: string }>>([])
 const draft = reactive<Record<string, string>>({})
 const baseline = ref<Record<string, string>>({})
 const loadingLanguages = ref(false)
@@ -175,6 +172,7 @@ const languageError = ref<string | null>(null)
 const editorError = ref<string | null>(null)
 let requestGeneration = 0
 let documentRevision: { locale: string; updatedAt: string } | null = null
+let loadedValues: Record<string, unknown> = {}
 
 
 /** Leaving the mode is a navigation like entering it, so Back and reload agree with the screen. */
@@ -227,6 +225,11 @@ function markDraftClean(): void {
 }
 
 function applyValues(values: Record<string, unknown>): void {
+  // Document writes replace their localized text snapshot. Keep values the
+  // current field list does not display, including explicit nulls.
+  loadedValues = props.resourceType === 'content_document' && !props.loadValues
+    ? Object.fromEntries(['title', 'summary', 'seo_keywords', 'metadata'].filter(key => Object.hasOwn(values, key)).map(key => [key, structuredClone(values[key])]))
+    : structuredClone(values)
   for (const field of props.fields) {
     const value = props.loadValues ? values[field.key] : field.key.split('.').reduce<unknown>((value, key) => isRecord(value) ? value[key] : undefined, values)
     draft[field.key] = field.kind === 'string-list'
@@ -237,12 +240,13 @@ function applyValues(values: Record<string, unknown>): void {
 }
 
 function serializedValues(): Record<string, unknown> {
-  const values: Record<string, unknown> = {}
+  const values: Record<string, unknown> = props.saveValues ? {} : structuredClone(loadedValues)
   for (const field of props.fields) {
     const rawValue = draft[field.key]
     if (rawValue === undefined) throw new Error(`Translation field ${field.key} is unavailable.`)
     const text = rawValue.trim()
-    if (!text) continue
+    if (props.saveValues && !text) continue
+    if (!props.saveValues && rawValue === baseline.value[field.key]) continue
     const value = field.kind === 'string-list'
       ? text.split('\n').map(item => item.trim()).filter(Boolean)
       : text
@@ -254,7 +258,17 @@ function serializedValues(): Record<string, unknown> {
         if (!isRecord(target[key])) target[key] = {}
         target = target[key] as Record<string, unknown>
       }
-      target[path[path.length - 1]!] = value
+      const key = path[path.length - 1]!
+      if (text) target[key] = value
+      else if (props.resourceType === 'content_document' && path.length === 1) target[key] = null
+      else {
+        Reflect.deleteProperty(target, key)
+        for (let index = path.length - 2; index >= 0; index -= 1) {
+          const parent = path.slice(0, index).reduce<Record<string, unknown>>((current, part) => current[part] as Record<string, unknown>, values)
+          const child = parent[path[index]!]
+          if (isRecord(child) && Object.keys(child).length === 0) Reflect.deleteProperty(parent, path[index]!)
+        }
+      }
     }
   }
   return values
@@ -275,9 +289,9 @@ async function loadLanguages(): Promise<void> {
     const sources = response.languages.filter(item => Boolean(item.is_source) && item.status === 'published')
     if (sources.length !== 1) throw new Error('The organization source language is not configured correctly.')
     sourceLocale.value = sources[0]!.locale
-    const secondaryLanguages = response.languages.filter(item => !item.is_source && item.status === 'published')
-    if (secondaryLanguages.some(item => !item.label)) throw new Error('An enabled language is missing its display name.')
-    localeOptions.value = secondaryLanguages.map(item => ({ label: `${item.label} (${item.locale})`, value: item.locale }))
+    const secondaryLanguages = response.languages.filter(item => !item.is_source)
+    if (secondaryLanguages.some(item => !item.label)) throw new Error('An added language is missing its display name.')
+    localeOptions.value = secondaryLanguages.map(item => ({ label: `${item.label} (${item.locale})${item.status === 'published' ? '' : ' · Not published'}`, value: item.locale, status: item.status }))
   } catch (cause) {
     languageError.value = getErrorMessage(cause, 'Failed to load organization languages')
   } finally {
@@ -289,13 +303,14 @@ async function load(): Promise<void> {
   const requestedLocale = locale.value
   const generation = ++requestGeneration
   documentRevision = null
+  loadedValues = {}
   clearDraft()
   markDraftClean()
   editorError.value = null
   loading.value = false
   if (!requestedLocale || loadingLanguages.value || languageError.value) return
   if (!localeOptions.value.some(option => option.value === requestedLocale)) {
-    editorError.value = `The requested ${requestedLocale} language is not enabled for this organization.`
+    editorError.value = `The requested ${requestedLocale} language has not been added to this organization.`
     return
   }
   loading.value = true
@@ -337,7 +352,6 @@ async function save(): Promise<void> {
           method: 'PUT',
           body: {
             values,
-            ...(props.routePath ? { route_path: props.routePath(requestedLocale) } : {}),
             ...(documentRevision?.locale === requestedLocale ? { expected_updated_at: documentRevision.updatedAt } : {}),
           },
           validate: isLocalizationResponse,

@@ -1,4 +1,5 @@
 import { slugifyTitle } from '~/utils/post-slugs'
+import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { TenantPageBlock, TenantPageType } from '~/utils/tenant-page-blocks'
 
 /**
@@ -175,9 +176,12 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
         ),
         pageId === 'new'
           ? Promise.resolve(null)
-          : dashboardApi<{ page: TenantPageResponse }>(`/api/editor/organizations/${organizationId}/pages/${pageId}`, { validate: isTenantPageResponse }),
+          : dashboardApi<{ page: TenantPageResponse; public_url: string | null }>(`/api/editor/organizations/${organizationId}/pages/${pageId}`, {
+            validate: (value): value is { page: TenantPageResponse; public_url: string | null } => isTenantPageResponse(value)
+              && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string'),
+          }),
       ])
-      return { context: context.context, page: page?.page ?? null }
+      return { context: context.context, page: page?.page ?? null, public_url: page?.public_url ?? null }
     },
   )
   const { data, error } = load
@@ -245,8 +249,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     const token = data.value?.context.previewToken
     const subdomain = data.value?.context.organization.subdomain
     if (!page || !token || !subdomain) return ''
-    const path = page.path === '/' ? '' : page.path
-    const localizedPath = page.id === page.page_id ? path : `/${page.locale}${path}`
+    const localizedPath = formatTenantLocalePath(page.path, page.locale, data.value!.context.sourceLocale)
     const origin = tenantOrganizationOrigin({
       platformDomain: String(runtimeConfig.public.platformDomain),
       freeOrganizationDomain: String(runtimeConfig.public.freeOrganizationDomain),
@@ -257,6 +260,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     url.searchParams.set('preview_token', token)
     return url.toString()
   })
+  const publicUrl = computed(() => data.value?.public_url ?? null)
 
   /**
    * The whole page, every time. Adding a section, renaming it, reordering the
@@ -267,9 +271,9 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     const title = draft.value.title.trim()
     if (!title) throw new Error('Add a page title before saving.')
     const blocks = draft.value.blocks.map((block, position) => ({ ...block, position }))
-    // The server takes the path as given; deriving it from the title is the
-    // editor's job, and only while the page does not exist yet.
-    const path = draft.value.id ? draft.value.path : `/${slugifyTitle(title)}`
+    // Existing records keep the path that was read, irrespective of draft state.
+    const path = draft.value.id ? accepted.value?.path : `/${slugifyTitle(title)}`
+    if (!path) throw new Error('The saved page path is unavailable.')
     if (!draft.value.id && path === '/') throw new Error('Choose a more specific page title.')
     const body = {
       id: draft.value.id || undefined,
@@ -298,7 +302,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     return response.page
   }
 
-  return { load, data, error, draft, dirty, revert, commit, isNew, savedBlockIds, previewUrl }
+  return { load, data, error, draft, dirty, revert, commit, isNew, savedBlockIds, previewUrl, publicUrl }
 }
 
 /**

@@ -6,6 +6,7 @@ import { assertOrganizationLanguageEntitlement, getPersistedSourceLocale } from 
 import { platformLocale } from '~/shared/platform-locales'
 import { RESOURCE_LOCALIZATION_REGISTRY, type LocalizedResourceType } from '~/server/utils/localization-registry'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
+import { articleCollectionOf } from '~/server/utils/content/publishing'
 import { postPublicPath } from '~/utils/post-slugs'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 
@@ -40,13 +41,13 @@ export async function resolvePublicLocalizationSourcePath(
 }
 
 export async function resolvePublicDocumentSourcePath(db: DbClient, organizationId: string, documentId: string): Promise<string> {
-  const [row] = await queryAll<{ id: string; kind: string; path: string | null; slug: string | null; category: string | null; vertical: string; theme_id: string }>(db, `
-    SELECT d.id, d.kind, d.path, d.slug, (d.metadata_json ->> '$.category') AS category, o.vertical, o.theme_id
-      FROM content_documents d JOIN organization o ON o.id = d.organization_id
+  const [row] = await queryAll<{ kind: string; path: string | null; slug: string | null; collection: string | null }>(db, `
+    SELECT d.kind, d.path, d.slug, (d.metadata_json ->> '$.collection') AS collection
+      FROM content_documents d
      WHERE d.organization_id = ? AND d.id = ? AND d.row_role = 'root' LIMIT 1`, [organizationId, documentId])
   if (row?.kind === 'page' && row.path) return row.path
-  if (row?.kind === 'social_post') return postPublicPath(row.slug ?? row.id)
-  if (row?.kind === 'article' && row.slug) return tenantBlogPostPath(row.slug)
+  if (row?.kind === 'social_post') return postPublicPath(row.slug ?? documentId)
+  if (row?.kind === 'article' && row.slug) return tenantBlogPostPath(row.slug, articleCollectionOf(row.collection))
   throw new HTTPError({ statusCode: 500, statusMessage: 'Document source route is missing', data: { document_id: documentId } })
 }
 
