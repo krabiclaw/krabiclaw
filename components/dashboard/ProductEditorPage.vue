@@ -140,7 +140,7 @@ import type { StayRoomAccessibility, StayHomeAccessibility } from '~/shared/stay
 import type { VerticalCopy } from '~/utils/vertical-copy'
 
 export const SECTION_KEYS = [
-  'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
+  'photo', 'kind', 'name', 'price', 'description', 'page', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
   'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'arrival-guide', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
@@ -169,6 +169,7 @@ export interface VariantDraft {
   /** Restated on save: a submitted variant is its complete state. */
   sku: string | null
   active: boolean
+  sort_order: number
   price_major: string
   /** The amount this box held when the product was loaded. */
   loaded_price_major: string
@@ -295,6 +296,7 @@ export interface ProductEditor {
   addOption: () => void
   removeOption: (index: number) => void
   setOptionValues: (index: number, values: string[]) => void
+  setOptionSelection: (variant: VariantDraft, optionId: string, value: string) => void
   setDetail: (definition: ProductDetailField, value: ProductDetailValue) => void
   listValue: (definition: ProductDetailField) => string[]
   textValue: (definition: ProductDetailField) => string
@@ -325,6 +327,7 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 </script>
 
 <script setup lang="ts">
+import { cloneFnJSON } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
@@ -427,7 +430,6 @@ const sectionLabels: Record<SectionKey, string> = {
   get price() { return product.value?.kind === 'service' ? 'Consultation pricing' : 'Price' },
   get description() { return product.value?.kind === 'experience' ? 'What you’ll do' : product.value?.kind === 'service' ? 'Short description' : 'Description' },
   'page': 'Page content',
-  'options': 'Variants',
   get 'order-url'() { return product.value?.kind === 'experience' ? 'External booking link' : product.value?.kind === 'service' ? 'External consultation link' : 'External link' },
   get attributes() { return product.value?.kind === 'dish' ? 'Food information' : 'Details' },
   'publication': 'Status',
@@ -459,7 +461,7 @@ const sectionLabels: Record<SectionKey, string> = {
   },
 }
 
-const detailKey = computed(() => level.child.value)
+const detailKey = computed(() => typeof route.params.definitionId === 'string' ? 'attributes' : level.child.value)
 const editorKey = computed<SectionKey>(() => (detailKey.value ?? 'photo') as SectionKey)
 
 const isNew = computed(() => productId.value === 'new')
@@ -838,12 +840,13 @@ function loadForm(row: Product) {
     values: option.values.map(value => ({ id: value.id, value: value.value })),
   }))
   form.variants = row.variants.map(variant => ({
-    key: form.options.length ? combinationKey(variant.option_values) : 'default',
+    key: form.options.length ? combinationKey(variant.option_values) : variant.id,
     id: variant.id,
     name: variant.name,
     selections: { ...variant.option_values },
     sku: variant.sku,
     active: variant.active,
+    sort_order: variant.sort_order,
     price_major: variantPriceMajor(variant),
     loaded_price_major: variantPriceMajor(variant),
     prices: variant.prices.map(price => ({ ...price })),
@@ -891,17 +894,10 @@ function loadForm(row: Product) {
   loadedCatalogShape.value = catalogShapeOf()
 }
 
-/**
- * The label combination a set of selections names, in option order.
- *
- * Both the loaded variants and the rebuilt ones are keyed by this, so a
- * combination that survives an option edit is recognised as the same one.
- */
+/** Option and value identities keep a saved configuration's prices through edits. */
 function combinationKey(selections: Record<string, string>): string {
-  return form.options
-    .filter(option => option.name.trim() && option.values.length)
-    .map(option => option.values.find(value => (value.id ?? value.value) === selections[option.id])?.value ?? '')
-    .join(' / ')
+  return JSON.stringify(form.options.filter(option => option.name.trim() && option.values.length)
+    .map(option => [option.id, selections[option.id] ?? null]))
 }
 
 function setDetail(definition: ProductDetailField, value: ProductDetailValue) {
@@ -920,11 +916,15 @@ function textValue(definition: ProductDetailField): string {
 // ── Options and the combinations they produce ───────────
 function addOption() {
   form.options.push({ id: `new-option-${form.options.length + 1}`, name: '', values: [] })
-  rebuildVariants()
 }
 function removeOption(index: number) {
-  form.options.splice(index, 1)
-  rebuildVariants()
+  const removed = form.options.splice(index, 1)[0]
+  if (!removed) return
+  form.variants = form.variants.map(variant => {
+    const selections = { ...variant.selections }
+    Reflect.deleteProperty(selections, removed.id)
+    return { ...variant, selections, key: form.options.length ? combinationKey(selections) : variant.id ?? variant.key }
+  })
 }
 function setOptionValues(index: number, values: string[]) {
   const option = form.options[index]
@@ -933,6 +933,17 @@ function setOptionValues(index: number, values: string[]) {
   // them keep pointing at the same rows.
   const existing = new Map(option.values.map(value => [value.value, value.id]))
   option.values = values.map(value => ({ id: existing.get(value) ?? null, value }))
+  // A new dimension needs an explicit value for each saved version. Naming
+  // its values cannot replace the things already sold.
+  if (product.value && !product.value.options.some(saved => saved.id === option.id)) {
+    const allowed = new Set(option.values.map(value => value.id ?? value.value))
+    for (const variant of form.variants) if (!allowed.has(variant.selections[option.id] ?? '')) Reflect.deleteProperty(variant.selections, option.id)
+    return
+  }
+  rebuildVariants()
+}
+function setOptionSelection(variant: VariantDraft, optionId: string, value: string) {
+  variant.selections[optionId] = value
   rebuildVariants()
 }
 
@@ -943,17 +954,27 @@ function setOptionValues(index: number, values: string[]) {
  * option's values must not move a price onto a different thing.
  */
 function rebuildVariants() {
+  // Every choice editor shares this draft. Changing an existing dimension may
+  // not bypass the explicit mapping still required by a new dimension.
+  if (product.value && form.options.some(option => !product.value!.options.some(saved => saved.id === option.id))) {
+    const saved = form.variants.filter(variant => variant.id)
+    if (!form.options.every(option => option.name.trim() && option.values.length)
+      || !saved.every(variant => form.options.every(option => option.values.some(value => (value.id ?? value.value) === variant.selections[option.id])))) return
+    const keys = saved.map(variant => combinationKey(variant.selections))
+    if (new Set(keys).size !== keys.length) return
+  }
   const options = form.options.filter(option => option.name.trim() && option.values.length)
   if (!options.length) {
-    const first = form.variants[0]
-    form.variants = [{
-      key: 'default', id: first?.id ?? null, name: form.name || 'Default', selections: {},
-      sku: first?.sku ?? null, active: first?.active ?? true,
-      price_major: first?.price_major ?? '', loaded_price_major: first?.loaded_price_major ?? '', prices: first?.prices ?? [],
-    }]
+    // Removing a dimension retains the things sold under it, including their
+    // identities, names, bookings, SKU and every price.
+    form.variants = form.variants.map(variant => ({ ...variant, key: variant.id ?? variant.key, selections: {} }))
     return
   }
-  const draftByKey = new Map(form.variants.map(variant => [variant.key, variant]))
+  const draftByKey = new Map<string, VariantDraft>()
+  for (const variant of form.variants) {
+    const key = combinationKey(variant.selections)
+    if (variant.id || !draftByKey.has(key)) draftByKey.set(key, variant)
+  }
   let combinations: Array<{ selections: Record<string, string>; labels: string[] }> = [{ selections: {}, labels: [] }]
   for (const option of options) {
     combinations = combinations.flatMap(combination => option.values.map(value => ({
@@ -961,16 +982,18 @@ function rebuildVariants() {
       labels: [...combination.labels, value.value],
     })))
   }
-  form.variants = combinations.map((combination) => {
-    const key = combination.labels.join(' / ')
+  const nextOrder = Math.max(-1, ...form.variants.map(variant => variant.sort_order)) + 1
+  form.variants = combinations.map((combination, index) => {
+    const key = combinationKey(combination.selections)
     const prior = draftByKey.get(key)
     return {
       key,
       id: prior?.id ?? null,
-      name: key,
+      name: prior?.name ?? combination.labels.join(' / '),
       selections: combination.selections,
       sku: prior?.sku ?? null,
       active: prior?.active ?? true,
+      sort_order: prior?.sort_order ?? nextOrder + index,
       price_major: prior?.price_major ?? '',
       loaded_price_major: prior?.loaded_price_major ?? '',
       prices: prior?.prices ?? [],
@@ -1015,8 +1038,17 @@ const sectionValid = computed(() => {
     return !invalidBedrooms && !invalidBeds && !invalidBaths
   }
   if (editorKey.value === 'team') return true
-  if (editorKey.value === 'options') {
+  if (editorKey.value === 'price' && typeof route.params.optionId === 'string') {
+    if (!form.options.length) return true
+    const combinations = new Set<string>()
     return form.options.every(option => option.name.trim() && option.values.length > 0)
+      && form.variants.every(variant => {
+        if (!form.options.every(option => option.values.some(value => (value.id ?? value.value) === variant.selections[option.id]))) return false
+        const combination = JSON.stringify(form.options.map(option => variant.selections[option.id]))
+        if (combinations.has(combination)) return false
+        combinations.add(combination)
+        return true
+      })
   }
   return true
 })
@@ -1062,10 +1094,6 @@ function roomsSummary(): string {
 if (isNew.value && !form.stay_location_id && locationId.value) form.stay_location_id = locationId.value
 
 // ── The index ─────────────────────────────────────────────
-function listSummary(values: readonly string[], empty: string) {
-  return values.length ? values.join(', ') : empty
-}
-
 // Who handles a bookable service's consultations, by name: the same list the
 // assignment concern reads, so it is one request shared by both.
 const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
@@ -1080,17 +1108,10 @@ function assignmentSummary(): string {
   return member ? `${member.name}${(experienceEditor.value || legalEditor.value) && member.scheduling?.public_approved !== 1 ? ' · Profile not published' : ''}` : 'Assigned member not found in this business'
 }
 
-/**
- * A price opens the editor of the one price it names. One variant has one
- * price, edited directly; several each have their own, so the row opens the
- * list of variants rather than choosing one of them.
- */
-const pricePath = computed(() => product.value && product.value.variants.length > 1 ? sectionPath('options') : sectionPath('price'))
-
 function priceSummary(): string {
   const row = product.value
   if (!row) return ''
-  if (row.variants.length > 1) return `${row.variants.length} variants`
+  if (row.variants.length > 1) return row.variants.map(variant => variant.name).join(', ')
   const variant = row.variants[0]
   if (!variant) return 'No price set'
   const price = selectPrice(variant.prices, { currency, location_id: priceLocationId(), at: new Date().toISOString() })
@@ -1173,8 +1194,9 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       const details = fields.filter(field => detailKeys.includes(field.key)).map(field => ({
         id: field.key, label: field.name, icon: field.icon, summary: detailSummary(field.key), placeholder: row.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`),
       }))
-      const detailNames = fields.filter(field => ![...detailKeys, PRICING_NOTE_HANDLE].includes(field.key)
-        && row.details[field.key] !== undefined && row.details[field.key] !== false).map(field => field.name)
+      const otherDetails = fields.filter(field => ![...detailKeys, PRICING_NOTE_HANDLE].includes(field.key)).map(field => ({
+        id: field.key, label: field.name, icon: field.icon, summary: detailSummary(field.key), placeholder: row.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`),
+      }))
       const sections = row.collections.map(membership => {
         const collection = collections.value.find(entry => entry.id === membership.collection_id)
         if (!collection) throw new Error('The offering references a collection that could not be loaded')
@@ -1188,8 +1210,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         { id: 'name', label: 'Name', summary: row.name, to: sectionPath('name') },
         { id: 'description', label: sectionLabels.description, summary: row.description || 'Nothing written yet', placeholder: !row.description, to: sectionPath('description') },
         ...(legalEditor.value ? pageItems : []),
-        { id: 'price', label: location.value ? `Price at ${location.value.title}` : sectionLabels.price, summary: prices, placeholder: prices === 'No price set', to: pricePath.value },
-        { id: 'options', label: 'Options', summary: row.options.map(option => `${option.name}: ${option.values.map(value => value.value).join(', ')}`).join('\n') || (row.variants.length > 1 ? `${row.variants.length} variants` : 'One version'), to: sectionPath('options') },
+        { id: 'price', label: location.value ? `Price at ${location.value.title}` : sectionLabels.price, summary: prices, placeholder: prices === 'No price set', to: sectionPath('price') },
         ...(!legalEditor.value || row.booking ? [{ id: 'assignment', label: bookingCopy.value.assigneeLabel, icon: 'i-lucide-user-round', summary: row.booking ? assignmentSummary() : 'Set up bookings first', placeholder: !row.booking || !row.booking.assigned_team_id && !row.booking.assigned_member_id, to: sectionPath(row.booking ? 'booking/assignment' : 'booking') }] : []),
         { id: 'booking', label: sectionLabels.booking, icon: 'i-lucide-calendar-check', summary: row.booking ? bookingSummary() : legalEditor.value ? 'No consultation calendar' : 'No booking calendar', placeholder: !row.booking, to: sectionPath('booking') },
         { id: 'locations', label: sectionLabels.locations, icon: 'i-lucide-map-pin', summary: productLocationSummary(), placeholder: !row.locations.length && !row.booking?.held_online, to: sectionPath('locations') },
@@ -1198,7 +1219,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         { id: 'publication', label: 'Website visibility', summary: publicationSummary(), status: published.value && row.active ? 'success' as const : 'neutral' as const, to: sectionPath('publication') },
         { id: 'order-url', label: sectionLabels['order-url'], summary: row.order_url || (legalEditor.value ? 'No external consultation link' : 'No external booking link'), placeholder: !row.order_url, to: sectionPath('order-url') },
         ...(legalEditor.value ? [] : pageItems),
-        { id: 'attributes', label: 'More details', summary: detailNames.join(', ') || 'No other details provided', placeholder: !detailNames.length, to: sectionPath('attributes') },
+        ...otherDetails,
         { id: 'collections', label: sectionLabels.collections, summary: sections.join('\n') || 'Not in a collection', placeholder: !sections.length, to: sectionPath('collections') },
         { id: 'kind', label: 'Type', summary: PRODUCT_KIND_LABELS[row.kind], to: sectionPath('kind') },
       ] }]
@@ -1207,8 +1228,9 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       const field = definitions.value.find(entry => entry.key === key)!
       return { id: key, label: field.name, icon: field.icon, summary: detailSummary(key), placeholder: row.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`) }
     })
-    const detailNames = definitions.value.filter(field => !['dietary_notes', 'allergens', 'ingredients', PRICING_NOTE_HANDLE].includes(field.key)
-      && row.details[field.key] !== undefined && row.details[field.key] !== false).map(field => field.name)
+    const otherFood = definitions.value.filter(field => !['dietary_notes', 'allergens', 'ingredients', PRICING_NOTE_HANDLE].includes(field.key)).map(field => ({
+      id: field.key, label: field.name, icon: field.icon, summary: detailSummary(field.key), placeholder: row.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`),
+    }))
     const sections = row.collections.map(membership => {
       const section = collections.value.find(entry => entry.id === membership.collection_id)
       if (!section) throw new Error('The dish references a menu section that could not be loaded')
@@ -1217,15 +1239,14 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     return [{ id: 'dish', items: [
       { id: 'photo', label: 'Photos', image: image ? mediaStillUrl(image) || undefined : undefined, summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'Add your first photo', placeholder: !image, to: sectionPath('photo') },
       { id: 'name', label: 'Name', summary: row.name, to: sectionPath('name') },
-      { id: 'price', label: location.value ? `Price at ${location.value.title}` : 'Price', summary: prices, placeholder: prices === 'No price set', to: pricePath.value },
+      { id: 'price', label: location.value ? `Price at ${location.value.title}` : 'Price', summary: prices, placeholder: prices === 'No price set', to: sectionPath('price') },
       { id: 'description', label: 'Description', summary: row.description || 'Nothing written yet', placeholder: !row.description, to: sectionPath('description') },
       ...food,
-      { id: 'options', label: 'Options and portions', summary: row.options.map(option => `${option.name}: ${option.values.map(value => value.value).join(', ')}`).join('\n') || 'One version', to: sectionPath('options') },
       { id: 'collections', label: 'Menu sections', summary: sections.join('\n') || 'Not in a menu section', placeholder: !sections.length, to: sectionPath('collections') },
       { id: 'locations', label: 'Locations', summary: productLocationSummary(), placeholder: !row.locations.length, to: sectionPath('locations') },
       { id: 'publication', label: 'Website visibility', summary: publicationSummary(), status: published.value && row.active ? 'success' as const : 'neutral' as const, to: sectionPath('publication') },
       { id: 'order-url', label: 'Ordering link', summary: row.order_url || 'No external ordering link', placeholder: !row.order_url, to: sectionPath('order-url') },
-      { id: 'attributes', label: 'More food information', summary: detailNames.join(', ') || 'Add details', placeholder: !detailNames.length, to: sectionPath('attributes') },
+      ...otherFood,
       { id: 'kind', label: 'Type', summary: PRODUCT_KIND_LABELS[row.kind], to: sectionPath('kind') },
     ] }]
   }
@@ -1242,7 +1263,9 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'checkout-instructions', label: 'Checkout instructions', summary: home.checkout_instructions.length ? `${home.checkout_instructions.length} ${home.checkout_instructions.length === 1 ? 'instruction' : 'instructions'}` : 'Add details', placeholder: !home.checkout_instructions.length, to: sectionPath('checkout-instructions') },
     ] }]
   }
-  const authoredDetails = definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !isStayFocusedDetail(definition.key))
+  const otherDetails = definitions.value.filter(definition => definition.key !== PRICING_NOTE_HANDLE && !isStayFocusedDetail(definition.key)).map(field => ({
+    id: field.key, label: field.name, summary: detailSummary(field.key), placeholder: product.value!.details[field.key] === undefined, to: sectionPath(`attributes/${field.id}`),
+  }))
   return [{
     id: 'item',
     items: [
@@ -1252,7 +1275,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       ...(product.value.page
         ? [{ id: 'page', label: 'Page content', summary: product.value.page.title, ...(canPreview.value ? { to: `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(product.value.page.id)}` } : {}) }]
         : []),
-      { id: 'price', label: 'Nightly price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: pricePath.value },
+      { id: 'price', label: 'Nightly price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: sectionPath('price') },
       {
         id: 'property-type',
         label: 'Property type',
@@ -1301,14 +1324,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'guest-safety', label: 'Guest safety', summary: savedSafety.value.join('\n') || 'Add details', placeholder: !savedSafety.value.length, to: sectionPath('guest-safety') },
       { id: 'location', label: 'Location', summary: stayLocationError.value || (stayLocation.value ? formatPostalAddress(stayLocation.value.address) || 'Add address' : 'Loading location…'), placeholder: !stayLocation.value?.address, to: sectionPath('location') },
       { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
-      { id: 'options', label: 'Variants', summary: product.value.variants.length > 1 ? `${product.value.variants.length} variants` : 'One version', to: sectionPath('options') },
-      {
-        id: 'attributes',
-        label: 'Details',
-        summary: listSummary(authoredDetails.map(definition => definition.name), 'None set'),
-        placeholder: !authoredDetails.length,
-        to: sectionPath('attributes'),
-      },
+      ...otherDetails,
       { id: 'kind', label: 'Type', summary: form.kind ? PRODUCT_KIND_LABELS[form.kind] : 'Choose a type', to: sectionPath('kind') },
       { id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), placeholder: !form.collection_ids.length, to: sectionPath('collections') },
       {
@@ -1331,12 +1347,12 @@ const activeNavigationItem = computed(() => {
 /**
  * The row the editor opens on a wide screen: the first one that opens a leaf
  * beside this index. A row that leads into a level of its own — Bookings,
- * Variants — would open that level too and push this index off the screen.
+ * Pricing — would open that level too and push this index off the screen.
  */
 const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'stay', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
 const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
-const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
+const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'tagline', 'featured', 'kind', 'collections']
 function rowRank(id: string) {
   const at = STAY_ROW_ORDER.indexOf(id)
   return at === -1 ? STAY_ROW_ORDER.length : at
@@ -1347,7 +1363,7 @@ function rowRank(id: string) {
  * than from a list of every section a product could ever have — a product being
  * created has only its name, and the rows already say so.
  */
-const openSections = computed(() => [...navigationGroups.value.flatMap(group => group.items.filter(item => item.id !== 'page' || canPreview.value).map(item => item.id)), ...(stayEditor.value ? ['arrival-guide'] : [])])
+const openSections = computed(() => [...navigationGroups.value.flatMap(group => group.items.filter(item => item.id !== 'page' || canPreview.value).map(item => item.id)), ...(!isNew.value && definitions.value.some(field => field.id === route.params.definitionId && field.key !== PRICING_NOTE_HANDLE && !isStayFocusedDetail(field.key)) ? ['attributes'] : []), ...(stayEditor.value ? ['arrival-guide'] : [])])
 
 // A section this product does not have 404s. A watcher, not a setup-time check:
 // moving between leaves reuses this component.
@@ -1407,13 +1423,13 @@ function buildCatalog() {
       sort_order: index,
       values: option.values.map((value, valueIndex) => ({ id: value.id ?? undefined, value: value.value, sort_order: valueIndex })),
   }))
-  const variants = form.variants.map((variant, index) => ({
+  const variants = form.variants.map(variant => ({
     id: variant.id ?? undefined,
     name: variant.name,
     // The form supplies the full intended variant state.
     sku: variant.sku,
     active: variant.active,
-    sort_order: index,
+    sort_order: variant.sort_order,
       // A selection names its option the same way the declaration above does:
       // a saved option by id, one being created by its name.
       option_values: Object.fromEntries(Object.entries(variant.selections)
@@ -1445,8 +1461,8 @@ function payload(concern?: ProductConcern) {
       if (!field) throw new Error('Choose a product detail before saving.')
       return { ...version, details_mode: 'merge', details: { [field.key]: form.details[field.key] ?? null } }
     }
-    if (editorKey.value === 'price' || editorKey.value === 'options' && typeof route.params.variantId === 'string') {
-      const variant = typeof route.params.variantId === 'string' ? form.variants.find(entry => entry.id === route.params.variantId) : form.variants.length === 1 ? form.variants[0] : null
+    if (editorKey.value === 'price' && typeof route.params.variantId === 'string') {
+      const variant = form.variants.find(entry => entry.id === route.params.variantId)
       if (!variant?.id) throw new Error('Choose a saved variant before editing its price.')
       const selection = { currency, location_id: priceLocationId(), at: new Date().toISOString() }
       const governing = selectPrice(variant.prices.filter(price => price.location_id === selection.location_id), selection)
@@ -1456,12 +1472,12 @@ function payload(concern?: ProductConcern) {
         ? [governing ? { id: governing.id, unit_amount: majorAmountToMinor(typed, currency) } : { ...(displayed ? carryPrice(displayed) : {}), id: undefined, unit_amount: majorAmountToMinor(typed, currency), currency, location_id: selection.location_id }]
         : governing ? [{ id: governing.id, active: false }] : []
       return { ...version, ...(prices.length ? { variants: [{ id: variant.id, prices }] } : {}),
-        ...(editorKey.value === 'price' ? { details_mode: 'merge', details: { [PRICING_NOTE_HANDLE]: form.details[PRICING_NOTE_HANDLE] || null } } : {}),
+        ...(form.variants.length === 1 ? { details_mode: 'merge', details: { [PRICING_NOTE_HANDLE]: form.details[PRICING_NOTE_HANDLE] || null } } : {}),
       }
     }
-    if (editorKey.value === 'options') {
+    if (editorKey.value === 'price' && typeof route.params.optionId === 'string') {
       const catalog = buildCatalog()
-      return { ...version, options: catalog.options, variants_mode: 'replace', variants: catalog.variants.map(variant => ({ ...variant, prices_mode: 'replace' })) }
+      return { ...version, options: catalog.options, variants_mode: 'replace', variants: catalog.variants.map(({ prices: _prices, ...variant }) => variant) }
     }
     throw new Error('This product setting has its own save action.')
   }
@@ -1652,7 +1668,7 @@ async function commit(concern?: ProductConcern) {
   saving.value = true
   saveError.value = null
   try {
-    if (!isNew.value && !stayEditor.value && concern === undefined) ordinaryDraft = { version: editVersion.value, values: structuredClone(toRaw(form)) }
+    if (!isNew.value && !stayEditor.value && concern === undefined) ordinaryDraft = { version: editVersion.value, values: cloneFnJSON(form) }
     if (isNew.value) {
       // A service is created with the page that shows it, in one write: the
       // name is the page's first title, the server gives it a free
@@ -1728,7 +1744,7 @@ async function commit(concern?: ProductConcern) {
     if (ordinaryDraft) {
       const draft = ordinaryDraft.values
       if (editorKey.value === 'attributes' || editorKey.value === 'price') form.details = draft.details
-      if (editorKey.value === 'options' || editorKey.value === 'price') { form.options = draft.options; form.variants = draft.variants }
+      if (editorKey.value === 'price') { form.options = draft.options; form.variants = draft.variants }
       if (editorKey.value === 'name') form.name = draft.name
       if (editorKey.value === 'description') form.description = draft.description
       if (editorKey.value === 'order-url') form.order_url = draft.order_url
@@ -2221,6 +2237,7 @@ provide(productEditorKey, {
   addOption,
   removeOption,
   setOptionValues,
+  setOptionSelection,
   setDetail,
   listValue,
   textValue,

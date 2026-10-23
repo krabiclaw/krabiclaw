@@ -1,6 +1,6 @@
 <template>
  <MemberAvailabilityIndex v-if="member" :key="`${organizationId}:${member.id}`" :organization-id="organizationId" :member-id="member.id" self />
- <DashboardLeafPanel v-else id="availability-loading" title="Your availability" :footer="false" :error="error ? getErrorMessage(error,'Your availability could not be loaded.') : ''" />
+ <DashboardLeafPanel v-else id="availability-loading" title="Profile & availability" :footer="false" :error="error ? getErrorMessage(error,'Your profile and availability could not be loaded.') : ''" />
 </template>
 <script setup lang="ts">
 import MemberAvailabilityIndex from '~/components/dashboard/MemberAvailabilityIndex.vue'

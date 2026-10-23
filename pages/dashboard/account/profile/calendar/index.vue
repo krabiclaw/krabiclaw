@@ -1,6 +1,6 @@
 <template>
  <!-- Personal has no organization of its own, so availability starts by naming one. Inside an organization, Account settings opens that organization's availability directly. -->
- <DashboardIndexPanel id="availability-organizations" title="Your availability">
+ <DashboardIndexPanel id="availability-organizations" title="Profile & availability">
   <UAlert v-if="state.error" color="error" :description="getErrorMessage(state.error,'Your organizations could not be loaded.')" />
   <EditorNavigationList :groups="groups" />
  </DashboardIndexPanel>

@@ -1,14 +1,16 @@
-import { expect, test, type APIRequestContext, type BrowserContext, type Page } from '@playwright/test'
+import { expect, test, type APIRequestContext, type BrowserContext, type Page, type Request } from '@playwright/test'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
-import { isAccountActivityResponse } from '../../shared/account-activity'
+import { isAccountActivityResponse, isBuyerPaymentEntry, type BuyerPaymentEntry } from '../../shared/account-activity'
+import { paymentMoney } from '../../shared/payment-display'
 import { isBookingDetailsResponse } from '../../composables/useBookingDetails'
 import type { DashboardArticleCategory } from '../../composables/useArticleCategories'
 import type { NotificationPreferenceMap } from '../../composables/useNotificationPreferences'
 import type { SessionAvailability } from '../../server/utils/availability'
 import type { OrganizationMembersData } from '../../utils/organization-members'
-import { localNow, timezoneLabel } from '../../utils/timezone'
+import { formatTimestamp, localNow, timezoneLabel } from '../../utils/timezone'
+import type { MemberSchedule } from '../../composables/useMemberAvailabilityEditor'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
@@ -110,11 +112,13 @@ test.describe('dashboard pane hierarchy', () => {
   test.describe('team and location assignment', () => {
     test.describe.configure({ mode: 'default' })
 
-  test('Team changes member roles through Better Auth, and self-demotion refreshes context before leaving Team', async ({ page, baseURL, browser }, testInfo) => {
+  test('Team changes member roles through Better Auth, and self-demotion refreshes context before leaving Team', async ({ page, baseURL, browser, playwright }, testInfo) => {
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Role writes use local D1 only.')
     const organizationId = 'org-demo'
     const release = await acquireTenantMutationLock(testInfo, organizationId)
+    let cleanupRequest: APIRequestContext | undefined
     try {
+    cleanupRequest = await playwright.request.newContext({ baseURL, storageState: await page.request.storageState() })
     const before = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     expect(before.status(), await before.text()).toBe(200)
     const members = (await before.json() as { members: Array<{ id: string; userId: string; role: string; user: { name: string } }> }).members
@@ -142,7 +146,10 @@ test.describe('dashboard pane hierarchy', () => {
       const ownerPage = await ownerContext.newPage()
       const pageErrors: string[] = []
       ownerPage.on('pageerror', error => pageErrors.push(error.message))
-      await open(ownerPage, `${ORG}/team`)
+      await open(ownerPage, `${ORG}/menu`)
+      const ownerMenu = ownerPage.locator('#dashboard-panel-organization-settings')
+      await expect(ownerMenu.getByRole('link', { name: 'Team', exact: true })).toBeVisible()
+      await ownerMenu.getByRole('link', { name: 'Team', exact: true }).click()
       const selfRole = ownerPage.getByRole('combobox', { name: `Role for ${member!.user.name}`, exact: true })
       await expect(selfRole).toContainText('Owner')
       const contextRefresh = ownerPage.waitForResponse(response => {
@@ -155,18 +162,23 @@ test.describe('dashboard pane hierarchy', () => {
       expect(refreshed.status(), await refreshed.text()).toBe(200)
       expect(await refreshed.json()).toMatchObject({ organization: { id: organizationId, role: 'member' } })
       await expect(ownerPage).toHaveURL('/dashboard/account/profile/calendar/org-demo')
-      await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('heading', { name: 'Your availability', exact: true })).toBeVisible()
+      await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('heading', { name: 'Profile & availability', exact: true })).toBeVisible()
       await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('link', { name: /^Hours/ })).toHaveAttribute('href', '/dashboard/account/profile/calendar/org-demo/hours')
       await expect(ownerPage.locator('#dashboard-panel-organization-members')).toHaveCount(0)
+      await ownerPage.getByRole('button', { name: 'Open menu', exact: true }).click()
+      const refreshedMenu = ownerPage.getByRole('dialog', { name: 'Menu', exact: true })
+      await expect(refreshedMenu).toBeVisible()
+      await expect(refreshedMenu.getByRole('link', { name: 'Website', exact: true })).toBeVisible()
+      await expect(refreshedMenu.getByRole('link', { name: 'Team', exact: true })).toHaveCount(0)
       const independentRead = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
       expect(independentRead.status(), await independentRead.text()).toBe(200)
       expect((await independentRead.json() as { members: Array<{ id: string; role: string }> }).members.find(item => item.id === member!.id)?.role).toBe('member')
       expect(pageErrors).toEqual([])
     } finally {
       try {
-        const restored = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: member!.id, role: member!.role } })
+        const restored = await cleanupRequest.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: member!.id, role: member!.role } })
         expect(restored.status(), await restored.text()).toBe(200)
-        const read = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+        const read = await cleanupRequest.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
         expect(read.status()).toBe(200)
         expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(item => item.id === member!.id)?.role).toBe('owner')
       } finally {
@@ -174,7 +186,8 @@ test.describe('dashboard pane hierarchy', () => {
       }
     }
     } finally {
-      await release()
+      try { await cleanupRequest?.dispose() }
+      finally { await release() }
     }
   })
 
@@ -1652,6 +1665,29 @@ test.describe('dashboard pane hierarchy', () => {
       } else if (!cancelled.length) {
         await expect(page.getByText('No past activity yet', { exact: true })).toBeVisible()
       }
+      await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
+      await page.getByTestId('dashboard-menu-payments').click()
+      await expect(page).toHaveURL('/dashboard/account/profile/payments')
+      const payments = page.locator('#dashboard-panel-account-payments')
+      await expect(payments.getByRole('heading', { name: 'Payments', exact: true })).toBeVisible()
+      const paymentsRead = await page.request.get('/api/account/payments')
+      expect(paymentsRead.status(), await paymentsRead.text()).toBe(200)
+      const { entries } = await paymentsRead.json() as { entries: BuyerPaymentEntry[] }
+      expect(Array.isArray(entries) && entries.every(isBuyerPaymentEntry), 'Payments returns this account’s actual payments and refunds').toBe(true)
+      await expect(payments.locator('[data-testid^="account-payment-"]')).toHaveCount(Math.min(entries.length, 10))
+      for (const entry of entries.slice(0, 10)) {
+        const row = payments.getByTestId(`account-payment-${entry.id}`)
+        await expect(row).toHaveAttribute('href', entry.to)
+        await expect(row).toContainText(`${entry.kind === 'paid' ? 'Paid' : 'Refunded'} ${formatTimestamp(entry.occurredAt, 'en', 'UTC', { month: 'short', day: 'numeric' })}`)
+        await expect(row).toContainText(entry.title)
+        await expect(row).toContainText(paymentMoney(entry.amount, entry.currency))
+        await expect(row).toContainText(entry.currency)
+        if (entry.organizationName) await expect(row).toContainText(entry.organizationName)
+      }
+      if (!entries.length) await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
+      await payments.getByTestId('dashboard-navbar-close').click()
+      await expect(page).toHaveURL('/dashboard/account/profile')
+      await expect(page.getByRole('dialog')).toHaveCount(0)
       await mobileNav.getByRole('link', { name: 'Today', exact: true }).click()
       await expect(page).toHaveURL('/dashboard/account')
       await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
@@ -2207,12 +2243,22 @@ test.describe('dashboard pane hierarchy', () => {
   // Account settings carries no organization in its URL. Better Auth's active
   // organization keeps the shell in it, and a member's own availability —
   // where Google Calendar connects — is that organization's page.
-  test('Account settings keeps the active organization\'s shell', async ({ page, baseURL }) => {
+  test('Account settings keeps the active organization\'s shell', async ({ page, baseURL }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Account writes and the unconfigured image-provider response use isolated local data only.')
+    const organizationId = 'org-ncls-blawby'
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
     const services = '/dashboard/north-carolina-legal-services'
     const availability = '/dashboard/account/profile/calendar/org-ncls-blawby'
+    let originalUser: { id: string; name: string; image: string | null } | null = null
+    let memberId: string | null = null
+    let previous: MemberSchedule = null
+    let bioSaved = false
+    let nameSaved = false
+    const failures: unknown[] = []
+    try {
     await page.context().clearCookies()
     await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
-    const activated = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-ncls-blawby' } })
+    const activated = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId } })
     expect(activated.status(), await activated.text()).toBe(200)
     await page.setViewportSize({ width: 390, height: 844 })
 
@@ -2226,16 +2272,172 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.getByTestId('dashboard-mobile-nav-menu-link')).toHaveAttribute('aria-current', 'page')
     await expect(page.locator('#dashboard-panel-account-profile [data-testid="dashboard-navbar-back"]')).toHaveAttribute('href', `${services}/menu`)
     // Opening it changed nothing in Better Auth: availability opens the active organization's own page.
-    const session = await page.request.get('/api/auth/get-session', { headers: authRequestHeaders(baseURL!) })
-    expect((await session.json() as { session: { activeOrganizationId: string | null } }).session.activeOrganizationId).toBe('org-ncls-blawby')
-    await page.getByRole('link', { name: /^Your availability/ }).click()
+    const session = await page.request.get('/api/auth/get-session', { params: { disableCookieCache: 'true' } })
+    expect(session.status(), await session.text()).toBe(200)
+    const signedIn = await session.json() as { user: { id: string; name: string; image: string | null }; session: { activeOrganizationId: string | null } }
+    originalUser = { id: signedIn.user.id, name: signedIn.user.name, image: signedIn.user.image }
+    expect(signedIn.session.activeOrganizationId).toBe(organizationId)
+    const membersRead = await page.request.get(`/api/organizations/${organizationId}/members/scheduling`)
+    expect(membersRead.status(), await membersRead.text()).toBe(200)
+    const member = (await membersRead.json() as { members: Array<{ id: string; self: boolean; scheduling: MemberSchedule }> }).members.find(item => item.self)
+    expect(member, 'the account edits its own existing Better Auth membership').toBeDefined()
+    memberId = member!.id
+    previous = member!.scheduling
+    await page.getByRole('link', { name: /^Profile & availability/ }).click()
     await expect(page).toHaveURL(availability)
     await expect(page.getByRole('link', { name: /^Google Calendar/ })).toBeVisible()
+
+    // Public profile editing never asks this person to initialize Hours first.
+    await page.getByRole('link', { name: /^Public profile/ }).click()
+    await page.getByRole('link', { name: /^About you/ }).click()
+    const bioLeaf = page.locator('#dashboard-panel-member-bio')
+    const bio = `I help clients understand their options and prepare for family law consultations. My goal is to make the next steps clear and give each client time to ask questions.\n\nFictional example profile · ${Date.now().toString(36)}`
+    await bioLeaf.getByRole('textbox', { name: 'About you', exact: true }).fill(bio)
+    const bioWrite = page.waitForResponse(response => new URL(response.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && response.request().method() === 'PUT')
+    await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
+    const bioResponse = await bioWrite
+    expect(bioResponse.status(), await bioResponse.text()).toBe(200)
+    bioSaved = true
+    expect(bioResponse.request().postDataJSON()).toEqual({ public_bio: bio, expected_updated_at: previous?.updated_at ?? null })
+    const independentProfile = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+    expect(independentProfile.status(), await independentProfile.text()).toBe(200)
+    const saved = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await independentProfile.json()).scheduling
+    expect(saved).toMatchObject({ public_bio: bio, public_approved: 0, updated_by: originalUser.id })
+    if (previous) {
+      expect(saved).toEqual({ ...previous, public_bio: bio, public_approved: 0, updated_at: saved.updated_at, updated_by: originalUser.id })
+      expect(saved.updated_at).not.toBe(previous.updated_at)
+    } else {
+      expect(saved).toMatchObject({ timezone: null, weekly: null, time_off: null, public_name: null, public_photo_url: null, calendar_account_id: null, calendar_ids: [], busy_from: null, busy_until: null, busy_checked_at: null, busy_error: null, calendar_status: 'internal' })
+    }
+
+    await expect(bioLeaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await page.setViewportSize(WIDE)
+    await expect(bioLeaf.getByRole('textbox', { name: 'About you', exact: true })).toHaveValue(bio)
+    await page.screenshot({ path: testInfo.outputPath('shared-profile-desktop.png') })
+    await page.setViewportSize(PHONE)
+    await expect(bioLeaf.getByRole('textbox', { name: 'About you', exact: true })).toHaveValue(bio)
+    await expect.poll(async () => {
+      const bounds = await page.getByRole('dialog').boundingBox()
+      return bounds !== null && bounds.y >= 0 && bounds.height > PHONE.height / 2 && Math.round(bounds.y + bounds.height) === PHONE.height
+    }).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath('shared-profile-mobile.png') })
+    const attemptedBio = `${bio} unsaved edit`
+    await bioLeaf.getByRole('textbox', { name: 'About you', exact: true }).fill(attemptedBio)
+    const concurrentBio = `${bio} concurrent edit`
+    const concurrentWrite = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'set_member_scheduling', args: { organization_id: organizationId, member_id: memberId, public_bio: concurrentBio, expected_updated_at: saved.updated_at } })
+    expect(concurrentWrite.status(), await concurrentWrite.text()).toBe(200)
+    const concurrent = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await concurrentWrite.json()).scheduling
+    expect(concurrent.public_bio).toBe(concurrentBio)
+    const conflictWrite = page.waitForResponse(response => new URL(response.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && response.request().method() === 'PUT')
+    await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
+    const conflictResponse = await conflictWrite
+    expect(conflictResponse.status(), await conflictResponse.text()).toBe(409)
+    expect(conflictResponse.request().postDataJSON()).toEqual({ public_bio: attemptedBio, expected_updated_at: saved.updated_at })
+    await expect(bioLeaf.getByRole('textbox', { name: 'About you', exact: true })).toHaveValue(attemptedBio)
+    await expect(bioLeaf.getByText(/These settings changed after your edit\. Use the saved values before editing again\./)).toBeVisible()
+    await expect(bioLeaf.getByRole('button', { name: 'Retry', exact: true })).toBeDisabled()
+    const concurrentRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+    expect(concurrentRead.status(), await concurrentRead.text()).toBe(200)
+    expect(mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await concurrentRead.json()).scheduling).toEqual(concurrent)
+    let reloadWrites = 0
+    const observeReload = (request: Request) => {
+      if (new URL(request.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && request.method() === 'PUT') reloadWrites++
+    }
+    page.on('request', observeReload)
+    try {
+      const reload = page.waitForResponse(response => new URL(response.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && response.request().method() === 'GET')
+      await bioLeaf.getByRole('button', { name: 'Use saved values', exact: true }).click()
+      const reloadResponse = await reload
+      expect(reloadResponse.status(), await reloadResponse.text()).toBe(200)
+      expect((await reloadResponse.json()).scheduling).toEqual(concurrent)
+      await expect(bioLeaf.getByRole('textbox', { name: 'About you', exact: true })).toHaveValue(concurrentBio)
+      await expect(bioLeaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await expect(bioLeaf.getByRole('button', { name: 'Use saved values', exact: true })).toHaveCount(0)
+      expect(reloadWrites, 'Use saved values reads the concurrent settings without resubmitting').toBe(0)
+    } finally {
+      page.off('request', observeReload)
+    }
+
+    await open(page, '/dashboard/account/profile/personal')
+    const personal = page.locator('#dashboard-panel-account-personal')
+    const nameRow = personal.locator('.divide-y > div').filter({ has: page.getByText('Display name', { exact: true }) })
+    await nameRow.getByRole('button', { name: originalUser.name ? 'Edit' : 'Add', exact: true }).click()
+    const name = `E2E account name ${Date.now().toString(36)}`
+    await nameRow.getByRole('textbox').fill(name)
+    const nameWrite = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/update-user' && response.request().method() === 'POST')
+    await nameRow.getByRole('button', { name: 'Save', exact: true }).click()
+    const nameResponse = await nameWrite
+    expect(nameResponse.status(), await nameResponse.text()).toBe(200)
+    nameSaved = true
+    const accountRead = await page.request.get('/api/auth/get-session', { params: { disableCookieCache: 'true' } })
+    expect(accountRead.status(), await accountRead.text()).toBe(200)
+    expect((await accountRead.json()).user).toMatchObject({ id: originalUser.id, name, image: originalUser.image })
+    await expect(nameRow.getByText(name, { exact: true })).toBeVisible()
+
+    // Local runs deliberately have no Images credentials. Its real refusal must
+    // reach the person without replacing the account's saved avatar.
+    const photoRow = personal.locator('.divide-y > div').filter({ has: page.getByText('Photo', { exact: true }) })
+    await photoRow.getByRole('button', { name: 'Edit', exact: true }).click()
+    const avatarWrite = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/avatar' && response.request().method() === 'POST')
+    await photoRow.locator('input[type="file"]').setInputFiles({ name: 'account-avatar.png', mimeType: 'image/png', buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64') })
+    const avatarResponse = await avatarWrite
+    expect(avatarResponse.status(), await avatarResponse.text()).toBe(503)
+    await expect(photoRow.getByText(/Cloudflare Images is not configured in this environment, by design/)).toBeVisible()
+    const avatarRead = await page.request.get('/api/auth/get-session', { params: { disableCookieCache: 'true' } })
+    expect(avatarRead.status(), await avatarRead.text()).toBe(200)
+    expect((await avatarRead.json()).user).toMatchObject({ id: originalUser.id, name, image: originalUser.image })
 
     // On the team, your own row opens the same page; the admin view is for everyone else.
     await open(page, `${services}/team`)
     const ownRow = page.getByRole('listitem').filter({ hasText: 'ncls-owner@playwright.example' })
     await expect(ownRow.getByRole('link', { name: 'Profile, hours & Calendar', exact: true })).toHaveAttribute('href', availability)
+
+    // Only the fictional fixture account appears in shared visual evidence.
+    await open(page, '/dashboard/account/profile/payments')
+    const payments = page.locator('#dashboard-panel-account-payments')
+    const paymentsRead = await page.request.get('/api/account/payments')
+    expect(paymentsRead.status(), await paymentsRead.text()).toBe(200)
+    const { entries } = await paymentsRead.json() as { entries: BuyerPaymentEntry[] }
+    expect(Array.isArray(entries) && entries.every(isBuyerPaymentEntry)).toBe(true)
+    await expect(payments.locator('[data-testid^="account-payment-"]')).toHaveCount(Math.min(entries.length, 10))
+    if (!entries.length) await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
+    await page.setViewportSize(WIDE)
+    await expect(payments.getByRole('heading', { name: 'Payments', exact: true })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('shared-payments-desktop.png') })
+    await page.setViewportSize(PHONE)
+    await expect.poll(async () => {
+      const bounds = await page.getByRole('dialog').boundingBox()
+      return bounds !== null && bounds.y >= 0 && bounds.height > PHONE.height / 2 && Math.round(bounds.y + bounds.height) === PHONE.height
+    }).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath('shared-payments-mobile.png') })
+    } catch (error) { failures.push(error) }
+    finally {
+      try {
+        if (nameSaved && originalUser) {
+          const restored = await page.request.post('/api/auth/update-user', { headers: authRequestHeaders(baseURL!), data: { name: originalUser.name } })
+          expect(restored.status(), await restored.text()).toBe(200)
+          const read = await page.request.get('/api/auth/get-session', { params: { disableCookieCache: 'true' } })
+          expect(read.status(), await read.text()).toBe(200)
+          expect((await read.json()).user).toMatchObject(originalUser)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        if (bioSaved && memberId && originalUser) {
+          const current = await page.request.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
+          expect(current.status(), await current.text()).toBe(200)
+          const record = (await current.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
+          const restored = await page.request.put(`/api/organizations/${organizationId}/members/${memberId}/scheduling`, { data: { public_bio: previous?.public_bio ?? null, public_approved: Boolean(previous?.public_approved), expected_updated_at: record.updated_at } })
+          expect(restored.status(), await restored.text()).toBe(200)
+          const independent = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+          expect(independent.status(), await independent.text()).toBe(200)
+          const read = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await independent.json()).scheduling
+          if (previous) expect(read).toEqual({ ...previous, updated_at: read.updated_at, updated_by: originalUser.id })
+          else expect(read).toMatchObject({ public_bio: null, public_name: null, public_photo_url: null, public_approved: 0, timezone: null, weekly: null, time_off: null, calendar_account_id: null, calendar_ids: [], busy_from: null, busy_until: null, busy_checked_at: null, busy_error: null, calendar_status: 'internal' })
+        }
+      } catch (error) { failures.push(error) }
+      try { await release() } catch (error) { failures.push(error) }
+    }
+    if (failures.length) throw new AggregateError(failures, 'Account profile verification or restoration failed')
   })
 
   // Choosing, opening and deleting an organization are the account's; the

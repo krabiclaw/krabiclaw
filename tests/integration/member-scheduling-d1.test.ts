@@ -4,8 +4,9 @@ import { symmetricEncrypt } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson,generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
-import { writeMemberScheduling, readMemberScheduling, requireSchedulingAccess, refreshMemberBusy, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
+import { writeMemberScheduling, readMemberScheduling, requireSchedulingAccess, refreshMemberBusy, refreshWorkingWindows, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
 import { claimSessionCapacity, CapacityUnavailableError } from '../../server/utils/availability.ts'
+import { publicProductHosts } from '../../server/utils/public-provider.ts'
 import { reassignBookingProvider } from '../../server/domain/provider-reassignment.ts'
 import { storeCalendarSelection, readCalendarIntegration, disconnectCalendar, syncCalendarOrganization } from '../../server/utils/google-calendar.ts'
 import { BUSY_FRESHNESS_MS, MEMBER_BUSY_SCOPES } from '../../shared/member-scheduling.ts'
@@ -27,14 +28,49 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await assert.rejects(()=>requireSchedulingAccess({...own,userId:'outsider'},'member-one'))
   await assert.rejects(()=>writeMemberScheduling(own,'member-two',hours))
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{...hours,public_approved:true}))
-  const saved=await writeMemberScheduling(own,'member-one',{...hours,public_name:'Approved name',public_bio:'Public bio'})
+  const profile=await writeMemberScheduling(own,'member-one',{expected_updated_at:null,public_name:'Approved name',public_bio:'Public bio'})
+  assert.deepEqual({timezone:profile.timezone,weekly:profile.weekly,time_off:profile.time_off,calendar_ids:profile.calendar_ids},{timezone:null,weekly:null,time_off:null,calendar_ids:[]})
+  const profileRow=await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first()
+  for(const field of ['timezone','weekly_json','time_off_json','windows_json','windows_until'])assert.equal(profileRow?.[field],null,'a profile does not fabricate working facts')
+  await assert.rejects(db.prepare("UPDATE member_scheduling SET timezone='UTC' WHERE member_id='member-one'").run(),/member_scheduling_hours_check/)
+  await assert.rejects(db.prepare("UPDATE member_scheduling SET weekly_json='[]' WHERE member_id='member-one'").run(),/member_scheduling_hours_check/)
+  await refreshWorkingWindows(db)
+  assert.deepEqual(await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first(),profileRow,'window refresh excludes profile-only members')
+  await assert.rejects(()=>selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]}),{statusCode:409,message:'Save member hours first before selecting busy-input calendars'})
+  await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,timezone:'UTC'}),/together the first time/)
+  await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,weekly:[]}),/together the first time/)
+  await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profile.updated_at,timezone:null} as unknown as Parameters<typeof writeMemberScheduling>[2]),/IANA timezone/)
+  await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('experience','profile-host','org','Authored host','profile-host','owner','owner')").run()
+  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,assigned_member_id,created_by,updated_by)VALUES('profile-host','org','member-one','owner','owner')").run()
+  const publishedProfile=await writeMemberScheduling(owner,'member-one',{expected_updated_at:profile.updated_at,public_approved:true})
+  assert.deepEqual(await publicProductHosts(db,'org','profile-host'),[{name:'Approved name',photo_url:null,bio:'Public bio'}],'a published host profile does not require provider hours')
+  const saved=await writeMemberScheduling(own,'member-one',{...hours,expected_updated_at:publishedProfile.updated_at,public_name:'Approved name',public_bio:'Public bio',public_photo_url:null})
   assert.equal(saved?.timezone,'America/New_York')
-  assert.equal(saved?.public_approved,0)
+  assert.equal(saved?.public_approved,1,'unchanged profile facts retain approval when hours are authored')
+  const clock=t.mock.method(Date,'now',()=>Date.parse(saved.updated_at))
   const approved=await writeMemberScheduling(owner,'member-one',{...hours,expected_updated_at:saved!.updated_at,public_approved:true})
+  assert.equal(Date.parse(approved.updated_at),Date.parse(saved.updated_at)+1,'the revision advances even within the same millisecond')
+  clock.mock.restore()
   assert.equal((await readMemberScheduling(db,'org','member-one'))?.public_approved,1)
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{...hours,expected_updated_at:saved!.updated_at}),/changed/)
   const changed=await writeMemberScheduling(own,'member-one',{...hours,expected_updated_at:approved!.updated_at,public_name:'Changed public name'})
   assert.equal(changed?.public_approved,0,'self-edited content loses prior approval')
+  const beforeConflict=await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first()
+  const invalidations=async()=>Number(await db.prepare("SELECT count(*) n FROM public_resource_cache_invalidations WHERE organization_id='org'").first('n'))
+  const beforeInvalidations=await invalidations()
+  await db.prepare("CREATE TRIGGER skip_member_settings BEFORE UPDATE ON member_scheduling WHEN OLD.member_id='member-one' BEGIN SELECT RAISE(IGNORE); END").run()
+  try {
+   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:changed.updated_at,public_bio:'Rejected edit'}),{statusCode:409,message:'Member settings changed; reload before saving'})
+   assert.deepEqual(await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first(),beforeConflict)
+   assert.equal(await invalidations(),beforeInvalidations,'a zero-write conflict cannot commit a cache invalidation')
+  } finally {await db.prepare('DROP TRIGGER skip_member_settings').run()}
+  const racedProfile=await Promise.allSettled(['First profile edit','Second profile edit'].map(public_bio=>writeMemberScheduling(own,'member-one',{expected_updated_at:changed.updated_at,public_bio})))
+  assert.equal(racedProfile.filter(result=>result.status==='fulfilled').length,1)
+  const refusedProfile=racedProfile.find(result=>result.status==='rejected') as PromiseRejectedResult
+  assert.equal(refusedProfile.reason.statusCode,409)
+  const winningProfile=(racedProfile.find(result=>result.status==='fulfilled') as PromiseFulfilledResult<Awaited<ReturnType<typeof writeMemberScheduling>>>).value
+  assert.equal(await db.prepare("SELECT public_bio FROM member_scheduling WHERE member_id='member-one'").first('public_bio'),winningProfile.public_bio)
+  assert.equal(await invalidations(),beforeInvalidations+1)
   await writeMemberScheduling({...own,userId:'two'},'member-two',{...hours,timezone:'UTC'})
   await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope)VALUES('busy-linked','google-subject','google','one',?)").bind(MEMBER_BUSY_SCOPES.join(',')).run()
   const raced = await Promise.allSettled([
@@ -98,6 +134,37 @@ test('member self-service uses Better Auth permissions, public approval is admin
    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,held_online,created_by,updated_by)VALUES(?,'org','provider',?,60,1,1,'owner','owner')").bind(id,member).run()
    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,'org',?,?,'UTC',?,?,1,'owner','owner')").bind(`session-${id}`,id,member,start,end).run()
   }
+  const stable=()=>db.prepare("SELECT timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_account_id,calendar_ids_json,calendar_revision,busy_json,busy_from,busy_until,busy_checked_at,busy_error FROM member_scheduling WHERE member_id='member-one'").first()
+  const stableBefore=await stable()
+  const sessionsBefore=(await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results
+  const current=await readMemberScheduling(db,'org','member-one')
+  const profileOnly=await writeMemberScheduling(own,'member-one',{expected_updated_at:current!.updated_at,public_bio:null})
+  assert.equal(profileOnly.public_bio,null,'explicit null clears the profile field')
+  assert.deepEqual(await stable(),stableBefore,'profile edits retain all schedule, window and calendar bytes')
+  assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,sessionsBefore,'profile saves never materialize sessions')
+  const shorterHours=profileOnly.weekly!.map(slot=>({...slot,end:'16:00'}))
+  const completionStart=`${day}T16:00:00.000Z`
+  await db.prepare("CREATE TRIGGER refuse_member_sessions BEFORE INSERT ON product_sessions WHEN NEW.product_id='one' BEGIN SELECT RAISE(ABORT,'Injected session completion failure'); END").run()
+  let afterFailedProfile:Awaited<ReturnType<typeof writeMemberScheduling>>|null=null
+  try {
+   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{expected_updated_at:profileOnly.updated_at,weekly:shorterHours}),/Injected session completion failure/)
+   const pending=await readMemberScheduling(db,'org','member-one')
+   assert.deepEqual(pending!.weekly,shorterHours,'the reported failure can follow a persisted Hours change')
+   assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,sessionsBefore,'a failed session batch commits no partial slots')
+   const pendingBytes=await stable()
+   afterFailedProfile=await writeMemberScheduling(own,'member-one',{expected_updated_at:pending!.updated_at,public_bio:'Profile after a visible Hours failure'})
+   assert.deepEqual(await stable(),pendingBytes,'a profile edit does not complete or change pending Hours work')
+   assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,sessionsBefore)
+  } finally {await db.prepare('DROP TRIGGER refuse_member_sessions').run()}
+  assert(afterFailedProfile)
+  const completed=await writeMemberScheduling(own,'member-one',{expected_updated_at:afterFailedProfile.updated_at,weekly:shorterHours})
+  const completedSlot=await db.prepare("SELECT assigned_member_id,status FROM product_sessions WHERE product_id='one' AND starts_at=?").bind(completionStart).first()
+  assert.deepEqual(completedSlot,{assigned_member_id:'member-one',status:'scheduled'},'an explicit unchanged Hours retry finishes canonical session materialization')
+  const completedBytes=await stable()
+  const completedSessions=(await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results
+  await writeMemberScheduling(own,'member-one',{expected_updated_at:completed.updated_at,timezone:completed.timezone!,weekly:completed.weekly!,time_off:completed.time_off!})
+  assert.deepEqual(await stable(),completedBytes,'unchanged Hours retain all window and calendar bytes')
+  assert.deepEqual((await db.prepare('SELECT * FROM product_sessions ORDER BY id').all()).results,completedSessions,'idempotent Hours completion retains every persisted session byte')
   await db.prepare("UPDATE member_scheduling SET calendar_account_id='missing-account',calendar_ids_json='[\"busy-calendar\"]',busy_checked_at=?,busy_from=?,busy_until=?,busy_error=NULL WHERE member_id='member-one'").bind(new Date().toISOString(),new Date().toISOString(),`${day}T20:00:00.000Z`).run()
   const failed=await refreshMemberBusy(db,env,'member-one',true)
   assert(failed?.error)

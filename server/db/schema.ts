@@ -3314,11 +3314,11 @@ export const payment_servicing_tenants = sqliteTable("payment_servicing_tenants"
 export const member_scheduling = sqliteTable("member_scheduling", {
  member_id: text().primaryKey(),
  organization_id: text().notNull(),
- timezone: text().notNull(),
- weekly_json: text().notNull(),
- time_off_json: text().notNull(),
- windows_json: text().notNull(),
- windows_until: text().notNull(),
+ timezone: text(),
+ weekly_json: text(),
+ time_off_json: text(),
+ windows_json: text(),
+ windows_until: text(),
  public_name: text(),
  public_photo_url: text(),
  public_bio: text(),
@@ -3335,6 +3335,7 @@ export const member_scheduling = sqliteTable("member_scheduling", {
  updated_by: text().notNull(),
 }, t => [index("member_scheduling_org_idx").on(t.organization_id),
  foreignKey({ columns: [t.member_id, t.organization_id], foreignColumns: [member.id, member.organizationId] }).onDelete("cascade"),
+ check("member_scheduling_hours_check", sql`(${t.timezone} IS NULL AND ${t.weekly_json} IS NULL AND ${t.time_off_json} IS NULL AND ${t.windows_json} IS NULL AND ${t.windows_until} IS NULL) OR (${t.timezone} IS NOT NULL AND ${t.weekly_json} IS NOT NULL AND ${t.time_off_json} IS NOT NULL AND ${t.windows_json} IS NOT NULL AND ${t.windows_until} IS NOT NULL)`),
 ]);
 
 // A creation attempt survives an ambiguous provider response. Retry discovers
