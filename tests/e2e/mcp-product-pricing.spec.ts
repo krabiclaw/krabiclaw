@@ -98,11 +98,16 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   expect(before.id).toBe(created.id)
   // Dishes have prices and options, but no booking editor at either depth.
   // Dashboard documents serve the app shell; its route guard shows the refusal.
+  const organizationsRead = await request.get(`${baseURL}/api/organizations`)
+  expect(organizationsRead.status()).toBe(200)
+  const { organizations } = await organizationsRead.json() as { organizations: Array<{ id: string; slug: string }> }
+  const dashboardOrganization = organizations.find(organization => organization.id === organizationId)
+  expect(dashboardOrganization?.slug, 'The targeted organization has its saved dashboard slug').toMatch(/\S/)
   const bookingContext = await browser.newContext({ storageState: await request.storageState() })
   try {
     const bookingPage = await bookingContext.newPage()
     for (const section of ['booking', 'booking/enabled']) {
-      await bookingPage.goto(`${baseURL}/dashboard/${organizationId}/products/${created.id}/${section}`)
+      await bookingPage.goto(`${baseURL}/dashboard/${encodeURIComponent(dashboardOrganization!.slug)}/products/${created.id}/${section}`)
       await expect(bookingPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
     }
   } finally {

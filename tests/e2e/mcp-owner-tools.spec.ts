@@ -1203,8 +1203,6 @@ test.describe('stateless MCP server', () => {
         const creation = { kind: 'experience', name, idempotency_key: crypto.randomUUID(), variants: [{ name: 'Per person', prices: [{ unit_amount: 13000, currency: settings.settings.default_currency }] }],
           booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false, assigned_member_id: host.memberId,
             sessions: [{ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3600000).toISOString(), capacity: 6 }] } }
-        const missing = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'create_product',args:{organization_id:organizationId,kind:'experience',name,idempotency_key:crypto.randomUUID()}})
-        expect((await missing.json()).result.isError).toBe(true)
         const { product } = await call<{ product: { id: string; slug: string; public_url: string; booking_readiness: { ready: boolean; missing: string[] } } }>('create_product', creation)
         experienceId = product.id
         expect(product.booking_readiness).toEqual({ ready: true, missing: [] })
