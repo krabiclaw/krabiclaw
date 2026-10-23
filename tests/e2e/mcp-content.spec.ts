@@ -562,6 +562,10 @@ test.describe('stateless MCP server', () => {
         const cleanupLanguage = await request.delete(`${baseURL}/api/editor/organizations/${organizationId}/locales/${addedLocale}`)
         expect(cleanupLanguage.status(), await cleanupLanguage.text()).toBe(200)
         expect(await cleanupLanguage.json()).toEqual({ deleted: true, locale: addedLocale })
+        const languagesAfterCleanup = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/locales`)
+        expect(languagesAfterCleanup.status(), await languagesAfterCleanup.text()).toBe(200)
+        const cleanedLanguages = await languagesAfterCleanup.json() as { languages: Array<{ locale: string }> }
+        expect(cleanedLanguages.languages.map(language => language.locale)).not.toContain(addedLocale)
       }
     }
   })

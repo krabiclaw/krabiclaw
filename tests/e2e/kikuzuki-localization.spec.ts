@@ -298,6 +298,10 @@ test('Kikuzuki translations preserve published addresses and save an added langu
         expect(afterLanguages.languages.filter(language => language.locale !== privateLocale).map(({ locale, status }) => ({ locale, status })).sort((left, right) => left.locale.localeCompare(right.locale))).toEqual(beforeLanguages.languages.map(({ locale, status }) => ({ locale, status })).sort((left, right) => left.locale.localeCompare(right.locale)))
       } finally {
         await expectStatus(await owner.delete(`/api/editor/organizations/${organizationId}/locales/${privateLocale}`), 200)
+        const cleanedLanguagesResponse = await owner.get(`/api/editor/organizations/${organizationId}/locales`)
+        await expectStatus(cleanedLanguagesResponse, 200)
+        const cleanedLanguages = await cleanedLanguagesResponse.json() as typeof beforeLanguages
+        expect(cleanedLanguages.languages.map(language => language.locale)).not.toContain(privateLocale)
       }
     } finally {
       await cms.close()

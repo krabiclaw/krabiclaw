@@ -592,6 +592,9 @@ test.describe('stateless MCP server', () => {
     })
     expect(restoredTitle.status()).toBe(200)
     expect(mcpData<{ ok: boolean }>(await restoredTitle.json()).ok).toBe(true)
+    const locationAfterRestore = await request.get(locationApiPath)
+    expect(locationAfterRestore.status()).toBe(200)
+    expect((await locationAfterRestore.json()).location).toMatchObject({ title: originalLocation.title, slug: originalLocation.slug, phone: `+1202555${lineNumber}` })
 
     const reviewsList = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
