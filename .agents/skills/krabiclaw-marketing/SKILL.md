@@ -19,6 +19,8 @@ Scope authorization explicitly: preparation/capture, paid generation budget, ins
 
 ## Authentic capture
 
+For a continuous screen recording of the live product (app review and OAuth verification demos), use the kit in [recording/](recording/README.md): window-only capture of the owner's Chrome, scripted real-cursor driving, and a cut list rendered with HyperFrames.
+
 Use available browser capture for the focused pages the video needs. Do not build or run a route-crawling capture engine.
 
 On a shared Mac, use an isolated window in the existing signed-in Chrome session for captures. Pin the tab and verify its URL, viewport and window dimensions before each capture; normalize AppleScript IDs to text when selecting a tab. The AppleScript window ID and macOS capture window number are different. Target native window pixels rather than whichever application happens to be foreground. Dismiss browser popovers and inspect the captured pixels before acceptance. Cropped native screenshots edited into a typing sequence are actual UI states, not a continuous live recording; record that distinction.
