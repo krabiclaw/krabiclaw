@@ -50,8 +50,6 @@ interface JobRow {
 const LEASE_MS = 120_000
 /** A cron run stops starting steps after this, so runs two minutes apart never overlap. */
 export const CRON_SLICE_MS = 100_000
-/** The first slice a request starts on its own, within the Worker's waitUntil allowance. */
-export const REQUEST_SLICE_MS = 25_000
 /** Transient failures are retried this many times in all before the job fails. */
 const MAX_ATTEMPTS = 8
 
@@ -226,14 +224,14 @@ function advanced(result: { stage: ImportStage; waiting: boolean }): Step {
  * it is done, has to wait for Channex, or the time is up, and released. A
  * transient failure (the network, a provider's 5xx or 429) is retried with the
  * calendar outbox's backoff up to MAX_ATTEMPTS; any other fails the job. A job whose connection is busy is left for
- * the next run. `organizationId` limits the run to one organization.
+ * the next run.
  */
-export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number, organizationId?: string): Promise<{ stepped: number; done: number; failed: number }> {
+export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number): Promise<{ stepped: number; done: number; failed: number }> {
   const db = env.DB
   const totals = { stepped: 0, done: 0, failed: 0 }
-  const due = await queryAll<JobRow>(db, `SELECT * FROM airbnb_sync_jobs WHERE state IN ('pending', 'error') ${organizationId ? 'AND organization_id = ?' : ''}
+  const due = await queryAll<JobRow>(db, `SELECT * FROM airbnb_sync_jobs WHERE state IN ('pending', 'error')
     AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (lease_until IS NULL OR lease_until <= ?)
-    ORDER BY COALESCE(next_attempt_at, created_at), id`, [...(organizationId ? [organizationId] : []), now(), now()])
+    ORDER BY COALESCE(next_attempt_at, created_at), id`, [now(), now()])
   for (const job of due) {
     if (Date.now() >= until) break
     const lease = crypto.randomUUID()
