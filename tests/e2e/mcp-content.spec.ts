@@ -47,8 +47,8 @@ test.describe('stateless MCP server', () => {
     const sourceRead = await request.get(`${editor}/pages/${home!.id}`)
     expect(sourceRead.status()).toBe(200)
     const originalSource = await sourceRead.json()
-    expect(originalSource.page.page_type).toBe('recipe')
-    expect(originalSource.page.recipe, 'The existing source homepage has a template recipe to inherit').toEqual(expect.any(String))
+    expect(originalSource.page.page_type).toBe('system')
+    expect(originalSource.page.recipe, 'The existing source homepage has a template recipe to inherit').toBe('home')
     const publicSource = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/' } })
     expect(publicSource.status()).toBe(200)
     const originalPublicSource = (await publicSource.json()).page
