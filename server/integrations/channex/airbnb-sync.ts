@@ -146,12 +146,13 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
   const at = now()
   const queued = [...items.map(item => ({ listing: item.listing_id, product: productOf(item.listing_id) ?? null, action: 'sync' as const, details: item.details ? JSON.stringify(item.details) : null })),
     ...stopped.map(listing => ({ listing: listing.id, product: productOf(listing.id) ?? null, action: 'stop' as const, details: null }))]
+  // A request clears any run's lease, so a run still on the old request writes nothing over this one.
   for (const job of queued) {
     await execute(db, `INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, requested_by, attempts, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?)
       ON CONFLICT (organization_id, listing_id) DO UPDATE SET action = excluded.action, details = excluded.details, state = 'pending', requested_by = excluded.requested_by,
         product_id = COALESCE(excluded.product_id, airbnb_sync_jobs.product_id), attempts = 0, last_error_code = NULL, last_error = NULL,
-        next_attempt_at = NULL, completed_at = NULL, updated_at = excluded.updated_at`,
+        next_attempt_at = NULL, completed_at = NULL, lease_token = NULL, lease_until = NULL, updated_at = excluded.updated_at`,
     [crypto.randomUUID(), organizationId, job.listing, job.product, job.action, job.details, userId, at, at])
   }
   const named = new Set(queued.map(job => job.listing))
