@@ -42,7 +42,7 @@
           :description="languageError"
         />
         <div v-else-if="localeOptions.length === 0" class="space-y-3">
-          <p class="text-sm text-muted">Enable another language in Localization settings before translating this content.</p>
+          <p class="text-sm text-muted">Add another language in Localization settings before translating this content.</p>
           <UButton v-if="languageSettingsPath" color="neutral" variant="soft" label="Manage languages" :to="languageSettingsPath" />
         </div>
 
@@ -275,8 +275,8 @@ async function loadLanguages(): Promise<void> {
     const sources = response.languages.filter(item => Boolean(item.is_source) && item.status === 'published')
     if (sources.length !== 1) throw new Error('The organization source language is not configured correctly.')
     sourceLocale.value = sources[0]!.locale
-    const secondaryLanguages = response.languages.filter(item => !item.is_source && item.status === 'published')
-    if (secondaryLanguages.some(item => !item.label)) throw new Error('An enabled language is missing its display name.')
+    const secondaryLanguages = response.languages.filter(item => !item.is_source)
+    if (secondaryLanguages.some(item => !item.label)) throw new Error('A configured language is missing its display name.')
     localeOptions.value = secondaryLanguages.map(item => ({ label: `${item.label} (${item.locale})`, value: item.locale }))
   } catch (cause) {
     languageError.value = getErrorMessage(cause, 'Failed to load organization languages')
@@ -295,7 +295,7 @@ async function load(): Promise<void> {
   loading.value = false
   if (!requestedLocale || loadingLanguages.value || languageError.value) return
   if (!localeOptions.value.some(option => option.value === requestedLocale)) {
-    editorError.value = `The requested ${requestedLocale} language is not enabled for this organization.`
+    editorError.value = `The requested ${requestedLocale} language is not configured for this organization.`
     return
   }
   loading.value = true

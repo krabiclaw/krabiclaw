@@ -763,11 +763,73 @@ export function createTenantPageBlock(type: TenantPageBlockType, data: Record<st
   return { id: crypto.randomUUID(), type, position, level: type === 'heading' ? 2 : null, data: { ...data }, media: [] }
 }
 
-const TRANSLATABLE_DATA_FIELDS = new Set([
-  'answer', 'body', 'caption', 'copy_label', 'description', 'eyebrow', 'heading',
-  'intro', 'label', 'markdown', 'name', 'note', 'prompt', 'question', 'short_description',
-  'subtitle', 'summary', 'text', 'title', 'cta_label',
-])
+export type LocalizedContentFieldSegment = string | '*'
+
+/** Plain text is interpolated; Markdown is parsed and sanitized. */
+export type ContentTextFormat = 'plain' | 'markdown'
+
+export interface ContentBlockTextField {
+  /** Path into the block's data. `*` walks every element of an array. */
+  readonly path: readonly LocalizedContentFieldSegment[]
+  readonly format: ContentTextFormat
+}
+
+/** The block registry owns the text fields shared by authoring and localization. */
+function blockTextFields(fields: Readonly<Record<string, TenantPageField>>, prefix: LocalizedContentFieldSegment[] = []): ContentBlockTextField[] {
+  const collected: ContentBlockTextField[] = []
+  for (const [key, field] of Object.entries(fields)) {
+    if (field.translatable === false) continue
+    if (field.kind === 'list') {
+      // A list of records describes its item's fields; a list of plain strings
+      // is itself the text — how_to's tools and supplies are the latter.
+      if (field.of) collected.push(...blockTextFields(field.of, [...prefix, key, '*']))
+      else collected.push({ path: [...prefix, key, '*'], format: 'plain' })
+      continue
+    }
+    // A record is one object of named fields — a button's label and url.
+    if (field.kind === 'record') {
+      if (field.of) collected.push(...blockTextFields(field.of, [...prefix, key]))
+      continue
+    }
+    if (field.kind !== 'text' && field.kind !== 'markdown') continue
+    collected.push({ path: [...prefix, key], format: field.kind === 'markdown' ? 'markdown' : 'plain' })
+  }
+  return collected
+}
+
+export const CONTENT_BLOCK_TEXT_FIELDS = Object.fromEntries(
+  Object.entries(TENANT_PAGE_BLOCK_REGISTRY).map(([type, definition]) => [type, blockTextFields(definition.fields)]),
+) as Record<TenantPageBlockType, readonly ContentBlockTextField[]>
+
+export type ContentFieldPath = ReadonlyArray<string | number>
+
+/** Resolves declared field patterns against the array indices a block holds. */
+export function expandContentFieldPath(
+  data: Record<string, unknown>,
+  pattern: readonly LocalizedContentFieldSegment[],
+  path: ContentFieldPath = [],
+): ContentFieldPath[] {
+  const [segment, ...remaining] = pattern
+  if (segment === undefined) return [path]
+  if (segment !== '*') return expandContentFieldPath(data, remaining, [...path, segment])
+  const collection = readContentFieldValue(data, path)
+  if (!Array.isArray(collection)) return []
+  return collection.flatMap((_, index) => expandContentFieldPath(data, remaining, [...path, index]))
+}
+
+export function readContentFieldValue(data: Record<string, unknown>, path: ContentFieldPath): unknown {
+  let value: unknown = data
+  for (const segment of path) {
+    if (typeof segment === 'number') {
+      if (!Array.isArray(value)) return undefined
+      value = value[segment]
+    } else {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+      value = (value as Record<string, unknown>)[segment]
+    }
+  }
+  return value
+}
 
 export interface TenantPageLocalizedTextField {
   path: Array<string | number>
@@ -779,22 +841,13 @@ function localizedFieldLabel(key: string): string {
   return key.replace(/_/g, ' ').replace(/^\w/, character => character.toUpperCase())
 }
 
-function collectTenantPageLocalizedText(value: unknown, path: Array<string | number>, key = ''): TenantPageLocalizedTextField[] {
-  if (typeof value === 'string') {
-    return TRANSLATABLE_DATA_FIELDS.has(key)
-      ? [{ path, label: localizedFieldLabel(key), value }]
-      : []
-  }
-  if (Array.isArray(value)) {
-    return value.flatMap((item, index) => collectTenantPageLocalizedText(item, [...path, index], key))
-  }
-  if (!value || typeof value !== 'object') return []
-  return Object.entries(value as Record<string, unknown>).flatMap(([childKey, childValue]) =>
-    collectTenantPageLocalizedText(childValue, [...path, childKey], childKey))
-}
-
 export function tenantPageLocalizedTextFields(block: TenantPageBlock): TenantPageLocalizedTextField[] {
-  return collectTenantPageLocalizedText(block.data, [])
+  return CONTENT_BLOCK_TEXT_FIELDS[block.type].flatMap(({ path: pattern }) =>
+    expandContentFieldPath(block.data, pattern).flatMap(path => {
+      const value = readContentFieldValue(block.data, path)
+      const key = pattern.filter(segment => segment !== '*').at(-1)!
+      return typeof value === 'string' ? [{ path: [...path], label: localizedFieldLabel(key), value }] : []
+    }))
 }
 
 export function writeTenantPageLocalizedText(block: TenantPageBlock, path: readonly (string | number)[], value: string): void {
@@ -806,14 +859,6 @@ export function writeTenantPageLocalizedText(block: TenantPageBlock, path: reado
   }
   if (!target || typeof target !== 'object') throw new Error('Localized page field path is invalid.')
   ;(target as Record<string | number, unknown>)[path[path.length - 1]!] = value
-}
-
-function clearTenantPageTranslationText(value: unknown, key = ''): unknown {
-  if (typeof value === 'string') return TRANSLATABLE_DATA_FIELDS.has(key) ? '' : value
-  if (Array.isArray(value)) return value.map(item => clearTenantPageTranslationText(item))
-  if (!value || typeof value !== 'object') return value
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-    .map(([childKey, childValue]) => [childKey, clearTenantPageTranslationText(childValue, childKey)]))
 }
 
 export function tenantPageTranslationSourceBlockId(block: TenantPageBlock): string {
@@ -829,13 +874,15 @@ function pageFieldPathKey(path: readonly (string | number)[]): string {
 }
 
 function blankTenantPageTranslationBlock(block: TenantPageBlock, id: string = crypto.randomUUID()): TenantPageBlock {
-  return {
+  const translated = {
     ...block,
     id,
     source_block_id: block.id,
-    data: clearTenantPageTranslationText(structuredClone(block.data)) as Record<string, unknown>,
+    data: structuredClone(block.data),
     media: block.media.map(item => ({ ...item, alt_text: null })),
   }
+  for (const field of tenantPageLocalizedTextFields(translated)) writeTenantPageLocalizedText(translated, field.path, '')
+  return translated
 }
 
 export function createTenantPageTranslationBlocks(blocks: readonly TenantPageBlock[]): TenantPageBlock[] {

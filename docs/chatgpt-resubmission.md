@@ -11,6 +11,16 @@ collection and paid booking cancellation/rejection return an incomplete
 authenticated dashboard handoff before financial writes. Dashboard payment,
 approval, refund execution and interrupted-operation recovery remain available.
 
+The proposed catalog retains four explicit Google Ads tools and removes the
+combined launcher and partial clone. Page creation describes its additive
+behavior and preserves omitted source identity when creating a translation.
+Translations inherit page order; the dashboard can author configured draft
+languages before publication. Page translation fields now come from the same
+block registry as the content contract, including secondary button and accent
+text. Empty translated experience catalogs use their existing 404 contract
+before checking for branding. These source changes require deployed verification
+before they count as production review evidence.
+
 ## Prepared reviewer data
 
 Prepare these independently through the existing dashboard and guest workflows
