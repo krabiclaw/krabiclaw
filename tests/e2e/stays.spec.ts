@@ -643,7 +643,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
       check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
       // The editor's listing choices persist through the native home projection too.
-      description: listingDescription, published: false, live: false, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
+      description: listingDescription, published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
       ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
       amenity_answers: [{ code: 'dryer', available: true }, { code: 'wireless_internet', available: true }],
       carbon_monoxide_detector_details: null, smoke_detector_details: null,
