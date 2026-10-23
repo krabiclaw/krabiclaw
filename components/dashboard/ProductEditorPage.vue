@@ -1121,11 +1121,6 @@ function publicationSummary(): string {
   return parts.join(' · ')
 }
 
-function locationsSummary(): string {
-  const offered = organizationLocations.value.filter(entry => form.locations[entry.id])
-  return offered.length ? offered.map(entry => entry.title).join(', ') : 'Not offered at a location'
-}
-
 function collectionsSummary(): string {
   const names = collections.value.filter(row => form.collection_ids.includes(row.id)).map(row => row.name)
   return names.length ? names.join(', ') : 'Not in a collection'
@@ -1244,72 +1239,64 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     ] }]
   }
   const authoredDetails = definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !isStayFocusedDetail(definition.key))
-  // Other Product kinds retain their existing concern order until their own
-  // vertical's editor has been verified.
   return [{
     id: 'item',
     items: [
-      { id: 'photo', label: 'Photos', summary: stayEditor.value ? (photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'No photos yet') : image ? (product.value.gallery.length ? `${product.value.gallery.length + 1} photos` : '') : 'No photo yet', placeholder: stayEditor.value ? !photoAssets.value.length : !image, to: sectionPath('photo') },
-      { id: 'name', label: stayEditor.value ? 'Title' : 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
+      { id: 'photo', label: 'Photos', summary: photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'No photos yet', placeholder: !photoAssets.value.length, to: sectionPath('photo') },
+      { id: 'name', label: 'Title', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
       { id: 'description', label: 'Description', summary: form.description || 'Nothing written yet', placeholder: !form.description, to: sectionPath('description') },
       ...(product.value.page
         ? [{ id: 'page', label: 'Page content', summary: product.value.page.title, ...(canPreview.value ? { to: `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(product.value.page.id)}` } : {}) }]
         : []),
-      { id: 'price', label: form.kind === 'stay' ? 'Nightly price' : 'Price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: pricePath.value },
-      // A place to stay is at its one location under its stay settings; nights and
-      // stays are on the Calendar, not scheduled sessions.
-      ...(form.kind === 'stay'
-        ? [
-            {
-              id: 'property-type',
-              label: 'Property type',
-              summary: product.value.stay?.listing_type
-                ? `${STAY_LISTING_TYPES[product.value.stay.listing_type].label}${product.value.stay.property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[product.value.stay.property_type_group].label}` : ''}`
-                : product.value.stay?.property_type
-                  ? `${STAY_PROPERTY_TYPES[product.value.stay.property_type].label}${product.value.stay.property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[product.value.stay.property_type_group].label}` : ''}`
-                  : 'Choose property type',
-              placeholder: !product.value.stay?.listing_type && !product.value.stay?.property_type,
-              to: sectionPath('property-type'),
-            },
-            {
-              id: 'rooms',
-              label: 'Rooms and beds',
-              summary: roomsSummary(),
-              placeholder: !form.stay_bedrooms && !form.stay_beds && !form.stay_bathrooms,
-              to: sectionPath('rooms'),
-            },
-            {
-              id: 'amenities',
-              label: 'Amenities',
-              summary: product.value.stay!.amenities.length
-                ? `${product.value.stay!.amenities.length} ${product.value.stay!.amenities.length === 1 ? 'amenity' : 'amenities'}`
-                : 'No amenities selected',
-              placeholder: !product.value.stay!.amenities.length,
-              to: sectionPath('amenities'),
-            },
-            {
-              id: 'accessibility', label: 'Accessibility features',
-              summary: product.value.stay!.accessibility.filter(answer => answer.available !== null).map(answer => `${STAY_HOME_ACCESSIBILITY_FEATURES[answer.feature].label}${answer.available === false ? ': Not available' : ''}`).join(', ') || 'Add details',
-              placeholder: !product.value.stay!.accessibility.some(answer => answer.available !== null),
-              to: sectionPath('accessibility'),
-            },
-            {
-              id: 'cancellation',
-              label: 'Cancellation policy',
-              summary: product.value.stay!.cancellation_policy
-                ? STAY_CANCELLATION_POLICIES[product.value.stay!.cancellation_policy].label
-                : 'No policy set',
-              placeholder: !product.value.stay!.cancellation_policy,
-              to: sectionPath('cancellation'),
-            },
-            { id: 'availability', label: 'Availability', summary: `${product.value.stay!.min_nights} ${product.value.stay!.min_nights === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
-            { id: 'guests', label: 'Number of guests', summary: `${product.value.stay!.max_guests} ${product.value.stay!.max_guests === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
-            { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
-            { id: 'guest-safety', label: 'Guest safety', summary: savedSafety.value.join('\n') || 'Add details', placeholder: !savedSafety.value.length, to: sectionPath('guest-safety') },
-            { id: 'location', label: 'Location', summary: stayLocationError.value || (stayLocation.value ? formatPostalAddress(stayLocation.value.address) || 'Add address' : 'Loading location…'), placeholder: !stayLocation.value?.address, to: sectionPath('location') },
-            { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
-          ]
-        : []),
+      { id: 'price', label: 'Nightly price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: pricePath.value },
+      {
+        id: 'property-type',
+        label: 'Property type',
+        summary: product.value.stay?.listing_type
+          ? `${STAY_LISTING_TYPES[product.value.stay.listing_type].label}${product.value.stay.property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[product.value.stay.property_type_group].label}` : ''}`
+          : product.value.stay?.property_type
+            ? `${STAY_PROPERTY_TYPES[product.value.stay.property_type].label}${product.value.stay.property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[product.value.stay.property_type_group].label}` : ''}`
+            : 'Choose property type',
+        placeholder: !product.value.stay?.listing_type && !product.value.stay?.property_type,
+        to: sectionPath('property-type'),
+      },
+      {
+        id: 'rooms',
+        label: 'Rooms and beds',
+        summary: roomsSummary(),
+        placeholder: !form.stay_bedrooms && !form.stay_beds && !form.stay_bathrooms,
+        to: sectionPath('rooms'),
+      },
+      {
+        id: 'amenities',
+        label: 'Amenities',
+        summary: product.value.stay!.amenities.length
+          ? `${product.value.stay!.amenities.length} ${product.value.stay!.amenities.length === 1 ? 'amenity' : 'amenities'}`
+          : 'No amenities selected',
+        placeholder: !product.value.stay!.amenities.length,
+        to: sectionPath('amenities'),
+      },
+      {
+        id: 'accessibility', label: 'Accessibility features',
+        summary: product.value.stay!.accessibility.filter(answer => answer.available !== null).map(answer => `${STAY_HOME_ACCESSIBILITY_FEATURES[answer.feature].label}${answer.available === false ? ': Not available' : ''}`).join(', ') || 'Add details',
+        placeholder: !product.value.stay!.accessibility.some(answer => answer.available !== null),
+        to: sectionPath('accessibility'),
+      },
+      {
+        id: 'cancellation',
+        label: 'Cancellation policy',
+        summary: product.value.stay!.cancellation_policy
+          ? STAY_CANCELLATION_POLICIES[product.value.stay!.cancellation_policy].label
+          : 'No policy set',
+        placeholder: !product.value.stay!.cancellation_policy,
+        to: sectionPath('cancellation'),
+      },
+      { id: 'availability', label: 'Availability', summary: `${product.value.stay!.min_nights} ${product.value.stay!.min_nights === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
+      { id: 'guests', label: 'Number of guests', summary: `${product.value.stay!.max_guests} ${product.value.stay!.max_guests === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
+      { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
+      { id: 'guest-safety', label: 'Guest safety', summary: savedSafety.value.join('\n') || 'Add details', placeholder: !savedSafety.value.length, to: sectionPath('guest-safety') },
+      { id: 'location', label: 'Location', summary: stayLocationError.value || (stayLocation.value ? formatPostalAddress(stayLocation.value.address) || 'Add address' : 'Loading location…'), placeholder: !stayLocation.value?.address, to: sectionPath('location') },
+      { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
       { id: 'options', label: 'Variants', summary: product.value.variants.length > 1 ? `${product.value.variants.length} variants` : 'One version', to: sectionPath('options') },
       {
         id: 'attributes',
@@ -1319,17 +1306,12 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         to: sectionPath('attributes'),
       },
       { id: 'kind', label: 'Type', summary: form.kind ? PRODUCT_KIND_LABELS[form.kind] : 'Choose a type', to: sectionPath('kind') },
-      // Guests book a place to stay on this site; it has no external link.
-      ...(form.kind === 'stay' ? [] : [{ id: 'order-url', label: 'External link', summary: form.order_url || 'No external link', placeholder: !form.order_url, to: sectionPath('order-url') }]),
-      ...(form.kind === 'stay' ? [] : [{ id: 'locations', label: 'Locations', summary: locationsSummary(), placeholder: !Object.keys(form.locations).length, to: sectionPath('locations') }]),
       { id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), placeholder: !form.collection_ids.length, to: sectionPath('collections') },
       {
         id: 'publication',
-        label: stayEditor.value ? (published.value ? 'Listed' : 'Unlisted') : 'Status',
-        summary: stayEditor.value
-          ? (published.value ? (product.value?.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.')
-          : publicationSummary(),
-        status: stayEditor.value ? (published.value ? 'success' as const : 'neutral' as const) : undefined,
+        label: published.value ? 'Listed' : 'Unlisted',
+        summary: published.value ? (product.value.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.',
+        status: published.value ? 'success' as const : 'neutral' as const,
         to: sectionPath('publication'),
       },
     ].sort((left, right) => rowRank(left.id) - rowRank(right.id)),
@@ -1352,11 +1334,8 @@ const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item
 
 const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
 function rowRank(id: string) {
-  if (form.kind === 'stay') {
-    const at = STAY_ROW_ORDER.indexOf(id)
-    return at === -1 ? STAY_ROW_ORDER.length : at
-  }
-  return 0
+  const at = STAY_ROW_ORDER.indexOf(id)
+  return at === -1 ? STAY_ROW_ORDER.length : at
 }
 
 /**
