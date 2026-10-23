@@ -183,8 +183,8 @@ function copyProductionRows(path: string) {
     `WITH ${ctes.join(', ')} SELECT *, count(*) OVER () AS total_rows FROM (${groups[0]})`,
   )
   if (!rows.length || rows[0]!.total_rows !== rows.length) throw new Error(`Incomplete ${values.source} copy; no target data was written`)
-  // Sorting the full SQL dump in D1 duplicates a large result in its limited
-  // memory. Order the complete single-snapshot read here before replaying it.
+  // Order the complete single-snapshot read locally instead of sorting the
+  // full SQL dump inside D1.
   rows.sort((left, right) => left.phase - right.phase || (left.table_name < right.table_name ? -1 : left.table_name > right.table_name ? 1 : 0))
   const schema = rows.filter(row => row.phase !== 1)
   if (schema.length !== schemaObjects.length || schema.some((row, index) => row.table_name !== schemaObjects[index]!.name || row.phase !== schemaObjects[index]!.phase || row.statement !== schemaObjects[index]!.sql)) {
