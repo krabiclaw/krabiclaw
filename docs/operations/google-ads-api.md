@@ -29,7 +29,7 @@ All calls are in `server/utils/google-ads.ts`, against `v25`.
 | `customers:listAccessibleCustomers`, `googleAds:search` on `customer` | Integrations → Google Ads: list the login's accounts with their names, currency and time zone; pick one |
 | `googleAds:search` on `campaign` | Insights → Google Ads (campaigns by spend for a range); `list_google_ads_campaigns`; Today's Google Ads card totals |
 | `googleAds:search` on `ad_group`, `ad_group_criterion`, `ad_group_ad` | `get_google_ads_campaign` detail |
-| `campaignBudgets:mutate`, `campaigns:mutate`, `googleAds:mutate` | `create_google_ads_search_campaign`, `clone_google_ads_campaign`, `update_google_ads_campaign` (status, budget) — Business plan only |
+| `googleAds:mutate` | `create_google_ads_search_campaign`, `update_google_ads_campaign` (status, budget) — Business plan only |
 | `googleAds:search` on `customer` metrics for one day | `marketing:ad-spend-daily`: a managed account's finished day, billed at 10% |
 
 Reads are live and never stored. The only persisted Google Ads figures are the
@@ -44,7 +44,7 @@ daily `ad_spend` usage events for businesses with managed ads on.
   currency; a managed-ads card when the service is off.
 - **Today** — the connected account's last 7 complete days (spend, clicks,
   conversions), linking to that range in Insights.
-- **ChatGPT / MCP** — the five `*_google_ads_*` tools above, for Business.
+- **ChatGPT / MCP** — the four `*_google_ads_*` tools above, for Business.
 - **Plan and billing → Managed ads** — managed ads consent; the daily task reads
   spend only for days the agreement was on.
 
@@ -83,7 +83,7 @@ Google's form asks for the use case, a design document and a demo. State:
   A Google Ads account connects to one KrabiClaw site at a time, so NCLS was
   disconnected while Cedar Legal held the account and reconnected afterwards.
   New campaigns need the advertiser's EU political advertising declaration
-  (`contains_eu_political_advertising` on the create and clone tools).
+  (`contains_eu_political_advertising` on the campaign creation tools).
 
 Submit from Cloud Console → Google Ads API → Access levels → Apply for Basic
 access, signed in as the owner.

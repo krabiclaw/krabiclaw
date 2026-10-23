@@ -4,10 +4,9 @@ import {
   formatGoogleAdsCustomerId,
   listGoogleAdsAccounts,
   listGoogleAdsCampaigns,
+  getGoogleAdsCampaignDetail,
   createGoogleAdsSearchCampaign,
-  cloneGoogleAdsCampaign,
-  updateGoogleAdsCampaignStatus,
-  updateGoogleAdsCampaignBudget,
+  updateGoogleAdsCampaign,
   getGoogleAdsPerformanceSummary,
 } from '../../server/utils/google-ads.ts'
 
@@ -152,6 +151,7 @@ test('creating a search campaign submits its budget, targeting and copy atomical
     assert.match(campaign.resourceName, /^customers\/3317427925\/campaigns\/-\d+$/)
     assert.match(adGroup.resourceName, /^customers\/3317427925\/adGroups\/-\d+$/)
     assert.equal(budget.amountMicros, '15000000')
+    assert.equal(budget.explicitlyShared, false)
     assert.equal(campaign.name, 'New Blog Post Campaign')
     assert.equal(campaign.status, 'PAUSED')
     assert.equal(campaign.advertisingChannelType, 'SEARCH')
@@ -229,92 +229,61 @@ test('creating a search campaign reports a provider rejection instead of returni
   }), { message: 'Google Ads campaign creation failed: REQUIRED: The required field was not present. (mutate_operations[1].campaign_operation.create.contains_eu_political_advertising)' })
 })
 
-test('cloneGoogleAdsCampaign reads source campaign, applies replacements, and creates new campaign', async (t) => {
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
-    const url = String(input)
-    if (url.includes('googleAds:search')) {
-      const body = JSON.parse(String(init?.body))
-      if (body.query.includes('FROM campaign WHERE')) {
-        return Response.json({
-          results: [{
-            campaign: { id: '100', name: 'Original Promo', status: 'ENABLED', advertisingChannelType: 'SEARCH' },
-            campaignBudget: { id: '900', amountMicros: '20000000' },
-            metrics: { clicks: '10', impressions: '200', costMicros: '5000000', conversions: 1 },
-          }],
-        })
-      }
-      if (body.query.includes('FROM ad_group WHERE')) {
-        return Response.json({ results: [{ adGroup: { id: '101', name: 'Original Ad Group', status: 'ENABLED' } }] })
-      }
-      if (body.query.includes('FROM ad_group_criterion WHERE')) {
-        return Response.json({
-          results: [
-            { adGroupCriterion: { keyword: { text: 'island hopping', matchType: 'PHRASE' } } },
-          ],
-        })
-      }
-      if (body.query.includes('FROM ad_group_ad WHERE')) {
-        return Response.json({
-          results: [{
-            adGroupAd: {
-              ad: {
-                responsiveSearchAd: {
-                  headlines: [{ text: 'Island Tour' }, { text: 'Best Travel Guide' }, { text: 'Book Now' }],
-                  descriptions: [{ text: 'Experience islands at great prices.' }, { text: 'Book your spot today.' }],
-                },
-                finalUrls: ['https://krabiclaw.com/blog/island-hopping'],
-              },
-            },
-          }],
-        })
-      }
-    }
-
-    if (url.includes('googleAds:mutate')) {
-      return Response.json({
-        mutateOperationResponses: [
-          { campaignBudgetResult: { resourceName: 'customers/3317427925/campaignBudgets/901' } },
-          { campaignResult: { resourceName: 'customers/3317427925/campaigns/201' } },
-          { adGroupResult: { resourceName: 'customers/3317427925/adGroups/301' } },
-          { adGroupCriterionResult: { resourceName: 'customers/3317427925/adGroupCriteria/401' } },
-          { adGroupAdResult: { resourceName: 'customers/3317427925/adGroupAds/501' } },
-        ],
-      })
-    }
-
-    return new Response('Not found', { status: 404 })
-  })
-
-  const cloned = await cloneGoogleAdsCampaign('test-token', 'dev-tok', '331-742-7925', {
-    sourceCampaignId: '100',
-    newCampaignName: 'New Destination Promo',
-    targetUrl: 'https://krabiclaw.com/blog/new-destination',
-    headlineReplacements: { Island: 'Beach' },
-    status: 'PAUSED',
-    containsEuPoliticalAdvertising: false,
-  })
-
-  assert.equal(cloned.campaignId, '201')
-  assert.equal(cloned.status, 'PAUSED')
+test('campaign detail reports provider read failures instead of returning empty targeting or ad copy', async (t) => {
+  for (const failedQuery of ['FROM ad_group WHERE', 'FROM ad_group_criterion WHERE', 'FROM ad_group_ad WHERE']) {
+    const providerFetch = t.mock.method(globalThis, 'fetch', async (_input, init) => {
+      const { query } = JSON.parse(String(init?.body))
+      if (query.includes(failedQuery)) return new Response('Access denied', { status: 403 })
+      if (query.includes('FROM campaign WHERE')) return Response.json({ results: [{ campaign: { id: '100', name: 'Source', status: 'PAUSED', advertisingChannelType: 'SEARCH' } }] })
+      return Response.json({ results: [] })
+    })
+    await assert.rejects(getGoogleAdsCampaignDetail('token', 'dev', '3317427925', '100'), /query failed \(403\): Access denied/u)
+    providerFetch.mock.restore()
+  }
 })
 
-test('updateGoogleAdsCampaignStatus and updateGoogleAdsCampaignBudget mutate campaign and budget', async (t) => {
-  const mutated: string[] = []
-  t.mock.method(globalThis, 'fetch', async (input) => {
+test('campaign creation refuses invalid copy before sending a provider mutation', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => { throw new Error('Invalid copy must not reach the provider') })
+  await assert.rejects(createGoogleAdsSearchCampaign('token', 'dev', '3317427925', {
+    name: 'Campaign', dailyBudgetAmountMicros: 1000000, targetUrl: 'https://example.com', keywords: [],
+    headlines: ['A'.repeat(31), 'Second headline', 'Third headline'],
+    descriptions: ['First description', 'Second description'], containsEuPoliticalAdvertising: false,
+  }), /3 to 15 unique nonempty headlines of at most 30 characters/u)
+})
+
+test('campaign status and budget updates validate ownership and submit one atomic provider mutation', async (t) => {
+  const mutations: unknown[] = []
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = String(input)
-    mutated.push(url)
-    return Response.json({ results: [] })
+    const body = JSON.parse(String(init?.body))
+    if (url.endsWith('/googleAds:search')) {
+      assert.equal(body.query, 'SELECT campaign_budget.id FROM campaign WHERE campaign.id = 222 LIMIT 1')
+      return Response.json({ results: [{ campaignBudget: { id: '888' } }] })
+    }
+    assert.ok(url.endsWith('/googleAds:mutate'))
+    assert.notEqual(body.partialFailure, true)
+    mutations.push(body.mutateOperations)
+    return Response.json({ mutateOperationResponses: [
+      { campaignBudgetResult: { resourceName: 'customers/3317427925/campaignBudgets/888' } },
+      { campaignResult: { resourceName: 'customers/3317427925/campaigns/222' } },
+    ] })
   })
 
-  const statusRes = await updateGoogleAdsCampaignStatus('test-token', 'dev-tok', '331-742-7925', '222', 'PAUSED')
-  assert.equal(statusRes.campaignId, '222')
-  assert.equal(statusRes.status, 'PAUSED')
+  await updateGoogleAdsCampaign('test-token', 'dev-tok', '331-742-7925', { campaignId: '222', status: 'PAUSED', budgetId: '888', dailyBudgetAmountMicros: 20000000 })
+  assert.deepEqual(mutations, [[
+    { campaignBudgetOperation: { update: { resourceName: 'customers/3317427925/campaignBudgets/888', amountMicros: '20000000' }, updateMask: 'amountMicros' } },
+    { campaignOperation: { update: { resourceName: 'customers/3317427925/campaigns/222', status: 'PAUSED' }, updateMask: 'status' } },
+  ]])
+})
 
-  const budgetRes = await updateGoogleAdsCampaignBudget('test-token', 'dev-tok', '331-742-7925', '888', 20000000)
-  assert.equal(budgetRes.budgetId, '888')
-  assert.equal(budgetRes.amountMicros, 20000000)
-
-  assert.equal(mutated.length, 2)
+test('campaign updates reject incomplete input and another campaign’s budget before any write', async (t) => {
+  t.mock.method(globalThis, 'fetch', async (input) => {
+    assert.ok(String(input).endsWith('/googleAds:search'), 'invalid input must not trigger a mutation')
+    return Response.json({ results: [{ campaignBudget: { id: '999' } }] })
+  })
+  await assert.rejects(updateGoogleAdsCampaign('token', 'dev', '3317427925', { campaignId: '222', status: 'ENABLED', dailyBudgetAmountMicros: 20000000 }), /must be supplied together/u)
+  await assert.rejects(updateGoogleAdsCampaign('token', 'dev', '3317427925', { campaignId: '222' }), /Supply a status or daily budget/u)
+  await assert.rejects(updateGoogleAdsCampaign('token', 'dev', '3317427925', { campaignId: '222', status: 'ENABLED', budgetId: '888', dailyBudgetAmountMicros: 20000000 }), /does not belong to campaign 222/u)
 })
 
 test('getGoogleAdsPerformanceSummary queries customer aggregates and calculates blended CPC', async (t) => {

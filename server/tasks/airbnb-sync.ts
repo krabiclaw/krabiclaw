@@ -6,6 +6,8 @@ export default defineScheduledTask({
   meta: { name: 'airbnb-sync', description: 'Advance the Airbnb listings hosts asked to sync or stop' },
   async run({ context }) {
     const env = (context as { cloudflare: { env: CloudflareEnv } }).cloudflare.env
-    return { result: await runAirbnbSyncJobs(env, Date.now() + CRON_SLICE_MS) }
+    const result = await runAirbnbSyncJobs(env, Date.now() + CRON_SLICE_MS)
+    if (result.failed) throw new Error(`${result.failed} Airbnb sync job(s) failed; inspect each listing's sync status and airbnb_sync_jobs.last_error`)
+    return { result }
   },
 })

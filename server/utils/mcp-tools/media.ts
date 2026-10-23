@@ -68,7 +68,7 @@ const mediaMutationOutputSchema = {
 export const MEDIA_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'set_media',
-      description: 'Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping.',
+      description: 'Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping. Product photos are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.',
       domain: 'media',
       minimumRole: 'admin',
       inputSchema: {
@@ -90,7 +90,7 @@ export const MEDIA_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'attach_media',
-      description: 'Attach one existing media asset to an ordered collection placement (a gallery or a compliance document list), appending it after the current last item. An existing attachment stays in place; a full collection rejects a new attachment. For a single-valued placement (a cover, hero, or logo) use set_media instead.',
+      description: 'Attach one existing media asset to an ordered collection placement (a gallery or a compliance document list), appending it after the current last item. An existing attachment stays in place; a full collection rejects a new attachment. For a single-valued placement (a cover, hero, or logo) use set_media instead. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.',
       domain: 'media',
       minimumRole: 'admin',
       inputSchema: {
@@ -102,7 +102,7 @@ export const MEDIA_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'remove_media',
-      description: 'Detach one media asset from an ordered collection placement (a gallery or a compliance document list). Removing an asset that is not attached changes nothing; other attached assets keep their order.',
+      description: 'Detach one media asset from an ordered collection placement (a gallery or a compliance document list). Removing an asset that is not attached changes nothing; other attached assets keep their order. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.',
       domain: 'media',
       minimumRole: 'admin',
       inputSchema: {
@@ -114,7 +114,7 @@ export const MEDIA_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'reorder_media',
-      description: 'Move attached gallery or compliance assets before or after an attached neighbor. Omitted anchors move the asset to the end; invalid assets or anchors reject the call.',
+      description: 'Move attached gallery or compliance assets before or after an attached neighbor. Omitted anchors move the asset to the end; invalid assets or anchors reject the call. Product galleries are saved in KrabiClaw; a connected listing’s Airbnb photo tour is edited in Airbnb.',
       domain: 'media',
       minimumRole: 'admin',
       inputSchema: {
@@ -179,7 +179,7 @@ export const MEDIA_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_media_asset',
-      description: "Change the selected asset’s alt text or library category. At least one field is required. Category organizes the library and does not assign media to a page.",
+      description: "Change the selected asset’s alt text or library category. At least one field is required. Category organizes the library and does not assign media to a page. Airbnb photo captions are edited in Airbnb.",
       domain: 'media',
       minimumRole: 'admin',
       inputSchema: {

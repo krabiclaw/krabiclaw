@@ -1,7 +1,6 @@
 /** Fetch and inline a bounded public HTTP(S) image for the OG renderer. */
 export interface FetchImageOptions {
   maxBytes?: number
-  acceptedContentTypes?: readonly string[]
 }
 
 const DEFAULT_MAX_BYTES = 5_000_000
@@ -39,7 +38,7 @@ function publicImageUrl(value: string, base?: URL): URL | null {
 }
 
 async function cancelBody(response: Response): Promise<void> {
-  await response.body?.cancel().catch(() => undefined)
+  await response.body?.cancel()
 }
 
 async function readBoundedStream(stream: ReadableStream<Uint8Array>, maxBytes: number): Promise<Uint8Array | null> {
@@ -98,11 +97,6 @@ export async function fetchTransformedImageAsDataUri(
     await cancelBody(response)
     return null
   }
-  if (options.acceptedContentTypes && !options.acceptedContentTypes.includes(contentType)) {
-    await cancelBody(response)
-    return null
-  }
-
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
   const contentLength = Number(response.headers.get('content-length'))
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {

@@ -1,5 +1,7 @@
-import { TENANT_PAGE_BLOCK_REGISTRY, type TenantPageBlockType, type TenantPageField } from '../utils/tenant-page-blocks'
+import { CONTENT_BLOCK_TEXT_FIELDS, TENANT_PAGE_BLOCK_REGISTRY, type LocalizedContentFieldSegment, type TenantPageBlockType, type TenantPageField } from '../utils/tenant-page-blocks'
 import { PRICING_CALCULATOR_SCHEMA } from '../utils/pricing-calculator'
+
+export { CONTENT_BLOCK_TEXT_FIELDS, expandContentFieldPath, readContentFieldValue, type ContentBlockTextField, type ContentFieldPath, type ContentTextFormat, type LocalizedContentFieldSegment } from '../utils/tenant-page-blocks'
 
 export const CONTENT_DOCUMENT_KINDS = [
   'page',
@@ -26,44 +28,6 @@ export const PUBLICATION_CONTENT_BLOCK_TYPES = [
 
 export type PublicationContentBlockType = typeof PUBLICATION_CONTENT_BLOCK_TYPES[number]
 
-export type LocalizedContentFieldSegment = string | '*'
-
-/** Plain text is interpolated; Markdown is parsed and sanitized. */
-export type ContentTextFormat = 'plain' | 'markdown'
-
-export interface ContentBlockTextField {
-  /** Path into the block's data. `*` walks every element of an array. */
-  readonly path: readonly LocalizedContentFieldSegment[]
-  readonly format: ContentTextFormat
-}
-
-/** The block registry owns the text fields shared by authoring and localization. */
-function blockTextFields(fields: Readonly<Record<string, TenantPageField>>, prefix: LocalizedContentFieldSegment[] = []): ContentBlockTextField[] {
-  const collected: ContentBlockTextField[] = []
-  for (const [key, field] of Object.entries(fields)) {
-    if (field.kind === 'list') {
-      // A list of records describes its item's fields; a list of plain strings
-      // is itself the text — how_to's tools and supplies are the latter.
-      if (field.of) collected.push(...blockTextFields(field.of, [...prefix, key, '*']))
-      else if (field.translatable !== false) collected.push({ path: [...prefix, key, '*'], format: 'plain' })
-      continue
-    }
-    // A record is one object of named fields — a button's label and url.
-    if (field.kind === 'record') {
-      if (field.of) collected.push(...blockTextFields(field.of, [...prefix, key]))
-      continue
-    }
-    if (field.kind !== 'text' && field.kind !== 'markdown') continue
-    if (field.translatable === false) continue
-    collected.push({ path: [...prefix, key], format: field.kind === 'markdown' ? 'markdown' : 'plain' })
-  }
-  return collected
-}
-
-export const CONTENT_BLOCK_TEXT_FIELDS = Object.fromEntries(
-  Object.entries(TENANT_PAGE_BLOCK_REGISTRY).map(([type, definition]) => [type, blockTextFields(definition.fields)]),
-) as unknown as Record<ContentBlockType, readonly ContentBlockTextField[]>
-
 // This is the publication block contract for tenant-authored text. Structural
 // fields, URLs, flags, and media references are intentionally absent.
 export const PUBLICATION_CONTENT_BLOCK_LOCALIZED_FIELDS = Object.fromEntries(
@@ -80,42 +44,8 @@ export const LOCALIZED_RESOURCE_TYPES = [
 
 export type LocalizedResourceType = typeof LOCALIZED_RESOURCE_TYPES[number]
 
-export type ContentFieldPath = ReadonlyArray<string | number>
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-/**
- * Resolves one declared field pattern against a block's data, expanding `*`
- * into the indices the array actually holds. A pattern that does not match
- * anything yields nothing rather than an empty slot.
- */
-export function expandContentFieldPath(
-  data: Record<string, unknown>,
-  pattern: readonly LocalizedContentFieldSegment[],
-  path: ContentFieldPath = [],
-): ContentFieldPath[] {
-  const [segment, ...remaining] = pattern
-  if (segment === undefined) return [path]
-  if (segment !== '*') return expandContentFieldPath(data, remaining, [...path, segment])
-  const collection = readContentFieldValue(data, path)
-  if (!Array.isArray(collection)) return []
-  return collection.flatMap((_, index) => expandContentFieldPath(data, remaining, [...path, index]))
-}
-
-export function readContentFieldValue(data: Record<string, unknown>, path: ContentFieldPath): unknown {
-  let value: unknown = data
-  for (const segment of path) {
-    if (typeof segment === 'number') {
-      if (!Array.isArray(value)) return undefined
-      value = value[segment]
-    } else {
-      if (!isRecord(value)) return undefined
-      value = value[segment]
-    }
-  }
-  return value
 }
 
 /** JSON Schema comes from the same field registry the editor and writer use. */

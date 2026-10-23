@@ -5,6 +5,45 @@ import { projectExactLocalizedResource } from '../../server/utils/public-localiz
 import { resolveTenantLocalePath } from '../../utils/tenant-locale-path.ts'
 import { tenantBlogPostPath } from '../../utils/tenant-blog-route.ts'
 import { validateLocalizedRoutePath } from '../../server/utils/localization-registry.ts'
+import { alignTenantPageTranslationBlocks, createTenantPageBlock, createTenantPageTranslationBlocks, tenantPageLocalizedTextFields } from '../../utils/tenant-page-blocks.ts'
+
+test('page translation drafts clear declared copy and retain URLs, identities, choices and calculator values', () => {
+  const source = [
+    createTenantPageBlock('hero', { title: 'Visit us', accent: 'us', rotating_accents: ['Today', 'Tonight'], cta_label: 'Book', cta_url: '/book', secondary_label: 'View menu', secondary_url: '/menu' }),
+    createTenantPageBlock('social_posts', { title: 'News', limit: 6, location_id: 'location-1', call_to_action: { label: 'All posts', url: '/posts' } }),
+    createTenantPageBlock('language_reach', { items: [{ title: 'English', locale: 'en' }] }),
+    createTenantPageBlock('feature_grid', { source: 'calculator', calculator: { note: 'Your rate', rows: [[1, '$10,000', 20000, 30000]] } }),
+    createTenantPageBlock('page_grid', { accent: 'Explore', page_ids: ['page-1'] }),
+    createTenantPageBlock('video', { title: 'Our story', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', upload_date: '2026-10-23' }),
+  ]
+  const before = structuredClone(source)
+  const translations = createTenantPageTranslationBlocks(source)
+  assert.deepEqual(translations.map(block => block.data), [
+    { title: '', accent: '', rotating_accents: ['', ''], cta_label: '', cta_url: '/book', secondary_label: '', secondary_url: '/menu' },
+    { title: '', limit: 6, location_id: 'location-1', call_to_action: { label: '', url: '/posts' } },
+    { items: [{ title: '', locale: 'en' }] },
+    { source: 'calculator', calculator: { note: 'Your rate', rows: [[1, '$10,000', 20000, 30000]] } },
+    { accent: '', page_ids: ['page-1'] },
+    { title: '', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', upload_date: '2026-10-23' },
+  ])
+  assert.deepEqual(tenantPageLocalizedTextFields(source[0]!).map(field => field.path), [
+    ['title'], ['accent'], ['rotating_accents', 0], ['rotating_accents', 1], ['cta_label'], ['secondary_label'],
+  ])
+  assert.deepEqual(source, before)
+})
+
+test('aligning page translations retains authored second-button and list copy while preserving source structure', () => {
+  const source = createTenantPageBlock('hero', { title: 'Visit us', accent: 'us', rotating_accents: ['Today', 'Tonight'], secondary_label: 'View menu', secondary_url: '/menu' })
+  const [aligned] = alignTenantPageTranslationBlocks([source], [{
+    ...source, id: 'translated-hero', source_block_id: source.id,
+    data: { title: 'Ghé thăm', accent: 'chúng tôi', rotating_accents: ['Hôm nay', 'Tối nay'], secondary_label: 'Xem thực đơn', secondary_url: '/incorrect' },
+  }])
+  assert.equal(aligned!.id, 'translated-hero')
+  assert.equal(aligned!.source_block_id, source.id)
+  assert.deepEqual(aligned!.data, {
+    title: 'Ghé thăm', accent: 'chúng tôi', rotating_accents: ['Hôm nay', 'Tối nay'], secondary_label: 'Xem thực đơn', secondary_url: '/menu',
+  })
+})
 
 test('catch-all locale classification uses the tenant published-locale set', () => {
   assert.deepEqual(resolveTenantLocalePath('/th/contact', ['th']), {

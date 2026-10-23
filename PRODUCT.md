@@ -43,9 +43,11 @@ close nights, and set minimum/maximum stays and arrival/departure restrictions.
 On the public site, guests choose available nights at a published home and pay
 in full. New customers need Business and a ready Stripe connected account for
 this direct booking flow. Checkout holds the selected nights; successful payment
-confirms the stay. Recording a stay taken by phone collects no payment, but it
-applies existing automatic guest-message schedules and updates connected Airbnb
-availability. Recording money received outside KrabiClaw moves no money.
+confirms the stay. Recording a stay taken by phone takes no payment. It applies
+existing automatic guest-message schedules and updates availability on the home's
+connected Airbnb listing through Channex. A failed channel update reports that
+the stay was saved; read the calendar and channel state before retrying with the
+same idempotency key. Recording money received outside KrabiClaw moves no money.
 
 A home is live when it is active at its active location and either published on
 the site or syncing through an enabled Channex mapping. Live homes count toward
