@@ -131,7 +131,7 @@ A home is **live** when it is active at its active location and either published
 
 ### 3.5 Airbnb listings: sync in the background
 
-Stages of a listing's import, in order: `property`, `room`, `rate`, `inventory`, `verify_inventory`, `content`, `draft`, `mapping`, `activate`, `reservations`, `messages`, `complete`. `draft` is new and `content` moved before it; each value appears in `import.stage` of `GET …/integrations/airbnb/listings`, in `stage` below and in every import response. A home at `draft` is built (calendar, content, Channex property) and syncs nothing: it is a free draft (`live: false`). From `mapping` on the listing syncs, and from `reservations` its mapping is enabled.
+Stages of a listing's import, in order: `property`, `room`, `rate`, `inventory`, `verify_inventory`, `content`, `draft`, `mapping`, `activate`, `reservations`, `messages`, `complete`. `draft` is new and `content` moved before it; each value appears in `import.stage` of `GET …/integrations/airbnb/listings`, in `stage` below and in every import response. A home at `draft` is built (calendar, content, Channex property) and syncs nothing. It is a free draft (`live: false`) only when it is not otherwise live through website publication (§3.4). From `mapping` on the listing syncs, and from `reservations` its mapping is enabled.
 
 **Sync request.** `POST /api/organizations/:id/integrations/airbnb/sync`, owner or admin, bearer session:
 
@@ -139,7 +139,7 @@ Stages of a listing's import, in order: `property`, `room`, `rate`, `inventory`,
 { "sync": [{ "listing_id": "39313043" }, { "listing_id": "40112808", "details": { "zipCode": "84103", "propertyType": "apartment" } }], "stop": ["8d0c…"] }
 ```
 
-`sync` names listings of the connected Airbnb account to import (if they are not homes yet) and make live, each with `details` (optional): values for the fields `GET …/listings/:listingId` reports in `missingFields`, each text, used when the home is made. Contact email and phone default to the organization's. `stop` names homes imported from the account to take back to free drafts. The plan is checked once for the whole request, before anything is queued: the live homes it leaves are the live homes now, plus each synced listing not live yet, less each stopped home that is not also published on the site. Past Basic's 2 it is 402, nothing queued:
+`sync` names listings of the connected Airbnb account to import (if they are not homes yet) and make live, each with `details` (optional): values for the fields `GET …/listings/:listingId` reports in `missingFields`, each text, used when the home is made. Contact email and phone default to the organization's. `stop` names homes imported from the account to stop syncing; they become free drafts only when they are not otherwise live through website publication (§3.4). The plan is checked once for the whole request, before anything is queued: the live homes it leaves are the live homes now, plus each synced listing not live yet, less each stopped home that is not also published on the site. Past Basic's 2 it is 402, nothing queued:
 
 ```json
 { "error": "Basic includes 2 homes. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 2, "covered": 2 }, "quote": { "plan": "free", "currency": "USD", "homes": { "used": 2, "drafts": 0, "included": 2, "additional_price_minor": 900, "amount_minor": 0 }, "adding": { "count": 1, "additional_homes": 1, "amount_minor": 900, "allowed": false }, "billing": { "period_end": null, "prorated": false } } }

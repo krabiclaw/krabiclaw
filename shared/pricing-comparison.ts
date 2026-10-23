@@ -50,7 +50,7 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
   { title: 'Places to stay', rows: [
     { id: 'stays.listings', label: 'Home listings and photo tours', detail: 'Publish home descriptions, amenities, rooms, photos and house rules on your lodging website.', included: 'Included' },
     { id: 'stays.calendar', label: 'Nightly rates and stay calendar', detail: 'Set nightly prices, block dates and record stays and offline payments. Team members see the homes assigned to them.', included: 'Included' },
-    { id: 'stays.airbnb', label: 'Airbnb connection', detail: 'Connect your Airbnb account to import listings and synchronize stays and availability. Review imported drafts before making them live; your home allowance applies.', included: 'Included' },
+    { id: 'stays.airbnb', label: 'Airbnb connection', detail: 'Choose listings from your connected Airbnb account to sync stays and availability. KrabiClaw checks your home allowance first and completes setup in the background. Publishing a home on your website is separate.', included: 'Included' },
     { id: 'stays.guest-messaging', label: 'Arrival guides and guest messages', detail: 'Save private arrival instructions and guest replies, and schedule messages around booking, check-in and checkout. Delivery needs a guest conversation and a configured channel.', included: 'Included' },
     { id: 'stays.direct-booking', label: 'Direct stay booking with online payment', detail: `Guests book available nights and pay on your website. Requires Stripe setup; ${PAYMENTS_FEE}, billed at the end of each month.`, entitlement: 'payments' },
   ] },
