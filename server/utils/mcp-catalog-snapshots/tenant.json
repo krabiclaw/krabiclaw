@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:092a9479a63da567b6bcb60cae2fffb616e5a7d4245693552da1a9a173681424",
-  "documentationFingerprint": "sha256:a5ea07a32bc91640cd8bd10a9695cc66472ccb16115c6d64c3c503e926a12b99",
+  "fingerprint": "sha256:f7ebebffd19da37fe6f1cc04098b99f5e9a629fa401aa59091fea7e72de6d932",
+  "documentationFingerprint": "sha256:9cf60a5aef68daa280248c606de4875d18d1ffa3ef73b29c1dfc9f5509fe4669",
   "tools": [
     {
       "name": "add_organization_language",
@@ -27370,7 +27370,7 @@
     {
       "name": "create_site_page",
       "title": "Create site page",
-      "description": "Create an authored site page in the named language, returning its document, blocks and editor information. A secondary language must name an existing source page. Supply the actual content for that language; no translation is generated. Pages on a live site can become public immediately; blog articles and short announcements use their own tools.",
+      "description": "Add a new authored site page or a new language version of an existing source page. Existing document IDs and occupied language paths are refused; existing pages and their content are retained. Supply the actual content for the named language; no translation is generated. Pages on a live site can become public immediately. Returns the new document, blocks and editor information.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -29014,7 +29014,7 @@
         "additionalProperties": false,
         "properties": {
           "blocks": {
-            "description": "Complete canonical block array. Each existing block must retain its id unless its removal is explicitly confirmed. Block data never contains asset IDs or delivery URLs. Omit media to preserve that block's current placements; provide media explicitly to replace them, or call set_media with owner_type \"content_block\", the block id, and the intended slot.",
+            "description": "Ordered blocks for the new page. Existing pages and their blocks are not replaced. Block data contains no asset IDs or delivery URLs; use each block’s media field for its saved media placements.",
             "items": {
               "additionalProperties": false,
               "anyOf": [
@@ -30963,6 +30963,7 @@
             "type": "array"
           },
           "locale": {
+            "description": "Authored language of the new page version. Omit or use null for the site’s source language.",
             "type": [
               "string",
               "null"
@@ -30973,7 +30974,7 @@
             "type": "string"
           },
           "pageType": {
-            "description": "The page's type. Send the page_type from the last read unless you are changing it.",
+            "description": "Type of the new page.",
             "enum": [
               "custom",
               "recipe",
@@ -30983,28 +30984,29 @@
             "type": "string"
           },
           "page_id": {
+            "description": "Existing source page ID only when adding a new secondary-language version. Omit or use null for a new source page.",
             "type": [
               "string",
               "null"
             ]
           },
           "path": {
-            "description": "The page path to write. Send the current path unless you are moving the page; a different path moves it and creates the locale-scoped redirect.",
+            "description": "New unused path in this language. An occupied path or redirect is refused; creation does not move an existing page.",
             "type": "string"
           },
           "recipe": {
-            "description": "The template section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.",
+            "description": "Template section the new page fills, or null for none.",
             "type": [
               "string",
               "null"
             ]
           },
           "sortOrder": {
-            "description": "The page's position in the site's page list. Send the sort_order from the last read unless you are reordering.",
+            "description": "Position of the new page in the site’s page list.",
             "type": "number"
           },
           "summary": {
-            "description": "Omit to preserve on update; null clears it.",
+            "description": "Summary of the new page; null means no summary.",
             "type": [
               "string",
               "null"
@@ -31015,6 +31017,7 @@
             "type": "string"
           },
           "variant_id": {
+            "description": "Optional new document ID. An existing document ID is refused.",
             "type": [
               "string",
               "null"

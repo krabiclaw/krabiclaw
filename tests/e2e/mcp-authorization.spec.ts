@@ -19,7 +19,7 @@ test.describe('stateless MCP server', () => {
       expect(body.result?.isError).toBe(true)
       expect(body.result?.structuredContent).toBeUndefined()
       expect(body.result?.content?.[0]?.text).toContain('Invalid arguments for tool update_google_ads_campaign')
-      expect(body.result?.content?.[0]?.text).toContain('oneOf')
+      expect(body.result?.content?.[0]?.text).toContain('Instance does not match exactly one subschema (0 matches).')
     }
   })
 
