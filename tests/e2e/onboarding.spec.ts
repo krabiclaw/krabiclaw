@@ -261,11 +261,18 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   expect(placesRequests).toEqual([])
 })
 
-test('a lodging owner restores their draft, creates the workspace and opens the home editor', async ({ page, baseURL }) => {
+test('an owner changes their restaurant draft to lodging, restores it and opens the home editor', async ({ page, baseURL }) => {
   await dismissPreviewToolbar(page)
   await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
+  const previous = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(previous.status(), await previous.text()).toBe(200)
+  const previousDraft = (await previous.json() as { draft: { organizationId: string | null } | null }).draft
   const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
   expect(discarded.status(), await discarded.text()).toBe(200)
+  expect(await discarded.json()).toEqual({ success: true, deleted: previousDraft?.organizationId != null })
+  const cleared = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(cleared.status(), await cleared.text()).toBe(200)
+  expect(await cleared.json()).toEqual({ success: true, draft: null })
   const name = `E2E Lodging ${Date.now().toString(36)}`
   const step = (id: string) => page.locator(`[data-onboarding-step="${id}"]`)
   const advance = async (label: string, next: string) => {
@@ -276,7 +283,7 @@ test('a lodging owner restores their draft, creates the workspace and opens the 
   await page.goto('/dashboard/onboarding/type')
   await expect(step('type')).toBeVisible()
   await expect(step('type').getByRole('button')).toHaveCount(4)
-  await page.getByRole('button', { name: 'Lodging or vacation rentals', exact: true }).click()
+  await page.getByRole('button', { name: 'Restaurant, café or bar', exact: true }).click()
   await expect(step('language')).toBeVisible()
   await page.getByRole('button', { name: 'English', exact: true }).click()
   await expect(step('business')).toBeVisible()
@@ -291,6 +298,31 @@ test('a lodging owner restores their draft, creates the workspace and opens the 
   await advance('Save hours', 'currency')
   await expect(step('currency')).toContainText('Thai Baht (THB)')
   await advance('Next', 'contact')
+  await advance('Skip for now', 'products')
+  await page.getByPlaceholder('Grilled squid').fill('Grilled squid')
+  await page.getByRole('button', { name: 'Add dish', exact: true }).click()
+  await advance('Next', 'look')
+  const restaurant = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(restaurant.status(), await restaurant.text()).toBe(200)
+  expect((await restaurant.json() as { draft: unknown }).draft).toMatchObject({
+    vertical: 'restaurant', products: [{ name: 'Grilled squid', category: 'Menu', amountMinor: null }],
+  })
+
+  // The saved restaurant offering is restored before the owner changes type.
+  // Selecting lodging removes it from the answers, and the next save must send
+  // the new type with no generic offerings rather than fail on a hidden field.
+  await page.goto('/dashboard/onboarding/type')
+  await expect(step('type').getByRole('button', { name: 'Restaurant, café or bar', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: 'Lodging or vacation rentals', exact: true }).click()
+  await expect(step('language')).toBeVisible()
+  await page.getByRole('button', { name: 'English', exact: true }).click()
+  await expect(step('business')).toBeVisible()
+  await advance('Next', 'location')
+  await advance('Next', 'hours')
+  await advance('Save hours', 'currency')
+  const convertedSave = page.waitForRequest(sent => sent.method() === 'POST' && new URL(sent.url()).pathname === '/api/dashboard/onboarding/drafts/active')
+  await advance('Next', 'contact')
+  expect((await convertedSave).postDataJSON()).toMatchObject({ vertical: 'lodging', products: [] })
   await advance('Skip for now', 'look')
   await expect(step('products')).toHaveCount(0)
   await advance('Next', 'review')

@@ -9,7 +9,7 @@
       v-if="step.id === 'type'"
       :choices="VERTICAL_CHOICES"
       :model-value="state.vertical"
-      @update:model-value="choose(() => { state.vertical = $event as OrganizationVertical })"
+      @update:model-value="choose(() => selectOnboardingVertical(state, $event as OrganizationVertical))"
     />
 
     <OnboardingChoiceGrid
@@ -78,7 +78,7 @@ import OnboardingChoiceGrid from '~/lib/components/workspace/onboarding/Onboardi
 import GooglePlacePicker from '~/lib/components/workspace/location/GooglePlacePicker.vue'
 import OnboardingProductsCard from '~/lib/components/workspace/onboarding/OnboardingProductsCard.vue'
 import OnboardingReviewCard from '~/lib/components/workspace/onboarding/OnboardingReviewCard.vue'
-import { useOnboardingState, type OnboardingPlacePreview, type OnboardingStep } from '~/composables/useOnboardingFlow'
+import { selectOnboardingVertical, useOnboardingState, type OnboardingPlacePreview, type OnboardingStep } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
 import { currencyForCountry } from '~/shared/currencies'
 import { singleTimezoneForCountry } from '~/utils/timezone'

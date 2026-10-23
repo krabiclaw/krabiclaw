@@ -180,6 +180,12 @@ export function onboardingStep(id: string | undefined): OnboardingStep | null {
   return ONBOARDING_STEPS.find(step => step.id === id) ?? null
 }
 
+export function selectOnboardingVertical(state: OnboardingFlowState, vertical: OrganizationVertical) {
+  state.vertical = vertical
+  // Changing the business type also removes answers its flow no longer asks.
+  if (onboardingStep('products')?.applies?.(state) === false) state.products = []
+}
+
 function emptyState(): OnboardingFlowState {
   return {
     // 'restaurant' is the first choice on the type step, which the owner answers
