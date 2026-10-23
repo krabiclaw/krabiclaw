@@ -530,8 +530,11 @@ binding or loading either:
 - `krabiclaw-staging-v20`: `caa1d5c6-2310-4c22-902a-c795f70b0c3a`
 - `krabiclaw-production-v20`: `1953787d-eef5-482c-81f4-1819d85704c3`
 
-The PR prepares each replacement from its own v19 source using the canonical
-snapshot path and preserves that environment's signing keys. Its bindings point
+Each replacement was loaded from its own v19 source using the canonical
+snapshot path, preserving that environment's signing keys: staging 111 tables,
+96,218 rows; production 111 tables, 117,376 rows. All 27 transfer invariants passed
+with no data transformations. Independent D1 reads confirmed foreign-key checks,
+the fresh `0000_baseline.sql` ledger and all four retained catalog kinds. Its bindings point
 to the prepared copies; deployed Workers continue using v19 until an authorized
 deployment. Before each cutover, take a fresh delta with `--source
 krabiclaw-staging-v19` or `--source krabiclaw-production-v19` and the corresponding

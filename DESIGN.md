@@ -170,7 +170,7 @@ The `service` vertical is exclusively and canonically **Legal Services**. Do not
 
 **Catalog is where everything the business offers is found, as Airbnb's Your
 listings.** It navigates rather than edits: kind pills — All, Menu,
-Experiences, Products, Services, Places to stay, each only when the business
+Experiences, Services, Places to stay, each only when the business
 has one — over one grid of photo cards, full width on a phone. A menu belongs
 to a location, so the Menu is one card per location, opening that location's
 menu; every other offering is its own card, opening the one Product editor.
