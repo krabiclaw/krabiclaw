@@ -4,10 +4,11 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
-import { countActiveHomes, countActiveLocations, homesQuote, parseHomesAdding } from '../../server/utils/billing.ts'
+import { countActiveHomes, countActiveLocations, getOrganizationBillingStatus, getOrganizationSubscriptionPrice, homesQuote, parseHomesAdding } from '../../server/utils/billing.ts'
 import { createLocation, deleteLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, readStayHome, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
+import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import { HTTPError } from 'nitro'
 
 // Billing by count: Growth and Business bill every active location and every
@@ -30,9 +31,12 @@ test('active locations and live homes are reported to their Stripe meters, draft
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'business-capacity-proof', exportName: 'Hub' } },
   } }] })
-  // The metered prices each Stripe subscription carries, as Stripe returns its items: Growth's carries
-  // the homes price; Business's is from before homes were priced and carries only the locations one.
-  const subscriptionMeters: Record<string, string[]> = { sub_grower: ['locations', 'homes'], sub_inn: ['locations'] }
+  // Each Stripe subscription as Stripe returns it. Growth's carries a homes price of its own, 3 included and
+  // $7 each after, not the published one: the quote reads the subscription. Business's is from before homes
+  // were priced, carries only the locations price, and is in a free trial.
+  const homesTiers = [{ up_to: 3, unit_amount: 0, flat_amount: null }, { up_to: null, unit_amount: 700, flat_amount: null }]
+  const subscriptions: Record<string, { status: string; meters: string[] }> = { sub_grower: { status: 'active', meters: ['locations', 'homes'] }, sub_inn: { status: 'trialing', meters: ['locations'] } }
+  const innTrialEnd = Math.floor(Date.UTC(2026, 10, 22, 14, 6, 27) / 1000)
   // Stripe receives the meter events; each one is kept as Stripe was sent it.
   const reported: Array<{ event: string; customer: string; value: number }> = []
   const originalFetch = globalThis.fetch
@@ -41,9 +45,18 @@ test('active locations and live homes are reported to their Stripe meters, draft
     if (url.hostname !== 'api.stripe.com') return originalFetch(input, init)
     const subscription = /^\/v1\/subscriptions\/(sub_[a-z]+)$/.exec(url.pathname)?.[1]
     if (subscription) {
-      const items = subscriptionMeters[subscription]!.map(family => ({ object: 'subscription_item', id: `si_${family}`, price: { object: 'price', id: `price_${family}`, product: { object: 'product', id: `prod_${family}`, metadata: { product_family: family } } } }))
-      return Response.json({ object: 'subscription', id: subscription, customer: `cus_${subscription.slice(4)}`, items: { object: 'list', data: items, has_more: false } })
+      assert.deepEqual([...url.searchParams].filter(([key]) => key.startsWith('expand')).map(([, value]) => value), ['items.data.price.product', 'items.data.price.tiers'])
+      const { status, meters } = subscriptions[subscription]!
+      const plan = { object: 'subscription_item', id: 'si_plan', quantity: 1, price: { object: 'price', id: 'price_plan', currency: 'usd', billing_scheme: 'per_unit', unit_amount: 14900, recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' },
+        product: { object: 'product', id: 'prod_plan', name: subscription === 'sub_inn' ? 'Business' : 'Growth', metadata: { plan_id: subscription === 'sub_inn' ? 'business' : 'growth' } } } }
+      const items = meters.map(family => ({ object: 'subscription_item', id: `si_${family}`, price: { object: 'price', id: `price_${family}`, product: { object: 'product', id: `prod_${family}`, metadata: { product_family: family } },
+        ...(family === 'homes' ? { billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: homesTiers } : {}) } }))
+      const trial = status === 'trialing' ? { trial_end: innTrialEnd, trial_settings: { end_behavior: { missing_payment_method: 'cancel' } } } : { trial_end: null, trial_settings: null }
+      return Response.json({ object: 'subscription', id: subscription, status, ...trial, customer: `cus_${subscription.slice(4)}`, items: { object: 'list', data: [plan, ...items], has_more: false } })
     }
+    // Basic is quoted from the published catalog.
+    const catalog = publishedCatalogResponse(url)
+    if (catalog) return catalog
     assert.equal(url.pathname, '/v1/billing/meter_events')
     const body = new URLSearchParams(String(init?.body))
     reported.push({ event: body.get('event_name')!, customer: body.get('payload[stripe_customer_id]')!, value: Number(body.get('payload[value]')) })
@@ -73,8 +86,9 @@ test('active locations and live homes are reported to their Stripe meters, draft
       // The owner's published host profile: a home is listed only with a host guests can see.
       await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, public_name, public_bio, public_approved, calendar_revision, updated_at, updated_by)
         VALUES (?, ?, 'America/Denver', '[]', '[]', '[]', '2026-10-15T00:00:00.000Z', 'Owner Host', NULL, 1, 'revision', '2026-10-15T00:00:00.000Z', ?)`).bind(`m-${id}`, id, OWNER).run()
-      if (plan) await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, stripeSubscriptionId, stripeCustomerId, periodEnd) VALUES (?, ?, ?, 'active', 1, ?, ?, ?)")
-        .bind(`sub-${id}`, plan, id, `sub_${id}`, customer, Math.floor(Date.now() / 1000) + 86_400).run()
+      // As Better Auth's webhook writes it from the Stripe subscription.
+      if (plan) await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, billingInterval, stripeSubscriptionId, stripeCustomerId, periodEnd) VALUES (?, ?, ?, ?, 1, 'month', ?, ?, ?)")
+        .bind(`sub-${id}`, plan, id, subscriptions[`sub_${id}`]!.status, `sub_${id}`, customer, Math.floor(Date.now() / 1000) + 86_400).run()
     }
     const manager = (organizationId: string) => ({ organizationId, actorId: OWNER, manage: true as const })
     const home = (organizationId: string, key: string) => createStayHome(env, db, manager(organizationId), stayHomeInput({
@@ -112,11 +126,15 @@ test('active locations and live homes are reported to their Stripe meters, draft
     assert.deepEqual(last('cus_inn'), { locations: 1, homes: 3 })
     assert.equal((await getProduct(db, 'inn', villas[0]!.product_id)).stay!.live, true)
     // A subscription without the homes price is charged nothing for homes: its quote prices each one at 0.
+    // In its free trial the quote says when the trial ends, from Stripe: no usage is billed before then.
     const innQuote = await homesQuote(env, db, 'inn', 1)
-    assert.deepEqual([innQuote.homes, innQuote.adding], [
+    assert.deepEqual([innQuote.homes, innQuote.adding, innQuote.billing.trial_end], [
       { used: 3, drafts: 0, included: 2, additional_price_minor: 0, amount_minor: 0 },
       { count: 1, additional_homes: 1, amount_minor: 0, allowed: true },
+      '2026-11-22T14:06:27.000Z',
     ])
+    // The billing status the plan screen reads says the same trial, and what Stripe does at its end without a card.
+    assert.deepEqual((await getOrganizationSubscriptionPrice(env, await getOrganizationBillingStatus(env, db, 'inn')))?.trial, { end: '2026-11-22T14:06:27.000Z', withoutPaymentMethod: 'cancel' })
     // A stay product made at a location makes that location a home's: one fewer location, and one more home once it is live.
     const cabin = await homeAt('inn', bistroId, 'Garden Cabin')
     assert.equal(cabin.stay!.live, false)
@@ -162,20 +180,21 @@ test('active locations and live homes are reported to their Stripe meters, draft
     await organization('grower', 'growth')
     for (const title of ['One', 'Two', 'Three']) assert.equal((await place('grower', title)).status, 201)
     await publish('grower', (await home('grower', 'g-1')).product_id)
-    // The quote a paid host reads before making homes live: of three more, one is included and two are billed at the end of the period.
+    // The quote a paid host reads before making homes live, priced by the homes price on its own subscription
+    // (3 included, $7 after): of four more, two are included and two are billed at the end of the period.
     const growerPeriodEnd = (await db.prepare("SELECT periodEnd FROM subscription WHERE referenceId = 'grower'").first('periodEnd')) as number
-    assert.deepEqual(await homesQuote(env, db, 'grower', 3), {
+    assert.deepEqual(await homesQuote(env, db, 'grower', 4), {
       plan: 'growth', currency: 'USD',
-      homes: { used: 1, drafts: 0, included: 2, additional_price_minor: 900, amount_minor: 0 },
-      adding: { count: 3, additional_homes: 2, amount_minor: 1800, allowed: true },
-      billing: { period_end: new Date(growerPeriodEnd * 1000).toISOString(), prorated: false },
+      homes: { used: 1, drafts: 0, included: 3, additional_price_minor: 700, amount_minor: 0 },
+      adding: { count: 4, additional_homes: 2, amount_minor: 1400, allowed: true },
+      billing: { period_end: new Date(growerPeriodEnd * 1000).toISOString(), trial_end: null, prorated: false },
     })
-    for (const key of ['g-2', 'g-3']) await publish('grower', (await home('grower', key)).product_id)
-    // With three live, one is billed now and the next would be too.
-    assert.deepEqual((await homesQuote(env, db, 'grower', 1)).homes, { used: 3, drafts: 0, included: 2, additional_price_minor: 900, amount_minor: 900 })
-    assert.deepEqual((await homesQuote(env, db, 'grower', 1)).adding, { count: 1, additional_homes: 1, amount_minor: 900, allowed: true })
-    assert.deepEqual(await counts('grower'), { locations: 3, homes: 3 })
-    assert.deepEqual(last('cus_grower'), { locations: 3, homes: 3 })
+    for (const key of ['g-2', 'g-3', 'g-4']) await publish('grower', (await home('grower', key)).product_id)
+    // With four live, one is billed now and the next would be too.
+    assert.deepEqual((await homesQuote(env, db, 'grower', 1)).homes, { used: 4, drafts: 0, included: 3, additional_price_minor: 700, amount_minor: 700 })
+    assert.deepEqual((await homesQuote(env, db, 'grower', 1)).adding, { count: 1, additional_homes: 1, amount_minor: 700, allowed: true })
+    assert.deepEqual(await counts('grower'), { locations: 3, homes: 4 })
+    assert.deepEqual(last('cus_grower'), { locations: 3, homes: 4 })
 
     // ── Basic includes two locations and two live homes, counted apart, and refuses a third of either; drafts are unlimited. It has no customer and reports nothing.
     await organization('starter', null)
@@ -184,7 +203,7 @@ test('active locations and live homes are reported to their Stripe meters, draft
       plan: 'free', currency: 'USD',
       homes: { used, drafts, included: 2, additional_price_minor: 900, amount_minor: 0 },
       adding: { count: adding, additional_homes: Math.max(0, used + adding - 2) - Math.max(0, used - 2), amount_minor: allowed ? 0 : 900 * (Math.max(0, used + adding - 2) - Math.max(0, used - 2)), allowed },
-      billing: { period_end: null, prorated: false },
+      billing: { period_end: null, trial_end: null, prorated: false },
     })
     assert.deepEqual(await homesQuote(env, db, 'starter', 1), starterQuote(0, 0, 1, true))
     for (const title of ['One', 'Two']) assert.equal((await place('starter', title)).status, 201)

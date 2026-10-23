@@ -11,6 +11,7 @@ import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-
 import { getProduct } from '../../server/utils/product-management.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { countActiveHomes } from '../../server/utils/billing.ts'
+import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import contentRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/content.post.ts'
 import syncPostRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.post.ts'
 import syncGetRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.get.ts'
@@ -92,6 +93,11 @@ class FakeChannex {
     const method = (init.method ?? 'GET').toUpperCase()
     const path = url.pathname.replace('/api/v1', '').replace(`/channels/${this.channelId}`, '/channels/chan-1')
     const body = typeof init.body === 'string' ? JSON.parse(init.body) as FakeBody : null
+    // Basic's homes quote reads the published price from Stripe's catalog.
+    if (url.origin === 'https://api.stripe.com') {
+      const catalog = publishedCatalogResponse(url)
+      if (catalog) return catalog
+    }
     if (url.origin === CDN) {
       const id = url.pathname.slice('/photos/'.length).replace(/\.jpg$/, '')
       this.photoFetches += 1
@@ -202,7 +208,7 @@ async function boot() {
   try {
     const db = await runtime.getD1Database('DB')
     const env = {
-      ...await runtime.getBindings<CloudflareEnv>(), DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
+      ...await runtime.getBindings<CloudflareEnv>(), DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1',
       BETTER_AUTH_URL: BASE, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client',
       GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app', MEDIA_BASE_URL: 'https://media.proof.example', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     } as unknown as CloudflareEnv
