@@ -182,7 +182,10 @@ export async function stopAirbnbSyncForPlanEnd(db: DbClient, organizationId: str
     WHERE m.organization_id = ? AND m.provider = 'channex' AND m.product_id IN (SELECT value FROM json_each(?))`, [organizationId, JSON.stringify(productIds)])
   const missing = productIds.find(id => !mappings.some(row => row.product_id === id))
   if (missing) throw new Error(`Home ${missing} is not imported from the organization's connected Airbnb account`)
-  await queueJobs(db, organizationId, null, mappings.map(row => ({ listing: row.listing_id, product: row.product_id, action: 'stop', details: null })))
+  // One batch holds at most D1's statements per batch; an organization past Basic may have more homes than that.
+  for (let start = 0; start < mappings.length; start += MAX_D1_BATCH_STATEMENTS) {
+    await queueJobs(db, organizationId, null, mappings.slice(start, start + MAX_D1_BATCH_STATEMENTS).map(row => ({ listing: row.listing_id, product: row.product_id, action: 'stop', details: null })))
+  }
 }
 
 /** Every listing this organization asked to sync or stop, with where each stands. */
