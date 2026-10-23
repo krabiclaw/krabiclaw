@@ -2466,7 +2466,9 @@ export function parseIcalRanges(text: string): Array<[string, string]> {
   if (lines[0]?.trim() !== 'BEGIN:VCALENDAR') throw new Error('The address did not return an iCal calendar')
   const ranges: Array<[string, string]> = []
   let event: { start?: string; end?: string; cancelled: boolean } | null = null
+  let closed = false
   for (const line of lines) {
+    if (line === 'END:VCALENDAR') { closed = true; break }
     const name = line.split(/[;:]/, 1)[0]!.toUpperCase()
     if (line === 'BEGIN:VEVENT') event = { cancelled: false }
     else if (!event) continue
@@ -2482,7 +2484,7 @@ export function parseIcalRanges(text: string): Array<[string, string]> {
       event = null
     }
   }
-  if (event) throw new Error('The calendar ends inside an event')
+  if (event || !closed) throw new Error('The calendar ended before END:VCALENDAR; it was not read whole')
   return ranges
 }
 
@@ -2496,7 +2498,7 @@ async function syncCalendarLink(db: DbClient, env: CalendarLinkEnv, row: StayCal
   const access: StayAccess = { organizationId: row.organization_id, actorId: 'system', manage: true }
   const home = await readStayHome(db, access, row.product_id)
   const recordFailure = async (message: string, code: string, cause?: unknown): Promise<never> => {
-    await execute(db, 'UPDATE stay_calendar_links SET sync_error = ?, updated_at = ? WHERE id = ?', [message, new Date().toISOString(), row.id])
+    await execute(db, 'UPDATE stay_calendar_links SET sync_error = ?, updated_at = ? WHERE id = ? AND import_url = ?', [message, new Date().toISOString(), row.id, row.import_url])
     throw new HTTPError({ statusCode: 502, message: `The Vrbo calendar could not be read. ${message}`, data: { code, field: 'import_url', product_id: row.product_id, committed: true }, cause })
   }
   let ranges: Array<[string, string]>
@@ -2514,15 +2516,19 @@ async function syncCalendarLink(db: DbClient, env: CalendarLinkEnv, row: StayCal
   const before = await claimed()
   const now = new Date().toISOString()
   const wanted = JSON.stringify(nights)
+  // Every write applies only while the link still reads the address this read fetched, so a
+  // slower read of a replaced address cannot overwrite the newer one's nights.
+  const current = 'EXISTS (SELECT 1 FROM stay_calendar_links WHERE id = ? AND import_url = ?)'
+  const guard = [row.id, row.import_url]
   await executeBatch(db, [
-    { query: `DELETE FROM stay_nights WHERE product_id = ? AND date IN (SELECT value FROM json_each(?)) AND ${LAPSED_HOLD_CLAIM_SQL}`, params: [row.product_id, wanted] },
-    { query: 'DELETE FROM stay_nights WHERE calendar_link_id = ? AND date NOT IN (SELECT value FROM json_each(?))', params: [row.id, wanted] },
+    { query: `DELETE FROM stay_nights WHERE product_id = ? AND date IN (SELECT value FROM json_each(?)) AND ${LAPSED_HOLD_CLAIM_SQL} AND ${current}`, params: [row.product_id, wanted, ...guard] },
+    { query: `DELETE FROM stay_nights WHERE calendar_link_id = ? AND date NOT IN (SELECT value FROM json_each(?)) AND ${current}`, params: [row.id, wanted, ...guard] },
     {
-      query: `INSERT INTO stay_nights (organization_id, product_id, date, calendar_link_id) SELECT ?, ?, value, ? FROM json_each(?) WHERE true
+      query: `INSERT INTO stay_nights (organization_id, product_id, date, calendar_link_id) SELECT ?, ?, value, ? FROM json_each(?) WHERE ${current}
               ON CONFLICT (product_id, date) DO NOTHING`,
-      params: [row.organization_id, row.product_id, row.id, wanted],
+      params: [row.organization_id, row.product_id, row.id, wanted, ...guard],
     },
-    { query: 'UPDATE stay_calendar_links SET blocked_json = ?, synced_at = ?, sync_error = NULL, updated_at = ? WHERE id = ?', params: [JSON.stringify(ranges), now, now, row.id] },
+    { query: 'UPDATE stay_calendar_links SET blocked_json = ?, synced_at = ?, sync_error = NULL, updated_at = ? WHERE id = ? AND import_url = ?', params: [JSON.stringify(ranges), now, now, ...guard] },
   ], { operation: 'Sync linked calendar' })
   const after = await claimed()
   const changed = nightRuns([...before.filter(night => !after.includes(night)), ...after.filter(night => !before.includes(night))])
@@ -2581,13 +2587,11 @@ export async function removeStayCalendarLink(db: DbClient, env: StayMutationEnv,
   })
 }
 
-/** Read every linked calendar; a failed one is reported after the others have had their turn. */
+/** Read every linked calendar at once, so a slow site holds up no other; failures are reported after all have finished. */
 export async function syncStayCalendarLinks(db: DbClient, env: CalendarLinkEnv): Promise<{ synced: number }> {
-  const rows = await queryAll<StayCalendarLinkRow>(db, `SELECT ${CALENDAR_LINK_COLUMNS} FROM stay_calendar_links ORDER BY synced_at IS NOT NULL, synced_at`)
-  const failures: unknown[] = []
-  for (const row of rows) {
-    try { await syncCalendarLink(db, env, row) } catch (error) { failures.push(error) }
-  }
+  const rows = await queryAll<StayCalendarLinkRow>(db, `SELECT ${CALENDAR_LINK_COLUMNS} FROM stay_calendar_links`)
+  const failures = (await Promise.allSettled(rows.map(row => syncCalendarLink(db, env, row))))
+    .flatMap(result => result.status === 'rejected' ? [result.reason] : [])
   if (failures.length) throw new AggregateError(failures, `${failures.length} of ${rows.length} linked calendars could not be synced. ${failures.map(error => error instanceof Error ? error.message : String(error)).join(' ')}`)
   return { synced: rows.length }
 }
