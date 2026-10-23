@@ -182,9 +182,9 @@ export interface OnboardingDraftPayload {
 }
 
 function defaultProductCategory(vertical: OrganizationVertical): string {
-  if (vertical === 'experience' || vertical === 'lodging') return 'Experiences'
-  if (vertical === 'service') return 'Services'
-  return 'Menu'
+  if (vertical === 'experience') return 'Experiences'
+  if (vertical === 'restaurant') return 'Menu'
+  throw new HTTPError({ statusCode: 400, statusMessage: 'This business type adds its offerings after website setup' })
 }
 
 export function onboardingPagePath(page: string): string {
@@ -340,6 +340,7 @@ export function buildOnboardingDraftPayload(input: {
   brandDraft?: DraftBrandInput | null
   products?: DraftProductInput[] | null
 }): OnboardingDraftPayload {
+  if (input.products?.length && input.vertical !== 'restaurant' && input.vertical !== 'experience') throw new HTTPError({ statusCode: 400, statusMessage: 'This business type adds its offerings after website setup' })
   const sourceLocale = input.details.sourceLocale ? platformLocale(input.details.sourceLocale) : null
   if (!sourceLocale) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language' })
   const brandName = input.details.name || input.name

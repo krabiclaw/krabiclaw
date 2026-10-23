@@ -1,8 +1,9 @@
 # KrabiClaw
 
 [KrabiClaw](https://krabiclaw.com) runs the website, bookings, payments and messaging
-for restaurants, experience operators and professional-service businesses, managed from
-the dashboard or from ChatGPT and Claude through one MCP service.
+for restaurants, experience operators, law firms and lodging hosts, managed from
+the dashboard or from ChatGPT and Claude through one MCP service. Lodging includes
+homes, nightly availability and prices, direct stay bookings and guest messaging.
 
 Open source under [AGPL-3.0](LICENSE).
 

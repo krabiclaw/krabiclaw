@@ -16,7 +16,7 @@ export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
 export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, ...BILLING_METER_KEYS, 'site_language', 'strategy'])
 export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
-// Products no longer sold that carry a family rather than a plan: rental units are not billed.
+// The former rental-unit product family is retired; live homes use the homes meter.
 export const RETIRED_PRODUCT_FAMILIES = Object.freeze(['rental_units'])
 export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
 export const STRIPE_CATALOG_REQUEST_TIMEOUT_MS = 10_000
@@ -54,12 +54,16 @@ export const PLAN_DEFINITIONS = Object.freeze([
     badge: 'Most Popular',
     imagePath: 'scripts/assets/stripe/growth.jpg',
     features: [
-      'Business websites for restaurants, experiences and law firms',
+      'Business websites for restaurants, experiences, law firms and lodging',
       `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`,
       `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`,
       'Your own domain (yourbusiness.com)',
       'Update supported content, menus and photos through ChatGPT',
       'Bookings, consultation requests and ticketed experiences',
+      'Home listings, nightly rates, stay calendars and arrival guides',
+      'Connect Airbnb to import listings and sync stays and availability',
+      'Saved guest replies and scheduled check-in and checkout messages',
+      'iPhone companion app — no extra subscription',
       'WhatsApp booking and reservation notifications — setup required',
       'Publish to connected Facebook, Instagram and Discord channels',
       'Google Places re-imports and weekly Google review refresh',
@@ -74,7 +78,6 @@ export const PLAN_DEFINITIONS = Object.freeze([
     features: [
       'Everything in Growth',
       'Direct stay booking with online payment',
-      'The KrabiClaw iOS app at no extra cost for your whole team',
       'Online payments for paid bookings and one-time orders',
       'Buyer receipts and purchase history',
       'Refund, dispute and payout management',

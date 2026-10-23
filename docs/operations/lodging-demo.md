@@ -37,8 +37,10 @@ January 2 the holiday price with a five-night minimum on arrival, and every
 home but the studio has a few blocked nights a month or two out. The staging development owner (the
 account the iOS simulator signs in with) owns the organization.
 
-Staging has no Cloudflare Images credentials by design, so photo uploads there
-return 503 and the homes have no photos.
+Staging has no Cloudflare Images credentials by design. Uploads that use that
+provider return 503; do not add production's Images credentials. AVIF images use
+the existing staging R2 media path and can be uploaded through the ordinary
+media tools. The provisioned homes have no photos until an operator adds them.
 
 ## Create or reset
 

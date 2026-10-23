@@ -98,7 +98,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
-      description: '', published: false, live: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
+      description: '', published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
     const created = await call(owner, 'POST', keyedCabin)
@@ -155,9 +155,9 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       product_id: made.product_id, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
       check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: home.accessibility,
-      address: home.address, latitude: null, longitude: null, description: '', published: false, live: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
+      address: home.address, latitude: null, longitude: null, description: '', published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
-    assert.deepEqual(edited.body, { home: changed, channel_push: null })
+    assert.deepEqual(edited.body, { home: changed, channel_push: null, airbnb_unsynced: [] })
     // Read back through other paths: the homes list, the location, and the member now assigned seeing it.
     assert.deepEqual(((await call(owner, 'GET')).body.homes as Array<{ product_id: string }>).find(home => home.product_id === made.product_id), changed)
     assert.equal((await getLocation(db, ORG, made.location_id))!.timezone, 'America/Los_Angeles')
@@ -165,7 +165,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     // The price is the one it had, changed in place; null removes it. Fields left out keep their value.
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM prices WHERE organization_id = ?').bind(ORG).first('n'), 1)
     const unpriced = await edit(owner, { base_price_minor: null, assigned_member_id: null })
-    assert.deepEqual(unpriced.body, { home: { ...changed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null }, channel_push: null })
+    assert.deepEqual(unpriced.body, { home: { ...changed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null }, channel_push: null, airbnb_unsynced: [] })
 
     // What the home is and offers, and its private arrival guide: each refused value names its field and changes nothing.
     assert.deepEqual(refusal(await edit(owner, { property_type_group: 'apartments', property_type: 'castle' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.property_type' })
@@ -218,7 +218,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       address: { address: '3 Rim Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: 38.57, longitude: -109.55,
     }
     assert.equal(described.status, 200)
-    assert.deepEqual(described.body, { home: listed, channel_push: null })
+    assert.deepEqual(described.body, { home: listed, channel_push: null, airbnb_unsynced: [] })
     assert.deepEqual(((await call(owner, 'GET')).body.homes as Array<{ product_id: string }>).find(home => home.product_id === made.product_id), listed)
     // The location holds the address and the pin; the product holds what the home is; private arrival columns stay out of the product.
     const moved = (await getLocation(db, ORG, made.location_id))!
@@ -242,23 +242,23 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(await db.prepare('SELECT listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit FROM product_stay_configs WHERE product_id = ?').bind(made.product_id).first(), propertyDetails)
     const resized = await edit(owner, { property_size: 80.5 })
     assert.equal(resized.status, 200)
-    assert.deepEqual(resized.body, { home: { ...listed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, property_size: 80.5 }, channel_push: null })
+    assert.deepEqual(resized.body, { home: { ...listed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, property_size: 80.5 }, channel_push: null, airbnb_unsynced: [] })
     assert.partialDeepStrictEqual((await getProduct(db, ORG, made.product_id)).stay, { ...propertyDetails, property_size: 80.5 })
     const changedUnit = await edit(owner, { property_size_unit: 'square_feet' })
     assert.equal(changedUnit.status, 200)
-    assert.deepEqual(changedUnit.body, { home: { ...listed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, property_size: 80.5, property_size_unit: 'square_feet' }, channel_push: null })
+    assert.deepEqual(changedUnit.body, { home: { ...listed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, property_size: 80.5, property_size_unit: 'square_feet' }, channel_push: null, airbnb_unsynced: [] })
     assert.partialDeepStrictEqual((await getProduct(db, ORG, made.product_id)).stay, { ...propertyDetails, property_size: 80.5, property_size_unit: 'square_feet' })
     const partialProperties = { ...propertyDetails, total_floors: null, listing_floor: 4, property_size: 80.5, property_size_unit: 'square_feet' }
     const unknownTotal = await edit(owner, { total_floors: null, listing_floor: 4 })
     assert.equal(unknownTotal.status, 200)
-    assert.deepEqual(unknownTotal.body, { home: { ...listed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, ...partialProperties }, channel_push: null })
+    assert.deepEqual(unknownTotal.body, { home: { ...listed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, ...partialProperties }, channel_push: null, airbnb_unsynced: [] })
     assert.deepEqual(((await call(owner, 'GET')).body.homes as Array<{ product_id: string }>).find(home => home.product_id === made.product_id), unknownTotal.body.home)
     assert.partialDeepStrictEqual((await getProduct(db, ORG, made.product_id)).stay, partialProperties)
     assert.deepEqual(await db.prepare('SELECT listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit FROM product_stay_configs WHERE product_id = ?').bind(made.product_id).first(), partialProperties)
     // Clearing: null removes a value, an empty list offers nothing.
     const cleared = await edit(owner, { ...unspecifiedPropertyDetails, wifi_password: null, amenities: [], bedrooms: null, checkout_instructions: [] })
     assert.equal(cleared.status, 200)
-    assert.deepEqual(cleared.body, { home: { ...listed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, ...unspecifiedPropertyDetails, wifi_password: null, amenities: [], amenity_answers: [], bedrooms: null, checkout_instructions: [] }, channel_push: null })
+    assert.deepEqual(cleared.body, { home: { ...listed, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, ...unspecifiedPropertyDetails, wifi_password: null, amenities: [], amenity_answers: [], bedrooms: null, checkout_instructions: [] }, channel_push: null, airbnb_unsynced: [] })
     assert.deepEqual(((await call(owner, 'GET')).body.homes as Array<{ product_id: string }>).find(home => home.product_id === made.product_id), cleared.body.home)
     assert.deepEqual(await db.prepare('SELECT wifi_password, amenities, bedrooms, checkout_instructions FROM product_stay_configs WHERE product_id = ?').bind(made.product_id).first(),
       { wifi_password: null, amenities: '[]', bedrooms: null, checkout_instructions: '[]' })

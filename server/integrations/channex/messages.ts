@@ -1,4 +1,4 @@
-import { channexCreate, channexGet, channexList, ChannexError, type ChannexEnv } from './client'
+import { channexCreate, channexGet, channexList, channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, integer, object, resource, string, type JsonRecord, type Resource } from './data'
 
 export interface ChannexMessageThread {
@@ -18,7 +18,12 @@ export interface ChannexMessageThread {
 export interface ChannexMessage {
   id: string
   threadId: string
-  sender: 'guest' | 'property' | 'system'
+  /**
+   * Channex documents `guest` and `property`; it also sends `system` and
+   * `agent`, the latter an Airbnb agent (meta.role "AGENT"), as read from a
+   * live Airbnb thread on 2026-10-23. Neither is the guest or the host's team.
+   */
+  sender: 'guest' | 'property' | 'system' | 'agent'
   text: string | null
   attachments: string[]
   insertedAt: string
@@ -134,7 +139,7 @@ export function parseChannexMessage(value: unknown, env: ChannexEnv, uncertain =
   if (text !== null && typeof text !== 'string') fail(label, 'message', 'Expected text or null for an attachment-only message', uncertain)
   if ((text === null || !text.trim()) && attachments.length === 0) fail(label, 'message', 'A message needs text or an attachment', uncertain)
   const sender = attributes.sender
-  if (sender !== 'guest' && sender !== 'property' && sender !== 'system') fail(label, 'sender', 'Expected guest, property or system', uncertain)
+  if (sender !== 'guest' && sender !== 'property' && sender !== 'system' && sender !== 'agent') fail(label, 'sender', 'Expected guest, property, system or agent', uncertain)
   const meta = attributes.meta === undefined || attributes.meta === null
     ? attributes.meta
     : read(label, 'meta', () => object(attributes.meta, 'meta'), uncertain)
@@ -211,6 +216,14 @@ async function installedMessages(env: ChannexEnv, propertyId: string, uncertain 
   if (matches.length > 1) fail('application_installation', 'property_id', 'Property has more than one Messages installation', uncertain)
   const found = matches[0]
   return found ? { id: found.id, propertyId: found.propertyId, applicationCode: 'channex_messages' } : null
+}
+
+/** Remove the property's Messages installation, if any, and confirm through the list endpoint that it is gone. */
+export async function uninstallChannexMessages(env: ChannexEnv, propertyId: string): Promise<void> {
+  const existing = await installedMessages(env, propertyId)
+  if (!existing) return
+  await channexRequest(env, `/applications/${encodeURIComponent(existing.id)}/uninstall`, 'DELETE')
+  if (await installedMessages(env, propertyId, true)) fail(`application_installation:${existing.id}`, 'id', 'The Messages installation is still listed after uninstalling it', true)
 }
 
 /** Read first, install once if absent, and confirm the installation through the list endpoint. */

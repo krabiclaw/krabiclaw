@@ -119,6 +119,10 @@ The representative client order is:
 3. NCLS: home, services and details, pricing, articles, contact, and schedule.
 4. KrabiClaw's own site: home, documentation, blog, and the help form. It is an
    ordinary site on the platform template, so it is qualified like a tenant.
+5. For lodging changes on staging, Saltleaf Stays: home, the homes index and a
+   home detail, nightly availability and the guest booking form. Use the
+   [fictional lodging demo](lodging-demo.md); inspect existing calendar, Airbnb
+   and guest-message state without resetting the demo or sending a message.
 
 For a shared renderer, routing, theme, content-model, or destructive
 content-migration change, expand that representative set to every published

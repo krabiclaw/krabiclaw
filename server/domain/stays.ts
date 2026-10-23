@@ -13,7 +13,7 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { validateProductDetails, validateStayAlarmDetails } from '~/shared/product-details'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
@@ -21,7 +21,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, pushStayNights, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import { completeChannelPush, pushAirbnbListingSettings, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
@@ -204,6 +204,9 @@ export interface StayHome {
    * nights; one importing (a draft not yet activated among them) or disconnected does not.
    */
   channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null
+  /** The Airbnb listing the home was imported from, and that listing's editor on Airbnb; null for a home not imported from Airbnb. */
+  airbnb_listing_id: string | null
+  airbnb_editor_url: string | null
   /**
    * The home's photos in order, the cover first: its product's own media
    * (the product image, then its gallery), the same pictures its pages show.
@@ -362,7 +365,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
-           ${liveHomeSql('p')} AS live, m.enabled AS channel_enabled, m.import_stage AS channel_stage
+           ${liveHomeSql('p')} AS live, m.enabled AS channel_enabled, m.import_stage AS channel_stage, m.listing_id AS airbnb_listing_id
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
@@ -418,11 +421,42 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
         provider: 'channex',
         status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
       },
+      airbnb_listing_id: row.airbnb_listing_id === null ? null : String(row.airbnb_listing_id),
+      airbnb_editor_url: row.airbnb_listing_id === null ? null : airbnbEditorUrl(String(row.airbnb_listing_id), 'details'),
       photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
       photo_rooms: photoRooms.get(String(row.product_id)) ?? [],
       accessibility: accessibility.get(String(row.product_id))!,
     }
   })
+}
+
+/** A page of an Airbnb listing's editor, as Airbnb's own editor addresses it (read 2026-10-23). */
+function airbnbEditorUrl(listingId: string, page: string): string {
+  return `https://www.airbnb.com/hosting/listings/editor/${encodeURIComponent(listingId)}/${page}`
+}
+
+/** The Airbnb listing fields Channex cannot write, each with the page of Airbnb's editor that holds it (read 2026-10-23). */
+const AIRBNB_ONLY_FIELDS = {
+  name: 'details/title', description: 'details/description', photos: 'details/photo-tour', amenities: 'details/amenities', max_guests: 'details/number-of-guests',
+  check_in_method: 'arrival/check-in-method', wifi: 'arrival/wifi-details', directions: 'arrival/directions', house_manual: 'arrival/house-manual',
+} as const
+type AirbnbOnlyField = keyof typeof AIRBNB_ONLY_FIELDS
+/** The Airbnb field each home field is part of. */
+const AIRBNB_FIELD_OF: Record<string, AirbnbOnlyField> = {
+  name: 'name', description: 'description', photos: 'photos', amenities: 'amenities', amenity_answers: 'amenities', max_guests: 'max_guests',
+  check_in_method: 'check_in_method', check_in_instructions: 'check_in_method', wifi_network: 'wifi', wifi_password: 'wifi', directions: 'directions', house_manual: 'house_manual',
+}
+
+/**
+ * The Airbnb fields a save changed on a home syncing with Airbnb that Airbnb
+ * will not receive, each with its page in the listing's Airbnb editor, so the
+ * host can make the same change there. Empty for a home not syncing, or a save
+ * of fields Airbnb receives or has none of.
+ */
+export function airbnbUnsynced(home: StayHome, fields: readonly string[]): Array<{ field: AirbnbOnlyField; airbnb_url: string }> {
+  if (home.channel?.status !== 'connected' || !home.airbnb_listing_id) return []
+  const changed = [...new Set(fields.flatMap(field => AIRBNB_FIELD_OF[field] ? [AIRBNB_FIELD_OF[field]] : []))]
+  return changed.map(field => ({ field, airbnb_url: airbnbEditorUrl(home.airbnb_listing_id!, AIRBNB_ONLY_FIELDS[field]) }))
 }
 
 function nullableText(value: unknown): string | null {
@@ -620,7 +654,7 @@ function locationPatch(body: Record<string, unknown>): UpdateLocationInput {
  * connected home, a new base price or minimum stay is pushed for the nights
  * ahead, because nights without their own value use them.
  */
-export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: StayAccess, productId: string, body: Record<string, unknown>): Promise<{ home: StayHome; channel_push: SuccessfulChannelPush | null }> {
+export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: StayAccess, productId: string, body: Record<string, unknown>): Promise<{ home: StayHome; channel_push: SuccessfulChannelPush | null; airbnb_unsynced: ReturnType<typeof airbnbUnsynced> }> {
   requireManager(access)
   const home = await readStayHome(db, access, productId)
   const unknown = Object.keys(body).find(key => !(EDITABLE_HOME_FIELDS as readonly string[]).includes(key))
@@ -678,6 +712,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     else if (base) patch.variants = [{ id: variant.id, prices_mode: 'replace', prices: variant.prices.filter(other => other.id !== base.id).map(other => ({ id: other.id })) }]
   }
   const pushes = pricing || nights !== null
+  const settings = touchesAirbnbSettings(patch)
   // Clearing an already absent base price still asks for channel completion,
   // but creates no product pricing patch for updateProduct to preflight.
   if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
@@ -700,19 +735,19 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
       metadata: { fields: columns.sort().join(',') }, onlyIfPreviousChangedOneRow: true })], { operation: 'Update home arrival guide' })
     if (results[0]?.meta.changes !== 1) fail(409, 'HOME_CHANGED', 'The home changed before its arrival guide was saved; reload it', 'product_id')
   }
-  const product = pushes ? await getProduct(db, access.organizationId, productId) : null
-  const channelPush = product ? await pushStayHomeNights(db, env, access, product) : null
+  const product = pushes || settings !== null ? await getProduct(db, access.organizationId, productId) : null
+  const channelPush = product ? await pushStayHomeChannel(db, env, access, product, { nights: pushes, settings }) : null
   return completeChannelPush(channelPush, { product_id: productId, ...(product ? { updated_at: product.updated_at } : {}) }, async () => {
     const updated = await readStayHome(db, access, productId)
     if (zone !== null && zone !== home.timezone) await planHomeMessages(db, access.organizationId, home.location_id)
-    if (product && channelPush !== null) {
+    if (product && pushes && channelPush !== null) {
       await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: product.updated_at })
     }
     // A product or location change already announced itself; the arrival guide and the listing switch do here.
     if (instructionsAt !== null || 'published' in body) {
       await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: instructionsAt ?? new Date().toISOString() })
     }
-    return { home: updated }
+    return { home: updated, airbnb_unsynced: airbnbUnsynced(updated, Object.keys(body)) }
   })
 }
 
@@ -1252,10 +1287,104 @@ async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, pro
 }
 
 /** A base price or minimum stay changes the same 500 future nights on every write surface. */
-export async function pushStayHomeNights(db: DbClient, env: ChannexEnv, access: StayAccess, product: Pick<Product, 'id' | 'updated_at'>): Promise<ChannelPushCompletion> {
+/**
+ * Our cancellation policies as Airbnb's own: the option of the same title and
+ * wording in Airbnb's listing editor (read 2026-10-23), as Channex names it.
+ * Airbnb's editor offers no Strict, so a home syncing with Airbnb is refused one.
+ */
+const AIRBNB_CANCELLATION: Partial<Record<StayCancellationPolicy, string>> = {
+  flexible: 'flexible', moderate: 'moderate', limited: 'firm_14', firm: 'better_strict_with_grace_period',
+}
+
+/**
+ * Refuse, before anything is written, a value a home syncing with Airbnb could
+ * not send: a short-term cancellation policy Airbnb does not offer.
+ */
+export async function requireAirbnbAcceptable(db: DbClient, organizationId: string, productId: string, patch: UpdateProductInput): Promise<void> {
+  const policy = patch.stay?.cancellation_policy
+  if (!policy || AIRBNB_CANCELLATION[policy]) return
+  const syncing = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1", [organizationId, productId])
+  if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', `Airbnb has no ${STAY_CANCELLATION_POLICIES[policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, 'cancellation_policy')
+}
+const AIRBNB_LONG_TERM_CANCELLATION: Record<StayLongTermCancellationPolicy, string> = { firm: 'CANCEL_LONG_TERM_FAIR', strict: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD' }
+/** House rules Airbnb takes as guest controls, by product detail. */
+const AIRBNB_GUEST_CONTROLS = { pets_allowed: 'allows_pets_as_host', smoking_allowed: 'allows_smoking_as_host', events_allowed: 'allows_events_as_host' } as const
+/** Which of a connected home's Airbnb listing settings a product write changes, by section. */
+export type AirbnbSettingSections = { [Section in keyof AirbnbListingSettings]: boolean }
+
+export function touchesAirbnbSettings(patch: UpdateProductInput): AirbnbSettingSections | null {
+  const sections = {
+    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined)
+      || Object.keys(AIRBNB_GUEST_CONTROLS).some(key => patch.details?.[key as keyof typeof AIRBNB_GUEST_CONTROLS] !== undefined),
+    availability: patch.stay?.min_nights !== undefined,
+  }
+  return sections.booking || sections.availability ? sections : null
+}
+
+/**
+ * A home's Airbnb listing settings, or why one of its values cannot be one.
+ * Airbnb takes whole hours: a check-in start from 08:00 to 02:00 the next day
+ * ("8"–"26"), an end up to 03:00 ("27") or flexible, and a checkout hour.
+ * Only what the home has is sent: an unset house rule or policy is left as
+ * Airbnb has it. Prices are not listing settings here: every night's price,
+ * the base price's included, already reaches Airbnb with the nightly calendar.
+ */
+function airbnbListingSettings(home: StayHome, details: Product['details'], sections: AirbnbSettingSections): AirbnbListingSettings | { refusal: string } {
+  const booking = sections.booking ? airbnbBookingSettings(home, details) : {}
+  if ('refusal' in booking) return booking as { refusal: string }
+  return { booking, availability: sections.availability ? { default_min_nights: home.min_nights } : {} }
+}
+
+function airbnbBookingSettings(home: StayHome, details: Product['details']): Record<string, unknown> | { refusal: string } {
+  const hour = (time: string, field: string): number | { refusal: string } => {
+    const [hh, mm] = time.split(':')
+    return mm === '00' ? Number(hh) : { refusal: `Airbnb takes ${field} in whole hours; ${time} was saved but not sent to Airbnb` }
+  }
+  const start = hour(home.check_in_time, 'the check-in start')
+  if (typeof start !== 'number') return start
+  const startHour = start < 8 ? start + 24 : start
+  if (startHour > 26) return { refusal: `Airbnb's check-in start is between 08:00 and 02:00; ${home.check_in_time} was saved but not sent to Airbnb` }
+  const booking: Record<string, unknown> = { check_in_time_start: String(startHour) }
+  if (home.check_in_end_time === null) booking.check_in_time_end = 'FLEXIBLE'
+  else {
+    const end = hour(home.check_in_end_time, 'the check-in end')
+    if (typeof end !== 'number') return end
+    // An end earlier than the start is the next day, as is every end of a start after midnight.
+    const endHour = startHour >= 24 || end <= start ? end + 24 : end
+    if (endHour > 27 || endHour <= startHour) return { refusal: `Airbnb's check-in end is after the start and no later than 03:00; ${home.check_in_end_time} was saved but not sent to Airbnb` }
+    booking.check_in_time_end = String(endHour)
+  }
+  const checkout = hour(home.check_out_time, 'checkout')
+  if (typeof checkout !== 'number') return checkout
+  booking.check_out_time = checkout
+  const controls = Object.fromEntries((Object.entries(AIRBNB_GUEST_CONTROLS) as Array<[keyof typeof AIRBNB_GUEST_CONTROLS, string]>).flatMap(([key, control]) => typeof details[key] === 'boolean' ? [[control, details[key]]] : []))
+  if (Object.keys(controls).length) booking.guest_controls = controls
+  const category = home.cancellation_policy ? AIRBNB_CANCELLATION[home.cancellation_policy] : undefined
+  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy; it was saved but not sent to Airbnb` }
+  const cancellation = {
+    ...(category ? { cancellation_policy_category: category } : {}),
+    ...(home.long_term_cancellation_policy ? { lts_cancellation_policy_id: AIRBNB_LONG_TERM_CANCELLATION[home.long_term_cancellation_policy] } : {}),
+  }
+  if (Object.keys(cancellation).length) booking.cancellation_policy_settings = cancellation
+  return booking
+}
+
+/**
+ * Push what a write changed of a connected home to its channel: its Airbnb
+ * listing settings, then its nights for the calendar ahead (nights without a
+ * value of their own use the home's base price and minimum stay). A home that
+ * is not connected has nothing to push and returns null.
+ */
+export async function pushStayHomeChannel(db: DbClient, env: ChannexEnv, access: StayAccess, product: Pick<Product, 'id' | 'updated_at'>, changes: { nights: boolean; settings: AirbnbSettingSections | null }): Promise<ChannelPushCompletion> {
   try {
     const home = await readStayHome(db, access, product.id)
     if (home.channel?.status !== 'connected') return null
+    if (changes.settings) {
+      const settings = airbnbListingSettings(home, (await getProduct(db, access.organizationId, product.id)).details, changes.settings)
+      const pushed: ChannelPush | null = 'refusal' in settings ? { state: 'needs_review', detail: settings.refusal } : await pushAirbnbListingSettings(db, env, access.organizationId, product.id, settings)
+      if (pushed?.state === 'needs_review' || !changes.nights) return pushed
+    }
+    if (!changes.nights) return null
     const today = homeToday(home.timezone)
     return await pushNights(db, env, access, product.id, [[today, addDays(today, MAX_CALENDAR_DAYS)]])
   } catch (cause) {

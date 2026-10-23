@@ -48,7 +48,7 @@ const secondaryUrl = computed(() => blockTextOrNull(props.block.data.secondary_u
  * A page whose whole job is to sell one vertical closes large; a prompt inside
  * a page that is about something else reads at the size of its other cards.
  */
-const LARGE_PAGES = new Set(['/', '/restaurants', '/experiences', '/legal'])
+const LARGE_PAGES = new Set(['/', '/restaurants', '/experiences', '/lodging', '/legal'])
 const size = computed<'md' | 'lg'>(() => (LARGE_PAGES.has(props.page.path) ? 'lg' : 'md'))
 </script>
 

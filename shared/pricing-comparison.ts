@@ -22,7 +22,7 @@ export interface PricingComparisonRow {
 
 export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly PricingComparisonRow[] }> = [
   { title: 'Your website', rows: [
-    { id: 'site.management', label: 'Business website', detail: 'Restaurant, experience or law firm website.', included: 'Included' },
+    { id: 'site.management', label: 'Business website', detail: 'Restaurant, experience, law firm or lodging website.', included: 'Included' },
     { id: 'themes.public', label: 'Saya and Blawby themes', detail: 'The theme follows your business type.', included: 'Included' },
     { id: 'site.management', label: 'KrabiClaw subdomain', detail: 'A hosted address for your site.', included: 'Included' },
     { id: 'site.seo', label: 'Structured search metadata', detail: 'Business-type metadata supports search discovery; search ranking or indexing is not guaranteed.', included: 'Included' },
@@ -31,19 +31,27 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
   ] },
   { title: 'Manage your business', rows: [
     { id: 'content.standard', label: 'Dashboard and ChatGPT tools', detail: 'Edit supported resources with authorized tools. Access varies by operation.', included: 'Included' },
-    { id: 'catalog.products', label: 'Menus, offerings and photos', detail: 'Manage products and media for your business type.', included: 'Included' },
+    { id: 'catalog.products', label: 'Menus, offerings, homes and photos', detail: 'Manage products and media for your business type.', included: 'Included' },
     { id: 'media.management', label: 'Image and video library', detail: 'Upload and place supported media on your site; videos need a poster image.', included: 'Included' },
     { id: 'analytics.reports', label: 'Website analytics', detail: 'Read available organization-scoped reports. Connected Google reports require provider setup.', included: 'Included' },
     { id: 'locations.included', label: 'Locations', detail: `${INCLUDED_LOCATIONS} locations included on every plan. Growth and Business add more at ${additionalLocationPrice()}.`, planValue: planId => isKnownRecurringPlan(planId)
       ? `${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}`
       : `${INCLUDED_LOCATIONS} included` },
-    { id: 'homes.included', label: 'Homes', detail: `${INCLUDED_HOMES} homes included on every plan. Growth and Business add more at ${additionalHomePrice()}. A home is a place to stay, counted as a home and not as a location.`, planValue: planId => isKnownRecurringPlan(planId)
+    { id: 'homes.included', label: 'Homes', detail: `${INCLUDED_HOMES} live homes included on every plan. Growth and Business add more at ${additionalHomePrice()}. A home counts while active at an active location and either published on your site or syncing through an enabled Airbnb mapping; drafts are free. A home is counted separately from locations.`, planValue: planId => isKnownRecurringPlan(planId)
       ? `${INCLUDED_HOMES} included, then ${additionalHomePrice()}`
       : `${INCLUDED_HOMES} included` },
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
     { id: 'posts.website', label: 'Website posts', detail: 'Create and publish posts on your website.', included: 'Included' },
     { id: 'social.external-channels', label: 'Facebook, Instagram and Discord publishing', detail: 'Explicit publishing to connected channels requires provider permissions and valid media.', entitlement: 'managed_service' },
     { id: 'ads.google', label: 'Google Ads campaign management', detail: 'Create and pause Search campaigns and change their daily budgets in a connected Google Ads account. Ad spend is billed by Google; campaigns we manage are 10% of monthly ad spend.', entitlement: 'marketing' },
+    { id: 'app.ios', label: 'iPhone companion app', detail: 'Use your existing KrabiClaw account with no extra subscription. Team permissions and plan capabilities still apply.', included: 'Included' },
+  ] },
+  { title: 'Places to stay', rows: [
+    { id: 'stays.listings', label: 'Home listings and photo tours', detail: 'Publish home descriptions, amenities, rooms, photos and house rules on your lodging website.', included: 'Included' },
+    { id: 'stays.calendar', label: 'Nightly rates and stay calendar', detail: 'Set nightly prices, block dates and record stays and offline payments. Team members see the homes assigned to them.', included: 'Included' },
+    { id: 'stays.airbnb', label: 'Airbnb connection', detail: 'Connect your Airbnb account to import listings and synchronize stays and availability. Review imported drafts before making them live; your home allowance applies.', included: 'Included' },
+    { id: 'stays.guest-messaging', label: 'Arrival guides and guest messages', detail: 'Save private arrival instructions and guest replies, and schedule messages around booking, check-in and checkout. Delivery needs a guest conversation and a configured channel.', included: 'Included' },
+    { id: 'stays.direct-booking', label: 'Direct stay booking with online payment', detail: `Guests book available nights and pay on your website. Requires Stripe setup; ${PAYMENTS_FEE}, billed at the end of each month.`, entitlement: 'payments' },
   ] },
   { title: 'Guests and bookings', rows: [
     { id: 'bookings.requests', label: 'Bookings and consultation requests', detail: 'Availability depends on your business type and configured offerings.', included: 'Included' },

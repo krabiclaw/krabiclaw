@@ -320,7 +320,7 @@ function additionalHomes(used: number, adding: number): number {
  * the quote both decide by this, so a quote that allows the homes is one the
  * write will allow. Reads the subscription rows and nothing from Stripe.
  */
-async function homeAllowance(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number) {
+export async function homeAllowance(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number) {
   const [used, subscriptions] = await Promise.all([countActiveHomes(db, organizationId), readOrganizationSubscriptions(env, [organizationId])])
   const rows = subscriptions.get(organizationId) ?? []
   const plan = planFromSubscriptions(organizationId, rows)
