@@ -1083,12 +1083,16 @@ test.describe('dashboard pane hierarchy', () => {
       expect(availability.status(), await availability.text()).toBe(200)
       const savedSessions = (await availability.json() as { sessions: SessionAvailability[] }).sessions
       expect(savedSessions.length, 'the assigned host can read its actual saved availability').toBeGreaterThan(0)
-      const calendarMonth = localNow(savedSessions[0]!.timezone, new Date(savedSessions[0]!.starts_at)).date.slice(0, 7)
+      const calendarDay = localNow(savedSessions[0]!.timezone, new Date(savedSessions[0]!.starts_at)).date
+      const calendarMonth = calendarDay.slice(0, 7)
       await open(memberPage, `/dashboard/${org}/calendar?product_id=${productId}&month=${calendarMonth}`)
       const calendar = memberPage.locator('#dashboard-panel-org-calendar')
       await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(editedName)
       await expect(calendar.getByRole('link', { name: 'Add availability', exact: true })).toBeVisible()
-      await expect(calendar.locator(`[data-session-id="${savedSessions[0]!.id}"]`)).toBeVisible()
+      // A month cell shows two times; the next future time can be its third.
+      await calendar.locator(`[data-day="${calendarDay}"]`).getByRole('link').first().click()
+      await expect(memberPage).toHaveURL(url => url.pathname === `/dashboard/${org}/calendar/${calendarDay}` && url.searchParams.get('product_id') === productId)
+      await expect(memberPage.locator('#dashboard-panel-calendar-day').locator(`[data-session-id="${savedSessions[0]!.id}"]`)).toBeVisible()
     } catch (error) {
       failures.push(error)
     } finally {
