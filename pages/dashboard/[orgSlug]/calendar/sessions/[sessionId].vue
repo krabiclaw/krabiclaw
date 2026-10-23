@@ -88,7 +88,7 @@ function reset() {
   saveError.value = null
 }
 watch([data, error, p.product, sessionId], ([,,, nextId], [,,, previousId]) => {
-  if (nextId !== previousId) {
+  if (nextId !== previousId && !(saving.value && previousId === 'new')) {
     reset()
     revision.value++
   } else if (!saving.value && !recovering.value && !saveError.value && !error.value) reset()
