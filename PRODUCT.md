@@ -65,29 +65,44 @@ A push that Apple refuses is recorded as failed.
 ## Airbnb listings
 
 A host connects their Airbnb account through Channex and imports a listing as a
-home. The import walks fixed stages, each resumed by the apps until it
-completes: the Channex property, room type and rate plan; the listing's next
-500 nights, pushed and verified; the Airbnb mapping and activation; future
-reservations; the listing's content; and the conversation feed. The content
-stage reads what the listing says about itself and writes it onto the home:
-its photos in Airbnb's order with their captions, its description from
-Airbnb's summary, space, neighbourhood and house rules, its arrival guide from
-the check-in instruction, access and interaction texts, the house manual, the
-directions and the wifi details, its bedroom, bed and bathroom counts, its
-amenities by Airbnb's own codes, and its check-in method where Airbnb's
-category has a verified counterpart. Airbnb's transit and other notes are not
-imported. Nothing is filled in: a text Airbnb has no value for leaves the
-home's own alone, a text over the home's limit is cut, an amenity code the
-home vocabulary lacks is not written, a photo the host has since deleted from
-the media library stays deleted, photos past the home's limit are not fetched,
-and Airbnb's rooms are not created as photo rooms because its photos name no
-room. Each of those is recorded in the
-import's content report, which the import progress and the listings carry so
-the apps can show the host what to finish by hand. A photo Airbnb cannot serve
-stops the stage naming the image; the retry keeps every photo already stored.
-A completed import can run its content stage again from the dashboard API, and
-`scripts/airbnb-content-backfill.mjs` does so for every home an organization
-imported before content was carried over.
+home. The import asks only for what Airbnb leaves out (the organization's
+contact details, until it has them) and takes everything else from Airbnb. A
+listing without a check-in start or checkout time on Airbnb is refused, naming
+the field to set there. The import walks fixed stages, each resumed by the
+apps until it completes: the Channex property, room type and rate plan; the
+listing's next 500 nights, pushed and verified; the Airbnb mapping and
+activation; future reservations; the listing's content; and the conversation
+feed.
+
+The content stage copies the listing onto the home, one Airbnb field to one
+home field:
+
+- Airbnb's Listing description becomes the home's description. Its space,
+  guest access, interaction, other details, neighbourhood, getting around and
+  house rules become the home's sections of the same names. Airbnb's combined
+  description text is not used.
+- The check-in window (start, end or Flexible) and checkout come from Airbnb.
+- Airbnb's pets, events and smoking answers and its quiet hours become the
+  home's house rules.
+- The check-in instruction becomes the home's check-in instructions. The house
+  manual, directions and wifi details become the arrival guide's fields.
+- Bedroom, bed and bathroom counts, amenities by Airbnb's own codes, and the
+  check-in method where Airbnb's category has a verified counterpart.
+- Photos come in Airbnb's order with their captions, fetched at 2560 px.
+
+Nothing is filled in. A text Airbnb has no value for leaves the home's own
+alone. A text over the home's limit is cut. An amenity code the home
+vocabulary lacks is not written. A photo the host deleted stays deleted, and
+photos past the home's limit are not fetched. Airbnb's rooms are not created
+as photo rooms, because its photos name no room. Each of these is recorded in
+the import's content report, which the apps show the host. A photo Airbnb
+cannot serve stops the stage, naming the image and the address tried. The
+retry keeps every photo already stored.
+
+A completed import can run its content stage again from the dashboard API.
+`scripts/airbnb-content-backfill.mjs` does so for an organization's homes,
+fetching photos stored by earlier imports again at full size into the same
+photos.
 
 ## Team conversations
 

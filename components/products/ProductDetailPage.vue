@@ -120,7 +120,7 @@
             <div class="flex items-start gap-4">
               <TenantIcon name="clock" class="size-5 text-default shrink-0 mt-0.5" />
               <div>
-                <p class="font-medium text-default text-sm">{{ t('stay.check_in_after', { time: formatTime(product.stay!.check_in_time, locale) }) }}</p>
+                <p class="font-medium text-default text-sm">{{ stayCheckIn }}</p>
                 <p class="text-xs text-muted">{{ t('stay.check_out_before', { time: formatTime(product.stay!.check_out_time, locale) }) }}</p>
               </div>
             </div>
@@ -940,10 +940,18 @@ const stayLocationDetails = computed(() => STAY_LOCATION_DETAIL_KEYS.flatMap(key
   const text = props.product.details[key]
   return typeof text === 'string' ? [{ key, label: t(`stay.${key}`), text }] : []
 }))
+/** Airbnb's wording: a window when the check-in has an end, otherwise its start alone. */
+const stayCheckIn = computed(() => {
+  const stay = props.product.stay
+  if (!stay) return ''
+  return stay.check_in_end_time === null
+    ? t('stay.check_in_after', { time: formatTime(stay.check_in_time, locale.value) })
+    : t('stay.check_in_window', { start: formatTime(stay.check_in_time, locale.value), end: formatTime(stay.check_in_end_time, locale.value) })
+})
 const stayRules = computed(() => props.product.kind === 'stay' ? stayHouseRuleLines(props.product.details, value => formatTime(value, locale.value)) : [])
 /** Airbnb's three columns for a home: house rules with its times and party, safety and property, then its other details. */
 const stayHouseRules = computed(() => props.product.stay ? [
-  t('stay.check_in_after', { time: formatTime(props.product.stay.check_in_time, locale.value) }),
+  stayCheckIn.value,
   t('stay.check_out_before', { time: formatTime(props.product.stay.check_out_time, locale.value) }),
   t('stay.guests_maximum', props.product.stay.max_guests),
   ...stayRules.value,
@@ -1111,6 +1119,7 @@ const stayStructuredData = computed(() => {
     ] } : {}),
     additionalProperty: [
       { '@type': 'PropertyValue', name: 'checkinTime', value: stay.check_in_time },
+      ...(stay.check_in_end_time !== null ? [{ '@type': 'PropertyValue' as const, name: 'checkinEndTime', value: stay.check_in_end_time }] : []),
       { '@type': 'PropertyValue', name: 'checkoutTime', value: stay.check_out_time },
       { '@type': 'PropertyValue', name: 'minimumNights', value: stay.min_nights },
       ...(stay.total_floors !== null ? [{ '@type': 'PropertyValue' as const, name: 'totalFloors', value: stay.total_floors }] : []),

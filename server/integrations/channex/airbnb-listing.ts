@@ -14,7 +14,7 @@ import { ChannexDataError, integer, object, received, string, type JsonRecord } 
  * host to supply; nothing is filled in for them.
  */
 
-export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'propertyType', 'childBeds', 'infantCots'] as const
+export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'propertyType'] as const
 export type DetailField = typeof DETAIL_FIELDS[number]
 export const PROPERTY_TYPES = ['apartment', 'holiday_home', 'villa', 'chalet', 'lodge'] as const
 export const CALENDAR_NIGHTS = 500
@@ -29,8 +29,14 @@ export interface ListingDetails {
   nightlyRate: string
   fields: Partial<Record<DetailField, string>>
   missingFields: DetailField[]
-  /** Airbnb's check-in start and checkout hours as HH:MM, or null when Airbnb has none set. */
+  /**
+   * Airbnb's check-in window and checkout (`booking_settings.check_in_time_start`,
+   * `check_in_time_end`, `check_out_time`) as local HH:MM. A start or checkout
+   * Airbnb has not set is null, and the import refuses it; a flexible or unset
+   * end is null.
+   */
   checkInTime: string | null
+  checkInEndTime: string | null
   checkOutTime: string | null
 }
 
@@ -69,13 +75,17 @@ function amount(value: unknown, label: string): string {
 }
 
 /**
- * Airbnb states check-in start and checkout as an hour of the day, as the
- * string "16" or the number 10; "FLEXIBLE" and other words mean no set time.
+ * Airbnb states check-in hours as strings, "16", from "8" to "27" where 24 and
+ * later are the small hours of the next day, or "FLEXIBLE" / "NOT_SELECTED";
+ * checkout as an integer hour, 0 to 23. Channex documents both
+ * (Channels.AirbnbListingBookingSettings). A word is null; anything else is
+ * not a shape Airbnb sends.
  */
-function hourTime(value: unknown): string | null {
-  const hour = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,2}$/.test(value) ? Number(value) : null
-  if (hour === null || !Number.isInteger(hour) || hour < 0 || hour > 23) return null
-  return `${String(hour).padStart(2, '0')}:00`
+function hourTime(value: unknown, label: string): string | null {
+  if (value === undefined || value === null || value === 'FLEXIBLE' || value === 'NOT_SELECTED') return null
+  const hour = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,2}$/.test(value) ? Number(value) : Number.NaN
+  if (!Number.isInteger(hour) || hour < 0 || hour > 27) throw new ChannexDataError(`${label} must be an hour or FLEXIBLE (got ${received(value)})`)
+  return `${String(hour % 24).padStart(2, '0')}:00`
 }
 
 /** The IANA zone at the listing's coordinates. Airbnb sends none of its own. */
@@ -119,14 +129,14 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       if (!(PROPERTY_TYPES as readonly string[]).includes(category)) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified KrabiClaw mapping. Import stopped for review.`)
       fields.propertyType = category
     }
-    // Airbnb's guest capacity does not split out children and infants, so
-    // those two always come from the host.
     return {
       id: listingId, title: string(listing.name, 'Listing name'), currency: string(pricing.listing_currency, 'Currency'),
       maxGuests: integer(listing.person_capacity, 'Guest capacity', 1), defaultOccupancy: integer(pricing.guests_included, 'Included guests', 1),
       nightlyRate: amount(pricing.default_daily_price, 'Base price'), fields,
       missingFields: DETAIL_FIELDS.filter(key => fields[key] === undefined),
-      checkInTime: hourTime(booking.check_in_time_start), checkOutTime: hourTime(booking.check_out_time),
+      checkInTime: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
+      checkInEndTime: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
+      checkOutTime: hourTime(booking.check_out_time, 'booking_settings.check_out_time'),
     }
   })
 }
@@ -140,9 +150,16 @@ export interface ListingImage {
   id: string
   caption: string | null
   sortOrder: number
-  /** The largest rendition Airbnb's listing details name: `extra_medium_url`. */
+  /**
+   * The photo at 2560 px wide: `extra_medium_url` (450×300) with its query
+   * replaced by `im_w=2560`. Airbnb's image server answers that width and 404s
+   * at 3840 (observed 2026-10-23, not documented); Channex names no larger URL.
+   */
   url: string
 }
+
+/** The width imported photos are fetched at. */
+export const PHOTO_WIDTH = 2560
 
 export interface ListingRoom {
   type: string
@@ -154,6 +171,14 @@ export interface ListingRoom {
 export interface ListingContent {
   images: ListingImage[]
   descriptions: Record<DescriptionField, string | null>
+  /** `booking_settings.guest_controls`: whether the host allows pets, events and smoking; null where Airbnb has no answer. */
+  guestControls: { pets: boolean | null; events: boolean | null; smoking: boolean | null }
+  /** Top-level `quiet_hours` as local HH:MM: null when Airbnb leaves it out, false when the list is empty. */
+  quietHours: { start: string; end: string } | false | null
+  /** The check-in window and checkout, as `listingDetails` reads them. */
+  checkInTime: string | null
+  checkInEndTime: string | null
+  checkOutTime: string | null
   /** Airbnb's amenity constants reported present (`is_present`), plus its `listing_views`, in Airbnb's spelling. */
   amenities: string[]
   bedrooms: number | null
@@ -175,6 +200,13 @@ function text(record: JsonRecord, key: string, label: string): string | null {
   return value.trim() ? value : null
 }
 
+function flag(record: JsonRecord, key: string, label: string): boolean | null {
+  const value = record[key]
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'boolean') throw new ChannexDataError(`${label} must be true, false or null (got ${received(value)})`)
+  return value
+}
+
 function count(record: JsonRecord, key: string, label: string, step: 1 | 0.5): number | null {
   const value = record[key]
   if (value === undefined || value === null) return null
@@ -183,12 +215,14 @@ function count(record: JsonRecord, key: string, label: string, step: 1 | 0.5): n
 }
 
 /**
- * The listing's content. Channex documents `images` (or null), `rooms` and
- * `descriptions` (or null) on the listing and leaves their items open;
- * `amenities`, `bedrooms`, `beds`, `bathrooms`, `house_manual`, `directions`,
- * the wifi fields and `check_in_option` are undocumented fields Airbnb returns
- * (checked live, 2026-10-22), so each is null when absent and an error when
- * present in another shape.
+ * The listing's content. Channex documents `images` (or null), `rooms`,
+ * `descriptions` (or null) and `booking_settings` (its check-in hours and
+ * `guest_controls`) and leaves the items open; `amenities`, `bedrooms`,
+ * `beds`, `bathrooms`, `house_manual`, `directions`, the wifi fields,
+ * `quiet_hours` and `check_in_option` are undocumented fields Airbnb returns
+ * (checked live on listings 2465888 and 39313043, 2026-10-22/23), so each is
+ * null when absent and an error when present in another shape. `quiet_hours`
+ * is on the listing itself, not in `guest_controls`.
  */
 export async function listingContent(env: ChannexEnv, channelId: string, listingId: string): Promise<ListingContent> {
   const listing = await listingRecord(env, channelId, listingId)
@@ -197,9 +231,11 @@ export async function listingContent(env: ChannexEnv, channelId: string, listing
     if (!Array.isArray(rawImages)) throw new ChannexDataError('images must be a list or null')
     const images = rawImages.map((value, index): ListingImage => {
       const image = object(value, `images[${index}]`)
-      const url = string(image.extra_medium_url, `images[${index}].extra_medium_url`)
-      if (!URL.canParse(url) || new URL(url).protocol !== 'https:') throw new ChannexDataError(`images[${index}].extra_medium_url must be an https URL`)
-      return { id: string(image.id, `images[${index}].id`), caption: text(image, 'caption', `images[${index}].caption`), sortOrder: integer(image.sort_order, `images[${index}].sort_order`), url }
+      const source = string(image.extra_medium_url, `images[${index}].extra_medium_url`)
+      if (!URL.canParse(source) || new URL(source).protocol !== 'https:') throw new ChannexDataError(`images[${index}].extra_medium_url must be an https URL`)
+      const url = new URL(source)
+      url.search = `?im_w=${PHOTO_WIDTH}`
+      return { id: string(image.id, `images[${index}].id`), caption: text(image, 'caption', `images[${index}].caption`), sortOrder: integer(image.sort_order, `images[${index}].sort_order`), url: url.toString() }
     }).sort((a, b) => a.sortOrder - b.sortOrder)
     if (new Set(images.map(image => image.id)).size !== images.length) throw new ChannexDataError('images must have distinct ids')
     const texts = listing.descriptions === null || listing.descriptions === undefined ? {} : object(listing.descriptions, 'descriptions')
@@ -229,13 +265,33 @@ export async function listingContent(env: ChannexEnv, channelId: string, listing
         }),
       }
     })
+    const booking = listing.booking_settings === undefined || listing.booking_settings === null ? {} : object(listing.booking_settings, 'booking_settings')
+    const controls = booking.guest_controls === undefined || booking.guest_controls === null ? {} : object(booking.guest_controls, 'booking_settings.guest_controls')
+    let quietHours: ListingContent['quietHours'] = null
+    if (listing.quiet_hours !== undefined && listing.quiet_hours !== null) {
+      if (!Array.isArray(listing.quiet_hours) || listing.quiet_hours.length > 1) throw new ChannexDataError(`quiet_hours must be a list of at most one window (got ${received(listing.quiet_hours)})`)
+      const window = listing.quiet_hours[0] === undefined ? null : object(listing.quiet_hours[0], 'quiet_hours[0]')
+      if (window) {
+        const start = hourTime(string(window.start_time, 'quiet_hours[0].start_time'), 'quiet_hours[0].start_time')
+        const end = hourTime(string(window.end_time, 'quiet_hours[0].end_time'), 'quiet_hours[0].end_time')
+        if (!start || !end) throw new ChannexDataError('quiet_hours[0] must name a start and an end hour')
+        quietHours = { start, end }
+      } else quietHours = false
+    }
     let checkInOption: ListingContent['checkInOption'] = null
     if (listing.check_in_option !== null && listing.check_in_option !== undefined) {
       const option = object(listing.check_in_option, 'check_in_option')
       checkInOption = { category: string(option.category, 'check_in_option.category'), instruction: text(option, 'instruction', 'check_in_option.instruction') }
     }
     return {
-      images, descriptions, amenities: [...new Set(amenities)], rooms, checkInOption,
+      images, descriptions, amenities: [...new Set(amenities)], rooms, checkInOption, quietHours,
+      guestControls: {
+        pets: flag(controls, 'allows_pets_as_host', 'guest_controls.allows_pets_as_host'), events: flag(controls, 'allows_events_as_host', 'guest_controls.allows_events_as_host'),
+        smoking: flag(controls, 'allows_smoking_as_host', 'guest_controls.allows_smoking_as_host'),
+      },
+      checkInTime: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
+      checkInEndTime: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
+      checkOutTime: hourTime(booking.check_out_time, 'booking_settings.check_out_time'),
       bedrooms: count(listing, 'bedrooms', 'bedrooms', 1), beds: count(listing, 'beds', 'beds', 1), bathrooms: count(listing, 'bathrooms', 'bathrooms', 0.5),
       houseManual: text(listing, 'house_manual', 'house_manual'), directions: text(listing, 'directions', 'directions'),
       wifiNetwork: text(listing, 'wifi_network', 'wifi_network'), wifiPassword: text(listing, 'wifi_password', 'wifi_password'),

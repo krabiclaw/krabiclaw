@@ -611,16 +611,16 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(availabilityPanel).not.toBeVisible()
     await page.getByRole('tab', { name: 'Arrival guide', exact: true }).click()
     const arrivalPanel = page.locator('#dashboard-panel-product-arrival-time')
-    await arrivalPanel.getByLabel(/^Check-in from/).fill('16:00')
-    await arrivalPanel.getByLabel(/^Checkout by/).fill('10:00')
+    await arrivalPanel.getByLabel(/^Start time/).fill('16:00')
+    await arrivalPanel.getByLabel(/^Time/).fill('10:00')
     const arrivalSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
     await arrivalPanel.getByRole('button', { name: 'Save', exact: true }).click()
     expect((await arrivalSaved).status()).toBe(200)
     await expect(arrivalPanel.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/arrival-time`) && url.searchParams.get('guide') === 'arrival')
     await page.reload()
-    await expect(arrivalPanel.getByLabel(/^Check-in from/)).toHaveValue('16:00')
-    await expect(arrivalPanel.getByLabel(/^Checkout by/)).toHaveValue('10:00')
+    await expect(arrivalPanel.getByLabel(/^Start time/)).toHaveValue('16:00')
+    await expect(arrivalPanel.getByLabel(/^Time/)).toHaveValue('10:00')
     await expect(arrivalPanel).toBeVisible()
     await arrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
@@ -639,7 +639,8 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
       product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
-      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
+      // A home the editor creates has a flexible check-in end until the host chooses one.
+      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
       // The editor's listing choices persist through the native home projection too.
       description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
@@ -2821,8 +2822,8 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await rulesPanel.getByRole('link', { name: /Check-in & checkout/ }).click()
       await expect(page).toHaveURL(`${productPath}/house-rules/arrival-time`)
       const rulesArrivalPanel = page.locator('#dashboard-panel-product-arrival-time')
-      await rulesArrivalPanel.getByLabel(/^Check-in from/).fill('16:00')
-      await rulesArrivalPanel.getByLabel(/^Checkout by/).fill('10:00')
+      await rulesArrivalPanel.getByLabel(/^Start time/).fill('16:00')
+      await rulesArrivalPanel.getByLabel(/^Time/).fill('10:00')
       await rulesArrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(page).toHaveURL(`${productPath}/house-rules`)
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
@@ -2834,13 +2835,18 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(cancelledRuleTimes.error).toBeNull()
       expect(cancelledRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '15:00', check_out_time: '11:00', max_guests: 4 })
       await rulesPanel.getByRole('link', { name: /Check-in & checkout/ }).click()
-      await expect(rulesArrivalPanel.getByLabel(/^Check-in from/)).toHaveValue('15:00')
-      await expect(rulesArrivalPanel.getByLabel(/^Checkout by/)).toHaveValue('11:00')
-      await rulesArrivalPanel.getByLabel(/^Check-in from/).fill('')
-      await expect(rulesArrivalPanel.getByText('Choose a check-in time.', { exact: true })).toBeVisible()
+      await expect(rulesArrivalPanel.getByLabel(/^Start time/)).toHaveValue('15:00')
+      await expect(rulesArrivalPanel.getByLabel(/^Time/)).toHaveValue('11:00')
+      await rulesArrivalPanel.getByLabel(/^Start time/).fill('')
+      await expect(rulesArrivalPanel.getByText('Choose a check-in start time.', { exact: true })).toBeVisible()
       await expect(rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-      await rulesArrivalPanel.getByLabel(/^Check-in from/).fill('16:00')
-      await rulesArrivalPanel.getByLabel(/^Checkout by/).fill('10:00')
+      await rulesArrivalPanel.getByLabel(/^Start time/).fill('16:00')
+      // Airbnb's check-in window: the end is Flexible until the host chooses an hour.
+      const checkInEnd = rulesArrivalPanel.getByRole('combobox', { name: 'End time' })
+      await expect(checkInEnd).toContainText('Flexible')
+      await checkInEnd.click()
+      await page.getByRole('option', { name: '21:00', exact: true }).click()
+      await rulesArrivalPanel.getByLabel(/^Time/).fill('10:00')
       const rulesEndpoint = `/api/editor/organizations/${organizationId}/products/${assignedHome.product_id}`
       const interceptRules = (url: URL) => url.pathname === rulesEndpoint
       await page.route(interceptRules, async route => route.request().method() === 'PATCH' ? await route.abort('failed') : await route.continue())
@@ -2848,20 +2854,21 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const failedRuleTimesRequest = await interruptedRuleTimes
       expect(failedRuleTimesRequest.failure()).toEqual({ errorText: 'net::ERR_FAILED' })
-      expect(failedRuleTimesRequest.postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_out_time: '10:00' } })
+      expect(failedRuleTimesRequest.postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00' } })
       await expect(rulesArrivalPanel.getByText('Failed to fetch', { exact: false })).toBeVisible()
-      await expect(rulesArrivalPanel.getByLabel(/^Check-in from/)).toHaveValue('16:00')
-      await expect(rulesArrivalPanel.getByLabel(/^Checkout by/)).toHaveValue('10:00')
+      await expect(rulesArrivalPanel.getByLabel(/^Start time/)).toHaveValue('16:00')
+      await expect(checkInEnd).toContainText('21:00')
+      await expect(rulesArrivalPanel.getByLabel(/^Time/)).toHaveValue('10:00')
       const failedRuleTimes = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
       expect(failedRuleTimes.error).toBeNull()
-      expect(failedRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '15:00', check_out_time: '11:00', max_guests: 4 })
+      expect(failedRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4 })
       expect(failedRuleTimes.data!.product.details).toEqual(beforeRules.data!.product.details)
       await page.unroute(interceptRules)
       const ruleTimesSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === rulesEndpoint)
       await rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const ruleTimesResponse = await ruleTimesSaved
       expect(ruleTimesResponse.status(), await ruleTimesResponse.text()).toBe(200)
-      expect(ruleTimesResponse.request().postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_out_time: '10:00' } })
+      expect(ruleTimesResponse.request().postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00' } })
       await expect(page).toHaveURL(`${productPath}/house-rules`)
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
       await expect(ruleGuests).toHaveValue('5')
@@ -2869,7 +2876,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(quietEnd).toContainText('07:00')
       const savedRuleTimes = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
       expect(savedRuleTimes.error).toBeNull()
-      expect(savedRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '16:00', check_out_time: '10:00', max_guests: 4 })
+      expect(savedRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 4 })
       expect(savedRuleTimes.data!.product.details).toEqual(beforeRules.data!.product.details)
       const newerDetail = await call('update_product', { product_id: assignedHome.product_id, details_mode: 'merge', details: { guest_access: sharedGarden } })
       expect(newerDetail.error).toBeNull()

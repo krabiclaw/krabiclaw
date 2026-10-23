@@ -94,3 +94,36 @@ export function sniffMediaMimeType(data: Uint8Array): string {
 
   return "application/octet-stream";
 }
+
+/**
+ * The pixel size a JPEG, PNG or WebP file declares in its header, or null for
+ * any other type or a header too short to say. Read from the bytes alone, so
+ * an import can record what it stored.
+ */
+export function imagePixelSize(data: Uint8Array): { width: number; height: number } | null {
+  const type = sniffMediaMimeType(data)
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  if (type === "image/png") return data.byteLength >= 24 ? { width: view.getUint32(16), height: view.getUint32(20) } : null
+  if (type === "image/jpeg") {
+    // Walk the segments to the first start-of-frame marker (C0–CF except C4, C8, CC).
+    for (let offset = 2; offset + 9 < data.byteLength;) {
+      if (data[offset] !== 0xff) return null
+      const marker = data[offset + 1]!
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return { width: view.getUint16(offset + 7), height: view.getUint16(offset + 5) }
+      }
+      offset += 2 + view.getUint16(offset + 2)
+    }
+    return null
+  }
+  if (type === "image/webp" && data.byteLength >= 30) {
+    const chunk = String.fromCharCode(data[12]!, data[13]!, data[14]!, data[15]!)
+    if (chunk === "VP8X") return { width: 1 + (data[24]! | data[25]! << 8 | data[26]! << 16), height: 1 + (data[27]! | data[28]! << 8 | data[29]! << 16) }
+    if (chunk === "VP8 ") return { width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff }
+    if (chunk === "VP8L") {
+      const bits = view.getUint32(21, true)
+      return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }
+    }
+  }
+  return null
+}

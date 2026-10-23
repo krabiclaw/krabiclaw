@@ -9,6 +9,11 @@ export type StayArrivalField = Exclude<keyof StayArrivalGuide, 'product_id'>
 export const STAY_ARRIVAL_TEXT_LIMITS = { check_in_instructions: 5000, wifi_network: 100, wifi_password: 100, directions: 5000, house_manual: 5000 } as const
 export const STAY_CHECKOUT_DETAILS_LIMIT = 500
 
+/** A home's check-in window as the listing editor summarises it: its start and end, or its start alone when the end is flexible. */
+export function stayCheckInWindow(start: string, end: string | null): string {
+  return end === null ? `From ${start}` : `${start} – ${end}`
+}
+
 export const isStayCheckInMethod = (value: unknown): value is StayCheckInMethod =>
   typeof value === 'string' && Object.hasOwn(STAY_CHECK_IN_METHODS, value)
 export const isStayCheckoutTask = (value: unknown): value is StayCheckoutTask =>
