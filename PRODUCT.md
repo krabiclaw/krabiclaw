@@ -179,8 +179,7 @@ billing projection; a declaration is not proof that a send or write enforces it.
 Review-request sending is currently paid; the owner question about Free remains
 open. WhatsApp business notifications require the paid `messaging` capability
 at recipient selection and the defensive sender; authentication OTP is separate.
-Saya and Blawby are both provisioned without a billing check, while Blawby's
-marketing currently describes Growth inclusion. Documentation and the help form
+Saya and Blawby are both included on every plan. Documentation and the help form
 exist; Community/Priority support wording does not establish a service promise.
 These discrepancies must be resolved before publishing comparison claims.
 
