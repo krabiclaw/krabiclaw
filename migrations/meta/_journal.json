@@ -17,10 +17,10 @@
       "breakpoints": true
     },
     {
-      "idx": 25,
+      "idx": 2,
       "version": "6",
-      "when": 1792740785361,
-      "tag": "0025_airbnb_sync_jobs",
+      "when": 1792746128973,
+      "tag": "0002_airbnb_sync_jobs",
       "breakpoints": true
     }
   ]

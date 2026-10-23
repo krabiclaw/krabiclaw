@@ -539,6 +539,15 @@ verification covers populated channel children and a final delta across this
 forward change. The production replacement receives this pending migration
 through the normal production release procedure before its own cutover.
 
+The later Airbnb sync-job change is archived unchanged as v19 migration0025
+and becomes v20 `0002_airbnb_sync_jobs.sql`. Apply it before the final delta;
+it adds the job table and the mapping's `import_written` fact. Transfer manifests
+record the target migration filenames. A delta advances a private in-memory copy
+of its original comparison through the canonical forward migrations, so new
+tables and columns participate without rewriting the original artifact or
+recreating the prepared database. Earlier artifacts must match exactly one
+recorded schema stage; an ambiguous or unrecognized stage fails visibly.
+
 On 2026-10-23 production and staging had no physical-item Products. The replacement
 databases were created with `--location wnam`, and Cloudflare reported WNAM before
 binding or loading either:

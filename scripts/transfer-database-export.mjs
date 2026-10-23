@@ -73,6 +73,46 @@ const tableNames = db => db.prepare("SELECT name FROM sqlite_schema WHERE type =
 const columns = (db, table) => db.prepare(`PRAGMA table_info(${qi(table)})`).all().map(row => row.name)
 const digest = (rows, names) => hash(rows.map(row => JSON.stringify(names.map(name => row[name]))).sort().join('\n'))
 
+/** Advance a private copy; the original replacement artifact stays immutable. */
+function comparisonDatabase(path) {
+  const original = new Database(path, { readonly: true, fileMustExist: true })
+  let comparison
+  try { comparison = new Database(original.serialize()) } finally { original.close() }
+  const expected = new Database(':memory:')
+  try {
+    const files = readdirSync(resolve(MIGRATIONS_DIRECTORY)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
+    const hasManifest = existsSync(`${path}.manifest.json`)
+    const recorded = hasManifest ? JSON.parse(readFileSync(`${path}.manifest.json`, 'utf8')) : null
+    if (hasManifest) {
+      assert(recorded && typeof recorded === 'object' && !Array.isArray(recorded), 'The initial transfer manifest is invalid')
+      assert(recorded.baseline_sha256 === hash(readFileSync(resolve(MIGRATIONS_DIRECTORY, files[0]), 'utf8')), 'The initial transfer was built from another baseline')
+    }
+    const matches = []
+    for (let index = 0; index < files.length; index++) {
+      expected.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, files[index]), 'utf8'))
+      if (sameSchema(comparison, expected)) matches.push(index)
+    }
+    let applied
+    if (recorded?.target_migrations !== undefined) {
+      assert(Array.isArray(recorded.target_migrations) && recorded.target_migrations.length > 0
+        && JSON.stringify(recorded.target_migrations) === JSON.stringify(files.slice(0, recorded.target_migrations.length)), 'The initial transfer does not record a prefix of the current migration chain')
+      applied = recorded.target_migrations.length - 1
+      assert(matches.includes(applied), 'The initial transfer schema differs from its recorded migration stage')
+    } else {
+      assert(matches.length === 1, 'The initial transfer migration stage is unknown or ambiguous; explicitly reconcile its migration history before a final delta')
+      applied = matches[0]
+    }
+    comparison.pragma('foreign_keys = ON')
+    for (const file of files.slice(applied + 1)) comparison.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, file), 'utf8'))
+    assert(sameSchema(comparison, expected), 'The initial transfer cannot advance to the current migration chain')
+    assert(comparison.pragma('foreign_key_check').length === 0, 'The advanced comparison has foreign key violations')
+    return comparison
+  } catch (error) {
+    comparison.close()
+    throw error
+  } finally { expected.close() }
+}
+
 /**
  * Columns the current schema dropped, so a v7 export still carries them. Each
  * is either mapped below or must hold nothing; a value nobody maps fails.
@@ -323,7 +363,7 @@ function primaryKey(db, table) {
 export function writePayload(target, payloadPath, schemaSql, { withoutJwks = false, deltaFrom = null } = {}) {
   const tables = tableNames(target).filter(table => !(withoutJwks && table === 'jwks'))
   const order = childFirstOrder(target, tables)
-  const earlier = deltaFrom ? new Database(deltaFrom, { readonly: true, fileMustExist: true }) : null
+  const earlier = deltaFrom ? comparisonDatabase(deltaFrom) : null
   const delta = {}
   const leftBehind = {}
   try {
@@ -428,7 +468,7 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
 
 /**
  * @typedef {{ table: string, source_rows: number, target_rows: number }} TableTransfer
- * @typedef {{ baseline_sha256: string, source_migrations: string[], tables: TableTransfer[], transforms: Array<{ name: string, changes: number, sql_sha256: string }>,
+ * @typedef {{ baseline_sha256: string, source_migrations: string[], target_migrations: string[], tables: TableTransfer[], transforms: Array<{ name: string, changes: number, sql_sha256: string }>,
  *   invariants: Array<{ name: string, violations: number, sql_sha256: string }>, payload?: { tables: number, statements: number, delta?: Record<string, number>, left_behind?: Record<string, { changed: string[], deleted: string[] }> },
  *   provider_hours_session_ids: string[], provider_hours_session_source_hashes: Record<string, string>, schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
  */
@@ -460,7 +500,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
   const target = new Database(targetPath)
   /** @type {TransferManifest} */
   const manifest = {
-    baseline_sha256: hash(baseSql), source_migrations: [], tables: [], transforms: [], invariants: [], provider_hours_session_ids: [], provider_hours_session_source_hashes: {},
+    baseline_sha256: hash(baseSql), source_migrations: [], target_migrations: files, tables: [], transforms: [], invariants: [], provider_hours_session_ids: [], provider_hours_session_source_hashes: {},
   }
   try {
     const hasLedger = source.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name = 'd1_migrations'").get().n === 1
@@ -738,9 +778,15 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       }
     }
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) withBaselineTables(baseSql)
-    // The current chain's forward migrations run on the complete prior shape.
+    // Rehoming an archived forward migration does not make it a second
+    // operation: the complete v19 chain already ran on this stage.
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
-      for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
+      const absorbed = new Set(readdirSync('migrations-history/v19').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)
+        .map(name => hash(readFileSync(resolve('migrations-history/v19', name), 'utf8'))))
+      for (const name of files.slice(1)) {
+        const sql = readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8')
+        if (!absorbed.has(hash(sql))) stage.exec(sql)
+      }
     }
     const names = tableNames(stage)
     const count = (db, table) => db.prepare(`SELECT count(*) AS n FROM ${qi(table)}`).get().n
@@ -790,7 +836,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         assert(previous.provider_hours_session_source_hashes && typeof previous.provider_hours_session_source_hashes === 'object'
           && !Array.isArray(previous.provider_hours_session_source_hashes) && Object.values(previous.provider_hours_session_source_hashes).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)),
         'The initial transfer has no valid provider-hours source signatures; repeat the initial preflight before deriving a delta')
-        const earlier = new Database(deltaFrom, { readonly: true, fileMustExist: true })
+        const earlier = comparisonDatabase(deltaFrom)
         try {
           assert(sameSchema(earlier, target), 'The initial transfer schema differs from the current target')
           for (const [id, signature] of Object.entries(previous.provider_hours_session_source_hashes)) {
