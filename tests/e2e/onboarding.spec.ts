@@ -5,6 +5,7 @@ import { tenantHostIsAddressable, testBaseUrl } from './test-env'
 import { environmentTenantAliasSlug } from '../../server/utils/tenant-hosts'
 import { formatMinorAmount } from '../../shared/prices'
 import { starterPalette } from '../../shared/site-palette'
+import type { Product } from '../../server/types/products'
 
 /**
  * The subdomain the site is stored under, from the host this environment frames
@@ -260,6 +261,53 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await visitor.close()
   expect(placesRequests).toEqual([])
 })
+
+for (const vertical of ['experience', 'lodging'] as const) {
+  test(`a new ${vertical} site saves its first experience privately until booking setup is complete`, async ({ page, baseURL }) => {
+    await dismissPreviewToolbar(page)
+    await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
+    const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
+    expect(discarded.status(), await discarded.text()).toBe(200)
+    try {
+      const created = await page.request.post('/api/dashboard/onboarding/drafts/active', {
+        data: { sourceType: 'manual', vertical, name: `E2E ${vertical} ${Date.now().toString(36)}`, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', phone: '+66812345678' } },
+      })
+      expect(created.status(), await created.text()).toBe(200)
+      const { organizationId } = await created.json() as { organizationId: string }
+      await page.goto('/dashboard/onboarding/products')
+      await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
+      const products = page.locator('[data-onboarding-step="products"]')
+      await expect(products).toContainText('Booking details are required before an experience can be published.')
+      await page.getByPlaceholder('Sunset kayak tour').fill('Mangrove kayak trip')
+      await products.getByLabel('Price', { exact: true }).fill('850')
+      await page.getByRole('button', { name: 'Add experience', exact: true }).click()
+      await page.getByRole('button', { name: 'Next', exact: true }).click()
+      await expect(page.locator('[data-onboarding-step="look"]')).toBeVisible()
+
+      // Read the actual catalog independently of the onboarding draft writer.
+      const catalog = await page.request.get(`/api/editor/organizations/${organizationId}/products`)
+      expect(catalog.status(), await catalog.text()).toBe(200)
+      const saved = (await catalog.json() as { products: Product[] }).products
+      expect(saved).toHaveLength(1)
+      const experience = saved[0]!
+      expect(experience).toMatchObject({ kind: 'experience', name: 'Mangrove kayak trip', booking: null, stay: null, order_url: null })
+      expect(experience.variants).toHaveLength(1)
+      expect(experience.variants[0]!.prices).toEqual([expect.objectContaining({ unit_amount: 85000, currency: 'THB' })])
+      expect(experience.publications).toEqual([expect.objectContaining({ organization_id: organizationId, published: false })])
+      expect(experience.locations).toEqual([expect.objectContaining({ active: true, published: false })])
+      const publication = await page.request.put(`/api/editor/organizations/${organizationId}/products/${experience.id}/publication`, { data: { published: true } })
+      expect(publication.status(), await publication.text()).toBe(409)
+      const readBack = await page.request.get(`/api/editor/organizations/${organizationId}/products/${experience.id}`)
+      expect(readBack.status(), await readBack.text()).toBe(200)
+      expect((await readBack.json() as { product: Product }).product.publications).toEqual([expect.objectContaining({ published: false })])
+      await page.goto('/dashboard/onboarding/products')
+      await expect(page.locator('[data-onboarding-step="products"]')).toContainText('Mangrove kayak trip')
+    } finally {
+      const removed = await page.request.delete('/api/dashboard/onboarding/drafts/active')
+      expect(removed.status(), await removed.text()).toBe(200)
+    }
+  })
+}
 
 // Kikuzuki's own listing, answered by the real Places API (New) through the
 // server. Picking Google's prediction is the confirmation: its Place Details

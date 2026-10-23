@@ -2,6 +2,7 @@ import type { OrganizationSettings } from '../../shared/organization-settings'
 import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/organization-settings'
 import type { MediaCategory } from '~/shared/media-placement-contract'
 import { sql } from "drizzle-orm"
+import { PRODUCT_KINDS } from "../../shared/product-details"
 import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
@@ -431,7 +432,7 @@ export const products = sqliteTable("products", {
 	unique("products_org_slug_unique").on(table.organization_id, table.slug),
 	check("products_name_not_blank_check", sql`trim(name) <> ''`),
 	check("products_slug_check", sql`slug <> '' AND slug = lower(slug) AND slug NOT GLOB '*[^a-z0-9-]*' AND slug NOT LIKE '-%' AND slug NOT LIKE '%-' AND slug NOT LIKE '%--%'`),
-	check("products_kind_check", sql`kind IN ('dish', 'experience', 'service', 'item', 'stay')`),
+	check("products_kind_check", sql`kind IN (${sql.raw(PRODUCT_KINDS.map(kind => `'${kind}'`).join(', '))})`),
 	check("products_active_check", sql`active IN (0, 1)`),
 	check("products_marketing_features_check", sql`json_valid(marketing_features) AND json_type(marketing_features) = 'array'`),
 	check("products_details_json_check", sql`json_valid(details_json) AND json_type(details_json) = 'object'`),

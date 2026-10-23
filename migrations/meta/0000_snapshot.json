@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "56916581-9e7f-4741-9a07-5df729d2d509",
+  "id": "48ee3446-c686-410a-9b83-d0cd6c02f86e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -586,7 +586,7 @@
             "(payload_json ->> '$.entity_id')"
           ],
           "isUnique": true,
-          "where": "kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined', 'payments_fee_invoice_paid')"
+          "where": "kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined')"
         }
       },
       "foreignKeys": {
@@ -1402,7 +1402,7 @@
       "checkConstraints": {
         "broadcasts_category_check": {
           "name": "broadcasts_category_check",
-          "value": "category IN ('account_security', 'reservations_bookings', 'guest_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
+          "value": "category IN ('account_security', 'reservations_bookings', 'guest_messages', 'team_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
         },
         "broadcasts_created_at_check": {
           "name": "broadcasts_created_at_check",
@@ -1447,6 +1447,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "stay_map_sharing": {
+          "name": "stay_map_sharing",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'general'"
         },
         "phone": {
           "name": "phone",
@@ -1625,6 +1633,20 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "assigned_member_id": {
+          "name": "assigned_member_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "assigned_team_id": {
+          "name": "assigned_team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1658,6 +1680,19 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "business_locations_assigned_team_id_team_id_fk": {
+          "name": "business_locations_assigned_team_id_team_id_fk",
+          "tableFrom": "business_locations",
+          "tableTo": "team",
+          "columnsFrom": [
+            "assigned_team_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1686,6 +1721,10 @@
         "business_locations_timezone_check": {
           "name": "business_locations_timezone_check",
           "value": "timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'"
+        },
+        "business_locations_stay_map_sharing_check": {
+          "name": "business_locations_stay_map_sharing_check",
+          "value": "stay_map_sharing IN ('general', 'specific')"
         }
       }
     },
@@ -3865,6 +3904,145 @@
         }
       }
     },
+    "guest_thread_invites": {
+      "name": "guest_thread_invites",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "token_hash": {
+          "name": "token_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "claimed_at": {
+          "name": "claimed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "claimed_user_id": {
+          "name": "claimed_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "guest_thread_invites_token_hash_unique": {
+          "name": "guest_thread_invites_token_hash_unique",
+          "columns": [
+            "token_hash"
+          ],
+          "isUnique": true
+        },
+        "guest_thread_invites_open_request_unique": {
+          "name": "guest_thread_invites_open_request_unique",
+          "columns": [
+            "request_id"
+          ],
+          "isUnique": true,
+          "where": "claimed_at IS NULL AND revoked_at IS NULL"
+        }
+      },
+      "foreignKeys": {
+        "guest_thread_invites_request_id_requests_id_fk": {
+          "name": "guest_thread_invites_request_id_requests_id_fk",
+          "tableFrom": "guest_thread_invites",
+          "tableTo": "requests",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "guest_thread_invites_created_by_user_id_user_id_fk": {
+          "name": "guest_thread_invites_created_by_user_id_user_id_fk",
+          "tableFrom": "guest_thread_invites",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "guest_thread_invites_claimed_user_id_user_id_fk": {
+          "name": "guest_thread_invites_claimed_user_id_user_id_fk",
+          "tableFrom": "guest_thread_invites",
+          "tableTo": "user",
+          "columnsFrom": [
+            "claimed_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "guest_thread_invites_instants_check": {
+          "name": "guest_thread_invites_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at AND (claimed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', claimed_at, '+0 days') IS claimed_at) AND (revoked_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', revoked_at, '+0 days') IS revoked_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        },
+        "guest_thread_invites_state_check": {
+          "name": "guest_thread_invites_state_check",
+          "value": "(claimed_at IS NULL OR revoked_at IS NULL) AND (claimed_user_id IS NULL OR claimed_at IS NOT NULL)"
+        }
+      }
+    },
     "inventory_items": {
       "name": "inventory_items",
       "columns": {
@@ -5186,7 +5364,7 @@
         },
         "media_placements_owner_type_check": {
           "name": "media_placements_owner_type_check",
-          "value": "owner_type IN ('organization', 'business_location', 'product', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry')"
+          "value": "owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')"
         },
         "media_placements_sort_order_check": {
           "name": "media_placements_sort_order_check",
@@ -7928,6 +8106,130 @@
         }
       }
     },
+    "organization_services": {
+      "name": "organization_services",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "service": {
+          "name": "service",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "terms_version": {
+          "name": "terms_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agreed_by_user_id": {
+          "name": "agreed_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agreed_at": {
+          "name": "agreed_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_by_user_id": {
+          "name": "ended_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "organization_services_current_unique": {
+          "name": "organization_services_current_unique",
+          "columns": [
+            "organization_id",
+            "service"
+          ],
+          "isUnique": true,
+          "where": "ended_at IS NULL"
+        }
+      },
+      "foreignKeys": {
+        "organization_services_organization_id_organization_id_fk": {
+          "name": "organization_services_organization_id_organization_id_fk",
+          "tableFrom": "organization_services",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "organization_services_agreed_by_user_id_user_id_fk": {
+          "name": "organization_services_agreed_by_user_id_user_id_fk",
+          "tableFrom": "organization_services",
+          "tableTo": "user",
+          "columnsFrom": [
+            "agreed_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "organization_services_ended_by_user_id_user_id_fk": {
+          "name": "organization_services_ended_by_user_id_user_id_fk",
+          "tableFrom": "organization_services",
+          "tableTo": "user",
+          "columnsFrom": [
+            "ended_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "payment_attempts": {
       "name": "payment_attempts",
       "columns": {
@@ -8159,72 +8461,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "payment_billing_accounts": {
-      "name": "payment_billing_accounts",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "stripe_billing_customer_id": {
-          "name": "stripe_billing_customer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "metronome_customer_id": {
-          "name": "metronome_customer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "metronome_contract_id": {
-          "name": "metronome_contract_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contract_start_at": {
-          "name": "contract_start_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "currency": {
-          "name": "currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "payment_checkout_holds": {
       "name": "payment_checkout_holds",
       "columns": {
@@ -8382,6 +8618,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "converted_stay_id": {
+          "name": "converted_stay_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -8450,7 +8693,7 @@
         },
         "payment_holds_subject_check": {
           "name": "payment_holds_subject_check",
-          "value": "(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL)"
+          "value": "(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_reservation_id IS NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)"
         }
       }
     },
@@ -9258,20 +9501,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "billing_timestamp": {
-          "name": "billing_timestamp",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "credit_note_id": {
-          "name": "credit_note_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "dead_letter_at": {
           "name": "dead_letter_at",
           "type": "text",
@@ -9292,13 +9521,6 @@
           "name": "payment_usage_events_source_id_unique",
           "columns": [
             "source_id"
-          ],
-          "isUnique": true
-        },
-        "payment_usage_events_credit_note_id_unique": {
-          "name": "payment_usage_events_credit_note_id_unique",
-          "columns": [
-            "credit_note_id"
           ],
           "isUnique": true
         }
@@ -10591,6 +10813,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "import_content": {
+          "name": "import_content",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "enabled": {
           "name": "enabled",
           "type": "integer",
@@ -10707,7 +10936,7 @@
         },
         "product_channel_mappings_stage_check": {
           "name": "product_channel_mappings_stage_check",
-          "value": "import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'messages', 'complete')"
+          "value": "import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'content', 'messages', 'complete')"
         },
         "product_channel_mappings_ids_check": {
           "name": "product_channel_mappings_ids_check",
@@ -10721,9 +10950,13 @@
           "name": "product_channel_mappings_property_json_check",
           "value": "import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')"
         },
+        "product_channel_mappings_content_json_check": {
+          "name": "product_channel_mappings_content_json_check",
+          "value": "import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')"
+        },
         "product_channel_mappings_enabled_check": {
           "name": "product_channel_mappings_enabled_check",
-          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))"
+          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'content', 'messages', 'complete'))"
         },
         "product_channel_mappings_instants_check": {
           "name": "product_channel_mappings_instants_check",
@@ -11728,6 +11961,168 @@
         }
       }
     },
+    "product_stay_accessibility": {
+      "name": "product_stay_accessibility",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "feature_code": {
+          "name": "feature_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "available": {
+          "name": "available",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "product_stay_accessibility_home_fk": {
+          "name": "product_stay_accessibility_home_fk",
+          "tableFrom": "product_stay_accessibility",
+          "tableTo": "product_stay_configs",
+          "columnsFrom": [
+            "organization_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "product_stay_accessibility_organization_id_product_id_feature_code_pk": {
+          "columns": [
+            "organization_id",
+            "product_id",
+            "feature_code"
+          ],
+          "name": "product_stay_accessibility_organization_id_product_id_feature_code_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "product_stay_accessibility_feature_check": {
+          "name": "product_stay_accessibility_feature_check",
+          "value": "feature_code IN ('disabled_parking_spot', 'path_to_entrance_lit_at_night', 'home_step_free_access', 'home_wide_doorway', 'pool_hoist', 'ceiling_hoist')"
+        },
+        "product_stay_accessibility_available_check": {
+          "name": "product_stay_accessibility_available_check",
+          "value": "available IN (0, 1)"
+        }
+      }
+    },
+    "product_stay_accessibility_photos": {
+      "name": "product_stay_accessibility_photos",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "feature_code": {
+          "name": "feature_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "product_stay_accessibility_photos_asset_idx": {
+          "name": "product_stay_accessibility_photos_asset_idx",
+          "columns": [
+            "organization_id",
+            "asset_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "product_stay_accessibility_photos_answer_fk": {
+          "name": "product_stay_accessibility_photos_answer_fk",
+          "tableFrom": "product_stay_accessibility_photos",
+          "tableTo": "product_stay_accessibility",
+          "columnsFrom": [
+            "organization_id",
+            "product_id",
+            "feature_code"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id",
+            "feature_code"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "product_stay_accessibility_photos_asset_fk": {
+          "name": "product_stay_accessibility_photos_asset_fk",
+          "tableFrom": "product_stay_accessibility_photos",
+          "tableTo": "media_assets",
+          "columnsFrom": [
+            "organization_id",
+            "asset_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "product_stay_accessibility_photos_organization_id_product_id_feature_code_asset_id_pk": {
+          "columns": [
+            "organization_id",
+            "product_id",
+            "feature_code",
+            "asset_id"
+          ],
+          "name": "product_stay_accessibility_photos_organization_id_product_id_feature_code_asset_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "product_stay_configs": {
       "name": "product_stay_configs",
       "columns": {
@@ -11759,6 +12154,13 @@
           "notNull": true,
           "autoincrement": false
         },
+        "check_in_end_time": {
+          "name": "check_in_end_time",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "check_out_time": {
           "name": "check_out_time",
           "type": "text",
@@ -11787,6 +12189,148 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "property_type_group": {
+          "name": "property_type_group",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "property_type": {
+          "name": "property_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "listing_type": {
+          "name": "listing_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "total_floors": {
+          "name": "total_floors",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "listing_floor": {
+          "name": "listing_floor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "year_built": {
+          "name": "year_built",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "property_size": {
+          "name": "property_size",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "property_size_unit": {
+          "name": "property_size_unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bedrooms": {
+          "name": "bedrooms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "beds": {
+          "name": "beds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bathrooms": {
+          "name": "bathrooms",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "amenities": {
+          "name": "amenities",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "cancellation_policy": {
+          "name": "cancellation_policy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "long_term_cancellation_policy": {
+          "name": "long_term_cancellation_policy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "check_in_method": {
+          "name": "check_in_method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wifi_network": {
+          "name": "wifi_network",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wifi_password": {
+          "name": "wifi_password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "directions": {
+          "name": "directions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "house_manual": {
+          "name": "house_manual",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checkout_instructions": {
+          "name": "checkout_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
         },
         "assigned_member_id": {
           "name": "assigned_member_id",
@@ -11929,6 +12473,10 @@
           "name": "product_stay_configs_times_check",
           "value": "check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'"
         },
+        "product_stay_configs_check_in_end_check": {
+          "name": "product_stay_configs_check_in_end_check",
+          "value": "check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')"
+        },
         "product_stay_configs_guests_check": {
           "name": "product_stay_configs_guests_check",
           "value": "max_guests >= 1"
@@ -11940,8 +12488,581 @@
         "product_stay_configs_instructions_check": {
           "name": "product_stay_configs_instructions_check",
           "value": "check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)"
+        },
+        "product_stay_configs_property_type_group_check": {
+          "name": "product_stay_configs_property_type_group_check",
+          "value": "property_type_group IS NULL OR property_type_group IN ('apartments', 'houses', 'secondary_units', 'unique_homes', 'bnb', 'boutique_hotels_and_more')"
+        },
+        "product_stay_configs_property_type_check": {
+          "name": "product_stay_configs_property_type_check",
+          "value": "(property_type IS NULL AND property_type_group IS NULL) OR property_type_group || ':' || property_type IN ('apartments:apartment', 'apartments:condominium', 'apartments:serviced_apartment', 'apartments:loft', 'houses:house', 'houses:townhouse', 'houses:bungalow', 'houses:cabin', 'houses:chalet', 'houses:earthhouse', 'houses:hut', 'houses:lighthouse', 'houses:villa', 'houses:dome', 'houses:cottage', 'houses:farmstay', 'houses:houseboat', 'houses:tiny_house', 'secondary_units:guesthouse', 'secondary_units:private_suite', 'secondary_units:farmstay', 'unique_homes:boat', 'unique_homes:castle', 'unique_homes:cave', 'unique_homes:earthhouse', 'unique_homes:hut', 'unique_homes:igloo', 'unique_homes:island', 'unique_homes:lighthouse', 'unique_homes:plane', 'unique_homes:rv', 'unique_homes:tent', 'unique_homes:tipi', 'unique_homes:train', 'unique_homes:treehouse', 'unique_homes:yurt', 'unique_homes:other', 'unique_homes:dome', 'unique_homes:barn', 'unique_homes:campsite', 'unique_homes:farmstay', 'unique_homes:houseboat', 'unique_homes:tiny_house', 'unique_homes:windmill', 'unique_homes:bus', 'unique_homes:holiday_park', 'unique_homes:ranch', 'unique_homes:religious_building', 'unique_homes:riad', 'unique_homes:shipping_container', 'unique_homes:tower', 'bnb:bnb', 'bnb:nature_eco_lodge', 'bnb:farmstay', 'boutique_hotels_and_more:boutique_hotel', 'boutique_hotels_and_more:nature_eco_lodge', 'boutique_hotels_and_more:hostel', 'boutique_hotels_and_more:serviced_apartment', 'boutique_hotels_and_more:aparthotel', 'boutique_hotels_and_more:hotel', 'boutique_hotels_and_more:resort')"
+        },
+        "product_stay_configs_bedrooms_check": {
+          "name": "product_stay_configs_bedrooms_check",
+          "value": "bedrooms IS NULL OR bedrooms BETWEEN 0 AND 50"
+        },
+        "product_stay_configs_listing_type_check": {
+          "name": "product_stay_configs_listing_type_check",
+          "value": "listing_type IS NULL OR listing_type IN ('entire_place', 'private_room', 'shared_room')"
+        },
+        "product_stay_configs_total_floors_check": {
+          "name": "product_stay_configs_total_floors_check",
+          "value": "total_floors IS NULL OR (typeof(total_floors) = 'integer' AND total_floors BETWEEN 1 AND 9007199254740991)"
+        },
+        "product_stay_configs_listing_floor_check": {
+          "name": "product_stay_configs_listing_floor_check",
+          "value": "listing_floor IS NULL OR (typeof(listing_floor) = 'integer' AND listing_floor BETWEEN 1 AND 9007199254740991 AND (total_floors IS NULL OR listing_floor <= total_floors))"
+        },
+        "product_stay_configs_year_built_check": {
+          "name": "product_stay_configs_year_built_check",
+          "value": "year_built IS NULL OR (typeof(year_built) = 'integer' AND year_built BETWEEN 1 AND 9007199254740991)"
+        },
+        "product_stay_configs_property_size_check": {
+          "name": "product_stay_configs_property_size_check",
+          "value": "property_size IS NULL OR (typeof(property_size) IN ('integer', 'real') AND property_size > 0 AND property_size <= 1.7976931348623157e308)"
+        },
+        "product_stay_configs_property_size_unit_check": {
+          "name": "product_stay_configs_property_size_unit_check",
+          "value": "(property_size IS NULL AND property_size_unit IS NULL) OR (property_size IS NOT NULL AND property_size_unit IS NOT NULL AND property_size_unit IN ('square_meters', 'square_feet'))"
+        },
+        "product_stay_configs_beds_check": {
+          "name": "product_stay_configs_beds_check",
+          "value": "beds IS NULL OR beds BETWEEN 1 AND 50"
+        },
+        "product_stay_configs_bathrooms_check": {
+          "name": "product_stay_configs_bathrooms_check",
+          "value": "bathrooms IS NULL OR (bathrooms BETWEEN 0 AND 50 AND bathrooms * 2 = CAST(bathrooms * 2 AS INTEGER))"
+        },
+        "product_stay_configs_amenities_check": {
+          "name": "product_stay_configs_amenities_check",
+          "value": "json_valid(amenities) AND json_type(amenities) = 'array'"
+        },
+        "product_stay_configs_cancellation_check": {
+          "name": "product_stay_configs_cancellation_check",
+          "value": "cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')"
+        },
+        "product_stay_configs_long_term_cancellation_check": {
+          "name": "product_stay_configs_long_term_cancellation_check",
+          "value": "long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')"
+        },
+        "product_stay_configs_check_in_method_check": {
+          "name": "product_stay_configs_check_in_method_check",
+          "value": "check_in_method IS NULL OR check_in_method IN ('smart_lock', 'keypad', 'lockbox', 'building_staff', 'in_person', 'other')"
+        },
+        "product_stay_configs_wifi_network_check": {
+          "name": "product_stay_configs_wifi_network_check",
+          "value": "wifi_network IS NULL OR length(trim(wifi_network)) BETWEEN 1 AND 100"
+        },
+        "product_stay_configs_wifi_password_check": {
+          "name": "product_stay_configs_wifi_password_check",
+          "value": "wifi_password IS NULL OR length(wifi_password) BETWEEN 1 AND 100"
+        },
+        "product_stay_configs_directions_check": {
+          "name": "product_stay_configs_directions_check",
+          "value": "directions IS NULL OR length(trim(directions)) BETWEEN 1 AND 5000"
+        },
+        "product_stay_configs_house_manual_check": {
+          "name": "product_stay_configs_house_manual_check",
+          "value": "house_manual IS NULL OR length(trim(house_manual)) BETWEEN 1 AND 5000"
+        },
+        "product_stay_configs_checkout_instructions_check": {
+          "name": "product_stay_configs_checkout_instructions_check",
+          "value": "json_valid(checkout_instructions) AND json_type(checkout_instructions) = 'array'"
         }
       }
+    },
+    "product_stay_photo_room_amenities": {
+      "name": "product_stay_photo_room_amenities",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "amenity_code": {
+          "name": "amenity_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "product_stay_photo_room_amenities_room_fk": {
+          "name": "product_stay_photo_room_amenities_room_fk",
+          "tableFrom": "product_stay_photo_room_amenities",
+          "tableTo": "product_stay_photo_rooms",
+          "columnsFrom": [
+            "organization_id",
+            "product_id",
+            "room_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "product_stay_photo_room_amenities_organization_id_product_id_room_id_amenity_code_pk": {
+          "columns": [
+            "organization_id",
+            "product_id",
+            "room_id",
+            "amenity_code"
+          ],
+          "name": "product_stay_photo_room_amenities_organization_id_product_id_room_id_amenity_code_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "product_stay_photo_room_amenities_code_check": {
+          "name": "product_stay_photo_room_amenities_code_check",
+          "value": "amenity_code IN ('ac', 'dryer', 'essentials', 'heating', 'hot_water', 'kitchen', 'tv', 'washer', 'wireless_internet', 'bathtub', 'bidet', 'body_soap', 'cleaning_products', 'conditioner', 'hair_dryer', 'alfresco_shower', 'shampoo', 'shower_gel', 'bed_linens', 'wardrobe_or_closet', 'clothes_drying_rack', 'extra_pillows_and_blankets', 'hangers', 'iron', 'mosquito_net', 'room_darkening_shades', 'safe', 'arcade_machine', 'batting_cage', 'books', 'bowling_alley', 'climbing_wall', 'ethernet_connection', 'exercise_equipment', 'game_console', 'laser_tag', 'life_size_games', 'mini_golf', 'home_theater', 'piano', 'ping_pong_table', 'pool_table', 'record_player', 'skate_ramp', 'sound_system', 'theme_room', 'baby_bath', 'baby_monitor', 'childrens_bike', 'playroom', 'stair_gates', 'babysitter_recommendations', 'board_games', 'changing_table', 'childrens_books_and_toys', 'childrens_dinnerware', 'crib', 'fireplace_guards', 'high_chair', 'playground', 'outlet_covers', 'pack_n_play_travel_crib', 'table_corner_guards', 'window_guards', 'ceiling_fan', 'fireplace', 'portable_fans', 'carbon_monoxide_detector', 'fire_extinguisher', 'first_aid_kit', 'smoke_detector', 'laptop_friendly_workspace', 'pocket_wifi', 'baking_sheet', 'barbeque_utensils', 'bread_maker', 'blender', 'coffee', 'coffee_maker', 'cooking_basics', 'dining_table', 'dishes_and_silverware', 'dishwasher', 'freezer', 'hot_water_kettle', 'kitchenette', 'microwave', 'mini_fridge', 'oven', 'refrigerator', 'rice_maker', 'stove', 'toaster', 'trash_compacter', 'wine_glasses', 'beach_access', 'lake_access', 'laundromat_nearby', 'private_entrance', 'resort_access', 'ski_in_ski_out', 'waterfront', 'garden_or_backyard', 'bbq_area', 'beach_essentials', 'bicycle', 'boat_slip', 'fire_pit', 'hammock', 'kayak', 'alfresco_dining', 'outdoor_seating', 'outdoor_kitchen', 'patio_or_belcony', 'sun_loungers', 'free_parking', 'street_parking', 'paid_parking_on_premises', 'paid_parking', 'free_parking_off_premises', 'elevator', 'ev_charger', 'hockey_rink', 'gym', 'jacuzzi', 'pool', 'private_living_room', 'sauna', 'single_level_home', 'ebike_charger', 'solar_power', 'recycling', 'composting', 'doorman', 'gated_community', 'breakfast', 'cleaning_before_checkout', 'long_term_stays_allowed', 'luggage_dropoff_allowed', 'bay_view', 'beach_view', 'canal_view', 'city_view', 'courtyard_view', 'desert_view', 'garden_view', 'golf_view', 'harbor_view', 'lake_view', 'marina_view', 'mountain_view', 'ocean_view', 'park_view', 'pool_view', 'resort_view', 'river_view', 'sea_view', 'valley_view', 'vineyard_view', 'landmark_view')"
+        }
+      }
+    },
+    "product_stay_photo_room_memberships": {
+      "name": "product_stay_photo_room_memberships",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "product_stay_photo_room_memberships_room_idx": {
+          "name": "product_stay_photo_room_memberships_room_idx",
+          "columns": [
+            "organization_id",
+            "product_id",
+            "room_id"
+          ],
+          "isUnique": false
+        },
+        "product_stay_photo_room_memberships_asset_idx": {
+          "name": "product_stay_photo_room_memberships_asset_idx",
+          "columns": [
+            "organization_id",
+            "asset_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "product_stay_photo_room_memberships_room_fk": {
+          "name": "product_stay_photo_room_memberships_room_fk",
+          "tableFrom": "product_stay_photo_room_memberships",
+          "tableTo": "product_stay_photo_rooms",
+          "columnsFrom": [
+            "organization_id",
+            "product_id",
+            "room_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "product_stay_photo_room_memberships_asset_fk": {
+          "name": "product_stay_photo_room_memberships_asset_fk",
+          "tableFrom": "product_stay_photo_room_memberships",
+          "tableTo": "media_assets",
+          "columnsFrom": [
+            "organization_id",
+            "asset_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "product_stay_photo_room_memberships_organization_id_product_id_asset_id_pk": {
+          "columns": [
+            "organization_id",
+            "product_id",
+            "asset_id"
+          ],
+          "name": "product_stay_photo_room_memberships_organization_id_product_id_asset_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "product_stay_photo_rooms": {
+      "name": "product_stay_photo_rooms",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "type": {
+          "name": "type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "details_version": {
+          "name": "details_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "sleeping_arrangements": {
+          "name": "sleeping_arrangements",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "private_attached_bathroom": {
+          "name": "private_attached_bathroom",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sort_order": {
+          "name": "sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "product_stay_photo_rooms_scope_id_unique": {
+          "name": "product_stay_photo_rooms_scope_id_unique",
+          "columns": [
+            "organization_id",
+            "product_id",
+            "id"
+          ],
+          "isUnique": true
+        },
+        "product_stay_photo_rooms_scope_order_unique": {
+          "name": "product_stay_photo_rooms_scope_order_unique",
+          "columns": [
+            "organization_id",
+            "product_id",
+            "sort_order"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "product_stay_photo_rooms_home_fk": {
+          "name": "product_stay_photo_rooms_home_fk",
+          "tableFrom": "product_stay_photo_rooms",
+          "tableTo": "product_stay_configs",
+          "columnsFrom": [
+            "organization_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "product_stay_photo_rooms_type_check": {
+          "name": "product_stay_photo_rooms_type_check",
+          "value": "type IN ('art_studio', 'backyard', 'balcony', 'bedroom', 'bowling_alley', 'childrens_playroom', 'courtyard', 'darkroom', 'deck', 'dining_area', 'event_room', 'exterior', 'front_yard', 'full_bathroom', 'full_kitchen', 'game_room', 'garage', 'garden', 'gym', 'half_bathroom', 'hot_tub', 'kitchenette', 'laundry_area', 'library', 'living_room', 'movie_theater', 'music_studio', 'office', 'patio', 'photography_studio', 'pool', 'porch', 'rooftop', 'sunroom', 'terrace', 'theme_room', 'wine_cellar', 'woodshop', 'workshop', 'workspace')"
+        },
+        "product_stay_photo_rooms_order_check": {
+          "name": "product_stay_photo_rooms_order_check",
+          "value": "sort_order >= 0"
+        },
+        "product_stay_photo_rooms_created_at_check": {
+          "name": "product_stay_photo_rooms_created_at_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        },
+        "product_stay_photo_rooms_details_version_check": {
+          "name": "product_stay_photo_rooms_details_version_check",
+          "value": "details_version >= 1"
+        },
+        "product_stay_photo_rooms_sleeping_arrangements_check": {
+          "name": "product_stay_photo_rooms_sleeping_arrangements_check",
+          "value": "sleeping_arrangements IS NULL OR (json_valid(sleeping_arrangements) AND json_type(sleeping_arrangements) = 'array')"
+        },
+        "product_stay_photo_rooms_private_bathroom_check": {
+          "name": "product_stay_photo_rooms_private_bathroom_check",
+          "value": "private_attached_bathroom IS NULL OR (type = 'bedroom' AND private_attached_bathroom IN (0, 1))"
+        }
+      }
+    },
+    "product_stay_room_accessibility": {
+      "name": "product_stay_room_accessibility",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "feature_code": {
+          "name": "feature_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "available": {
+          "name": "available",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "product_stay_room_accessibility_room_fk": {
+          "name": "product_stay_room_accessibility_room_fk",
+          "tableFrom": "product_stay_room_accessibility",
+          "tableTo": "product_stay_photo_rooms",
+          "columnsFrom": [
+            "organization_id",
+            "product_id",
+            "room_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "product_stay_room_accessibility_organization_id_product_id_room_id_feature_code_pk": {
+          "columns": [
+            "organization_id",
+            "product_id",
+            "room_id",
+            "feature_code"
+          ],
+          "name": "product_stay_room_accessibility_organization_id_product_id_room_id_feature_code_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "product_stay_room_accessibility_feature_check": {
+          "name": "product_stay_room_accessibility_feature_check",
+          "value": "feature_code IN ('step_free_access', 'wide_doorway')"
+        },
+        "product_stay_room_accessibility_available_check": {
+          "name": "product_stay_room_accessibility_available_check",
+          "value": "available IN (0, 1)"
+        }
+      }
+    },
+    "product_stay_room_accessibility_photos": {
+      "name": "product_stay_room_accessibility_photos",
+      "columns": {
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "feature_code": {
+          "name": "feature_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "asset_id": {
+          "name": "asset_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "product_stay_room_accessibility_photos_asset_idx": {
+          "name": "product_stay_room_accessibility_photos_asset_idx",
+          "columns": [
+            "organization_id",
+            "asset_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "product_stay_room_accessibility_photos_answer_fk": {
+          "name": "product_stay_room_accessibility_photos_answer_fk",
+          "tableFrom": "product_stay_room_accessibility_photos",
+          "tableTo": "product_stay_room_accessibility",
+          "columnsFrom": [
+            "organization_id",
+            "product_id",
+            "room_id",
+            "feature_code"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id",
+            "room_id",
+            "feature_code"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "product_stay_room_accessibility_photos_asset_fk": {
+          "name": "product_stay_room_accessibility_photos_asset_fk",
+          "tableFrom": "product_stay_room_accessibility_photos",
+          "tableTo": "media_assets",
+          "columnsFrom": [
+            "organization_id",
+            "asset_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "product_stay_room_accessibility_photos_organization_id_product_id_room_id_feature_code_asset_id_pk": {
+          "columns": [
+            "organization_id",
+            "product_id",
+            "room_id",
+            "feature_code",
+            "asset_id"
+          ],
+          "name": "product_stay_room_accessibility_photos_organization_id_product_id_room_id_feature_code_asset_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
     },
     "product_variant_option_values": {
       "name": "product_variant_option_values",
@@ -12431,7 +13552,7 @@
         },
         "products_kind_check": {
           "name": "products_kind_check",
-          "value": "kind IN ('dish', 'experience', 'service', 'item', 'stay')"
+          "value": "kind IN ('dish', 'experience', 'service', 'stay')"
         },
         "products_active_check": {
           "name": "products_active_check",
@@ -14336,7 +15457,14 @@
           "name": "stay_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "hold_id": {
+          "name": "hold_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
@@ -14345,6 +15473,13 @@
           "name": "stay_nights_stay_idx",
           "columns": [
             "stay_id"
+          ],
+          "isUnique": false
+        },
+        "stay_nights_hold_idx": {
+          "name": "stay_nights_hold_idx",
+          "columns": [
+            "hold_id"
           ],
           "isUnique": false
         }
@@ -14356,6 +15491,19 @@
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "stay_nights_hold_id_payment_checkout_holds_id_fk": {
+          "name": "stay_nights_hold_id_payment_checkout_holds_id_fk",
+          "tableFrom": "stay_nights",
+          "tableTo": "payment_checkout_holds",
+          "columnsFrom": [
+            "hold_id"
           ],
           "columnsTo": [
             "id"
@@ -14395,6 +15543,10 @@
         "stay_nights_date_check": {
           "name": "stay_nights_date_check",
           "value": "date(date, '+0 days') IS date"
+        },
+        "stay_nights_claimant_check": {
+          "name": "stay_nights_claimant_check",
+          "value": "(stay_id IS NULL) <> (hold_id IS NULL)"
         }
       }
     },
@@ -14816,6 +15968,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "cancellation_policy": {
+          "name": "cancellation_policy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -14983,6 +16142,10 @@
         "stays_version_check": {
           "name": "stays_version_check",
           "value": "version >= 1"
+        },
+        "stays_cancellation_policy_check": {
+          "name": "stays_cancellation_policy_check",
+          "value": "cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict', 'long_term_firm', 'long_term_strict')"
         },
         "stays_booking_received_at_check": {
           "name": "stays_booking_received_at_check",
@@ -15895,6 +17058,409 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "team_messages": {
+      "name": "team_messages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sender_user_id": {
+          "name": "sender_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "team_messages_thread_idempotency_unique": {
+          "name": "team_messages_thread_idempotency_unique",
+          "columns": [
+            "thread_id",
+            "idempotency_key"
+          ],
+          "isUnique": true
+        },
+        "team_messages_thread_created_idx": {
+          "name": "team_messages_thread_created_idx",
+          "columns": [
+            "thread_id",
+            "created_at",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "team_messages_org_id_unique": {
+          "name": "team_messages_org_id_unique",
+          "columns": [
+            "organization_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "team_messages_sender_user_id_user_id_fk": {
+          "name": "team_messages_sender_user_id_user_id_fk",
+          "tableFrom": "team_messages",
+          "tableTo": "user",
+          "columnsFrom": [
+            "sender_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "team_messages_thread_scope_fk": {
+          "name": "team_messages_thread_scope_fk",
+          "tableFrom": "team_messages",
+          "tableTo": "team_threads",
+          "columnsFrom": [
+            "organization_id",
+            "thread_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "team_messages_body_check": {
+          "name": "team_messages_body_check",
+          "value": "length(body) <= 5000 AND body = trim(body)"
+        },
+        "team_messages_idempotency_check": {
+          "name": "team_messages_idempotency_check",
+          "value": "length(idempotency_key) BETWEEN 1 AND 200"
+        },
+        "team_messages_created_at_check": {
+          "name": "team_messages_created_at_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        }
+      }
+    },
+    "team_thread_members": {
+      "name": "team_thread_members",
+      "columns": {
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_read_at": {
+          "name": "last_read_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "team_thread_members_member_idx": {
+          "name": "team_thread_members_member_idx",
+          "columns": [
+            "member_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "team_thread_members_thread_scope_fk": {
+          "name": "team_thread_members_thread_scope_fk",
+          "tableFrom": "team_thread_members",
+          "tableTo": "team_threads",
+          "columnsFrom": [
+            "organization_id",
+            "thread_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "team_thread_members_member_scope_fk": {
+          "name": "team_thread_members_member_scope_fk",
+          "tableFrom": "team_thread_members",
+          "tableTo": "member",
+          "columnsFrom": [
+            "member_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organizationId"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "team_thread_members_thread_id_member_id_pk": {
+          "columns": [
+            "thread_id",
+            "member_id"
+          ],
+          "name": "team_thread_members_thread_id_member_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "team_thread_members_instants_check": {
+          "name": "team_thread_members_instants_check",
+          "value": "(last_read_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', last_read_at, '+0 days') IS last_read_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        }
+      }
+    },
+    "team_threads": {
+      "name": "team_threads",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stay_id": {
+          "name": "stay_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "location_id": {
+          "name": "location_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "participants_key": {
+          "name": "participants_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_message_at": {
+          "name": "last_message_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "team_threads_participants_unique": {
+          "name": "team_threads_participants_unique",
+          "columns": [
+            "organization_id",
+            "participants_key"
+          ],
+          "isUnique": true
+        },
+        "team_threads_org_activity_idx": {
+          "name": "team_threads_org_activity_idx",
+          "columns": [
+            "organization_id",
+            "last_message_at"
+          ],
+          "isUnique": false
+        },
+        "team_threads_org_stay_idx": {
+          "name": "team_threads_org_stay_idx",
+          "columns": [
+            "organization_id",
+            "stay_id"
+          ],
+          "isUnique": false
+        },
+        "team_threads_org_location_idx": {
+          "name": "team_threads_org_location_idx",
+          "columns": [
+            "organization_id",
+            "location_id"
+          ],
+          "isUnique": false
+        },
+        "team_threads_org_id_unique": {
+          "name": "team_threads_org_id_unique",
+          "columns": [
+            "organization_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "team_threads_organization_id_organization_id_fk": {
+          "name": "team_threads_organization_id_organization_id_fk",
+          "tableFrom": "team_threads",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "team_threads_created_by_user_id_user_id_fk": {
+          "name": "team_threads_created_by_user_id_user_id_fk",
+          "tableFrom": "team_threads",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "team_threads_stay_scope_fk": {
+          "name": "team_threads_stay_scope_fk",
+          "tableFrom": "team_threads",
+          "tableTo": "stays",
+          "columnsFrom": [
+            "organization_id",
+            "stay_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "team_threads_location_scope_fk": {
+          "name": "team_threads_location_scope_fk",
+          "tableFrom": "team_threads",
+          "tableTo": "business_locations",
+          "columnsFrom": [
+            "organization_id",
+            "location_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "team_threads_instants_check": {
+          "name": "team_threads_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        }
+      }
+    },
     "usage_events": {
       "name": "usage_events",
       "columns": {
@@ -16251,7 +17817,7 @@
       "checkConstraints": {
         "user_notification_preferences_category_check": {
           "name": "user_notification_preferences_category_check",
-          "value": "category IN ('account_security', 'reservations_bookings', 'guest_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
+          "value": "category IN ('account_security', 'reservations_bookings', 'guest_messages', 'team_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
         },
         "user_notification_preferences_updated_at_check": {
           "name": "user_notification_preferences_updated_at_check",
@@ -16260,6 +17826,10 @@
         "user_notification_preferences_account_security_check": {
           "name": "user_notification_preferences_account_security_check",
           "value": "category != 'account_security' OR email_enabled = 1"
+        },
+        "user_notification_preferences_push_only_check": {
+          "name": "user_notification_preferences_push_only_check",
+          "value": "category NOT IN ('team_messages') OR (email_enabled = 0 AND whatsapp_enabled = 0)"
         }
       }
     },

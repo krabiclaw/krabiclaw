@@ -453,7 +453,7 @@ export async function applyOnboardingDraft(
       actor: { actorId: userId },
       now,
       products: orderedProducts.map(product => ({
-        kind: input.target.vertical === 'restaurant' ? 'dish' : input.target.vertical === 'service' ? 'service' : 'item',
+        kind: input.target.vertical === 'restaurant' ? 'dish' : input.target.vertical === 'service' ? 'service' : 'experience',
         name: product.name,
         description: product.description,
         order_url: product.order_url,
@@ -474,18 +474,20 @@ export async function applyOnboardingDraft(
     productPages = pages
 
     // Publication and location membership are separate rows, and onboarding
-    // states both explicitly.
+    // states both explicitly. Experiences still need their booking setup in
+    // the editor, so onboarding keeps those offerings private.
+    const published = input.target.vertical === 'restaurant' || input.target.vertical === 'service' ? 1 : 0
     orderedProducts.forEach((product, index) => {
       const productId = ids[index]!
       batchQueries.push({
         query: `INSERT INTO product_publications (organization_id, product_id, published, created_at, updated_at, created_by, updated_by)
-                VALUES (?, ?, 1, ?, ?, ?, ?)`,
-        params: [organizationId, productId, now, now, userId, userId],
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        params: [organizationId, productId, published, now, now, userId, userId],
       })
       batchQueries.push({
         query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
-                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?)`,
-        params: [organizationId, productId, locationRow.id, now, now, userId, userId],
+                VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+        params: [organizationId, productId, locationRow.id, published, now, now, userId, userId],
       })
     })
     productIds = ids
