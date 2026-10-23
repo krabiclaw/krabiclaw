@@ -279,12 +279,15 @@ export function auditTargetInvariants(target) {
   // the rewrite would break, and the transfer names it. A deleted asset's
   // object is gone on purpose.
   const media = target.prepare("SELECT id, public_url FROM media_assets WHERE status = 'active' AND provider = 'cloudflare_r2' AND public_url IS NOT NULL").all()
-  const unserved = media.filter(row => {
-    const probe = spawnSync('curl', ['-s', '-o', '/dev/null', '-I', '-w', '%{http_code}', '--max-time', '20', String(row.public_url)], { encoding: 'utf8' })
-    if (probe.error) throw probe.error
-    return probe.stdout.trim() !== '200'
+  const unserved = media.flatMap(row => {
+    const probe = spawnSync('curl', ['-sS', '-o', '/dev/null', '-I', '-w', '%{http_code}', '--max-time', '20', String(row.public_url)], { encoding: 'utf8' })
+    if (probe.error) throw new Error(`Media probe failed for ${row.id} ${row.public_url}: ${probe.error.message}`, { cause: probe.error })
+    const status = probe.stdout.trim()
+    return probe.status === 0 && status === '200'
+      ? []
+      : [`${row.id} ${row.public_url}: HTTP ${status || 'unavailable'}, curl exit ${probe.status}${probe.signal ? ` (${probe.signal})` : ''}${probe.stderr.trim() ? `: ${probe.stderr.trim()}` : ''}`]
   })
-  results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved: unserved.map(row => `${row.id} ${row.public_url}`) })
+  results.push({ name: 'media_objects_are_served', violations: unserved.length, unserved })
   return results
 }
 
@@ -853,7 +856,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     expected.close()
     manifest.invariants = auditTargetInvariants(target)
     const broken = manifest.invariants.filter(result => result.violations > 0)
-    assert(broken.length === 0, `Invariant violations: ${broken.map(result => `${result.name}=${result.violations}`).join(', ')}`)
+    assert(broken.length === 0, `Invariant violations: ${JSON.stringify(broken)}`)
     if (payloadPath) manifest.payload = writePayload(target, payloadPath, schemaSql, { withoutJwks, deltaFrom })
     writeFileSync(`${targetPath}.manifest.json`, JSON.stringify(manifest, null, 2), { mode: 0o600 })
     return manifest

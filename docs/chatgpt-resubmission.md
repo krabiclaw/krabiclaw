@@ -105,9 +105,13 @@ On October 23, 2026, authenticated OAuth discovery, PKCE, token exchange,
 MCP initialize, 165-tool discovery, workspace context and organization reads
 passed against both staging and production. The current Chrome portal draft
 is version `0.1.3`, authorized and domain verified. Its fresh production scan
-completed and shows ten tool findings. Inspect their saved definitions before
-submission; a generic request for further review does not identify a code defect.
-A scan completion does not establish approval or test-case success.
+completed and shows ten tool findings. All ten saved definitions were inspected:
+nine request further review without identifying a defect, and one questions
+`create_site_page`'s non-destructive annotation. Its canonical operation adds a
+page or translation and refuses existing document IDs and occupied paths; the
+inherited update/move/replacement descriptions are corrected in this PR. Rescan
+after that correction reaches production. A scan completion does not establish
+approval or test-case success.
 
 The dedicated reviewer credential still signs in without an email code and can
 read Ember & Slice. Its saved workspace can point at another demo business:
@@ -118,6 +122,11 @@ required online collection. Ember's October payment list is empty and its
 seller Stripe account is not connected. `get_payments_usage.configured` describes
 plan fee pricing, not the seller account connection, and must not be used to
 infer payout availability.
+
+The foreign private booking was independently read by its owner, denied to the
+reviewer with a 404, and read unchanged by its owner afterward. This read-only
+preflight does not establish execution of the negative ChatGPT prompt. Its exact
+identifiers belong only in secure reviewer instructions.
 
 The existing [OpenAI walkthrough](https://media.krabiclaw.com/review/2026-10-12/krabiclaw-live-walkthrough-85a20f3afc89.mp4)
 and [Google Ads OAuth video](https://youtu.be/-ItMxoHlCus) are separate recordings.
