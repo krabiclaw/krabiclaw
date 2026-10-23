@@ -139416,12 +139416,13 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:6b1c5205427d0e9f78516a5fa1f2af3a556033059a0801405c3cc9fc076fe2af",
+      "contentHash": "sha256:904ce7d0d392af7973e01224bda83bc41bf4aec353760a3307b91a96b73e01b7",
       "toolContracts": {
         "create_location": "sha256:76191e793ce66aae9289cf1e505b47bd44a04320d4b29660f173959391e9c5b0",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
+        "get_stay_calendar": "sha256:c1c91c46762a25780eda52e16af31b0e42a7204269a2bf1fdbfbc7ab5fc1c9e2",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
@@ -139429,6 +139430,7 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
+        "set_stay_nights": "sha256:bed6702d3bbfed16c579a05cbe5617c126d49d8284fded330d07a863f0be435c",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
@@ -139500,11 +139502,12 @@
     },
     {
       "slug": "handle-inquiries-and-reservation-requests",
-      "contentHash": "sha256:ef918a59f51075aabf427c0d67ecce375c65deb59579f716f759a2368dd3a988",
+      "contentHash": "sha256:e79f2a9c6917973a49b4d96cfaf67bf6d587c727e619be056eb394f3cd32b944",
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "create_table_reservation": "sha256:9c27873124240d1f214c93c3e7ba73db383038fd555d7b93da570781ca2a4a18",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
+        "get_guest_messaging_context": "sha256:353544113fe7167fced9984c09c605e2a0a103b31a8854a2c396f96122c993e4",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
