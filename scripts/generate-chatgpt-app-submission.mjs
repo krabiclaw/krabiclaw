@@ -339,7 +339,7 @@ const submission = {
         "description": "Create a regular Brooklyn table reservation, then propose a one-hour change for guest acceptance.",
         "user_prompt": "Book a regular table for two at Ember & Slice in Brooklyn next Friday at 7 PM for Taylor Review, using the reviewer contact details in the review instructions. Then ask the guest to move it to 8 PM. Email the proposal and keep 7 PM until they accept.",
         "file_attachment_urls": null,
-        "tools_triggered": "list_organizations, list_locations, get_booking_policy, get_calendar, create_table_reservation, list_reservation_inquiries, request_table_reservation_change",
+        "tools_triggered": "list_organizations, list_locations, get_reservation_policy, get_calendar, create_table_reservation, list_reservation_inquiries, request_table_reservation_change",
         "expected_output": "Creates one regular table reservation using the actual location policy and controlled reviewer contact details. Emails one proposal for 8 PM while the reservation remains at 7 PM. Guest acceptance updates the same reservation once; reopening the accepted link preserves the accepted state. Experience bookings remain separate. Cancel the review reservation after verification.",
         "expected_output_url": null
     },
