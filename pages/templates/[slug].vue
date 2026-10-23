@@ -39,7 +39,7 @@
         <div class="theme-intro__top">
           <div>
             <NuxtLink to="/templates" class="theme-back">← All templates</NuxtLink>
-            <p class="theme-eyebrow">{{ template.displayName }} / Restaurants & experiences</p>
+            <p class="theme-eyebrow">{{ template.displayName }} / {{ template.supportedVerticals.join(', ') }}</p>
             <h1>{{ template.tagline }}</h1>
           </div>
           <div class="theme-intro__copy">
@@ -47,6 +47,7 @@
             <div class="theme-actions">
               <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" size="xl" class="theme-start" />
               <button type="button" class="theme-text-action" @click="openDemoPreview">View live demo <span aria-hidden="true">↗</span></button>
+              <NuxtLink to="/lodging" class="theme-text-action">Explore lodging websites <span aria-hidden="true">↗</span></NuxtLink>
             </div>
             <p class="theme-note">{{ template.priceLabel }}</p>
           </div>

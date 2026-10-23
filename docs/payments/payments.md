@@ -31,13 +31,15 @@ Business offers are sold; `seats` other than 1 is refused.
 **Billing at period end.** Usage is billed on the subscription's own invoice
 at the end of each monthly period. Adding a location or a fee in the middle of
 a period never charges then; there is no in-period preview or confirmation for
-it. Locations and homes are billed by count. A home is an active stay product
-at an active location; the location a home is at is the home's and is not a
-location, so it is never billed as one. Every other active business location
-is a location. The `last` meters bill the last count reported in the period,
+it. Locations and live homes are billed by count. A live home is an active stay
+product at an active location that is published on the website or has an enabled
+Airbnb mapping. Draft homes are free. The location a home is at is the home's
+and is not a location, so it is never billed as one. Every other active business
+location is a location. The `last` meters bill the last count reported in the period,
 so `reportBillingUsage` (`server/utils/billing.ts`) reports both counts after
 every write that can change them (`executeWithinCapacity` for creating or
-reactivating a location or a stay product, and location or home deletion) and
+reactivating a location or a stay product, publication or Airbnb activation and
+disconnection, and location or home deletion) and
 on each `customer.subscription.created`/`updated` event, which starts every
 period and every plan change with its counts. Basic has no subscription,
 includes 2 locations and 2 homes, and refuses a third of either

@@ -206,7 +206,7 @@ function itemImage(index: number) {
 const variant = computed<'home' | 'detailed' | 'vertical' | 'pictures'>(() => {
   if (blockText(props.block.data.layout) === 'pictures') return 'pictures'
   if (items.value.some(item => (item.specs ?? []).length)) return 'detailed'
-  return ['/restaurants', '/experiences', '/legal'].includes(props.page.path) ? 'vertical' : 'home'
+  return ['/restaurants', '/experiences', '/lodging', '/legal'].includes(props.page.path) ? 'vertical' : 'home'
 })
 </script>
 
