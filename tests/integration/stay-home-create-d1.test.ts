@@ -28,7 +28,7 @@ const cabin = {
   phone: '+14355550100', email: 'host@example.test', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, base_price_minor: 189_50,
 }
 
-test('a home added by hand is a new location and an unpublished stay, checked, replayable and billed', async () => {
+test('a home added by hand is a new location and an unpublished stay, checked, replayable, and billed once live', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'stay-home-create-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -98,7 +98,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
-      description: '', published: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
+      description: '', published: false, live: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
     const created = await call(owner, 'POST', keyedCabin)
@@ -125,13 +125,10 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     // On the site unpublished, like a product added in the editor: it can carry photos and a page before it is published.
     assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(made.product_id).all().then(result => result.results), [{ published: 0 }])
 
-    // Without a price the home has no base price; the plan's second home is the last it covers.
+    // Without a price the home has no base price.
     const second = await call(owner, 'POST', { ...cabin, idempotency_key: 'loft', name: 'River Loft', base_price_minor: undefined, state: undefined, zip_code: undefined })
     assert.equal(second.status, 201)
     assert.equal((second.body.home as { base_price_minor: number | null }).base_price_minor, null)
-    assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, idempotency_key: 'barn', name: 'Barn' })), {
-      status: 402, error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 },
-    })
     assert.deepEqual([await count('business_locations'), await count('products')], [2, 2])
 
     // Editing: each problem names its field and changes nothing.
@@ -158,7 +155,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       product_id: made.product_id, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
       check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: home.accessibility,
-      address: home.address, latitude: null, longitude: null, description: '', published: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
+      address: home.address, latitude: null, longitude: null, description: '', published: false, live: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     assert.deepEqual(edited.body, { home: changed, channel_push: null })
     // Read back through other paths: the homes list, the location, and the member now assigned seeing it.
@@ -303,15 +300,30 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, true)
     assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(made.product_id).all().then(result => result.results), [{ published: 1 }])
 
-    // The plan covers active homes: one whose location is taken off the site
-    // frees its slot, and putting it back is refused as a home while every slot is in use.
-    const loftLocation = (second.body.home as { location_id: string }).location_id
-    assert.equal((await updateLocation(db, ORG, loftLocation, { status: 'inactive' }, 'owner', env)).status, 200)
-    assert.equal((await call(owner, 'POST', { ...cabin, idempotency_key: 'barn-after-loft', name: 'Barn' })).status, 201)
-    assert.deepEqual(await updateLocation(db, ORG, loftLocation, { status: 'active' }, 'owner', env), {
-      status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } },
+    // Adding homes is never refused on Basic: new homes are drafts. The plan covers live homes,
+    // and publishing a third is refused as a home while two are live.
+    const hosted = async (key: string) => {
+      const added = await call(owner, 'POST', { ...cabin, idempotency_key: key, name: key })
+      assert.equal(added.status, 201)
+      const productId = (added.body.home as { product_id: string; live: boolean }).product_id
+      assert.equal((added.body.home as { live: boolean }).live, false)
+      assert.equal((await call(owner, 'PATCH', { assigned_member_id: 'm-helper' }, productId)).status, 200)
+      return added.body.home as { product_id: string; location_id: string }
+    }
+    const barn = await hosted('Barn')
+    const shed = await hosted('Shed')
+    const published = await call(owner, 'PATCH', { published: true }, barn.product_id)
+    assert.deepEqual([published.status, (published.body.home as { live: boolean }).live], [200, true])
+    const homeLimit = { status: 402, error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } }
+    assert.deepEqual(refusal(await call(owner, 'PATCH', { published: true }, shed.product_id)), homeLimit)
+    assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(shed.product_id).first('published'), 0)
+    // A live home whose location is taken off the site frees its slot, and putting it back is refused as a home while every slot is in use.
+    assert.equal((await updateLocation(db, ORG, barn.location_id, { status: 'inactive' }, 'owner', env)).status, 200)
+    assert.equal((await call(owner, 'PATCH', { published: true }, shed.product_id)).status, 200)
+    assert.deepEqual(await updateLocation(db, ORG, barn.location_id, { status: 'active' }, 'owner', env), {
+      status: 402, data: { error: homeLimit.error, code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } },
     })
-    assert.equal((await getLocation(db, ORG, loftLocation))!.status, 'inactive')
+    assert.equal((await getLocation(db, ORG, barn.location_id))!.status, 'inactive')
     // The check-in window's end: leaving the key out keeps it; null makes it flexible again, read back through the product.
     assert.equal(((await edit(owner, { max_guests: 6 })).body.home as { check_in_end_time: string | null }).check_in_end_time, '21:00')
     assert.equal(((await edit(owner, { check_in_end_time: null })).body.home as { check_in_end_time: string | null }).check_in_end_time, null)

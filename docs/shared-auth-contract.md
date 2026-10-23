@@ -34,10 +34,11 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 | Accept an invite | `POST /api/invite-links/:token/accept` → 200 `{organization:{id, name}, role, memberId}` | 401 `AUTHENTICATION_REQUIRED`, 404/410 as above, 409 `ALREADY_MEMBER`; membership is written only by `auth.api.addMember`. |
 | Change role / remove member / leave | `POST /api/auth/organization/update-member-role`, `/remove-member`, `/leave` | Admin may invite or promote an admin (D4). |
 | Team | `/api/dashboard/team/members`, `/api/dashboard/team/threads[/:threadId/messages\|/read]`, `PUT /api/dashboard/team/members/:memberId/homes` | A thread seat is a member row and cascades with it. |
-| Homes, stays, nights | `/api/dashboard/stay-homes[/:productId]`, `/api/dashboard/stays[/:stayId]` | A home's check-in window: §3.2. |
+| Homes, stays, nights | `/api/dashboard/stay-homes[/:productId]`, `/api/dashboard/stays[/:stayId]` | A home's check-in window: §3.2. Every home carries `live`: §3.4. |
 | Guest messaging | `/api/dashboard/guest-threads`, `/api/dashboard/message-templates`, `/api/dashboard/scheduled-guest-messages` | Airbnb conversations through Channex. |
-| Airbnb connection | `/api/organizations/:id/integrations/airbnb/*` | Disconnect is separate from account and organization deletion. Importing a listing: §3.3. |
-| Homes quote | `GET /api/organizations/:id/billing/homes?adding=N` | What adding homes costs before they are added; §3.1. The write that then adds them answers by the same rule, so a quote that allows them is one the write allows. A refused write is 402 `HOME_LIMIT` with `homes: {used, covered}`; the app hands it to the dashboard billing page. |
+| Airbnb connection | `/api/organizations/:id/integrations/airbnb/*` | Disconnect is separate from account and organization deletion. Importing a listing: §3.3; an import stops as a draft until Activate makes it live: §3.5. |
+| Homes quote | `GET /api/organizations/:id/billing/homes?adding=N` | What making homes live costs before they go live; §3.1. The write that then makes them live answers by the same rule, so a quote that allows them is one the write allows. A refused write is 402 `HOME_LIMIT` with `homes: {used, covered}`; the app offers Business there. |
+| Payouts | `POST /api/dashboard/connect`, `POST /api/dashboard/connect/status`, `GET /api/dashboard/connect` | Stripe-hosted payouts onboarding from the app with `returnTo: "app"`; §3.6. |
 | Push | `POST/DELETE /api/dashboard/devices`, `/api/user/notification-preferences` | A device token belongs to a Better Auth session and cascades with it. |
 | Support impersonation | `POST /api/auth/admin/impersonate-user`, `/stop-impersonating` | Platform `admin` only, 900 s (D8). |
 | Delete account | `POST /api/auth/delete-user` with `x-apple-authorization-code` when Apple is linked | §4. |
@@ -45,20 +46,20 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 
 ### 3.1 Homes quote
 
-`GET /api/organizations/:id/billing/homes?adding=N`, owner or admin. `adding` is optional, default 1, an integer from 0 to 500; anything else is 422 `INVALID_QUERY` with `field: "adding"`. Growth and Business include 2 homes and bill $9 for each further active home at the end of the period, never prorated; Basic includes 2 and refuses a third.
+`GET /api/organizations/:id/billing/homes?adding=N`, owner or admin. `adding` is optional, default 1, an integer from 0 to 500: the homes about to go live (§3.4). Anything else is 422 `INVALID_QUERY` with `field: "adding"`. Growth and Business include 2 live homes and bill $9 for each further live home at the end of the period, never prorated; Basic includes 2 live homes and refuses a third. Drafts are free and unlimited on every plan.
 
 ```json
 {
   "plan": "growth",
   "currency": "USD",
-  "homes": { "used": 2, "included": 2, "additional_price_minor": 900, "amount_minor": 0 },
+  "homes": { "used": 2, "drafts": 1, "included": 2, "additional_price_minor": 900, "amount_minor": 0 },
   "adding": { "count": 1, "additional_homes": 1, "amount_minor": 900, "allowed": true },
   "billing": { "period_end": "2026-11-21T00:00:00.000Z", "prorated": false }
 }
 ```
 
 - `plan`: the plan id (`free`, `growth`, `business`), derived the way the capacity check derives it.
-- `homes.used`: active homes now; `homes.included`: homes the plan includes; `homes.additional_price_minor`: USD cents per month for each home beyond those, 900, except `0` on a paid subscription from before homes were priced, which is charged nothing for them; `homes.amount_minor`: what the homes in use now add to the month, `max(0, used − included) × additional_price_minor`.
+- `homes.used`: live homes now; `homes.drafts`: homes that are not live (integer, always present); `homes.included`: live homes the plan includes; `homes.additional_price_minor`: USD cents per month for each live home beyond those, 900, except `0` on a paid subscription from before homes were priced, which is charged nothing for them; `homes.amount_minor`: what the live homes add to the month, `max(0, used − included) × additional_price_minor`.
 - `adding.count`: `N`; `adding.additional_homes`: the homes among the `N` that fall beyond the included ones; `adding.amount_minor`: `additional_homes × additional_price_minor`; `adding.allowed`: `false` only when the plan refuses, that is Basic with `used + N > included`.
 - `billing.period_end`: ISO instant of the current subscription period's end, when the invoice bills the homes, or `null` on Basic; `billing.prorated` is always `false`.
 
@@ -94,7 +95,7 @@ The import takes everything it can from Airbnb and asks only for what Airbnb lea
 
    `missingFields` lists only these keys: `timezone`, `email`, `phone`, `country`, `state`, `city`, `address`, `zipCode`, `propertyType`. `childBeds` and `infantCots` no longer exist; Airbnb counts neither, so Channex receives 0 for both. `checkInTime`, `checkInEndTime` and `checkOutTime` are Airbnb's `booking_settings.check_in_time_start`, `check_in_time_end` and `check_out_time` as `HH:MM`, for display only. `checkInEndTime` is `null` for Airbnb's `FLEXIBLE`. A start or checkout Airbnb has not set is `null`.
 2. `POST /api/organizations/:id/integrations/airbnb/listings/:listingId/import` with `{"missingDetails": {…}}`, holding only keys from `missingFields`, each a non-empty string. The fields earlier apps send are read and discarded, never refused: top-level `checkInTime` and `checkOutTime` (the home takes Airbnb's window), and `missingDetails.childBeds` and `missingDetails.infantCots` (Channex gets 0 for both). Any other top-level key is 400 `VALIDATION_ERROR` with `field` naming the key. Any other `missingDetails` key not in `missingFields` is 422 `ONLY_MISSING_DETAILS`. A listing whose Airbnb start or checkout is not set is 422 `MISSING_AIRBNB_FIELD` with `field: "booking_settings.check_in_time_start"` or `"booking_settings.check_out_time"`, and nothing is created; the host sets it on Airbnb and imports again. Success is 202 `{product_id, stage, waiting}`. The new home has Airbnb's check-in window (§3.2).
-3. `POST …/imports/:productId/advance` until `stage` is `complete`, as before. Each answer is `{product_id, stage, waiting, content}`. `content` is the content stage's report once that stage has run, else `null`. The same report is `import.content` in `GET …/listings`.
+3. `POST …/imports/:productId/advance` until `stage` is `draft`; then Activate (§3.5) and `advance` until `complete`. Each answer is `{product_id, stage, waiting, content}`. `content` is the content stage's report once that stage has run, else `null`. The same report is `import.content` in `GET …/listings`.
 4. `POST …/imports/:productId/content` runs the content stage again on a completed import (owner or admin): 200 `{product_id, stage: "complete", content}`.
 
 The content report:
@@ -112,6 +113,56 @@ The content report:
 | `photo_rooms_skipped` | number | Airbnb rooms not made into photo rooms. |
 
 A photo Airbnb cannot serve at 2560 px stops the stage with 502 `PHOTO_FETCH_FAILED`, `image_id` and `url`; the retry keeps every photo already stored.
+
+### 3.4 Live homes
+
+A home is **live** when it is active at its active location and either published on the site (`product_publications.published = 1`) or synced with Airbnb (its Channex mapping is enabled). Any other home is a **draft**: free and unlimited on every plan. Billing (`homes.used`, the Stripe homes meter) and Basic's limit count live homes only.
+
+- Adding a home (`POST /api/dashboard/stay-homes`) and importing one (§3.5) are never refused for the plan: the new home is a draft.
+- Publishing a home (`PATCH /api/dashboard/stay-homes/:productId` `{published: true}`, the product publication route, the MCP tool), activating an import (§3.5), reconnecting a listing, turning a home or its location back on: each that makes one more home live past Basic's 2 is refused with 402:
+
+```json
+{ "error": "Basic includes 2 homes. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 2, "covered": 2 } }
+```
+
+  On Growth and Business nothing is refused, and every change to the live count is reported to the Stripe homes meter.
+- Every `home` and `homes[]` from `/api/dashboard/stay-homes…`, and the `stay` object of the product API (`/api/editor/organizations/:id/products…`), carries `"live": true | false`, always present. The public site's product projection does not carry it. No other field changed type.
+
+### 3.5 Airbnb import: draft, Activate, complete
+
+Stages, in order: `property`, `room`, `rate`, `inventory`, `verify_inventory`, `content`, `draft`, `mapping`, `activate`, `reservations`, `messages`, `complete`. `draft` is new and `content` moved before it; each value appears in `import.stage` of `GET …/integrations/airbnb/listings` and in every import response.
+
+- `POST /api/organizations/:id/integrations/airbnb/listings/:listingId/import` starts an import (202 `{product_id, stage: "property", waiting: false}`); `POST …/imports/:productId/advance` runs one stage each call and answers `{product_id, stage, waiting, content}`. A new import advances until `{stage: "draft", waiting: false}` and stops: the home, its calendar, its content and its Channex property, room type and rate plan exist; nothing is mapped to the Airbnb channel, nothing syncs, and the home is a draft (`live: false`, `channel.status: "importing"`). `advance` on a draft answers `{product_id, stage: "draft", waiting: false, content}` unchanged and writes nothing. Both routes answer 200 at rest (`draft`, `complete`) and 202 otherwise.
+- `POST /api/organizations/:id/integrations/airbnb/imports/:productId/activate`, owner or admin, bearer session. On a draft it checks the plan for one more live home before anything is written to Channex (402 `HOME_LIMIT` as in §3.4, the import left at `draft`), then moves the import to `mapping` and answers 200:
+
+```json
+{ "product_id": "8d0c…", "stage": "mapping", "waiting": false }
+```
+
+  The app then calls `advance` until `complete`, as before; the `mapping` stage checks the plan again before Channex maps the listing, and the `activate` stage enables the mapping, which makes the home live. On an import already past `draft` it answers 200 with its current `{product_id, stage, waiting: false}` unchanged; on one not yet at `draft` it is 409 `IMPORT_IN_PROGRESS`. 404 `IMPORT_NOT_FOUND` when the home is not this connection's import.
+
+### 3.6 Payouts
+
+Stripe Connect payouts onboarding from the app, after the host chooses Business, on the dashboard's own Connect routes. Each names the organization with `?org=<slug>` and needs an owner or admin with the payments integration permission. Refusals carry a code at `data.code`, e.g. `{"status": 409, "statusText": "Stripe onboarding has not started", "message": "Stripe onboarding has not started", "data": {"code": "CONNECT_NOT_STARTED"}}`.
+
+- `POST /api/dashboard/connect?org=<slug>` `{"country"?: "US", "returnTo"?: "app"}` creates the organization's connected account on first use and answers 200 `{success: true, account, onboardingUrl}` (`account` is the `StripeConnectedAccount` below; `onboardingUrl` is Stripe's hosted link). A cookie session must be a same-origin browser request; the app's bearer session (an `Authorization: Bearer` header and no cookie) needs no `Origin`. `country` is optional: Stripe's hosted onboarding asks for it when it is absent. With `returnTo: "app"` Stripe returns to `https://<platform>/app/return/payouts?outcome=done` when the host finishes and `…?outcome=refresh` when the link expired; Stripe takes only https return addresses, so that page redirects at once to `krabiclaw://payouts/done` or `krabiclaw://payouts/refresh` and shows a "Return to the KrabiClaw app" link. On `refresh` the app asks for a new link. Without `returnTo` the dashboard's Payments return applies. Codes: 503 `CONNECT_NOT_CONFIGURED`, 409 `ACCOUNT_EMAIL_REQUIRED`, 422 `VALIDATION_ERROR` (`field: "returnTo"`), 502 `STRIPE_ONBOARDING_FAILED` (Stripe's own message).
+- `POST /api/dashboard/connect/status?org=<slug>` refreshes the account from Stripe and answers 200 `{success: true, account}`; 409 `CONNECT_NOT_STARTED` before onboarding, 502 `STRIPE_STATUS_FAILED`.
+- `GET /api/dashboard/connect?org=<slug>` answers `{success: true, account, payout, countries}`: `account` is `null` before onboarding; `payout` is `{bankName, last4, currency, schedule: {interval, delayDays}}` once the account is `ready` and has a bank, else `null`; `countries` lists Stripe's supported countries only while there is no account.
+
+```json
+{
+  "id": "…", "organizationId": "…", "stripeAccountId": "acct_…", "country": "US", "livemode": false,
+  "status": "action_required", "cardPaymentsStatus": "pending", "surchargeBasisPoints": null,
+  "requirements": [{ "awaitingActionFrom": "user", "deadlineStatus": "currently_due", "description": "Provide a bank account for payouts", "errors": [] }],
+  "stripeRefreshedAt": "2026-10-23T03:00:00.000Z", "lastError": null, "createdAt": "…", "updatedAt": "…"
+}
+```
+
+`status` is one of `creating`, `creation_failed`, `action_required`, `pending_review`, `restricted`, `ready`; `cardPaymentsStatus` one of `active`, `pending`, `restricted`, `unsupported` or `null`.
+
+### 3.7 Plans
+
+`GET /api/billing/plans` lists `free` (no prices), `growth` and `business`, each paid plan with exactly one price `{id, amount, currency: "usd", interval: "month"}`. Every plan is monthly; there is no annual price and no `annual` checkout.
 
 ## 4. Deletion and membership changes
 

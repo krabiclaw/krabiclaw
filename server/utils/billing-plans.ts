@@ -19,7 +19,7 @@ export interface PlanPrice {
   id: string
   amount: number // cents, the flat plan price
   currency: string
-  interval: 'month' | 'year'
+  interval: 'month'
 }
 
 export interface PlanLimits {
@@ -124,7 +124,7 @@ function isPlanPrice(value: unknown): value is PlanPrice {
     && value.amount > 0
     && typeof value.currency === 'string'
     && value.currency.length > 0
-    && (value.interval === 'month' || value.interval === 'year')
+    && value.interval === 'month'
   )
 }
 

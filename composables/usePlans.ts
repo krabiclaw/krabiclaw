@@ -48,35 +48,30 @@ export const usePlans = async () => {
     return plan.prices.find(p => p.interval === 'month')?.amount ?? null
   }
 
-  function annualPrice(plan: Plan): number | null {
-    return plan.prices.find(p => p.interval === 'year')?.amount ?? null
-  }
-
   const formatPrice = formatPlanPrice
 
-  /** A recurring charge in Stripe's pricing phrasing: "$49/mo", "$2,000/mo". The catalog sells in USD only. */
-  function formatRecurring(cents: number, currency: string, interval: 'month' | 'year' | string = 'month'): string {
+  /** A monthly charge in Stripe's pricing phrasing: "$49/mo", "$2,000/mo". The catalog sells in USD only, monthly only. */
+  function formatRecurring(cents: number, currency: string): string {
     if (currency.toUpperCase() !== 'USD') throw new Error(`Plan prices are sold in USD, not ${currency}`)
-    return `${formatPrice(cents)}/${interval === 'year' ? 'yr' : 'mo'}`
+    return `${formatPrice(cents)}/mo`
   }
 
   /**
-   * What this plan charges for the requested interval, as Stripe returned it —
-   * or null when Stripe returned no such price.
+   * What this plan charges each month, as Stripe returned it — or null when
+   * Stripe returned no monthly price.
    *
    * A plan with no subscription prices at all is the canonical no-subscription
    * plan and costs nothing; that is a fact about the plan, not a stand-in. A
-   * paid plan whose requested interval the provider did not return has no
-   * price to show, and answering that with '$0' offered a paid plan for free
-   * every time the Stripe catalog was incomplete. Annual is never inferred
-   * from monthly, nor monthly from annual: the caller renders the unavailable
-   * state instead.
+   * paid plan whose monthly price the provider did not return has no price to
+   * show, and answering that with '$0' offered a paid plan for free every time
+   * the Stripe catalog was incomplete: the caller renders the unavailable state
+   * instead.
    */
-  function displayPrice(plan: Plan, annual: boolean): string | null {
+  function displayPrice(plan: Plan): string | null {
     if (plan.prices.length === 0) return formatPrice(0)
-    const cents = annual ? annualPrice(plan) : monthlyPrice(plan)
+    const cents = monthlyPrice(plan)
     return cents === null ? null : formatPrice(cents)
   }
 
-  return { plans, monthlyPrice, annualPrice, formatPrice, formatRecurring, displayPrice, status, error }
+  return { plans, monthlyPrice, formatPrice, formatRecurring, displayPrice, status, error }
 }
