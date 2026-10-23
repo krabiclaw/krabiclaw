@@ -29,9 +29,19 @@ class FakeChannex {
   sent: Array<{ path: string; values: Value[] }> = []
   answer: Partial<Record<'/restrictions' | '/availability', () => Response>> = {}
 
+  /** The listing settings a minimum-stay change sends, by mapping: Airbnb's default minimum before each night's own. */
+  settings: Array<{ path: string; body: unknown }> = []
+
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
     const path = url.pathname.replace('/api/v1', '') as '/restrictions' | '/availability'
+    if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1') {
+      return Response.json({ data: { id: 'chan-1', type: 'channel', attributes: { rate_plans: ['1', '2', '3'].map(listing => ({ id: `map-${listing}`, rate_plan_id: `rate-${listing}`, settings: { listing_id: `listing-${listing}` } })) } } })
+    }
+    if (init.method === 'PUT' && (/^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path) || (path as string) === '/channels/chan-1/execute/update_booking_setting')) {
+      this.settings.push({ path, body: JSON.parse(init.body as string) })
+      return Response.json({ data: {} })
+    }
     assert.equal(init.method, 'POST')
     assert.ok(path === '/restrictions' || path === '/availability', `unexpected ${path}`)
     this.sent.push({ path, values: (JSON.parse(init.body as string) as { values: Value[] }).values })

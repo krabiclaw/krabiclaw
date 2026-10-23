@@ -1834,10 +1834,11 @@ export async function updateProduct(db: DbClient, input: {
   const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
   const complete = async (product: Product): Promise<ProductMutation> => {
     let channelPush: ChannelPushCompletion = null
-    if (product.kind === 'stay' && reprice && !input.deferStayNightPush) {
+    const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
+    const settings = touchesAirbnbSettings(input.patch)
+    if (product.kind === 'stay' && (reprice || settings !== null) && !input.deferStayNightPush) {
       if (!env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
-      const { pushStayHomeNights } = await import('~/server/domain/stays')
-      channelPush = await pushStayHomeNights(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
+      channelPush = await pushStayHomeChannel(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: reprice, settings })
     }
     return completeChannelPush(channelPush, { product_id: product.id, updated_at: product.updated_at }, async () => {
       if (photoPlan) await photoPlan.complete()
@@ -1857,6 +1858,10 @@ export async function updateProduct(db: DbClient, input: {
   }
   const earlier = await replay()
   if (earlier) return complete(earlier)
+  if (input.patch.stay) {
+    const { requireAirbnbAcceptable } = await import('~/server/domain/stays')
+    await requireAirbnbAcceptable(db, input.organizationId, input.productId, input.patch)
+  }
   if (input.booking && !dedupeKey) invalid('An idempotency key is required when configuring bookable sessions')
   const current = await getProduct(db, input.organizationId, input.productId)
   const roomChanged = (): never => {
@@ -2559,16 +2564,15 @@ export async function reconcileProducts(db: DbClient, input: {
     if (typeof product !== 'object' || product === null || Array.isArray(product)) throw new HTTPError({ statusCode: 400, message: `products[${index}] must be an object`, data: { code: 'INVALID_PRODUCT_FIELD', field: `products[${index}]` } })
   })
   const reprice = new Set(input.products.flatMap(product => product.product_id && (product.variants !== undefined || product.stay?.min_nights !== undefined) ? [product.product_id] : []))
+  const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
+  const settings = new Map(input.products.flatMap(product => { const sections = product.product_id ? touchesAirbnbSettings(product as UpdateProductInput) : null; return sections ? [[product.product_id!, sections] as const] : [] }))
   const complete = async (products: Product[]): Promise<ProductMutation[]> => {
     const results: Array<{ product: Product; channelPush: ChannelPushCompletion }> = []
     for (const product of products) {
       let channelPush: ChannelPushCompletion = null
-      if (product.kind === 'stay' && reprice.has(product.id)) {
+      if (product.kind === 'stay' && (reprice.has(product.id) || settings.has(product.id))) {
         if (!input.env) channelPush = new Error('The saved home requires its organization environment to update the channel')
-        else {
-          const { pushStayHomeNights } = await import('~/server/domain/stays')
-          channelPush = await pushStayHomeNights(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
-        }
+        else channelPush = await pushStayHomeChannel(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: reprice.has(product.id), settings: settings.get(product.id) ?? null })
       }
       results.push({ product, channelPush })
     }
