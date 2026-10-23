@@ -284,7 +284,7 @@ export const publicTemplateMarketing: Record<MarketedTemplateSlug, TemplateMarke
     sortOrder: 1,
     seo: {
       title: 'Saya — Restaurant, Experience and Lodging Website Template',
-      description: 'Create a restaurant, experience or lodging website with Saya. Showcase menus, bookable experiences and homes for direct stays. Included on every KrabiClaw plan.',
+      description: 'Build a restaurant, experience or lodging website with Saya. Show menus, home listings and nightly availability. Template included on every plan.',
     },
   },
   blawby: {

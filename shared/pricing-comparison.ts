@@ -37,7 +37,7 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'locations.included', label: 'Locations', detail: `${INCLUDED_LOCATIONS} locations included on every plan. Growth and Business add more at ${additionalLocationPrice()}.`, planValue: planId => isKnownRecurringPlan(planId)
       ? `${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}`
       : `${INCLUDED_LOCATIONS} included` },
-    { id: 'homes.included', label: 'Homes', detail: `${INCLUDED_HOMES} live homes included on every plan. Growth and Business add more at ${additionalHomePrice()}. A home counts while published or connected to Airbnb; drafts are free. A home is counted separately from locations.`, planValue: planId => isKnownRecurringPlan(planId)
+    { id: 'homes.included', label: 'Homes', detail: `${INCLUDED_HOMES} live homes included on every plan. Growth and Business add more at ${additionalHomePrice()}. A home counts while active at an active location and either published on your site or syncing through an enabled Airbnb mapping; drafts are free. A home is counted separately from locations.`, planValue: planId => isKnownRecurringPlan(planId)
       ? `${INCLUDED_HOMES} included, then ${additionalHomePrice()}`
       : `${INCLUDED_HOMES} included` },
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
