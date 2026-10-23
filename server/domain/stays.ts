@@ -275,6 +275,7 @@ export interface StayNight {
 
 const MAX_LIST_DAYS = 400
 const MAX_CALENDAR_DAYS = 500
+const MAX_CALENDAR_BYTES = 2_000_000
 const MAX_STAY_NIGHTS = 365
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -2443,6 +2444,8 @@ async function homeCalendarLink(db: DbClient, organizationId: string, productId:
 
 /** The home's linked Vrbo calendar; null when the home has none. */
 export async function readStayCalendarLink(db: DbClient, env: CalendarLinkEnv, access: StayAccess, productId: string): Promise<StayCalendarLink | null> {
+  // Both addresses are credentials to the calendars; only a manager sees them.
+  requireManager(access)
   const home = await readStayHome(db, access, productId)
   const row = await homeCalendarLink(db, access.organizationId, home.product_id)
   return row ? calendarLinkView(db, env, row, home.timezone) : null
@@ -2498,14 +2501,27 @@ async function syncCalendarLink(db: DbClient, env: CalendarLinkEnv, row: StayCal
   const access: StayAccess = { organizationId: row.organization_id, actorId: 'system', manage: true }
   const home = await readStayHome(db, access, row.product_id)
   const recordFailure = async (message: string, code: string, cause?: unknown): Promise<never> => {
-    await execute(db, 'UPDATE stay_calendar_links SET sync_error = ?, updated_at = ? WHERE id = ? AND import_url = ?', [message, new Date().toISOString(), row.id, row.import_url])
+    await execute(db, 'UPDATE stay_calendar_links SET sync_error = ?, updated_at = ? WHERE id = ? AND import_url = ? AND synced_at IS ?', [message, new Date().toISOString(), row.id, row.import_url, row.synced_at])
     throw new HTTPError({ statusCode: 502, message: `The Vrbo calendar could not be read. ${message}`, data: { code, field: 'import_url', product_id: row.product_id, committed: true }, cause })
   }
   let ranges: Array<[string, string]>
   try {
     const response = await fetch(row.import_url, { headers: { accept: 'text/calendar' } })
-    if (!response.ok) return await recordFailure(`Vrbo answered HTTP ${response.status}.`, 'STAY_CALENDAR_READ_FAILED')
-    ranges = parseIcalRanges(await response.text())
+    if (!response.ok || !response.body) return await recordFailure(`Vrbo answered HTTP ${response.status}${response.body ? '' : ' with no calendar'}.`, 'STAY_CALENDAR_READ_FAILED')
+    const reader = response.body.getReader()
+    const chunks: Uint8Array[] = []
+    let size = 0
+    for (let part = await reader.read(); !part.done; part = await reader.read()) {
+      size += part.value.byteLength
+      if (size > MAX_CALENDAR_BYTES) {
+        await reader.cancel()
+        return await recordFailure(`The calendar is larger than ${MAX_CALENDAR_BYTES / 1_000_000} MB.`, 'STAY_CALENDAR_TOO_LARGE')
+      }
+      chunks.push(part.value)
+    }
+    const body = new Uint8Array(size)
+    chunks.reduce((offset, chunk) => { body.set(chunk, offset); return offset + chunk.byteLength }, 0)
+    ranges = parseIcalRanges(new TextDecoder().decode(body))
   } catch (error) {
     if (error instanceof HTTPError) throw error
     return await recordFailure(error instanceof Error ? error.message : String(error), 'STAY_CALENDAR_INVALID', error)
@@ -2516,11 +2532,12 @@ async function syncCalendarLink(db: DbClient, env: CalendarLinkEnv, row: StayCal
   const before = await claimed()
   const now = new Date().toISOString()
   const wanted = JSON.stringify(nights)
-  // Every write applies only while the link still reads the address this read fetched, so a
-  // slower read of a replaced address cannot overwrite the newer one's nights.
-  const current = 'EXISTS (SELECT 1 FROM stay_calendar_links WHERE id = ? AND import_url = ?)'
-  const guard = [row.id, row.import_url]
-  await executeBatch(db, [
+  // Every write applies only while the link still holds the address and last read this read
+  // started from, so a slower read (of a replaced address, or one another read overtook)
+  // changes nothing and tells no channel.
+  const current = 'EXISTS (SELECT 1 FROM stay_calendar_links WHERE id = ? AND import_url = ? AND synced_at IS ?)'
+  const guard = [row.id, row.import_url, row.synced_at]
+  const results = await executeBatch(db, [
     { query: `DELETE FROM stay_nights WHERE product_id = ? AND date IN (SELECT value FROM json_each(?)) AND ${LAPSED_HOLD_CLAIM_SQL} AND ${current}`, params: [row.product_id, wanted, ...guard] },
     { query: `DELETE FROM stay_nights WHERE calendar_link_id = ? AND date NOT IN (SELECT value FROM json_each(?)) AND ${current}`, params: [row.id, wanted, ...guard] },
     {
@@ -2528,12 +2545,16 @@ async function syncCalendarLink(db: DbClient, env: CalendarLinkEnv, row: StayCal
               ON CONFLICT (product_id, date) DO NOTHING`,
       params: [row.organization_id, row.product_id, row.id, wanted, ...guard],
     },
-    { query: 'UPDATE stay_calendar_links SET blocked_json = ?, synced_at = ?, sync_error = NULL, updated_at = ? WHERE id = ? AND import_url = ?', params: [JSON.stringify(ranges), now, now, ...guard] },
+    { query: 'UPDATE stay_calendar_links SET blocked_json = ?, synced_at = ?, sync_error = NULL, updated_at = ? WHERE id = ? AND import_url = ? AND synced_at IS ?', params: [JSON.stringify(ranges), now, now, ...guard] },
   ], { operation: 'Sync linked calendar' })
+  const applied = results[3]?.meta.changes
+  if (applied !== 0 && applied !== 1) fail(500, 'STAY_CALENDAR_WRITE_RESULT_REQUIRED', 'The linked calendar write did not report its affected row count', 'changes')
   const after = await claimed()
   const changed = nightRuns([...before.filter(night => !after.includes(night)), ...after.filter(night => !before.includes(night))])
   const saved = await homeCalendarLink(db, row.organization_id, row.product_id)
   if (!saved) fail(409, 'STAY_CALENDAR_LINK_REMOVED', 'The linked calendar was removed while it was being read', 'import_url')
+  // Another read finished first and owns the claims and their channel push.
+  if (applied === 0) return { ...await calendarLinkView(db, env, saved, home.timezone), channel_push: null }
   if (!changed.length) return { ...await calendarLinkView(db, env, saved, home.timezone), channel_push: null }
   const channelPush = await pushNights(db, env, access, row.product_id, changed)
   return completeChannelPush(channelPush, { product_id: row.product_id, updated_at: now, ranges: changed }, async () => {
