@@ -96,6 +96,11 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   expect(beforeResponse.status()).toBe(200)
   const before = (await beforeResponse.json() as { product: Product }).product
   expect(before.id).toBe(created.id)
+  // Dishes have prices and options, but no booking editor at either depth.
+  for (const section of ['booking', 'booking/enabled']) {
+    const unsupportedBooking = await request.get(`${baseURL}/dashboard/${organizationId}/products/${created.id}/${section}`)
+    expect(unsupportedBooking.status()).toBe(404)
+  }
 
   // The ChatGPT-style price edit names only the variant, price and new amount.
   // Read the persisted outcome through the dashboard API, which does not use

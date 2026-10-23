@@ -995,8 +995,7 @@ function recordExternalOrderClick() {
 /**
  * What this page describes, in schema.org's vocabulary.
  *
- * A dish is a MenuItem and a shop's goods are a Product: that is what the
- * surface sells, and `presentation.structuredDataType` names it. An experience
+ * A dish is a MenuItem, as `presentation.structuredDataType` states. An experience
  * is a class that runs at a stated time, which is an Event — several of them
  * are an EventSeries. Google reads an occurrence only as its own top-level
  * Event with its own address and Offer, so the soonest occurrences are emitted
