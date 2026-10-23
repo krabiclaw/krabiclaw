@@ -18,8 +18,8 @@ import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPage
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
-import type { AirbnbSettingSections } from '~/server/domain/stays'
-import { executeWithinCapacity, liveHomeSql } from '~/server/utils/billing'
+import type { AirbnbSettingSections, pushStayHomeChannel } from '~/server/domain/stays'
+import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
@@ -1363,6 +1363,7 @@ export async function createProduct(db: DbClient, input: {
     const existing = await queryFirst<{ id: string }>(db, 'SELECT id FROM products WHERE organization_id = ? AND id = ?', [input.organizationId, record.entityId])
     if (!existing) throw new HTTPError({ statusCode: 410, statusMessage: 'The product this idempotency_key created has been deleted; it is not created again' })
     const created = await getProduct(db, input.organizationId, record.entityId)
+    if (created.kind === 'stay') await reportBillingUsage(env, db, input.organizationId, { committed: true })
     if (created.page && pageInput) await refreshTenantPageCard(db, pageInput.env, { variantId: created.page.id, path: created.page.path }, input.actor.actorId)
     await publishStayProducts(env, [created])
     return created
@@ -1541,20 +1542,35 @@ async function readProductBatch(db: DbClient, organizationId: string, ids: strin
   return ids.map(id => byId.get(id)!)
 }
 
-async function replayCatalogWrite(db: DbClient, organizationId: string, dedupeKey: string | null, requestHash: string | null): Promise<Product[] | null> {
+/** The channel work planned before the Product commit, retained for completion retries. */
+function readProductChannelCompletion(value: unknown, product: Pick<Product, 'id' | 'updated_at'>): Parameters<typeof pushStayHomeChannel>[4] {
+  const invalidPlan = new HTTPError({ statusCode: 503, message: 'The home was saved, but its channel completion plan is missing or invalid. Its saved receipt requires repair before completion.',
+    data: { code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, reason: 'Product audit record has a missing or invalid channel completion plan', channel_outcome: 'unknown', product_id: product.id, updated_at: product.updated_at } })
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalidPlan
+  const plan = value as Record<string, unknown>
+  if (typeof plan.nights !== 'boolean') throw invalidPlan
+  if (plan.settings === null) return { nights: plan.nights, settings: null }
+  if (typeof plan.settings !== 'object' || Array.isArray(plan.settings)) throw invalidPlan
+  const settings = plan.settings as Record<string, unknown>
+  if (typeof settings.booking !== 'boolean' || typeof settings.availability !== 'boolean' || (!settings.booking && !settings.availability)) throw invalidPlan
+  return { nights: plan.nights, settings: { booking: settings.booking, availability: settings.availability } }
+}
+
+async function replayCatalogWrite(db: DbClient, organizationId: string, dedupeKey: string | null, requestHash: string | null): Promise<{ products: Product[]; metadata: Record<string, unknown> } | null> {
   if (!dedupeKey) return null
   const record = await readCreationRecord(db, dedupeKey)
   if (!record) return null
   if (record.requestHash !== requestHash || record.entityId !== organizationId) conflict('This idempotency key belongs to a different catalog update')
   const ids = record.metadata.product_ids
   if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string')) throw new Error('Catalog audit record has invalid product IDs')
-  return readProductBatch(db, organizationId, ids as string[])
+  return { products: await readProductBatch(db, organizationId, ids as string[]), metadata: record.metadata }
 }
 
 export async function createProductsBatch(db: DbClient, input: {
   organizationId: string; products: CreateProductInput[]; actor: Actor; env: CloudflareEnv; publication?: { published: boolean }; idempotencyKey?: string
 }): Promise<Product[]> {
-  const complete = async (products: Product[]): Promise<Product[]> => {
+  const complete = async (products: Product[], replay = false): Promise<Product[]> => {
+    if (replay && products.some(product => product.kind === 'stay')) await reportBillingUsage(input.env, db, input.organizationId, { committed: true })
     for (const product of products) if (product.page) {
       await refreshTenantPageCard(db, input.env, { variantId: product.page.id, path: product.page.path }, input.actor.actorId)
     }
@@ -1564,14 +1580,14 @@ export async function createProductsBatch(db: DbClient, input: {
   const dedupeKey = input.idempotencyKey ? `catalog-create:${input.organizationId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ products: input.products, publication: input.publication ?? null }) : null
   const replay = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
-  if (replay) return complete(replay)
+  if (replay) return complete(replay.products, true)
   const { ids, queries } = await planProductCreateWrites(db, { ...input, now: new Date().toISOString() })
   queries.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.created', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: ids, product_count: ids.length } }))
   if (queries.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
   try { await executeProductWrites(db, input.env, input.organizationId, queries, { operation: 'Create products', action: 'create them', stay: input.products.some(product => product.kind === 'stay') }) } catch (error) {
     if (isUniqueDedupeConflict(error)) {
       const concurrent = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
-      if (concurrent) return complete(concurrent)
+      if (concurrent) return complete(concurrent.products, true)
     }
     throw error
   }
@@ -1835,11 +1851,9 @@ export async function updateProduct(db: DbClient, input: {
   if (roomUpdate && (Object.keys(input.patch).length || input.booking)) invalid('Room details cannot be combined with unrelated product edits')
   if (homeUpdate && (roomUpdate || Object.keys(input.patch).length || input.booking)) invalid('Home accessibility cannot be combined with unrelated product edits')
   if (homeUpdate && (!isStayHomeAccessibility(homeUpdate.accessibility) || typeof homeUpdate.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(homeUpdate.expectedUpdatedAt)))) invalid('Home accessibility needs a valid answer and the Product updated_at value')
-  const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
-  const requestedReprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
-  const requestedSettings = touchesAirbnbSettings(input.patch)
-  let reprice = requestedReprice
-  let settings = requestedSettings
+  const { pushStayHomeChannel } = await import('~/server/domain/stays')
+  let reprice = false
+  let settings: AirbnbSettingSections | null = null
   const complete = async (product: Product): Promise<ProductMutation> => {
     let channelPush: ChannelPushCompletion = null
     if (product.kind === 'stay' && (reprice || settings !== null) && !input.deferStayNightPush) {
@@ -1860,9 +1874,14 @@ export async function updateProduct(db: DbClient, input: {
     const record = await readCreationRecord(db, dedupeKey)
     if (!record) return null
     if (record.requestHash !== requestHash || record.entityId !== input.productId) conflict('This idempotency key belongs to a different product update')
-    reprice = requestedReprice
-    settings = requestedSettings
-    return getProduct(db, input.organizationId, input.productId)
+    const product = await getProduct(db, input.organizationId, input.productId)
+    if (product.kind === 'stay') {
+      const completion = readProductChannelCompletion(record.metadata.channel_completion, product)
+      reprice = completion.nights
+      settings = completion.settings
+      await reportBillingUsage(env, db, input.organizationId, { committed: true })
+    }
+    return product
   }
   const earlier = await replay()
   if (earlier) return complete(earlier)
@@ -1969,7 +1988,7 @@ export async function updateProduct(db: DbClient, input: {
     writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: input.productId, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data }))
     writes.push({ query: `INSERT INTO product_publications(organization_id,product_id,published,created_at,updated_at,created_by,updated_by) VALUES(?,?,1,?,?,?,?) ON CONFLICT(product_id,organization_id) DO UPDATE SET published=1,updated_at=excluded.updated_at,updated_by=excluded.updated_by`, params: [input.organizationId, input.productId, now, now, input.actor.actorId, input.actor.actorId] })
   }
-  if (dedupeKey) writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'product', entityId: input.productId, dedupeKey, metadata: { request_hash: requestHash } }))
+  if (dedupeKey) writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'product', entityId: input.productId, dedupeKey, metadata: { request_hash: requestHash, channel_completion: { nights: reprice, settings } } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering exceeds one atomic update')
 
   // A variant anything was ever booked on is not removed by an edit. Stopping
@@ -2571,16 +2590,18 @@ export async function reconcileProducts(db: DbClient, input: {
   input.products.forEach((product, index) => {
     if (typeof product !== 'object' || product === null || Array.isArray(product)) throw new HTTPError({ statusCode: 400, message: `products[${index}] must be an object`, data: { code: 'INVALID_PRODUCT_FIELD', field: `products[${index}]` } })
   })
-  const reprice = new Set(input.products.flatMap(product => product.product_id && (product.variants !== undefined || product.stay?.min_nights !== undefined) ? [product.product_id] : []))
-  const { pushStayHomeChannel, touchesAirbnbSettings } = await import('~/server/domain/stays')
-  const settings = new Map(input.products.flatMap(product => { const sections = product.product_id ? touchesAirbnbSettings(product as UpdateProductInput) : null; return sections ? [[product.product_id!, sections] as const] : [] }))
-  const complete = async (products: Product[], settingChanges = settings, nightChanges = reprice): Promise<ProductMutation[]> => {
+  const { pushStayHomeChannel } = await import('~/server/domain/stays')
+  const complete = async (products: Product[], completion: unknown, replay = false): Promise<ProductMutation[]> => {
+    const plans = typeof completion === 'object' && completion !== null && !Array.isArray(completion) ? completion as Record<string, unknown> : null
+    // Validate every saved intent before starting any product's external work.
+    const changes = products.map(product => ({ product, completion: product.kind === 'stay' ? readProductChannelCompletion(plans?.[product.id], product) : null }))
+    if (replay && changes.some(change => change.completion)) await reportBillingUsage(input.env, db, input.organizationId, { committed: true })
     const results: Array<{ product: Product; channelPush: ChannelPushCompletion }> = []
-    for (const product of products) {
+    for (const { product, completion } of changes) {
       let channelPush: ChannelPushCompletion = null
-      if (product.kind === 'stay' && (nightChanges.has(product.id) || settingChanges.has(product.id))) {
+      if (completion && (completion.nights || completion.settings !== null)) {
         if (!input.env) channelPush = new Error('The saved home requires its organization environment to update the channel')
-        else channelPush = await pushStayHomeChannel(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, { nights: nightChanges.has(product.id), settings: settingChanges.get(product.id) ?? null })
+        else channelPush = await pushStayHomeChannel(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product, completion)
       }
       results.push({ product, channelPush })
     }
@@ -2600,7 +2621,7 @@ export async function reconcileProducts(db: DbClient, input: {
   const dedupeKey = input.idempotencyKey ? `catalog-reconcile:${input.organizationId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ products: input.products, deactivateMissing: input.deactivateMissing ?? false }) : null
   const replay = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
-  if (replay) return complete(replay)
+  if (replay) return complete(replay.products, replay.metadata.channel_completion, true)
   const products = input.products.map(product => ({
     ...product,
     ...(product.variants === undefined ? {} : {
@@ -2617,23 +2638,24 @@ export async function reconcileProducts(db: DbClient, input: {
   }
   const missing = input.deactivateMissing ? await queryAll<{ id: string; kind: string }>(db, `SELECT id, kind FROM products WHERE organization_id=? AND active=1 AND id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.product_id=products.id AND pub.organization_id=?)`, [input.organizationId, d1JsonArray(touched), input.organizationId]) : []
   const answered = [...touched, ...missing.map(product => product.id)]
+  const channelCompletion = Object.fromEntries(answered.map(id => [id, { nights: nightChanges.has(id), settings: airbnbSettings.get(id) ?? null }]))
   const writes = perProduct.flat()
   if (missing.length) writes.push({ query: `UPDATE products SET active=0,
     updated_at=CASE WHEN julianday(updated_at) IS NULL THEN NULL WHEN updated_at >= ? THEN strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0.001 seconds') ELSE ? END,
     updated_by=? WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))`, params: [now, now, input.actor.actorId, input.organizationId, d1JsonArray(missing.map(product => product.id))] })
-  writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered } }))
+  writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered, channel_completion: channelCompletion } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
   try { await executeProductWrites(db, input.env, input.organizationId, writes, { operation: 'Reconcile products', action: 'turn them on', stay: [...planned, ...missing].some(product => product.kind === 'stay') }) } catch (error) {
     if (isStayBedAllocationConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Every listing bed total must cover its assigned room beds. Reduce room quantities before reducing or clearing a total.', data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'stay.beds' }, cause: error })
     const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
     if (stale || isUniqueDedupeConflict(error)) {
       const concurrent = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
-      if (concurrent) return complete(concurrent)
+      if (concurrent) return complete(concurrent.products, concurrent.metadata.channel_completion, true)
     }
     if (stale) throw new HTTPError({ statusCode: 409, statusMessage: 'The catalog or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT' }, cause: error })
     throw error
   }
-  return complete(await readProductBatch(db, input.organizationId, answered), airbnbSettings, nightChanges)
+  return complete(await readProductBatch(db, input.organizationId, answered), channelCompletion)
 }
 
 

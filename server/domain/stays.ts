@@ -1313,12 +1313,12 @@ const AIRBNB_GUEST_CONTROLS = { pets_allowed: 'allows_pets_as_host', smoking_all
 /** Which of a connected home's Airbnb listing settings a product write changes, by section. */
 export type AirbnbSettingSections = { [Section in keyof AirbnbListingSettings]: boolean }
 
-/** With a previous value, compare complete normalized snapshots; without one, select requested sections for completion replay. */
-export function touchesAirbnbSettings(patch: UpdateProductInput, previous?: UpdateProductInput): AirbnbSettingSections | null {
+/** Compare complete normalized snapshots to select the sections this write changes. */
+export function touchesAirbnbSettings(patch: UpdateProductInput, previous: UpdateProductInput): AirbnbSettingSections | null {
   const sections = {
-    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined && (!previous || patch.stay[field] !== previous.stay?.[field]))
-      || (Object.keys(AIRBNB_GUEST_CONTROLS) as Array<keyof typeof AIRBNB_GUEST_CONTROLS>).some(key => previous ? patch.details?.[key] !== previous.details?.[key] : patch.details?.[key] !== undefined),
-    availability: patch.stay?.min_nights !== undefined && (!previous || patch.stay.min_nights !== previous.stay?.min_nights),
+    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined && patch.stay[field] !== previous.stay?.[field])
+      || (Object.keys(AIRBNB_GUEST_CONTROLS) as Array<keyof typeof AIRBNB_GUEST_CONTROLS>).some(key => patch.details?.[key] !== previous.details?.[key]),
+    availability: patch.stay?.min_nights !== undefined && patch.stay.min_nights !== previous.stay?.min_nights,
   }
   return sections.booking || sections.availability ? sections : null
 }

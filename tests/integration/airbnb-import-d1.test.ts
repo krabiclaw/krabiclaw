@@ -786,6 +786,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     await db.prepare('UPDATE organization SET stripeCustomerId = ? WHERE id = ?').bind('cus_paid_host', ORG).run()
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, stripeCustomerId, stripeSubscriptionId, status, seats, periodEnd) VALUES ('sub-paid', 'growth', ?, 'cus_paid_host', 'sub-paid', 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
     let stalled = true
+    let refused = false
     let requests = 0
     const receipts: Array<{ event: string; customer: string; value: string }> = []
     globalThis.fetch = async (input, init = {}) => {
@@ -800,6 +801,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
           else init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true })
         })
       }
+      if (refused) return Response.json({ error: { type: 'invalid_request_error', message: 'Meter refused' } }, { status: 400 })
       const data = new URLSearchParams(String(init.body))
       receipts.push({ event: data.get('event_name')!, customer: data.get('payload[stripe_customer_id]')!, value: data.get('payload[value]')! })
       return new Response(JSON.stringify({ object: 'billing.meter_event', identifier: `meter-${requests}`, event_name: data.get('event_name'), created: Math.floor(Date.now() / 1000), livemode: false }), { status: 200, headers: { 'content-type': 'application/json', 'request-id': `req-${requests}` } })
@@ -824,6 +826,25 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     assert.deepEqual(receipts, [{ event: 'krabiclaw_locations', customer: 'cus_paid_host', value: '0' }, { event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '1' }])
     assert.equal(channex.seen.filter(entry => entry.method !== 'GET').length, providerWrites, 'billing recovery does not repeat provider mutations')
     assert.equal((await readStayHome(db, manager, prepared.product_id)).live, true)
+
+    // A native Stripe refusal stays permanent after the committed-state formatter.
+    refused = true
+    await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).failed, 1)
+    assert.deepEqual(await job(), { state: 'failed', last_error_code: 'SYNC_STEP_FAILED', attempts: 1, lease_token: null, lease_until: null })
+    assert.match((await db.prepare('SELECT last_error FROM airbnb_sync_jobs').first<string>('last_error'))!, /changes were saved.*Meter refused/)
+    assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings').first(), { import_stage: 'draft', enabled: 0 })
+    assert.equal((await readStayHome(db, manager, prepared.product_id)).live, false)
+    const refusedRequests = requests
+    const stoppedWrites = channex.seen.filter(entry => entry.method !== 'GET').length
+    assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 60_000), { stepped: 0, done: 0, failed: 0 })
+    assert.equal(requests, refusedRequests, 'a permanent refusal is not automatically retried')
+    refused = false
+    await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
+    assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
+    assert.deepEqual(await job(), { state: 'done', last_error_code: null, attempts: 0, lease_token: null, lease_until: null })
+    assert.deepEqual(receipts.slice(2), [{ event: 'krabiclaw_locations', customer: 'cus_paid_host', value: '0' }, { event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '0' }])
+    assert.equal(channex.seen.filter(entry => entry.method !== 'GET').length, stoppedWrites)
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

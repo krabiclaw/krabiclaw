@@ -282,7 +282,9 @@ export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number, organ
           [outcome === 'later' ? new Date(Date.now() + 30_000).toISOString() : null, now(), job.id, lease])
       }
     } catch (error) {
-      const data = error instanceof HTTPError || error instanceof ChannexError ? error.data as { code?: unknown } | undefined : undefined
+      // H3 retains constructor details in cause, including the original provider cause.
+      const failure = error instanceof HTTPError && error.data?.code === 'POST_WRITE_COMPLETION_FAILED' && error.data?.field === 'billing_usage' && error.data?.committed === true ? (error.cause as { cause: unknown }).cause : error
+      const data = failure instanceof HTTPError || failure instanceof ChannexError ? failure.data as { code?: unknown } | undefined : undefined
       const code = typeof data?.code === 'string' ? data.code : signal.aborted ? 'SYNC_SLICE_ENDED' : 'SYNC_STEP_FAILED'
       const message = error instanceof Error ? error.message : String(error)
       if (code === 'CONNECTION_BUSY') {
@@ -291,7 +293,7 @@ export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number, organ
           [new Date(Date.now() + 30_000).toISOString(), now(), job.id, lease])
         continue
       }
-      const final = !transient(error) || job.attempts + 1 >= MAX_ATTEMPTS
+      const final = !transient(failure) || job.attempts + 1 >= MAX_ATTEMPTS
       const failed = await execute(db, `UPDATE airbnb_sync_jobs SET state = ?, last_error_code = ?, last_error = ?, attempts = attempts + 1, next_attempt_at = ?,
         lease_token = NULL, lease_until = NULL, updated_at = ? WHERE id = ? AND lease_token = ? AND lease_until > ?`,
       [final ? 'failed' : 'error', code, message, final ? null : new Date(Date.now() + Math.min(3_600_000, 30_000 * 2 ** Math.min(job.attempts, 7))).toISOString(), now(), job.id, lease, now()])
