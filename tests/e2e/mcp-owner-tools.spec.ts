@@ -1333,6 +1333,8 @@ test.describe('stateless MCP server', () => {
           product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
         })
         expect(beforeRetry.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 4, remaining: 4 })])
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
         await page.unroute(interceptSavedSession)
         const recoveredSession = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'GET')
         await availability.getByRole('button', { name: 'Use saved values', exact: true }).click()
@@ -1355,6 +1357,10 @@ test.describe('stateless MCP server', () => {
         expect((await refusedCalendar).status()).toBe(503)
         await expect(availability.getByText(calendarFailure, { exact: true })).toBeVisible()
         await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('5')
+        const afterUpdate = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+          product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
+        })
+        expect(afterUpdate.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 5, remaining: 5 })])
         await page.unroute(interceptCalendar)
         await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('6')
         await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
