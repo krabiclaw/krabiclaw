@@ -948,8 +948,42 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(save).toBeDisabled()
     await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
     await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+    const beforeRefreshFailure = (await list()).find(row => row.id === original!.id)!
+    const interceptCalendar = (url: URL) => url.pathname === endpoint
+    const calendarFailure = 'The saved calendar could not be read for this verification.'
+    let afterRefreshFailure: SessionAvailability | undefined
+    await page.route(interceptCalendar, async route => route.request().method() === 'GET'
+      ? await route.fulfill({ status: 503, json: { error: calendarFailure } })
+      : await route.continue())
+    try {
+      const written = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/${original!.id}` && response.request().method() === 'PATCH')
+      const refusedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
+      await save.click()
+      const writtenResponse = await written
+      expect(writtenResponse.status(), await writtenResponse.text()).toBe(200)
+      expect((await refusedCalendar).status()).toBe(503)
+      await expect(page).toHaveURL(path)
+      await expect(leaf.getByText(calendarFailure, { exact: true })).toBeVisible()
+      await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(localInput(startsAt))
+      await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(localInput(endsAt))
+      await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('9')
+      await expect(leaf.getByRole('radio', { name: 'Scheduled', exact: true })).toBeChecked()
+      await expect(save).toBeEnabled()
+      afterRefreshFailure = (await list()).find(row => row.id === original!.id)
+      expect(afterRefreshFailure, 'the write is persisted even though the required Calendar read failed').toBeDefined()
+      expect(afterRefreshFailure).toEqual({ ...beforeRefreshFailure, capacity: 9, remaining: 9, updated_at: afterRefreshFailure!.updated_at })
+      expect(Date.parse(afterRefreshFailure!.updated_at)).toBeGreaterThan(Date.parse(beforeRefreshFailure.updated_at))
+      expect((await writtenResponse.json() as { session: SessionAvailability }).session).toEqual(afterRefreshFailure)
+    } finally { await page.unroute(interceptCalendar) }
+    const refreshedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
     await commit()
-    expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'scheduled' })
+    const refreshedCalendarResponse = await refreshedCalendar
+    expect(refreshedCalendarResponse.status(), await refreshedCalendarResponse.text()).toBe(200)
+    const afterRetry = (await list()).find(row => row.id === original!.id)
+    expect(afterRetry, 'the retried save remains visible through an independent read').toBeDefined()
+    expect(afterRetry).toEqual({ ...afterRefreshFailure, updated_at: afterRetry!.updated_at })
+    expect(Date.parse(afterRetry!.updated_at)).toBeGreaterThan(Date.parse(afterRefreshFailure!.updated_at))
+    expect((await refreshedCalendarResponse.json() as { sessions: SessionAvailability[] }).sessions.find(row => row.id === original!.id)).toEqual(afterRetry)
 
     await open(page, path)
     await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('10')
