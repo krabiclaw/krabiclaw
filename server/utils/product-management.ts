@@ -18,7 +18,7 @@ import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPage
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
-import { executeWithinCapacity } from '~/server/utils/billing'
+import { executeWithinCapacity, liveHomeSql } from '~/server/utils/billing'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
@@ -122,14 +122,18 @@ async function stayBookingReadiness(db: DbClient, organizationId: string, produc
 
 type Row = Record<string, unknown>
 
-/** The product as the public site serves it; its booking and stay settings lose who on the team looks after them. */
+/** The product as the public site serves it; its booking and stay settings lose who on the team looks after them, and a home whether it is billed. */
 export function publicProduct<T extends Product>(product: T): PublicProduct<T> {
   const { booking, stay, ...rest } = product
   const strip = <C extends Record<StaffAssignment, string | null>>(config: C): Omit<C, StaffAssignment> => {
     const { assigned_member_id: _member, assigned_team_id: _team, ...shown } = config
     return shown
   }
-  return { ...rest, booking: booking ? strip(booking) : null, stay: stay ? strip(stay) : null }
+  const publicStay = (config: ProductStayConfig): Omit<ProductStayConfig, StaffAssignment | 'live'> => {
+    const { live: _live, ...shown } = strip(config)
+    return shown
+  }
+  return { ...rest, booking: booking ? strip(booking) : null, stay: stay ? publicStay(stay) : null }
 }
 
 function notFound(message = 'Product not found'): never {
@@ -265,10 +269,11 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT product_id, location_id, check_in_time, check_in_end_time, check_out_time, max_guests, min_nights, property_type_group, property_type,
-        listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit, bedrooms, beds, bathrooms, amenities,
-        cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id FROM product_stay_configs
-      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+    { query: `SELECT c.product_id, c.location_id, c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
+        c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
+        c.cancellation_policy, c.long_term_cancellation_policy, c.assigned_member_id, c.assigned_team_id, ${liveHomeSql('p')} AS live
+      FROM product_stay_configs c JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
+      WHERE c.organization_id = ? AND c.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' }), readStayPhotoRooms(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id)), readStayHomeAccessibility(db, organizationId, products.filter(product => product.kind === 'stay').map(product => product.id))])
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
   const optionRows = rowsAt(0)
@@ -292,6 +297,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
+      live: Number(row.live) === 1,
     }
     if (product?.stay) validateStayAlarmDetails(product.details, product.stay.amenity_answers)
   }
@@ -748,7 +754,7 @@ interface PlannedProduct {
   variants: PlannedVariant[]
   details: Record<string, ProductDetailValue>
   source: ProductSource
-  stay: Omit<ProductStayConfig, 'photo_rooms' | 'accessibility'> | null
+  stay: Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null
 }
 
 const STAY_TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -761,7 +767,7 @@ function stayUnitLabel(kind: ProductKind, unitLabel: string | null): string | nu
 }
 
 /** A place to stay is at one location of this organization, with stay settings the calendar and channels enforce. */
-async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility'> | null> {
+async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<Omit<ProductStayConfig, 'photo_rooms' | 'accessibility' | 'live'> | null> {
   if (kind !== 'stay') {
     if (value !== undefined && value !== null) invalid('Only a place to stay takes stay settings')
     return null
@@ -2123,7 +2129,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
 }
 
 export async function setProductPublication(db: DbClient, input: {
-  organizationId: string; productId: string; published: boolean; actor: Actor; env?: CloudflareEnv
+  organizationId: string; productId: string; published: boolean; actor: Actor; env: CloudflareEnv
 }): Promise<void> {
   const product = await requireOrganizationProduct(db, input)
   if (input.published) await assertStayBookable(db, input.organizationId, product)
@@ -2135,24 +2141,20 @@ export async function setProductPublication(db: DbClient, input: {
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: product.id, missing: readiness.missing } })
   }
   const now = new Date().toISOString()
-  await executeBatch(db, [{
+  // A home published goes live, so it is billed and held to Basic's limit; one withdrawn reports its count again.
+  const writes: BatchQuery[] = [{
     query: `INSERT INTO product_publications (organization_id, product_id, published, created_at, updated_at, created_by, updated_by)
             VALUES (?, ?, CASE WHEN EXISTS(SELECT 1 FROM products p WHERE p.organization_id=? AND p.id=? AND p.updated_at=?) ${readiness?.allocation ? `AND (${readiness.allocation.query})` : ''} ${alreadyPublished ? 'AND EXISTS(SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1)' : ''} THEN ? ELSE NULL END, ?, ?, ?, ?)
             ON CONFLICT (product_id, organization_id) DO UPDATE SET published = excluded.published, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
     params: [input.organizationId, input.productId, input.organizationId, input.productId, product.updated_at, ...(readiness?.allocation?.params ?? []), ...(alreadyPublished ? [input.organizationId, input.productId] : []), input.published ? 1 : 0, now, now, input.actor.actorId, input.actor.actorId],
-  }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed')], { operation: 'Set product publication' }).catch(error => {
+  }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed')]
+  const operation = 'Set product publication'
+  await (product.kind === 'stay'
+    ? executeWithinCapacity(input.env, db, input.organizationId, writes, { operation, action: 'publish it' })
+    : executeBatch(db, writes, { operation })).catch(error => {
     if (/NOT NULL constraint failed: product_publications\.published/.test(error instanceof Error ? error.message : String(error))) throw new HTTPError({statusCode:409,statusMessage:'The offering or its availability changed before publication. Review it and retry.',cause:error})
     throw error
   })
-}
-
-export async function removeProductPublication(db: DbClient, input: {
-  organizationId: string; productId: string
-}): Promise<void> {
-  await executeBatch(db, [
-    { query: 'DELETE FROM product_publications WHERE organization_id = ? AND product_id = ?', params: [input.organizationId, input.productId] },
-    publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed'),
-  ], { operation: 'Remove product publication' })
 }
 
 export async function setProductLocation(db: DbClient, input: {

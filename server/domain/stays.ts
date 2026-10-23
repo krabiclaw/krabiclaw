@@ -2,9 +2,9 @@ import { HTTPError } from 'nitro'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { creationDedupeKey, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
+import { organizationEventQuery } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
-import { requireHomeCapacity } from '~/server/utils/billing'
+import { liveHomeSql } from '~/server/utils/billing'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
@@ -160,6 +160,8 @@ export interface StayHome {
   description: string
   /** Whether the home is listed on the site: its product's publication there. */
   published: boolean
+  /** Whether the home is live, so billed: active at its active location, and published or syncing with Airbnb. A home not live is a free draft. */
+  live: boolean
   /** The home's location: its address and the pin its host placed, each null until set. */
   address: StayAddress | null
   latitude: number | null
@@ -199,7 +201,7 @@ export interface StayHome {
   /**
    * The channel this home is connected to, if any. null is a home kept only in
    * KrabiClaw: its night changes go nowhere else. A connected home pushes its
-   * nights; one importing or disconnected does not.
+   * nights; one importing (a draft not yet activated among them) or disconnected does not.
    */
   channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null
   /**
@@ -360,7 +362,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
-           m.enabled AS channel_enabled, m.import_stage AS channel_stage
+           ${liveHomeSql('p')} AS live, m.enabled AS channel_enabled, m.import_stage AS channel_stage
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
@@ -392,7 +394,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       product_id: String(row.product_id), product_updated_at: String(row.product_updated_at), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: String(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
-      description: String(row.description), published: Number(row.published) === 1,
+      description: String(row.description), published: Number(row.published) === 1, live: Number(row.live) === 1,
       address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude), stay_map_sharing: parseStayMapSharing(row.stay_map_sharing),
       property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
       property_type: nullableText(row.property_type) as StayPropertyType | null,
@@ -414,7 +416,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       channel: row.channel_stage === null ? null : {
         provider: 'channex',
-        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'content' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
+        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
       },
       photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
       photo_rooms: photoRooms.get(String(row.product_id)) ?? [],
@@ -804,17 +806,14 @@ export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db
 
 /**
  * Add a place to stay: a new location of this organization and an unpublished
- * stay at it, priced per night in the organization's currency. The home is
- * billed as a home, not its location as a location: Basic is refused past the
- * homes it includes before anything is written, and the stay product's write
- * is guarded as a home. A home added by hand and one imported from a channel
- * are made here, the same way. The key replays every write: a key that already
- * made its location is a replay, not a new home, so it is not held to the
- * limit the home it made may since have reached.
+ * stay at it, priced per night in the organization's currency. A new home is a
+ * draft, free on every plan: it is billed, and held to Basic's limit, only once
+ * it goes live (published, or synced with Airbnb). Its location is a home's, not
+ * a location. A home added by hand and one imported from a channel are made
+ * here, the same way. The key replays every write.
  */
 export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string): Promise<StayHome> {
   requireManager(access)
-  if (!await readCreationRecord(db, creationDedupeKey('location', access.organizationId, idempotencyKey.trim()))) await requireHomeCapacity(env, db, access.organizationId)
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),

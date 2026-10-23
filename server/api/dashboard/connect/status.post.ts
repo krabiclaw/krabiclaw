@@ -11,7 +11,7 @@ export default defineHandler(async (event) => {
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['integration'] } })
   const connected = await getStripeConnectedAccount(db, organization.id)
   if (!connected?.stripeAccountId) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe onboarding has not started' })
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe onboarding has not started', data: { code: 'CONNECT_NOT_STARTED' } })
   }
   try {
     const account = await refreshStripeConnectedAccount(db, paymentsStripe(env, connected.livemode), connected)
@@ -22,6 +22,6 @@ export default defineHandler(async (event) => {
       stripeAccountId: connected.stripeAccountId,
       error: error instanceof Error ? error.message : String(error),
     })
-    throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe account status could not be refreshed' })
+    throw new HTTPError({ statusCode: 502, statusMessage: 'Stripe account status could not be refreshed', data: { code: 'STRIPE_STATUS_FAILED' } })
   }
 })

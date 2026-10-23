@@ -27,10 +27,10 @@ export interface OrganizationBillingStatus {
   cancelAtPeriodEnd?: boolean
   /** Better Auth's subscription schedule for a plan change at the end of the period. */
   stripeScheduleId?: string
-  billingInterval?: 'month' | 'year'
+  billingInterval?: 'month'
   /** The plan item's own charge, and the metered prices the subscription carries: an earlier contract may lack one added since. */
-  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month' | 'year'; meters: BillingMeterKey[] }
-  /** What the plan bills by count: its active locations and homes. */
+  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month'; meters: BillingMeterKey[] }
+  /** What the plan bills by count: its active locations and live homes. */
   usage: BillingCapacity
   entitlements: EntitlementsMap
 }
@@ -115,18 +115,34 @@ function subscriptionMeters(native: Stripe.Subscription): BillingMeterKey[] {
   return BILLING_METER_KEYS.filter(key => native.items.data.some(row => typeof row.price.product !== 'string' && !row.price.product.deleted && row.price.product.metadata.product_family === key))
 }
 
-function billingInterval(value: string | undefined): 'month' | 'year' | undefined {
-  if (value === undefined || value === 'month' || value === 'year') return value
+/** Every plan is monthly: a subscription on any other interval is not one KrabiClaw sells. */
+function billingInterval(value: string | undefined): 'month' | undefined {
+  if (value === undefined || value === 'month') return value
   throw new Error(`Subscription billing interval ${value} is not a plan interval`)
 }
 
 // Only an active location is on the site, so only an active one is billed. A
 // location a home (a stay product) is at is the home's, not a location: the
-// home is billed in its place while it and its location are active.
+// home is billed in its place while it is live.
 const HOME_LOCATIONS_SQL = "SELECT c.location_id FROM product_stay_configs c JOIN products p ON p.id = c.product_id WHERE p.organization_id = ? AND p.kind = 'stay'"
 const ACTIVE_LOCATIONS_SQL = `SELECT COUNT(*) FROM business_locations l WHERE l.organization_id = ? AND l.status = 'active' AND l.id NOT IN (${HOME_LOCATIONS_SQL})`
-const ACTIVE_HOMES_SQL = `SELECT COUNT(*) FROM products p JOIN product_stay_configs c ON c.product_id = p.id JOIN business_locations l ON l.id = c.location_id
-  WHERE p.organization_id = ? AND p.kind = 'stay' AND p.active = 1 AND l.status = 'active'`
+
+/**
+ * Whether the stay product `alias` is a live home, the one definition billing,
+ * the plan's limit and every home's `live` read: an active home at its active
+ * location that is published on the site or syncs with Airbnb (its Channex
+ * mapping is enabled). Any other home is a draft, which is free.
+ */
+export function liveHomeSql(alias: string): string {
+  return `(${alias}.kind = 'stay' AND ${alias}.active = 1
+    AND EXISTS (SELECT 1 FROM product_stay_configs lc JOIN business_locations ll ON ll.organization_id = lc.organization_id AND ll.id = lc.location_id
+      WHERE lc.organization_id = ${alias}.organization_id AND lc.product_id = ${alias}.id AND ll.status = 'active')
+    AND (EXISTS (SELECT 1 FROM product_publications lp WHERE lp.organization_id = ${alias}.organization_id AND lp.product_id = ${alias}.id AND lp.published = 1)
+      OR EXISTS (SELECT 1 FROM product_channel_mappings lm WHERE lm.organization_id = ${alias}.organization_id AND lm.product_id = ${alias}.id AND lm.enabled = 1)))`
+}
+
+const ACTIVE_HOMES_SQL = `SELECT COUNT(*) FROM products p WHERE p.organization_id = ? AND ${liveHomeSql('p')}`
+const DRAFT_HOMES_SQL = `SELECT COUNT(*) FROM products p WHERE p.organization_id = ? AND p.kind = 'stay' AND NOT ${liveHomeSql('p')}`
 
 /** The locations a plan bills: every active location that is not a home's. */
 export async function countActiveLocations(db: DbClient, organizationId: string): Promise<number> {
@@ -135,7 +151,7 @@ export async function countActiveLocations(db: DbClient, organizationId: string)
   return row.locations
 }
 
-/** The homes a plan bills: every active stay product at an active location. */
+/** The homes a plan bills: every live home. */
 export async function countActiveHomes(db: DbClient, organizationId: string): Promise<number> {
   const row = await queryFirst<{ homes: number }>(db, `SELECT (${ACTIVE_HOMES_SQL}) AS homes`, [organizationId])
   if (!row) throw new Error('Billing usage could not be read')
@@ -143,7 +159,7 @@ export async function countActiveHomes(db: DbClient, organizationId: string): Pr
 }
 
 /**
- * What a plan bills by count: its active locations and its active homes. A
+ * What a plan bills by count: its active locations and its live homes. A
  * paid plan bills those past the included ones at the end of the period;
  * Basic includes its locations and homes and no more.
  */
@@ -154,7 +170,7 @@ export interface BillingCapacity {
 }
 
 /**
- * Report the organization's active locations and homes to their Stripe
+ * Report the organization's active locations and live homes to their Stripe
  * meters. Each meter keeps the last count reported in the billing period, and
  * the subscription's metered price bills it on the invoice at the end of the
  * period, so there is no charge in the middle of one. Called after every write
@@ -195,7 +211,7 @@ export async function reportBillingUsageForSubscriptionEvent(env: CloudflareEnv,
 
 // A write batch ends with guards that abort it — a NOT NULL failure on a
 // column no other statement clears — when it leaves more active locations or
-// homes in use than the bound. D1 rolls the batch back whole.
+// live homes than the bound. D1 rolls the batch back whole.
 function locationGuard(organizationId: string, bound: number): BatchQuery {
   return {
     query: `UPDATE business_locations SET status = NULL WHERE organization_id = ? AND status = 'active' AND (${ACTIVE_LOCATIONS_SQL}) > ?`,
@@ -276,12 +292,14 @@ export interface HomesQuote {
   plan: string
   currency: 'USD'
   /** `additional_price_minor` is what each home past the included ones costs: 0 on a paid subscription from before homes were priced. */
-  homes: { used: number; included: number; additional_price_minor: number; amount_minor: number }
+  /** `used` counts live homes; `drafts` the homes not live, which are free. */
+  homes: { used: number; drafts: number; included: number; additional_price_minor: number; amount_minor: number }
+  /** `count` is homes about to go live. */
   adding: { count: number; additional_homes: number; amount_minor: number; allowed: boolean }
   billing: { period_end: string | null; prorated: false }
 }
 
-/** The `adding` query of a homes quote: absent is one home; otherwise an integer from 0 to the most one quote covers. */
+/** The `adding` query of a homes quote, homes about to go live: absent is one home; otherwise an integer from 0 to the most one quote covers. */
 export function parseHomesAdding(value: unknown): number {
   if (value === undefined) return 1
   const count = typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : NaN
@@ -319,7 +337,8 @@ async function homeAllowance(env: CloudflareEnv, db: DbClient, organizationId: s
  * past its included ones cost once Growth or Business is chosen.
  */
 export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number): Promise<HomesQuote> {
-  const { plan, used, subscription, allowed } = await homeAllowance(env, db, organizationId, adding)
+  const [{ plan, used, subscription, allowed }, drafts] = await Promise.all([homeAllowance(env, db, organizationId, adding), queryFirst<{ homes: number }>(db, `SELECT (${DRAFT_HOMES_SQL}) AS homes`, [organizationId])])
+  if (!drafts) throw new Error('Billing usage could not be read')
   let price = ADDITIONAL_HOME_PRICE
   if (subscription) {
     if (!subscription.stripeSubscriptionId) throw new Error(`Subscription ${subscription.id} has no Stripe subscription`)
@@ -332,27 +351,29 @@ export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationI
   return {
     plan,
     currency: 'USD',
-    homes: { used, included: INCLUDED_HOMES, additional_price_minor: price, amount_minor: additionalHomes(0, used) * price },
+    homes: { used, drafts: drafts.homes, included: INCLUDED_HOMES, additional_price_minor: price, amount_minor: additionalHomes(0, used) * price },
     adding: { count: adding, additional_homes: added, amount_minor: added * price, allowed },
     billing: { period_end: subscription?.periodEnd?.toISOString() ?? null, prorated: false },
   }
 }
 
 /**
- * Refuse, before anything is written, the home Basic does not include. A home
- * is a location and then a stay product at it, written one after the other;
- * the location is a home's from the start, so it is not guarded as a location,
- * and the stay product's own write is guarded as a home. The allowance the
- * quote reports decides: on Basic a home past the included ones creates no location.
+ * Refuse, before any provider is asked to sync it, the home going live that
+ * Basic does not include: Activate asks here before Channex maps the listing.
+ * A home already live adds none. The allowance the quote reports decides; the
+ * write that makes the home live is still guarded by `executeWithinCapacity`.
  */
-export async function requireHomeCapacity(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<void> {
+export async function requireHomeCapacity(env: CloudflareEnv, db: DbClient, organizationId: string, productId: string): Promise<void> {
+  const live = await queryFirst<{ live: number }>(db, `SELECT ${liveHomeSql('p')} AS live FROM products p WHERE p.organization_id = ? AND p.id = ?`, [organizationId, productId])
+  if (!live) throw new HTTPError({ statusCode: 404, statusMessage: 'Home not found', data: { code: 'HOME_NOT_FOUND' } })
+  if (live.live) return
   const { used, allowed } = await homeAllowance(env, db, organizationId, 1)
   if (!allowed) throw capacityRefusalError(homeLimit(used))
 }
 
 /**
- * Run a write that may make a location or a home active: creating one or
- * turning one back on. It runs first guarded at the active counts now, which
+ * Run a write that may make a location active or a home live: creating one,
+ * turning one back on, publishing a home or enabling its Airbnb sync. It runs first guarded at the active counts now, which
  * reads nothing from billing, so a write that adds none never depends on the
  * plan. Only a write that adds one reads the plan: a paid plan bills it, so it
  * runs again unguarded; Basic runs it again guarded at the counts it includes

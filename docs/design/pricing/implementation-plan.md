@@ -20,9 +20,8 @@ identity. The free plan and CTAs are app-owned. The approved headline
 remains in the current CMS hero block.
 
 [Read-only billing verification](billing-verification.json) records the current
-public projection and live Stripe catalog. Growth currently has one USD 4900-cent
-monthly price and one USD 58800-cent annual price. Both lookup keys are null.
-Annual is not a discount or a calculation from monthly.
+public projection and live Stripe catalog. Growth has one USD 4900-cent monthly
+price and a null lookup key. The catalog is monthly only.
 
 ## Implementation scaffold
 
@@ -56,7 +55,7 @@ Target existing Growth Product `prod_UcH8Sw98ABNwKL`:
 - Review the generic messaging/import bullets against the verified paid gates,
   one-time free onboarding and weekly paid review refresh before final wording.
 - Do not write this proposal automatically or change product ID, plan_id,
-  default price, monthly/annual price IDs, amounts, currencies, lookup keys,
+  default price, monthly price IDs, amounts, currencies, lookup keys,
   recurring cadence or subscription policy.
 
 Free `STARTER_PLAN.name` becomes `Basic` in its application-owned source. Paid
@@ -119,7 +118,7 @@ the existing signup `redirect` parameter as well as `plan=growth`. Signup reads
 accounts. This changes application-owned CTA configuration only; identity, auth
 and checkout code are unchanged. Existing signed-in CTA behavior still reads
 the same plan query. No annual toggle is introduced: the card offers the actual
-monthly price and the existing billing screen owns interval choice.
+monthly price, and every plan is monthly.
 
 ## Verification limits and approval review
 

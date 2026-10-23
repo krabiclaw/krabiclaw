@@ -69,13 +69,9 @@
         <p data-plan-homes class="text-xs font-semibold mt-1" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
           {{ homesNote }}
         </p>
-        <p v-if="annual && savingsNote" class="text-xs font-semibold mt-2.5 flex items-center gap-1.5" :class="isHighlighted ? 'text-emerald-400' : 'text-emerald-600'">
-          <PlatformIcon name="sparkles" class="size-3.5 shrink-0" />
-          {{ savingsNote }}
-        </p>
       </template>
       <p v-else data-price-unavailable class="text-sm font-semibold" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
-        {{ billingPeriodLabel === '/year' ? 'Annual pricing is unavailable right now.' : 'Monthly pricing is unavailable right now.' }}
+        Monthly pricing is unavailable right now.
       </p>
     </div>
 
@@ -125,7 +121,6 @@ import { additionalHomePrice, additionalLocationPrice, INCLUDED_HOMES, INCLUDED_
 
 const props = defineProps<{
   plan: Plan
-  annual?: boolean
   highlighted?: boolean
   photo?: boolean
   frontImage?: string
@@ -155,38 +150,25 @@ onMounted(async () => {
 })
 useEventListener(computed(() => import.meta.client ? document : undefined), 'visibilitychange', () => { if (document.hidden) reveal() })
 
-const { displayPrice, annualPrice, monthlyPrice } = await usePlans()
+const { displayPrice } = await usePlans()
 
 const isHighlighted = computed(() => props.highlighted ?? props.plan.highlighted)
 
-const currentPrice = computed(() => displayPrice(props.plan, props.annual ?? false))
+const currentPrice = computed(() => displayPrice(props.plan))
 
-const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free' ? 'No subscription' : (props.annual ?? false) ? '/year' : '/mo')
+const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free' ? 'No subscription' : '/mo')
 
 // Stripe's own phrasing: the included allowance, then the charge per additional unit.
 const locationsNote = computed(() => {
-  const price = props.plan.prices.find(p => p.interval === ((props.annual ?? false) ? 'year' : 'month'))
-  if (!price) return `${INCLUDED_LOCATIONS} locations included`
+  if (!props.plan.prices.length) return `${INCLUDED_LOCATIONS} locations included`
   return `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`
 })
 // Homes are counted apart from locations: a home is a place to stay, not a location.
 const homesNote = computed(() => {
-  const price = props.plan.prices.find(p => p.interval === ((props.annual ?? false) ? 'year' : 'month'))
-  if (!price) return `${INCLUDED_HOMES} homes included`
+  if (!props.plan.prices.length) return `${INCLUDED_HOMES} homes included`
   return `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`
 })
 
-const savingsNote = computed(() => {
-  if (!props.annual) return null
-  const monthly = monthlyPrice(props.plan)
-  const annual = annualPrice(props.plan)
-  if (!monthly || !annual) return null
-  const savedPerYear = monthly * 12 - annual
-  if (savedPerYear > 0) {
-    return `Save $${(savedPerYear / 100).toFixed(0)}/year`
-  }
-  return null
-})
 </script>
 
 <style scoped>

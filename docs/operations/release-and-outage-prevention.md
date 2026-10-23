@@ -524,6 +524,17 @@ migrations and retain v19 session identities and timestamps without regenerating
 provider hours. Home property classifications must be either fully unknown or a
 complete valid category/type pair; the baseline CHECK refuses partial NULL pairs.
 
+The later live-home/import change remains an applied v19 forward migration at
+`migrations-history/v19/0024_airbnb_import_draft.sql`. The v20 chain carries the
+same child-preserving SQL as `0001_airbnb_import_draft.sql`; its generated
+metadata describes the merged schema. The existing v20 baseline is unchanged.
+Apply that forward migration to a prepared replacement before its final delta.
+It changes channel-mapping CHECKs without changing columns or primary keys, so
+the original v19-to-v20 snapshot remains the comparison artifact. Migration
+verification covers populated channel children and a final delta across this
+forward change. The production replacement receives this pending migration
+through the normal production release procedure before its own cutover.
+
 On 2026-10-23 production and staging had no physical-item Products. The replacement
 databases were created with `--location wnam`, and Cloudflare reported WNAM before
 binding or loading either:

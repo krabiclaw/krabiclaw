@@ -109,11 +109,13 @@ export interface ProductStayConfig {
   /** Who looks after the home: their stays are what an assigned member sees. */
   assigned_member_id: string | null
   assigned_team_id: string | null
+  /** Whether the home is live, so billed: active at its active location, and published or syncing with Airbnb. Read only. */
+  live: boolean
 }
 
 /** What a home is and offers; unsaid when a home is created without them. */
 export type StayListingField = 'property_type_group' | 'property_type' | 'listing_type' | 'total_floors' | 'listing_floor' | 'year_built' | 'property_size' | 'property_size_unit' | 'bedrooms' | 'beds' | 'bathrooms' | 'amenities' | 'amenity_answers' | 'cancellation_policy' | 'long_term_cancellation_policy'
-export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'photo_rooms' | 'accessibility' | 'check_in_end_time'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'> | 'check_in_end_time'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
+export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField | 'photo_rooms' | 'accessibility' | 'check_in_end_time' | 'live'> & Partial<Pick<ProductStayConfig, Exclude<StayListingField, 'amenity_answers'> | 'check_in_end_time'>> & { amenity_answers?: import('~/shared/stay-listing').StayAmenityAnswerPatch[] }
 
 /** Who looks after a product: workspace state the public site never carries. */
 export type StaffAssignment = 'assigned_member_id' | 'assigned_team_id'
@@ -323,8 +325,8 @@ export interface ProductPresentation {
   structuredDataType: 'MenuItem' | 'Product' | 'Event' | 'Accommodation'
 }
 
-/** A product as the public site serves it: everything but who on the team looks after it. */
+/** A product as the public site serves it: everything but who on the team looks after it and whether a home is billed. */
 export type PublicProduct<T extends Product = Product> = Omit<T, 'booking' | 'stay'> & {
   booking: Omit<ProductBookingConfig, StaffAssignment> | null
-  stay: Omit<ProductStayConfig, StaffAssignment> | null
+  stay: Omit<ProductStayConfig, StaffAssignment | 'live'> | null
 }
