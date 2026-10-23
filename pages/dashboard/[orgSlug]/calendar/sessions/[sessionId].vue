@@ -1,6 +1,6 @@
 <template>
-  <DashboardLeafPanel id="product-session" :title="isNew ? 'Add availability' : 'Edit availability'" :lead="timezone ? `Times are in ${timezone}.` : p.product.value?.kind === 'service' ? 'Choose the office for this consultation.' : 'Choose where this experience takes place.'" :saving="saving" :disabled="pending || !valid || (!isNew && !form?.dirty && !saveError)" :error="saveError ?? scopeError ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add to calendar' : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
-    <UForm v-if="!scopeError" ref="form" :key="revision" :state="{ location: p.locationId.value, startDate, startsAt, endsAt, capacity, sessionStatus }" :validate="() => validation.errors" class="space-y-6" @submit="save">
+  <DashboardLeafPanel id="product-session" :title="isNew ? 'Add availability' : 'Edit availability'" :lead="timezone ? `Times are in ${timezone}.` : p.product.value?.kind === 'service' ? 'Choose the office for this consultation.' : 'Choose where this experience takes place.'" :saving="saving" :disabled="!valid || (!isNew && !form?.dirty && !saveError)" :error="saveError ?? scopeError ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add to calendar' : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
+    <UForm v-if="!scopeError" ref="form" :key="revision" :disabled="pending || saving" :state="{ location: p.locationId.value, startDate, startsAt, endsAt, capacity, sessionStatus }" :validate="() => validation.errors" class="space-y-6" @submit="save">
       <UFormField v-if="isNew" name="location" label="Location" required><USelect :model-value="p.locationId.value ?? undefined" :items="locationItems" placeholder="Choose a location" class="w-full" @update:model-value="chooseLocation" /></UFormField>
       <p v-else class="text-sm text-muted">{{ savedLocation?.title ?? 'Online' }}</p>
       <UFormField v-if="isNew" name="startDate" label="Date" required eager-validation><UInput v-model="startDate" type="date" class="w-full" /></UFormField>
@@ -24,7 +24,7 @@ import { isValidCalendarDate, isValidTimezone, localDateTimeToInstant, localNow 
 import { getErrorMessage } from '~/utils/errors'
 import type { ProductSessionStatus } from '~/shared/bookings'
 
-definePageMeta({ layout: 'dashboard' })
+definePageMeta({ layout: 'dashboard', key: route => `calendar-session:${route.params.orgSlug}:${route.query.product_id}` })
 const context = inject(calendarSessionsKey)
 if (!context?.product.value) throw createError({ statusCode: 400, statusMessage: 'Choose the offering whose availability you want to edit.' })
 const productId = context.product.value.id
@@ -64,6 +64,8 @@ const sessionStatus = ref<ProductSessionStatus>('scheduled')
 const saving = ref(false)
 const recovering = ref(false)
 const saveError = ref<string | null>(null)
+// A different session or Cancel starts with untouched native form state.
+const revision = ref(0)
 const creationIntent = useState(`session-create:${p.organizationId}:${productId}`, () => ({ key: crypto.randomUUID(), fingerprint: '' }))
 const hasGuests = computed(() => (data.value?.session.claimed ?? 0) > 0)
 function localInput(instant: string, zone: string): string {
@@ -79,7 +81,10 @@ function reset() {
   saveError.value = null
 }
 watch([data, error, p.product, sessionId], ([,,, nextId], [,,, previousId]) => {
-  if (nextId !== previousId || !saving.value && !recovering.value && !saveError.value && !error.value) reset()
+  if (nextId !== previousId) {
+    reset()
+    revision.value++
+  } else if (!saving.value && !recovering.value && !saveError.value && !error.value) reset()
 }, { immediate: true })
 function instant(value: string, original?: string): string {
   if (original && timezone.value && value === localInput(original, timezone.value)) return original
@@ -127,7 +132,7 @@ watch(suggestedEnd, (next) => {
   if (!endsAt.value || endsAt.value === previousSuggestedEnd) endsAt.value = next
   previousSuggestedEnd = next
 })
-const valid = computed(() => Boolean(p.product.value?.booking) && (!isNew.value || canCreate.value) && !scopeError.value && !error.value && Boolean(validation.value.startsAt && validation.value.endsAt) && !validation.value.errors.length)
+const valid = computed(() => !pending.value && Boolean(p.product.value?.booking) && (!isNew.value || canCreate.value) && !scopeError.value && !error.value && Boolean(validation.value.startsAt && validation.value.endsAt) && !validation.value.errors.length)
 const form = useTemplateRef('form')
 // Revalidate native touched/error fields when a suggestion or time zone changes.
 // Untouched missing fields remain unmarked until their native input/blur or submit.
@@ -140,8 +145,6 @@ watch(validation, async () => {
   if (endsAt.value) names.add('endsAt')
   if (names.size) await current.validate({ name: [...names], silent: true })
 }, { flush: 'post' })
-// Cancel restores the draft; a new revision is a fresh form, so nothing reads as changed.
-const revision = ref(0)
 async function useSavedSession() {
   recovering.value = true
   try {

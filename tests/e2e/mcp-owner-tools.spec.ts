@@ -1205,6 +1205,7 @@ test.describe('stateless MCP server', () => {
         const addedId = addedSessions[0]!.id
         expect((await refusedCalendar).status()).toBe(503)
         await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/sessions/${addedId}`)
+        await expect(availability.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
         await expect(availability.getByText(calendarFailure, { exact: true })).toBeVisible()
         await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('4')
         const beforeRetry = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
