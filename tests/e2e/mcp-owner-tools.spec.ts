@@ -1335,6 +1335,7 @@ test.describe('stateless MCP server', () => {
         expect(beforeRetry.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 4, remaining: 4 })])
         await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
         await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('9')
         await page.unroute(interceptSavedSession)
         const recoveredSession = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'GET')
         await availability.getByRole('button', { name: 'Use saved values', exact: true }).click()
