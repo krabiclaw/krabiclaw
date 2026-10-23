@@ -19,7 +19,6 @@ import { STAYS_TOOLS, handleStaysTools } from './stays'
 import { GUEST_MESSAGING_TOOLS, handleGuestMessagingTools } from './guest-messaging'
 import { SUBMISSIONS_TOOLS, handleSubmissionsTools } from './submissions'
 import { GOOGLE_ADS_TOOLS, handleGoogleAdsTools } from './google-ads'
-import { MARKETING_TOOLS, handleMarketingTools } from './marketing'
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro'
 import { queryFirst } from '~/server/db'
@@ -63,7 +62,6 @@ export const MCP_PUBLIC_TOOLS: McpToolDefinition[] = [
   ...STAYS_TOOLS,
   ...GUEST_MESSAGING_TOOLS,
   ...GOOGLE_ADS_TOOLS,
-  ...MARKETING_TOOLS,
 ].sort((a, b) => a.name.localeCompare(b.name))
 
 export const MCP_INTERNAL_TOOLS: McpToolDefinition[] = []
@@ -133,7 +131,6 @@ export const DOMAIN_HANDLERS: Record<string, (_ctx: McpExecutorContext) => Promi
   stays: handleStaysTools,
   guest_messaging: handleGuestMessagingTools,
   google_ads: handleGoogleAdsTools,
-  marketing: handleMarketingTools,
 }
 
 export async function executeMcpToolCall(

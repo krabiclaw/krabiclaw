@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:c674b13648d53cddfb4a8b2608ea58b5762b8240a2b826361ee0d4c637c20a58",
-  "documentationFingerprint": "sha256:2ad0a4b7e9e8c87233558efc3a245e36f90c49867e972aa7cdc7bd77aa838cbc",
+  "fingerprint": "sha256:092a9479a63da567b6bcb60cae2fffb616e5a7d4245693552da1a9a173681424",
+  "documentationFingerprint": "sha256:a5ea07a32bc91640cd8bd10a9695cc66472ccb16115c6d64c3c503e926a12b99",
   "tools": [
     {
       "name": "add_organization_language",
@@ -11767,7 +11767,7 @@
     {
       "name": "cancel_stay",
       "title": "Cancel stay",
-      "description": "Cancel a stay the host took and free its nights. Refunds are recorded separately with record_stay_payment as a negative amount.",
+      "description": "Cancel a host-entered stay under its current version, free its nights, cancel pending automatic guest messages and update availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that cancellation was saved. If a website payment needs a refund, returns financial_action_required with an authenticated dashboard link before cancellation or financial writes. Offline refunds can be recorded separately with record_stay_payment; that record moves no money.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -12191,7 +12191,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       },
       "securitySchemes": [
@@ -12386,118 +12386,6 @@
       "domain": "bookings",
       "minimumRole": "admin",
       "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "clone_google_ads_campaign",
-      "title": "Clone google ads campaign",
-      "description": "Clone an existing Google Ads campaign structure for a new landing page or blog post, copying keywords, updating destination URL, and adapting ad headlines and daily budget.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "additional_keywords": {
-            "description": "Optional additional keywords to include.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "contains_eu_political_advertising": {
-            "description": "Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.",
-            "type": "boolean"
-          },
-          "daily_budget_micros": {
-            "description": "Optional daily budget in micros. Defaults to the source campaign budget.",
-            "minimum": 1000000,
-            "type": "integer"
-          },
-          "headline_replacements": {
-            "description": "Optional mapping of text patterns to replace in source ad headlines (e.g. {\"Old Title\": \"New Title\"}).",
-            "type": "object"
-          },
-          "new_campaign_name": {
-            "description": "Name for the cloned campaign.",
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
-            "type": "string"
-          },
-          "source_campaign_id": {
-            "description": "Google Ads campaign ID of the template campaign to clone.",
-            "type": "string"
-          },
-          "status": {
-            "description": "Initial status of the cloned campaign (default PAUSED).",
-            "enum": [
-              "ENABLED",
-              "PAUSED"
-            ],
-            "type": "string"
-          },
-          "target_url": {
-            "description": "Destination landing page or blog post URL for the new campaign.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "source_campaign_id",
-          "new_campaign_name",
-          "target_url",
-          "contains_eu_political_advertising"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "properties": {
-          "ad_group_resource_name": {
-            "type": "string"
-          },
-          "ad_resource_name": {
-            "type": "string"
-          },
-          "budget_resource_name": {
-            "type": "string"
-          },
-          "campaign_id": {
-            "type": "string"
-          },
-          "resource_name": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "campaign_id",
-          "resource_name",
-          "budget_resource_name",
-          "ad_group_resource_name",
-          "ad_resource_name",
-          "status"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "google_ads",
-      "minimumRole": "admin",
-      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -18101,7 +17989,7 @@
     {
       "name": "create_google_ads_search_campaign",
       "title": "Create google ads search campaign",
-      "description": "Create and launch a new Google Ads Search campaign with an atomic mutate batch including daily budget, campaign, ad group, keywords, and responsive search ad.",
+      "description": "Create a Google Ads Search campaign from supplied keywords, ad copy, destination URL and daily budget. Creates one ad group and responsive search ad. Starts PAUSED unless ENABLED is explicitly requested; enabled campaigns can spend the connected account’s advertising budget.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -18118,24 +18006,28 @@
             "description": "Descriptions for Responsive Search Ad (2 to 4, max 90 chars each).",
             "items": {
               "maxLength": 90,
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 4,
             "minItems": 2,
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "headlines": {
             "description": "Headlines for Responsive Search Ad (3 to 15, max 30 chars each).",
             "items": {
               "maxLength": 30,
+              "minLength": 1,
               "type": "string"
             },
             "maxItems": 15,
             "minItems": 3,
-            "type": "array"
+            "type": "array",
+            "uniqueItems": true
           },
           "keywords": {
-            "description": "Keywords to target with optional match type (defaults to PHRASE).",
+            "description": "Keywords to target with optional match type (default PHRASE).",
             "items": {
               "properties": {
                 "match_type": {
@@ -18147,6 +18039,7 @@
                   "type": "string"
                 },
                 "text": {
+                  "minLength": 1,
                   "type": "string"
                 }
               },
@@ -18159,6 +18052,8 @@
           },
           "name": {
             "description": "Campaign name.",
+            "minLength": 1,
+            "pattern": "\\S",
             "type": "string"
           },
           "organization_id": {
@@ -18222,8 +18117,7 @@
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
+        "destructiveHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
       },
@@ -34822,7 +34716,7 @@
     {
       "name": "create_stay",
       "title": "Create stay",
-      "description": "Add a stay the host took directly (phone, repeat guest) at a place to stay. It holds its nights; a night another stay already holds refuses it with STAY_OVERLAP. Takes no payment and sends no guest email.",
+      "description": "Add a stay the host took directly, such as by phone, and hold its nights. A night another stay already holds refuses it with STAY_OVERLAP. Takes no payment. Applies existing automatic guest-message schedules and updates availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that the stay was saved; retry with the same idempotency key.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -35317,7 +35211,7 @@
       "annotations": {
         "destructiveHint": false,
         "idempotentHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       },
       "securitySchemes": [
@@ -44881,12 +44775,13 @@
     {
       "name": "get_google_ads_campaign",
       "title": "Get google ads campaign",
-      "description": "Read full details of a Google Ads campaign, including its budget, ad groups, criteria/keywords, and responsive search ad headlines, descriptions, and final URLs.",
+      "description": "Read a campaign in the connected Google Ads account when inspecting its status, budget, ad groups, keywords, responsive search ad copy or destination URLs.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "campaign_id": {
             "description": "Numeric Google Ads campaign ID.",
+            "pattern": "^[0-9]+$",
             "type": "string"
           },
           "organization_id": {
@@ -44975,6 +44870,9 @@
                 "matchType": {
                   "type": "string"
                 },
+                "negative": {
+                  "type": "boolean"
+                },
                 "status": {
                   "type": [
                     "string",
@@ -44987,7 +44885,9 @@
               },
               "required": [
                 "text",
-                "matchType"
+                "matchType",
+                "status",
+                "negative"
               ],
               "type": "object"
             },
@@ -65722,312 +65622,6 @@
       "uiResourceUri": null
     },
     {
-      "name": "launch_omnichannel_campaign",
-      "title": "Launch omnichannel campaign",
-      "description": "Launch and coordinate an omnichannel marketing campaign across Google Ads (search campaign create or clone), social channels (Instagram, Facebook, Discord), and on-site visitor announcements.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "campaign_title": {
-            "description": "Human-readable name or theme for the marketing campaign.",
-            "type": "string"
-          },
-          "google_ads": {
-            "description": "Optional Google Ads Search campaign creation or cloning configuration.",
-            "properties": {
-              "additional_keywords": {
-                "description": "Optional additional keywords to include.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "contains_eu_political_advertising": {
-                "description": "Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.",
-                "type": "boolean"
-              },
-              "daily_budget_micros": {
-                "description": "Daily budget in micros (e.g. 10000000 for 10 units in account currency).",
-                "minimum": 1000000,
-                "type": "integer"
-              },
-              "descriptions": {
-                "description": "Responsive Search Ad descriptions (min 2) when mode is \"create\".",
-                "items": {
-                  "maxLength": 90,
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "headline_replacements": {
-                "description": "Optional keyword/phrase replacements for ad copy headlines when cloning.",
-                "type": "object"
-              },
-              "headlines": {
-                "description": "Responsive Search Ad headlines (min 3) when mode is \"create\".",
-                "items": {
-                  "maxLength": 30,
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "keywords": {
-                "description": "Keywords to target when mode is \"create\".",
-                "items": {
-                  "properties": {
-                    "match_type": {
-                      "enum": [
-                        "EXACT",
-                        "PHRASE",
-                        "BROAD"
-                      ],
-                      "type": "string"
-                    },
-                    "text": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "text"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "mode": {
-                "description": "Whether to clone an existing high-performing campaign or create a new search campaign.",
-                "enum": [
-                  "clone",
-                  "create"
-                ],
-                "type": "string"
-              },
-              "new_campaign_name": {
-                "description": "Optional campaign name. Defaults to \"<campaign_title> - Search\".",
-                "type": "string"
-              },
-              "source_campaign_id": {
-                "description": "Numeric campaign ID of the template campaign to clone (required when mode is \"clone\").",
-                "type": "string"
-              },
-              "status": {
-                "description": "Initial campaign status (defaults to PAUSED).",
-                "enum": [
-                  "ENABLED",
-                  "PAUSED"
-                ],
-                "type": "string"
-              }
-            },
-            "required": [
-              "mode",
-              "contains_eu_political_advertising"
-            ],
-            "type": "object"
-          },
-          "organization_id": {
-            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
-            "type": "string"
-          },
-          "social_post": {
-            "description": "Optional social media broadcast across Facebook, Instagram, or Discord.",
-            "properties": {
-              "caption": {
-                "description": "Post text / caption for social channels.",
-                "type": "string"
-              },
-              "channels": {
-                "description": "Target social channels. Defaults to all currently connected channels.",
-                "items": {
-                  "enum": [
-                    "facebook",
-                    "instagram",
-                    "discord"
-                  ],
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "media_asset_id": {
-                "description": "Optional media asset ID to attach as post image or video.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "caption"
-            ],
-            "type": "object"
-          },
-          "target_url": {
-            "description": "Destination URL (e.g. newly published blog post, product, or landing page).",
-            "type": "string"
-          },
-          "website_announcement": {
-            "description": "Optional on-site visitor announcement banner/popup.",
-            "properties": {
-              "cta_label": {
-                "description": "Call-to-action button text.",
-                "type": "string"
-              },
-              "cta_url": {
-                "description": "Call-to-action link destination (defaults to target_url).",
-                "type": "string"
-              },
-              "description": {
-                "description": "Optional announcement message details.",
-                "type": "string"
-              },
-              "dismissible": {
-                "description": "Whether the announcement can be dismissed by visitors (default true).",
-                "type": "boolean"
-              },
-              "enabled": {
-                "description": "Whether the announcement is active immediately (default true).",
-                "type": "boolean"
-              },
-              "format": {
-                "description": "Whether to present as a top banner or a popup modal (default modal).",
-                "enum": [
-                  "modal",
-                  "banner"
-                ],
-                "type": "string"
-              },
-              "headline": {
-                "description": "Announcement modal title.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "headline"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "campaign_title",
-          "target_url"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "properties": {
-          "campaign_title": {
-            "type": "string"
-          },
-          "google_ads": {
-            "properties": {
-              "campaign_id": {
-                "type": "string"
-              },
-              "error": {
-                "type": "string"
-              },
-              "resource_name": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              }
-            },
-            "type": "object"
-          },
-          "ok": {
-            "type": "boolean"
-          },
-          "social": {
-            "properties": {
-              "error": {
-                "type": "string"
-              },
-              "outcomes": {
-                "items": {
-                  "properties": {
-                    "channel": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    },
-                    "public_url": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "status": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "channel",
-                    "status"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "post_id": {
-                "type": "string"
-              },
-              "published": {
-                "type": "boolean"
-              }
-            },
-            "type": "object"
-          },
-          "target_url": {
-            "type": "string"
-          },
-          "website_announcement": {
-            "properties": {
-              "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "enabled": {
-                "type": "boolean"
-              },
-              "error": {
-                "type": "string"
-              },
-              "headline": {
-                "type": "string"
-              }
-            },
-            "type": "object"
-          }
-        },
-        "required": [
-          "ok",
-          "campaign_title",
-          "target_url"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "marketing",
-      "minimumRole": "admin",
-      "requiredEntitlement": "marketing",
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
       "name": "list_article_categories",
       "title": "List article categories",
       "description": "List categories and subcategories in one site blog or documentation collection, in public display order, with article and child-category counts. Published articles require a category in their collection.",
@@ -66780,7 +66374,7 @@
     {
       "name": "list_google_ads_campaigns",
       "title": "List google ads campaigns",
-      "description": "List Google Ads campaigns for the connected Google Ads account, including status, daily budget, spend, impressions, clicks, and conversions.",
+      "description": "List up to 100 non-removed campaigns in the connected Google Ads account, ordered by all-time spend, when reviewing campaign status, daily budget, spend, impressions, clicks and conversions.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -66789,7 +66383,7 @@
             "type": "string"
           },
           "status": {
-            "description": "Filter campaigns by status: ENABLED, PAUSED, or ALL (default: ALL).",
+            "description": "Filter campaigns by status: ENABLED, PAUSED, or ALL non-removed campaigns (default: ALL).",
             "enum": [
               "ENABLED",
               "PAUSED",
@@ -117179,20 +116773,49 @@
     {
       "name": "update_google_ads_campaign",
       "title": "Update google ads campaign",
-      "description": "Update the status (ENABLED/PAUSED) or daily budget of an existing Google Ads campaign.",
+      "description": "Pause, enable or change the daily budget of a selected campaign in the connected Google Ads account. Supply status, or both budget_id and daily_budget_micros. Enabling or raising a budget can increase advertising spend; changing a shared budget affects every campaign using it.",
       "inputSchema": {
         "additionalProperties": false,
+        "oneOf": [
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "budget_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "daily_budget_micros"
+                  ]
+                }
+              ]
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "required": [
+              "budget_id",
+              "daily_budget_micros"
+            ]
+          }
+        ],
         "properties": {
           "budget_id": {
-            "description": "Optional budget ID when updating daily budget.",
+            "description": "Budget ID returned for this campaign by get_google_ads_campaign or list_google_ads_campaigns. Required with daily_budget_micros; shared budget changes affect every campaign using it.",
+            "pattern": "^[0-9]+$",
             "type": "string"
           },
           "campaign_id": {
             "description": "Google Ads campaign ID to update.",
+            "pattern": "^[0-9]+$",
             "type": "string"
           },
           "daily_budget_micros": {
-            "description": "Optional new daily budget in micros.",
+            "description": "New daily budget in micros. Required with budget_id.",
             "minimum": 1000000,
             "type": "integer"
           },
@@ -134085,7 +133708,7 @@
     {
       "name": "update_stay",
       "title": "Update stay",
-      "description": "Change a stay the host took: dates, party, guest details, total or notes. Fields left out keep their values. Stays from Airbnb or another channel change only on that channel.",
+      "description": "Change a host-entered stay’s dates, party, guest details, total or notes under its current version. Omitted fields keep their values. Replans pending automatic guest messages and updates availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that the stay edit was saved. Stays from another channel must be changed on that channel.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -134573,7 +134196,7 @@
       },
       "annotations": {
         "destructiveHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       },
       "securitySchemes": [

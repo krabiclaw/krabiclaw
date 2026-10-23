@@ -7,6 +7,22 @@ import { MCP_ORGANIZATION_ID, mcpRequest, loginAsFreshMcpUser } from './helpers/
 // on a tenant it does not belong to.
 
 test.describe('stateless MCP server', () => {
+  test('Google Ads updates reject missing changes and incomplete budget changes before provider access', async ({ request, baseURL }) => {
+    await loginAs(request, baseURL!)
+    for (const change of [{}, { daily_budget_micros: 1000000 }, { budget_id: '2' }, { status: 'PAUSED', budget_id: '2' }]) {
+      const response = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'update_google_ads_campaign',
+        args: { organization_id: MCP_ORGANIZATION_ID, campaign_id: '1', ...change },
+      })
+      expect(response.status()).toBe(200)
+      const body = await response.json()
+      expect(body.result?.isError).toBe(true)
+      expect(body.result?.structuredContent).toBeUndefined()
+      expect(body.result?.content?.[0]?.text).toContain('Invalid arguments for tool update_google_ads_campaign')
+      expect(body.result?.content?.[0]?.text).toContain('oneOf')
+    }
+  })
+
   test('missing required records produce a 404 tool error across resource families', async ({ request, baseURL }) => {
     await loginAs(request, baseURL!)
     const missingId = `missing-${crypto.randomUUID()}`

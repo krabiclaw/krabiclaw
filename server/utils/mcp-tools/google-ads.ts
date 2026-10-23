@@ -9,12 +9,10 @@ import {
   listGoogleAdsCampaigns,
   getGoogleAdsCampaignDetail,
   createGoogleAdsSearchCampaign,
-  cloneGoogleAdsCampaign,
-  updateGoogleAdsCampaignStatus,
-  updateGoogleAdsCampaignBudget,
+  updateGoogleAdsCampaign,
 } from '~/server/utils/google-ads'
 
-export async function resolveGoogleAdsCredentials(ctx: McpExecutorContext) {
+async function resolveGoogleAdsCredentials(ctx: McpExecutorContext) {
   const integration = await readIntegration(ctx.organization.db, ctx.organization.organizationId, 'google_ads')
   if (!integration || !integration.account_id || !integration.target_id) {
     throw new HTTPError({
@@ -33,7 +31,7 @@ export async function resolveGoogleAdsCredentials(ctx: McpExecutorContext) {
 export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
   organizationTool({
     name: 'list_google_ads_campaigns',
-    description: 'List Google Ads campaigns for the connected Google Ads account, including status, daily budget, spend, impressions, clicks, and conversions.',
+    description: 'List up to 100 non-removed campaigns in the connected Google Ads account, ordered by all-time spend, when reviewing campaign status, daily budget, spend, impressions, clicks and conversions.',
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
@@ -41,7 +39,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
       status: {
         type: 'string',
         enum: ['ENABLED', 'PAUSED', 'ALL'],
-        description: 'Filter campaigns by status: ENABLED, PAUSED, or ALL (default: ALL).',
+        description: 'Filter campaigns by status: ENABLED, PAUSED, or ALL non-removed campaigns (default: ALL).',
       },
     },
     outputSchema: {
@@ -73,7 +71,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'get_google_ads_campaign',
-    description: 'Read full details of a Google Ads campaign, including its budget, ad groups, criteria/keywords, and responsive search ad headlines, descriptions, and final URLs.',
+    description: 'Read a campaign in the connected Google Ads account when inspecting its status, budget, ad groups, keywords, responsive search ad copy or destination URLs.',
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
@@ -81,6 +79,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     inputSchema: {
       campaign_id: {
         type: 'string',
+        pattern: '^[0-9]+$',
         description: 'Numeric Google Ads campaign ID.',
       },
     },
@@ -117,8 +116,9 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
               text: { type: 'string' },
               matchType: { type: 'string' },
               status: { type: ['string', 'null'] },
+              negative: { type: 'boolean' },
             },
-            required: ['text', 'matchType'],
+            required: ['text', 'matchType', 'status', 'negative'],
           },
         },
         headlines: { type: 'array', items: { type: 'string' } },
@@ -130,7 +130,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'create_google_ads_search_campaign',
-    description: 'Create and launch a new Google Ads Search campaign with an atomic mutate batch including daily budget, campaign, ad group, keywords, and responsive search ad.',
+    description: 'Create a Google Ads Search campaign from supplied keywords, ad copy, destination URL and daily budget. Creates one ad group and responsive search ad. Starts PAUSED unless ENABLED is explicitly requested; enabled campaigns can spend the connected account’s advertising budget.',
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
@@ -138,6 +138,8 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     inputSchema: {
       name: {
         type: 'string',
+        minLength: 1,
+        pattern: '\\S',
         description: 'Campaign name.',
       },
       daily_budget_micros: {
@@ -154,25 +156,27 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
         items: {
           type: 'object',
           properties: {
-            text: { type: 'string' },
+            text: { type: 'string', minLength: 1 },
             match_type: { type: 'string', enum: ['EXACT', 'PHRASE', 'BROAD'] },
           },
           required: ['text'],
         },
-        description: 'Keywords to target with optional match type (defaults to PHRASE).',
+        description: 'Keywords to target with optional match type (default PHRASE).',
       },
       headlines: {
         type: 'array',
-        items: { type: 'string', maxLength: 30 },
+        items: { type: 'string', minLength: 1, maxLength: 30 },
         minItems: 3,
         maxItems: 15,
+        uniqueItems: true,
         description: 'Headlines for Responsive Search Ad (3 to 15, max 30 chars each).',
       },
       descriptions: {
         type: 'array',
-        items: { type: 'string', maxLength: 90 },
+        items: { type: 'string', minLength: 1, maxLength: 90 },
         minItems: 2,
         maxItems: 4,
+        uniqueItems: true,
         description: 'Descriptions for Responsive Search Ad (2 to 4, max 90 chars each).',
       },
       status: {
@@ -199,72 +203,20 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     },
   }),
   organizationTool({
-    name: 'clone_google_ads_campaign',
-    description: 'Clone an existing Google Ads campaign structure for a new landing page or blog post, copying keywords, updating destination URL, and adapting ad headlines and daily budget.',
-    domain: 'google_ads',
-    minimumRole: 'admin',
-    requiredEntitlement: 'marketing',
-    required: ['source_campaign_id', 'new_campaign_name', 'target_url', 'contains_eu_political_advertising'],
-    inputSchema: {
-      source_campaign_id: {
-        type: 'string',
-        description: 'Google Ads campaign ID of the template campaign to clone.',
-      },
-      new_campaign_name: {
-        type: 'string',
-        description: 'Name for the cloned campaign.',
-      },
-      target_url: {
-        type: 'string',
-        description: 'Destination landing page or blog post URL for the new campaign.',
-      },
-      daily_budget_micros: {
-        type: 'integer',
-        minimum: 1000000,
-        description: 'Optional daily budget in micros. Defaults to the source campaign budget.',
-      },
-      headline_replacements: {
-        type: 'object',
-        description: 'Optional mapping of text patterns to replace in source ad headlines (e.g. {"Old Title": "New Title"}).',
-      },
-      additional_keywords: {
-        type: 'array',
-        items: { type: 'string' },
-        description: 'Optional additional keywords to include.',
-      },
-      status: {
-        type: 'string',
-        enum: ['ENABLED', 'PAUSED'],
-        description: 'Initial status of the cloned campaign (default PAUSED).',
-      },
-      contains_eu_political_advertising: {
-        type: 'boolean',
-        description: 'Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.',
-      },
-    },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        campaign_id: { type: 'string' },
-        resource_name: { type: 'string' },
-        budget_resource_name: { type: 'string' },
-        ad_group_resource_name: { type: 'string' },
-        ad_resource_name: { type: 'string' },
-        status: { type: 'string' },
-      },
-      required: ['campaign_id', 'resource_name', 'budget_resource_name', 'ad_group_resource_name', 'ad_resource_name', 'status'],
-    },
-  }),
-  organizationTool({
     name: 'update_google_ads_campaign',
-    description: 'Update the status (ENABLED/PAUSED) or daily budget of an existing Google Ads campaign.',
+    description: 'Pause, enable or change the daily budget of a selected campaign in the connected Google Ads account. Supply status, or both budget_id and daily_budget_micros. Enabling or raising a budget can increase advertising spend; changing a shared budget affects every campaign using it.',
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
     required: ['campaign_id'],
     inputSchema: {
+      oneOf: [
+        { required: ['status'], not: { anyOf: [{ required: ['budget_id'] }, { required: ['daily_budget_micros'] }] } },
+        { required: ['budget_id', 'daily_budget_micros'] },
+      ],
       campaign_id: {
         type: 'string',
+        pattern: '^[0-9]+$',
         description: 'Google Ads campaign ID to update.',
       },
       status: {
@@ -274,12 +226,13 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
       },
       budget_id: {
         type: 'string',
-        description: 'Optional budget ID when updating daily budget.',
+        pattern: '^[0-9]+$',
+        description: 'Budget ID returned for this campaign by get_google_ads_campaign or list_google_ads_campaigns. Required with daily_budget_micros; shared budget changes affect every campaign using it.',
       },
       daily_budget_micros: {
         type: 'integer',
         minimum: 1000000,
-        description: 'Optional new daily budget in micros.',
+        description: 'New daily budget in micros. Required with budget_id.',
       },
     },
     outputSchema: {
@@ -300,7 +253,7 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
 
   if (toolName === 'list_google_ads_campaigns') {
     const { accessToken, developerToken, customerId } = await resolveGoogleAdsCredentials(ctx)
-    const status = optionalString(args, 'status') as 'ENABLED' | 'PAUSED' | 'ALL' | undefined
+    const status = (optionalString(args, 'status') ?? undefined) as 'ENABLED' | 'PAUSED' | 'ALL' | undefined
     const campaigns = await listGoogleAdsCampaigns(accessToken, developerToken, customerId, status)
     return {
       customer_id: customerId,
@@ -349,65 +302,21 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
     }
   }
 
-  if (toolName === 'clone_google_ads_campaign') {
-    const { accessToken, developerToken, customerId } = await resolveGoogleAdsCredentials(ctx)
-    const sourceCampaignId = requiredString(args, 'source_campaign_id')
-    const newCampaignName = requiredString(args, 'new_campaign_name')
-    const targetUrl = requiredString(args, 'target_url')
-    const dailyBudgetAmountMicros = args.daily_budget_micros !== undefined ? Number(args.daily_budget_micros) : undefined
-    const headlineReplacements = args.headline_replacements as Record<string, string> | undefined
-    const additionalKeywords = args.additional_keywords as string[] | undefined
-    const status = (optionalString(args, 'status') as 'ENABLED' | 'PAUSED') ?? 'PAUSED'
-
-    const result = await cloneGoogleAdsCampaign(accessToken, developerToken, customerId, {
-      sourceCampaignId,
-      newCampaignName,
-      targetUrl,
-      dailyBudgetAmountMicros,
-      headlineReplacements,
-      additionalKeywords,
-      status,
-      containsEuPoliticalAdvertising: requiredBoolean(args, 'contains_eu_political_advertising'),
-    })
-
-    return {
-      campaign_id: result.campaignId,
-      resource_name: result.resourceName,
-      budget_resource_name: result.budgetResourceName,
-      ad_group_resource_name: result.adGroupResourceName,
-      ad_resource_name: result.adResourceName,
-      status: result.status,
-    }
-  }
-
   if (toolName === 'update_google_ads_campaign') {
     const { accessToken, developerToken, customerId } = await resolveGoogleAdsCredentials(ctx)
     const campaignId = requiredString(args, 'campaign_id')
-    const status = optionalString(args, 'status') as 'ENABLED' | 'PAUSED' | undefined
+    const status = (optionalString(args, 'status') ?? undefined) as 'ENABLED' | 'PAUSED' | undefined
     const budgetId = optionalString(args, 'budget_id')
     const dailyBudgetAmountMicros = args.daily_budget_micros !== undefined ? Number(args.daily_budget_micros) : undefined
 
-    let updatedStatus: string | null = null
-    let updatedBudgetId: string | null = null
-    let updatedBudgetAmount: number | null = null
+    await updateGoogleAdsCampaign(accessToken, developerToken, customerId, {
+      campaignId,
+      status,
+      budgetId: budgetId ?? undefined,
+      dailyBudgetAmountMicros,
+    })
 
-    if (status) {
-      await updateGoogleAdsCampaignStatus(accessToken, developerToken, customerId, campaignId, status)
-      updatedStatus = status
-    }
-
-    if (budgetId && dailyBudgetAmountMicros) {
-      await updateGoogleAdsCampaignBudget(accessToken, developerToken, customerId, budgetId, dailyBudgetAmountMicros)
-      updatedBudgetId = budgetId
-      updatedBudgetAmount = dailyBudgetAmountMicros
-    }
-
-    return {
-      campaign_id: campaignId,
-      status: updatedStatus,
-      budget_id: updatedBudgetId,
-      daily_budget_micros: updatedBudgetAmount,
-    }
+    return { campaign_id: campaignId, status: status ?? null, budget_id: budgetId, daily_budget_micros: dailyBudgetAmountMicros ?? null }
   }
 
   return NOT_HANDLED

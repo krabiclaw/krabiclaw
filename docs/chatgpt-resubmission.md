@@ -70,7 +70,11 @@ After the staging PR is merged and the tested changes are promoted to production
 
 ## Existing submission and portal checks
 
-Use existing app `asdk_app_6a2da16bb89c8191b37484641a83a20c`. The current
+Use the owner's current managed draft
+`plugin_asdk_app_6accb97bbe148191a40020f843575141`, associated with app
+`asdk_app_6accb97bbe148191a40020f843575141`. The rejected October 1 submission
+was app `asdk_app_6a2da16bb89c8191b37484641a83a20c`; do not create another app
+or move the configured production endpoint between them. The current
 [submission flow](https://developers.openai.com/plugins/deploy/submission)
 uses a complete plugin ZIP, tool scans and review details. If the app uses the
 previous form, download its existing release ZIP first and preserve all required
@@ -94,3 +98,34 @@ Production ChatGPT selection, reviewer fixtures, video, paid-booking MCP
 handoff/page verification and the portal rescan/resubmission remain pending
 until those steps are actually executed. Local D1, browser and scripted MCP
 checks support the PR; they do not satisfy these production review gates.
+
+## Current review evidence
+
+On October 23, 2026, authenticated OAuth discovery, PKCE, token exchange,
+MCP initialize, 165-tool discovery, workspace context and organization reads
+passed against both staging and production. The current Chrome portal draft
+is version `0.1.3`, authorized and domain verified. Its fresh production scan
+completed and shows ten tool findings. Inspect their saved definitions before
+submission; a generic request for further review does not identify a code defect.
+A scan completion does not establish approval or test-case success.
+
+The dedicated reviewer credential still signs in without an email code and can
+read Ember & Slice. Its saved workspace can point at another demo business:
+review instructions must explicitly select Ember & Slice before the cases.
+The Review Tasting Experience has review confirmation, no required online
+collection and available future sessions. Review Online Tasting retains its
+required online collection. Ember's October payment list is empty and its
+seller Stripe account is not connected. `get_payments_usage.configured` describes
+plan fee pricing, not the seller account connection, and must not be used to
+infer payout availability.
+
+The existing [OpenAI walkthrough](https://media.krabiclaw.com/review/2026-10-12/krabiclaw-live-walkthrough-85a20f3afc89.mp4)
+and [Google Ads OAuth video](https://youtu.be/-ItMxoHlCus) are separate recordings.
+The Google recording demonstrates consent, reporting and campaign changes;
+it does not replace the current OpenAI review cases.
+
+Staging also contains the Airbnb import change from
+[#1542](https://github.com/krabiclaw/krabiclaw/pull/1542), which records a production
+hold until the draft-aware iOS build ships. The owning iOS sessions are handling
+that build. Complete MCP source validation independently, then verify the native
+release evidence before promoting the combined staging branch.
