@@ -94,8 +94,8 @@ The import takes everything it can from Airbnb and asks only for what Airbnb lea
    ```
 
    `missingFields` lists only these keys: `timezone`, `email`, `phone`, `country`, `state`, `city`, `address`, `zipCode`, `propertyType`. `childBeds` and `infantCots` no longer exist; Airbnb counts neither, so Channex receives 0 for both. `checkInTime`, `checkInEndTime` and `checkOutTime` are Airbnb's `booking_settings.check_in_time_start`, `check_in_time_end` and `check_out_time` as `HH:MM`, for display only. `checkInEndTime` is `null` for Airbnb's `FLEXIBLE`. A start or checkout Airbnb has not set is `null`.
-2. `POST /api/organizations/:id/integrations/airbnb/listings/:listingId/import` with `{"missingDetails": {…}}`, holding only keys from `missingFields`, each a non-empty string. The fields earlier apps send are read and discarded, never refused: top-level `checkInTime` and `checkOutTime` (the home takes Airbnb's window), and `missingDetails.childBeds` and `missingDetails.infantCots` (Channex gets 0 for both). Any other top-level key is 400 `VALIDATION_ERROR` with `field` naming the key. Any other `missingDetails` key not in `missingFields` is 422 `ONLY_MISSING_DETAILS`. A listing whose Airbnb start or checkout is not set is 422 `MISSING_AIRBNB_FIELD` with `field: "booking_settings.check_in_time_start"` or `"booking_settings.check_out_time"`, and nothing is created; the host sets it on Airbnb and imports again. Success is 202 `{product_id, stage, waiting}`. The new home has Airbnb's check-in window (§3.2).
-3. A new build syncs listings with the sync request (§3.5). Builds that drive an import step by step call `POST …/imports/:productId/advance` until `complete`. Each answer is `{product_id, stage, waiting, content}`. `content` is the content stage's report once that stage has run, else `null`. The same report is `import.content` in `GET …/listings`.
+2. Request `POST /api/organizations/:id/integrations/airbnb/sync` with `{"sync": [{"listing_id": "39313043", "details": {…}}]}` (§3.5). Optional `details` holds only keys from `missingFields`, each a non-empty string; contact email and phone default to the organization's. The whole request's live-home allowance is checked before anything is queued. Success is 202 `{listings}`; KrabiClaw imports new homes and carries them through activation in the background. The home takes Airbnb's check-in window (§3.2). If its start or checkout is missing, the job fails with `MISSING_AIRBNB_FIELD`, naming `booking_settings.check_in_time_start` or `booking_settings.check_out_time`, before creating a home; the host sets the field on Airbnb and submits a new sync request.
+3. Read `GET …/integrations/airbnb/sync` for each listing's progress and failure (§3.5); the app need not stay open. There is no separate client activation or advance call. Once the content stage finishes, its report is `import.content` in `GET …/listings`.
 4. `POST …/imports/:productId/content` runs the content stage again on a completed import (owner or admin): 200 `{product_id, stage: "complete", content}`.
 
 The content report:
@@ -111,6 +111,7 @@ The content report:
 | `unmapped_check_in_category` | string or `null` | Airbnb's check-in category when it has no verified home check-in method. |
 | `truncated_fields` | `{field, limit, length}[]` | Texts cut to the home's limit. |
 | `photo_rooms_skipped` | number | Airbnb rooms not made into photo rooms. |
+| `kept_host_edits` | string[] | Fields edited in KrabiClaw since the last import and preserved by this refresh; absent from reports written before background sync. |
 
 A photo Airbnb cannot serve at 2560 px stops the stage with 502 `PHOTO_FETCH_FAILED`, `image_id` and `url`; the retry keeps every photo already stored.
 
@@ -118,7 +119,7 @@ A photo Airbnb cannot serve at 2560 px stops the stage with 502 `PHOTO_FETCH_FAI
 
 A home is **live** when it is active at its active location and either published on the site (`product_publications.published = 1`) or synced with Airbnb (its Channex mapping is enabled). Any other home is a **draft**: free and unlimited on every plan. Billing (`homes.used`, the Stripe homes meter) and Basic's limit count live homes only.
 
-- Adding a home (`POST /api/dashboard/stay-homes`) and importing one (§3.3) are never refused for the plan: the new home is a draft.
+- Adding a home (`POST /api/dashboard/stay-homes`) is never refused for the plan: the new home is a draft. An Airbnb sync request (§3.5), including one that imports a new home, checks the resulting live-home allowance before anything is queued.
 - Publishing a home (`PATCH /api/dashboard/stay-homes/:productId` `{published: true}`, the product publication route, the MCP tool), syncing an Airbnb listing (§3.5), reconnecting a listing, turning a home or its location back on: each that makes one more home live past Basic's 2 is refused with 402:
 
 ```json
