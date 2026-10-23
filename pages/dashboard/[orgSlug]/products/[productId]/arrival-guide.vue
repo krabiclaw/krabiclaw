@@ -5,7 +5,7 @@
       <section>
         <h2 class="text-xl font-medium text-highlighted">Check-in &amp; checkout</h2>
         <dl class="mt-4 grid grid-cols-2 gap-6">
-          <div><dt class="text-sm text-muted">Check-in from</dt><dd class="mt-1 text-base text-highlighted">{{ p.product.value?.stay?.check_in_time }}</dd></div>
+          <div><dt class="text-sm text-muted">Check-in</dt><dd class="mt-1 text-base text-highlighted">{{ p.product.value?.stay ? stayCheckInWindow(p.product.value.stay.check_in_time, p.product.value.stay.check_in_end_time) : '' }}</dd></div>
           <div><dt class="text-sm text-muted">Checkout by</dt><dd class="mt-1 text-base text-highlighted">{{ p.product.value?.stay?.check_out_time }}</dd></div>
         </dl>
       </section>
@@ -58,6 +58,7 @@
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS } from '~/shared/stay-listing'
+import { stayCheckInWindow } from '~/shared/stay-arrival'
 import { stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatTime } from '~/utils/timezone'

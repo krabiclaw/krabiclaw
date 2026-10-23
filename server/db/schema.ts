@@ -1113,6 +1113,8 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	location_id: text().notNull(),
 	check_in_time: text().notNull(),
+	// The end of the check-in window, local HH:MM; null is a flexible end. Earlier than check_in_time means after midnight.
+	check_in_end_time: text(),
 	check_out_time: text().notNull(),
 	max_guests: integer().notNull(),
 	min_nights: integer().default(1).notNull(),
@@ -1158,6 +1160,7 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	foreignKey({ columns: [table.organization_id, table.assigned_team_id], foreignColumns: [team.organizationId, team.id], name: "product_stay_configs_team_scope_fk" }).onDelete("no action"),
 	unique("product_stay_configs_org_product_unique").on(table.organization_id, table.product_id),
 	check("product_stay_configs_times_check", sql`check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'`),
+	check("product_stay_configs_check_in_end_check", sql`check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')`),
 	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
 	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
 	check("product_stay_configs_instructions_check", sql`check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)`),

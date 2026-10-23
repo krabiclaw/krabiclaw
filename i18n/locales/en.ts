@@ -103,6 +103,7 @@ export default {
     "max_guests": "This place has a maximum of {count} guests, not including infants.",
     "min_nights": "{count}-night minimum",
     "check_in_after": "Check-in after {time}",
+    "check_in_window": "Check-in {start} – {end}",
     "check_out_before": "Checkout before {time}",
     "nights_in": "{nights} in {place}",
     "select_check_in": "Select check-in date",

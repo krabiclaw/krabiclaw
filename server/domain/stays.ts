@@ -151,6 +151,8 @@ export interface StayHome {
   /** How tax relates to the base nightly price; null when the home has no base price. */
   base_price_tax_behavior: PriceTaxBehavior | null
   check_in_time: string
+  /** The end of the check-in window, local HH:MM; null is a flexible end. Earlier than check_in_time is after midnight. */
+  check_in_end_time: string | null
   check_out_time: string
   max_guests: number
   min_nights: number
@@ -353,7 +355,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, p.updated_at AS product_updated_at, p.name, p.description, p.details_json, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
-           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
+           c.check_in_time, c.check_in_end_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
@@ -389,7 +391,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
     return {
       product_id: String(row.product_id), product_updated_at: String(row.product_updated_at), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
-      check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      check_in_time: String(row.check_in_time), check_in_end_time: nullableText(row.check_in_end_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       description: String(row.description), published: Number(row.published) === 1,
       address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude), stay_map_sharing: parseStayMapSharing(row.stay_map_sharing),
       property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
@@ -459,6 +461,8 @@ export interface NewStayHome {
   phone: string | null
   email: string | null
   check_in_time: string
+  /** Null is a flexible end. */
+  check_in_end_time: string | null
   check_out_time: string
   max_guests: number
   min_nights: number
@@ -490,7 +494,7 @@ function homeDetails(body: Record<string, unknown>) {
     if (value !== null && !isValidTimezone(value)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone', 'timezone')
     return value
   }
-  const time = (key: 'check_in_time' | 'check_out_time', required: boolean) => {
+  const time = (key: 'check_in_time' | 'check_in_end_time' | 'check_out_time', required: boolean) => {
     const value = text(key, 5, required)
     if (value !== null && !TIME.test(value)) fail(422, 'INVALID_DETAIL', `${key} must be a 24-hour HH:MM time`, key)
     return value
@@ -511,7 +515,7 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
     name: name(true)!, timezone: timezone(true)!,
     ...homeAddress(body, ''),
     phone: text('phone', 32, false), email: text('email', 254, false),
-    check_in_time: time('check_in_time', true)!, check_out_time: time('check_out_time', true)!,
+    check_in_time: time('check_in_time', true)!, check_in_end_time: time('check_in_end_time', false), check_out_time: time('check_out_time', true)!,
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
     base_price_minor: basePrice(),
   }
@@ -544,7 +548,7 @@ const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude', 'stay_map_sharing'] as const
-const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
+const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_in_end_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
   'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...Object.values(STAY_ALARM_DETAIL_KEYS), ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
 
 /** The arrival guide fields a request names, checked; each problem names its field. */
@@ -628,6 +632,8 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   const stay: NonNullable<UpdateProductInput['stay']> = {}
   const checkIn = time('check_in_time', false)
   if (checkIn !== null) stay.check_in_time = checkIn
+  // null is a real value here: the check-in window has a flexible end.
+  if ('check_in_end_time' in body) stay.check_in_end_time = time('check_in_end_time', false)
   const checkOut = time('check_out_time', false)
   if (checkOut !== null) stay.check_out_time = checkOut
   const guests = maxGuests(false)
@@ -822,7 +828,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
-      stay: { location_id: locationId, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null },
     },
   })
   return await readStayHome(db, access, product.id)

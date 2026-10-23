@@ -5,7 +5,9 @@ import { errorChainForTelemetry } from "~/shared/error-telemetry";
 import type { DbClient } from "~/server/db";
 import { uploadImageBuffer, deleteImage } from "~/server/utils/cloudflare-images";
 import { uploadToR2, buildR2Key, deleteFromR2 } from "~/server/utils/cloudflare-r2";
-import { createMediaAsset, getMediaAsset, type MediaAsset } from "~/server/utils/media-asset-manager";
+import { executeBatch } from "~/server/db";
+import { publicResourceCacheInvalidationQuery } from "~/server/utils/public-resource-cache";
+import { assertNotPinnedByPublication, createMediaAsset, getMediaAsset, publicationPinGuardQuery, type MediaAsset } from "~/server/utils/media-asset-manager";
 import { fastStartMp4, readMp4Metadata } from "~/server/utils/video-metadata";
 import { R2_IMAGE_MIME_TYPES } from "~/server/utils/media-mime";
 
@@ -247,4 +249,59 @@ export async function uploadResolvedMediaToAssetStore(
     return { assetId, publicUrl, thumbnailUrl, kind: 'video' }
   }
   return { assetId, publicUrl, thumbnailUrl, kind: input.kind };
+}
+
+/**
+ * Put new bytes behind an existing R2 image asset, keeping the asset itself:
+ * its id, so every placement, room, caption and accessibility answer that
+ * names it stays as it is. The new file gets its own key and URL (no cached
+ * copy of the old one is served for it), the row is switched only while it
+ * still names the old file, and the old file is deleted after. A failure
+ * before the switch removes the new file; one after it reports the old file
+ * left behind.
+ */
+export async function replaceR2ImageFile(input: {
+  db: DbClient
+  env: Parameters<typeof uploadToR2>[0]
+  organizationId: string
+  assetId: string
+  buffer: Uint8Array<ArrayBuffer>
+  contentType: string
+  filename: string
+  width: number
+  height: number
+}): Promise<void> {
+  const asset = await getMediaAsset(input.db, input.assetId, input.organizationId)
+  if (!asset || asset.status !== 'active' || asset.kind !== 'image' || asset.provider !== 'cloudflare_r2' || !asset.r2_key) {
+    throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${input.assetId} is not an active R2 image`, data: { code: 'MEDIA_NOT_REPLACEABLE', field: 'asset_id' } })
+  }
+  // A published post shows this exact file; it is not changed under it.
+  await assertNotPinnedByPublication(input.db, input.organizationId, input.assetId)
+  const key = buildR2Key(input.organizationId, `${input.assetId}-${crypto.randomUUID()}`, input.filename)
+  const publicUrl = await uploadToR2(input.env, key, input.buffer, input.contentType)
+  let switched: boolean
+  try {
+    const [, result] = await executeBatch(input.db, [publicationPinGuardQuery(input.organizationId, input.assetId), {
+      query: `UPDATE media_assets SET r2_key = ?, public_url = ?, mime_type = ?, file_name = ?, file_size = ?, width = ?, height = ?, updated_at = ?
+        WHERE id = ? AND organization_id = ? AND r2_key = ? AND status = 'active'`,
+      params: [key, publicUrl, input.contentType, input.filename, input.buffer.byteLength, input.width, input.height, new Date().toISOString(), input.assetId, input.organizationId, asset.r2_key],
+    }, publicResourceCacheInvalidationQuery(input.organizationId, 'media-file-replace')], { operation: 'Replace media file' })
+    switched = Number(result?.meta?.changes ?? 0) === 1
+  } catch (error) {
+    try {
+      await deleteFromR2(input.env, key)
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], `Media asset ${input.assetId} kept its file; the new file ${key} could not be deleted`, { cause: cleanupError })
+    }
+    throw error
+  }
+  if (!switched) {
+    await deleteFromR2(input.env, key)
+    throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${input.assetId} changed while its file was replaced`, data: { code: 'MEDIA_CHANGED', field: 'asset_id' } })
+  }
+  try {
+    await deleteFromR2(input.env, asset.r2_key)
+  } catch (error) {
+    throw new Error(`Media asset ${input.assetId} now uses ${key}; its previous file ${asset.r2_key} could not be deleted`, { cause: error })
+  }
 }

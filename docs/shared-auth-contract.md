@@ -34,9 +34,9 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 | Accept an invite | `POST /api/invite-links/:token/accept` → 200 `{organization:{id, name}, role, memberId}` | 401 `AUTHENTICATION_REQUIRED`, 404/410 as above, 409 `ALREADY_MEMBER`; membership is written only by `auth.api.addMember`. |
 | Change role / remove member / leave | `POST /api/auth/organization/update-member-role`, `/remove-member`, `/leave` | Admin may invite or promote an admin (D4). |
 | Team | `/api/dashboard/team/members`, `/api/dashboard/team/threads[/:threadId/messages\|/read]`, `PUT /api/dashboard/team/members/:memberId/homes` | A thread seat is a member row and cascades with it. |
-| Homes, stays, nights | `/api/dashboard/stay-homes[/:productId]`, `/api/dashboard/stays[/:stayId]` | |
+| Homes, stays, nights | `/api/dashboard/stay-homes[/:productId]`, `/api/dashboard/stays[/:stayId]` | A home's check-in window: §3.2. |
 | Guest messaging | `/api/dashboard/guest-threads`, `/api/dashboard/message-templates`, `/api/dashboard/scheduled-guest-messages` | Airbnb conversations through Channex. |
-| Airbnb connection | `/api/organizations/:id/integrations/airbnb/*` | Disconnect is separate from account and organization deletion. |
+| Airbnb connection | `/api/organizations/:id/integrations/airbnb/*` | Disconnect is separate from account and organization deletion. Importing a listing: §3.3. |
 | Homes quote | `GET /api/organizations/:id/billing/homes?adding=N` | What adding homes costs before they are added; §3.1. The write that then adds them answers by the same rule, so a quote that allows them is one the write allows. A refused write is 402 `HOME_LIMIT` with `homes: {used, covered}`; the app hands it to the dashboard billing page. |
 | Push | `POST/DELETE /api/dashboard/devices`, `/api/user/notification-preferences` | A device token belongs to a Better Auth session and cascades with it. |
 | Support impersonation | `POST /api/auth/admin/impersonate-user`, `/stop-impersonating` | Platform `admin` only, 900 s (D8). |
@@ -61,6 +61,57 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 - `homes.used`: active homes now; `homes.included`: homes the plan includes; `homes.additional_price_minor`: USD cents per month for each home beyond those, 900, except `0` on a paid subscription from before homes were priced, which is charged nothing for them; `homes.amount_minor`: what the homes in use now add to the month, `max(0, used − included) × additional_price_minor`.
 - `adding.count`: `N`; `adding.additional_homes`: the homes among the `N` that fall beyond the included ones; `adding.amount_minor`: `additional_homes × additional_price_minor`; `adding.allowed`: `false` only when the plan refuses, that is Basic with `used + N > included`.
 - `billing.period_end`: ISO instant of the current subscription period's end, when the invoice bills the homes, or `null` on Basic; `billing.prorated` is always `false`.
+
+### 3.2 A home's check-in window
+
+A home has Airbnb's check-in window: a start, an end, and a checkout time. All three are local 24-hour `HH:MM` in the home's time zone.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `check_in_time` | string, required | Start of the check-in window. Unchanged. |
+| `check_in_end_time` | string or `null` | End of the check-in window. `null` is Airbnb's **Flexible** (no end). A time earlier than `check_in_time` is after midnight (`"01:00"` with a `"16:00"` start). It may not equal `check_in_time`. New. |
+| `check_out_time` | string, required | Checkout. Unchanged. |
+
+- **Read:** every home response (`GET /api/dashboard/stay-homes`, `GET /api/dashboard/stay-homes/:productId`, and the `home` in every write's answer) always carries `check_in_end_time`, `null` included.
+- **Create:** `POST /api/dashboard/stay-homes` accepts `check_in_end_time` (string or `null`); left out, it is `null`.
+- **Change:** `PATCH /api/dashboard/stay-homes/:productId` accepts `check_in_end_time` on its own or with the other fields. Sending `null` makes the end flexible; leaving the key out keeps it. A value that is not `HH:MM` or equals the start is 422 `INVALID_DETAIL` with `field: "check_in_end_time"`.
+- The product API and MCP carry the same field as `stay.check_in_end_time`; the guest page shows "Check-in 4:00 PM – 9:00 PM", or "Check-in after 4:00 PM" when the end is `null`.
+
+### 3.3 Importing an Airbnb listing
+
+The import takes everything it can from Airbnb and asks only for what Airbnb leaves out.
+
+1. `GET /api/organizations/:id/integrations/airbnb/listings/:listingId` returns the listing details:
+
+   ```json
+   {
+     "id": "39313043", "title": "45B · …", "currency": "USD", "maxGuests": 4, "defaultOccupancy": 2, "nightlyRate": "109",
+     "fields": { "timezone": "America/Denver", "country": "US", "state": "UT", "city": "Salt Lake City", "address": "45 …", "zipCode": "84103", "propertyType": "apartment" },
+     "missingFields": ["email", "phone"],
+     "checkInTime": "16:00", "checkInEndTime": null, "checkOutTime": "11:00"
+   }
+   ```
+
+   `missingFields` lists only these keys: `timezone`, `email`, `phone`, `country`, `state`, `city`, `address`, `zipCode`, `propertyType`. `childBeds` and `infantCots` no longer exist; Airbnb counts neither, so Channex receives 0 for both. `checkInTime`, `checkInEndTime` and `checkOutTime` are Airbnb's `booking_settings.check_in_time_start`, `check_in_time_end` and `check_out_time` as `HH:MM`, for display only. `checkInEndTime` is `null` for Airbnb's `FLEXIBLE`. A start or checkout Airbnb has not set is `null`.
+2. `POST /api/organizations/:id/integrations/airbnb/listings/:listingId/import` with exactly `{"missingDetails": {…}}`, holding only keys from `missingFields`, each a non-empty string. Any other top-level key, including the former `checkInTime` and `checkOutTime`, is 400 `VALIDATION_ERROR` with `field` naming the key. A `missingDetails` key not in `missingFields` is 422 `ONLY_MISSING_DETAILS`. A listing whose Airbnb start or checkout is not set is 422 `MISSING_AIRBNB_FIELD` with `field: "booking_settings.check_in_time_start"` or `"booking_settings.check_out_time"`, and nothing is created; the host sets it on Airbnb and imports again. Success is 202 `{product_id, stage, waiting}`. The new home has Airbnb's check-in window (§3.2).
+3. `POST …/imports/:productId/advance` until `stage` is `complete`, as before. Each answer is `{product_id, stage, waiting, content}`. `content` is the content stage's report once that stage has run, else `null`. The same report is `import.content` in `GET …/listings`.
+4. `POST …/imports/:productId/content` runs the content stage again on a completed import (owner or admin): 200 `{product_id, stage: "complete", content}`.
+
+The content report:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `photos_imported` | string[] | Airbnb image ids stored this run, at 2560 px. |
+| `photos_skipped` | string[] | Already stored at full size; kept as they are. |
+| `photos_upgraded` | string[] | Stored by an earlier import at 450 px and fetched again at 2560 px into the same photo, keeping its place, caption and rooms. |
+| `photos_removed` | string[] | Deleted by the host from the media library after an import; left out. |
+| `photos_unplaced` | string[] | Past the home's 50-photo limit; not fetched. |
+| `unmatched_amenities` | string[] | Airbnb amenity constants with no home amenity. |
+| `unmapped_check_in_category` | string or `null` | Airbnb's check-in category when it has no verified home check-in method. |
+| `truncated_fields` | `{field, limit, length}[]` | Texts cut to the home's limit. |
+| `photo_rooms_skipped` | number | Airbnb rooms not made into photo rooms. |
+
+A photo Airbnb cannot serve at 2560 px stops the stage with 502 `PHOTO_FETCH_FAILED`, `image_id` and `url`; the retry keeps every photo already stored.
 
 ## 4. Deletion and membership changes
 

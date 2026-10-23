@@ -95,7 +95,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
 
     const unspecifiedPropertyDetails = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
     const home = {
-      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
+      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })),
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
       description: '', published: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
@@ -141,18 +141,21 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(refusal(await edit(owner, { name: null })), { status: 422, code: 'INVALID_DETAIL', field: 'name' })
     assert.deepEqual(refusal(await edit(owner, { name: 'Renamed', timezone: 'Mars/Olympus' })), { status: 422, code: 'INVALID_DETAIL', field: 'timezone' })
     assert.deepEqual(refusal(await edit(owner, { name: '  ' })), { status: 422, code: 'INVALID_DETAIL', field: 'name' })
+    // The check-in window's end is a time other than its start, or null for a flexible end.
+    assert.deepEqual(refusal(await edit(owner, { check_in_end_time: '9pm' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_end_time' })
+    assert.deepEqual(refusal(await edit(owner, { check_in_end_time: '15:00' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.check_in_end_time' })
     assert.deepEqual(refusal(await edit(owner, { assigned_member_id: 'nobody' })), { status: 422, code: 'INVALID_DETAIL', field: 'assigned_member_id' })
     assert.deepEqual(refusal(await edit(await cookieFor('helper'), { name: 'Mine' })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual((await call(owner, 'GET')).body.homes, [created.body.home, second.body.home])
 
     const edited = await edit(owner, {
-      name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', check_in_time: '16:00', check_out_time: '10:00',
+      name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00',
       max_guests: 6, min_nights: 3, base_price_minor: 210_00, assigned_member_id: 'm-helper',
     })
     assert.equal(edited.status, 200)
     const changed = {
       product_id: made.product_id, product_updated_at: (await getProduct(db, ORG, made.product_id)).updated_at, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
-      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
+      check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [], photo_rooms: [], stay_map_sharing: 'general',
       accessibility: home.accessibility,
       address: home.address, latitude: null, longitude: null, description: '', published: false, property_type_group: null, property_type: null, ...unspecifiedPropertyDetails, bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], smoke_detector_details: null, carbon_monoxide_detector_details: null, cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
@@ -308,6 +311,10 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } },
     })
     assert.equal((await getLocation(db, ORG, loftLocation))!.status, 'inactive')
+    // The check-in window's end: leaving the key out keeps it; null makes it flexible again, read back through the product.
+    assert.equal(((await edit(owner, { max_guests: 6 })).body.home as { check_in_end_time: string | null }).check_in_end_time, '21:00')
+    assert.equal(((await edit(owner, { check_in_end_time: null })).body.home as { check_in_end_time: string | null }).check_in_end_time, null)
+    assert.equal((await getProduct(db, ORG, made.product_id)).stay!.check_in_end_time, null)
   } finally {
     await runtime.dispose()
   }
