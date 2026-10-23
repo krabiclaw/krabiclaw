@@ -1,12 +1,17 @@
 import { HTTPError } from 'nitro'
+import tzLookup from '@photostructure/tz-lookup'
+import { isValidTimezone } from '~/utils/timezone'
 import { channexRequest, type ChannexEnv } from './client'
-import { ChannexDataError, integer, object, string } from './data'
+import { ChannexDataError, integer, object, received, string, type JsonRecord } from './data'
 
 /**
- * What an Airbnb listing says about itself, read through Channex: its details
- * and its next 500 nights. A field
- * Airbnb leaves out is reported as missing for the host to supply; nothing is
- * filled in for them.
+ * What an Airbnb listing says about itself, read through Channex: its details,
+ * its content (photos, texts, amenities, rooms) and its next 500 nights. Airbnb's listing (checked live on 2026-10-22) has
+ * no time zone, email or phone: the time zone comes from the listing's
+ * coordinates and the contact details from the organization, since Channex
+ * requires a contact email and phone on a property before it connects to
+ * Airbnb. A field still unknown after that is reported as missing for the
+ * host to supply; nothing is filled in for them.
  */
 
 export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'propertyType', 'childBeds', 'infantCots'] as const
@@ -24,6 +29,15 @@ export interface ListingDetails {
   nightlyRate: string
   fields: Partial<Record<DetailField, string>>
   missingFields: DetailField[]
+  /** Airbnb's check-in start and checkout hours as HH:MM, or null when Airbnb has none set. */
+  checkInTime: string | null
+  checkOutTime: string | null
+}
+
+/** The organization's guest contact details, which every imported home carries. */
+export interface OrganizationContact {
+  email: string | null
+  phone: string | null
 }
 
 export interface ListingNight {
@@ -50,20 +64,44 @@ function provided<T>(read: () => T): T {
 }
 
 function amount(value: unknown, label: string): string {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new ChannexDataError(`${label} is missing or invalid. Review the listing on Airbnb.`)
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) throw new ChannexDataError(`${label} is missing or invalid (got ${received(value)}). Review the listing on Airbnb.`)
   return String(value)
 }
 
-export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string): Promise<ListingDetails> {
+/**
+ * Airbnb states check-in start and checkout as an hour of the day, as the
+ * string "16" or the number 10; "FLEXIBLE" and other words mean no set time.
+ */
+function hourTime(value: unknown): string | null {
+  const hour = typeof value === 'number' ? value : typeof value === 'string' && /^\d{1,2}$/.test(value) ? Number(value) : null
+  if (hour === null || !Number.isInteger(hour) || hour < 0 || hour > 23) return null
+  return `${String(hour).padStart(2, '0')}:00`
+}
+
+/** The IANA zone at the listing's coordinates. Airbnb sends none of its own. */
+function coordinateTimezone(lat: unknown, lng: unknown): string | null {
+  if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return null
+  const zone = tzLookup(lat, lng)
+  return isValidTimezone(zone) ? zone : null
+}
+
+/** Channex's `listing_details` action: the listing record as Airbnb reports it. */
+async function listingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
   const raw = await channexRequest(env, `/channels/${encodeURIComponent(channelId)}/action/listing_details?${new URLSearchParams({ listing_id: listingId })}`)
   return provided(() => {
-    const listing = object(object(raw.data, 'Listing details').listing, 'Airbnb listing')
-    if (listing.id !== listingId) throw new ChannexDataError('Airbnb returned a different listing')
+    const record = object(object(raw.data, 'Listing details').listing, 'Airbnb listing')
+    if (record.id !== listingId) throw new ChannexDataError('Airbnb returned a different listing')
+    return record
+  })
+}
+
+export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {
+  const listing = await listingRecord(env, channelId, listingId)
+  return provided(() => {
     const pricing = object(listing.pricing_settings, 'Listing pricing')
     const fields: Partial<Record<DetailField, string>> = {}
     const sources: ReadonlyArray<readonly [DetailField, string]> = [
-      ['timezone', 'timezone'], ['email', 'email'], ['phone', 'phone'], ['country', 'country_code'],
-      ['state', 'state'], ['city', 'city'], ['address', 'street'], ['zipCode', 'zipcode'],
+      ['country', 'country_code'], ['state', 'state'], ['city', 'city'], ['address', 'street'], ['zipCode', 'zipcode'],
     ]
     for (const [key, source] of sources) {
       const value = listing[source]
@@ -71,6 +109,11 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       if (typeof value !== 'string' || !value.trim()) throw new ChannexDataError(`Airbnb listing field ${source} must be a non-empty string`)
       fields[key] = value
     }
+    const timezone = coordinateTimezone(listing.lat, listing.lng)
+    if (timezone) fields.timezone = timezone
+    if (contact.email) fields.email = contact.email
+    if (contact.phone) fields.phone = contact.phone
+    const booking = listing.booking_settings === undefined || listing.booking_settings === null ? {} : object(listing.booking_settings, 'Booking settings')
     if (listing.property_type_category !== undefined && listing.property_type_category !== null) {
       const category = string(listing.property_type_category, 'Airbnb property type')
       if (!(PROPERTY_TYPES as readonly string[]).includes(category)) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified KrabiClaw mapping. Import stopped for review.`)
@@ -83,6 +126,119 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       maxGuests: integer(listing.person_capacity, 'Guest capacity', 1), defaultOccupancy: integer(pricing.guests_included, 'Included guests', 1),
       nightlyRate: amount(pricing.default_daily_price, 'Base price'), fields,
       missingFields: DETAIL_FIELDS.filter(key => fields[key] === undefined),
+      checkInTime: hourTime(booking.check_in_time_start), checkOutTime: hourTime(booking.check_out_time),
+    }
+  })
+}
+
+/** The listing texts Airbnb's editor holds, by Airbnb's field name. `name` and `locale` are not content. */
+export const DESCRIPTION_FIELDS = ['summary', 'description', 'space', 'access', 'interaction', 'neighborhood_overview', 'transit', 'notes', 'house_rules'] as const
+export type DescriptionField = typeof DESCRIPTION_FIELDS[number]
+
+export interface ListingImage {
+  /** Airbnb's image id, unique across listings (`<listing id>_<photo id>`). */
+  id: string
+  caption: string | null
+  sortOrder: number
+  /** The largest rendition Airbnb's listing details name: `extra_medium_url`. */
+  url: string
+}
+
+export interface ListingRoom {
+  type: string
+  isPrivate: boolean
+  beds: Array<{ type: string; quantity: number }>
+}
+
+/** A listing's content as Airbnb reports it: nothing is filled in; a text Airbnb has no value for is null. */
+export interface ListingContent {
+  images: ListingImage[]
+  descriptions: Record<DescriptionField, string | null>
+  /** Airbnb's amenity constants reported present (`is_present`), plus its `listing_views`, in Airbnb's spelling. */
+  amenities: string[]
+  bedrooms: number | null
+  beds: number | null
+  bathrooms: number | null
+  rooms: ListingRoom[]
+  houseManual: string | null
+  directions: string | null
+  wifiNetwork: string | null
+  wifiPassword: string | null
+  checkInOption: { category: string; instruction: string | null } | null
+}
+
+/** A text Airbnb may leave out or leave blank: null for both; anything else must be a string. */
+function text(record: JsonRecord, key: string, label: string): string | null {
+  const value = record[key]
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'string') throw new ChannexDataError(`${label} must be text`)
+  return value.trim() ? value : null
+}
+
+function count(record: JsonRecord, key: string, label: string, step: 1 | 0.5): number | null {
+  const value = record[key]
+  if (value === undefined || value === null) return null
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || !Number.isInteger(value / step)) throw new ChannexDataError(`${label} must be a count in steps of ${step}`)
+  return value
+}
+
+/**
+ * The listing's content. Channex documents `images` (or null), `rooms` and
+ * `descriptions` (or null) on the listing and leaves their items open;
+ * `amenities`, `bedrooms`, `beds`, `bathrooms`, `house_manual`, `directions`,
+ * the wifi fields and `check_in_option` are undocumented fields Airbnb returns
+ * (checked live, 2026-10-22), so each is null when absent and an error when
+ * present in another shape.
+ */
+export async function listingContent(env: ChannexEnv, channelId: string, listingId: string): Promise<ListingContent> {
+  const listing = await listingRecord(env, channelId, listingId)
+  return provided(() => {
+    const rawImages = listing.images === null || listing.images === undefined ? [] : listing.images
+    if (!Array.isArray(rawImages)) throw new ChannexDataError('images must be a list or null')
+    const images = rawImages.map((value, index): ListingImage => {
+      const image = object(value, `images[${index}]`)
+      const url = string(image.extra_medium_url, `images[${index}].extra_medium_url`)
+      if (!URL.canParse(url) || new URL(url).protocol !== 'https:') throw new ChannexDataError(`images[${index}].extra_medium_url must be an https URL`)
+      return { id: string(image.id, `images[${index}].id`), caption: text(image, 'caption', `images[${index}].caption`), sortOrder: integer(image.sort_order, `images[${index}].sort_order`), url }
+    }).sort((a, b) => a.sortOrder - b.sortOrder)
+    if (new Set(images.map(image => image.id)).size !== images.length) throw new ChannexDataError('images must have distinct ids')
+    const texts = listing.descriptions === null || listing.descriptions === undefined ? {} : object(listing.descriptions, 'descriptions')
+    const descriptions = Object.fromEntries(DESCRIPTION_FIELDS.map(key => [key, text(texts, key, `descriptions.${key}`)])) as Record<DescriptionField, string | null>
+    const amenities: string[] = []
+    if (listing.amenities !== null && listing.amenities !== undefined) {
+      for (const [key, value] of Object.entries(object(listing.amenities, 'amenities'))) {
+        const amenity = object(value, `amenities.${key}`)
+        if (typeof amenity.is_present !== 'boolean') throw new ChannexDataError(`amenities.${key}.is_present must be true or false`)
+        if (amenity.is_present) amenities.push(key)
+      }
+    }
+    if (listing.listing_views !== null && listing.listing_views !== undefined) {
+      if (!Array.isArray(listing.listing_views)) throw new ChannexDataError('listing_views must be a list')
+      amenities.push(...listing.listing_views.map((value, index) => string(value, `listing_views[${index}]`)))
+    }
+    if (!Array.isArray(listing.rooms)) throw new ChannexDataError('rooms must be a list')
+    const rooms = listing.rooms.map((value, index): ListingRoom => {
+      const room = object(value, `rooms[${index}]`)
+      if (typeof room.is_private !== 'boolean') throw new ChannexDataError(`rooms[${index}].is_private must be true or false`)
+      if (!Array.isArray(room.beds)) throw new ChannexDataError(`rooms[${index}].beds must be a list`)
+      return {
+        type: string(room.room_type, `rooms[${index}].room_type`), isPrivate: room.is_private,
+        beds: room.beds.map((entry, bed) => {
+          const record = object(entry, `rooms[${index}].beds[${bed}]`)
+          return { type: string(record.type, `rooms[${index}].beds[${bed}].type`), quantity: integer(record.quantity, `rooms[${index}].beds[${bed}].quantity`, 1) }
+        }),
+      }
+    })
+    let checkInOption: ListingContent['checkInOption'] = null
+    if (listing.check_in_option !== null && listing.check_in_option !== undefined) {
+      const option = object(listing.check_in_option, 'check_in_option')
+      checkInOption = { category: string(option.category, 'check_in_option.category'), instruction: text(option, 'instruction', 'check_in_option.instruction') }
+    }
+    return {
+      images, descriptions, amenities: [...new Set(amenities)], rooms, checkInOption,
+      bedrooms: count(listing, 'bedrooms', 'bedrooms', 1), beds: count(listing, 'beds', 'beds', 1), bathrooms: count(listing, 'bathrooms', 'bathrooms', 0.5),
+      houseManual: text(listing, 'house_manual', 'house_manual'), directions: text(listing, 'directions', 'directions'),
+      wifiNetwork: text(listing, 'wifi_network', 'wifi_network'), wifiPassword: text(listing, 'wifi_password', 'wifi_password'),
     }
   })
 }
@@ -111,15 +267,25 @@ export async function listingCalendar(env: ChannexEnv, channelId: string, listin
       const matching = days.filter(day => day.date === date)
       if (matching.length !== 1) throw new ChannexDataError('Airbnb returned missing or duplicate calendar dates')
       const day = matching[0]!
-      const count = integer(day.available_count, 'Availability')
-      if ((day.availability !== 'available' && day.availability !== 'unavailable') || ![0, 1].includes(count)
-        || (day.availability === 'available') !== (count === 1) || typeof day.closed_to_arrival !== 'boolean' || typeof day.closed_to_departure !== 'boolean') {
-        throw new ChannexDataError("This listing's calendar cannot be imported without review")
-      }
-      return {
-        date, availability: count as 0 | 1, rate: amount(day.daily_price, 'Nightly price'),
-        minStay: integer(day.min_nights, 'Minimum nights', 1), maxStay: integer(day.max_nights, 'Maximum nights'),
-        closedToArrival: day.closed_to_arrival, closedToDeparture: day.closed_to_departure,
+      // A bad day names its date and the value Airbnb sent, so the host and the
+      // worker log both show which night stopped the import.
+      try {
+        // Airbnb's calendar (checked live on 2026-10-22) carries availability only as
+        // this string; the available_count Channex's schema lists is never sent.
+        if (day.availability !== 'available' && day.availability !== 'unavailable') {
+          throw new ChannexDataError(`This listing's calendar cannot be imported without review (availability ${received(day.availability)})`)
+        }
+        if (typeof day.closed_to_arrival !== 'boolean' || typeof day.closed_to_departure !== 'boolean') {
+          throw new ChannexDataError(`Closed-to-arrival and closed-to-departure must be booleans (got ${received(day.closed_to_arrival)} and ${received(day.closed_to_departure)})`)
+        }
+        return {
+          date, availability: day.availability === 'available' ? 1 : 0, rate: amount(day.daily_price, 'Nightly price'),
+          minStay: integer(day.min_nights, 'Minimum nights', 1), maxStay: integer(day.max_nights, 'Maximum nights'),
+          closedToArrival: day.closed_to_arrival, closedToDeparture: day.closed_to_departure,
+        }
+      } catch (error) {
+        if (error instanceof ChannexDataError) throw new ChannexDataError(`${error.message} (night ${date})`)
+        throw error
       }
     })
   })

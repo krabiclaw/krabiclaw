@@ -16,14 +16,22 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(JSON.stringify(document), 'complete canonical pricing document').toContain('billing_features')
   const comparison = page.locator('[data-parity-section="comparison"]')
   await expect(comparison).toBeVisible()
-  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(31)
+  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(32)
   const locations = comparison.locator('tr[data-feature-id="locations.included"]')
   await expect(locations.locator('td')).toHaveText([
     '2 included',
     '2 included, then $49 per additional location per month',
     '2 included, then $49 per additional location per month',
   ])
-  // Locations are the only count billed: no plan has a rental-unit row.
+  // Homes are billed apart from locations: 2 included, then $9 each on a paid plan.
+  const homes = comparison.locator('tr[data-feature-id="homes.included"]')
+  await expect(homes).toContainText('Homes')
+  await expect(homes.locator('td')).toHaveText([
+    '2 included',
+    '2 included, then $9 per additional home per month',
+    '2 included, then $9 per additional home per month',
+  ])
+  // Locations and homes are the counts billed: no plan has a rental-unit row.
   await expect(comparison.locator('tr[data-feature-id="rental-units.included"]')).toHaveCount(0)
   const teamAvailability = comparison.locator('tr[data-feature-id="bookings.member-availability"]')
   await expect(teamAvailability).toContainText('Team availability')
@@ -56,6 +64,8 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
   await expect(cards.nth(0).locator('[data-plan-locations]')).toHaveText('2 locations included')
   for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-locations]')).toHaveText('2 locations included, then $49 per additional location per month')
+  await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('2 homes included')
+  for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText('2 homes included, then $9 per additional home per month')
   await expect(page.getByText(/rental unit/i)).toHaveCount(0)
   // The services under the plans and the Markdown projection state the same add-ons from the same catalog.
   const addons = page.locator('[data-parity-section="add-ons"] .kc-pricing-addon')
@@ -158,6 +168,8 @@ test('pricing remains readable with JavaScript disabled', async ({ browser }) =>
     await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
     await expect(cards.nth(0).locator('[data-plan-locations]')).toHaveText('2 locations included')
     for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-locations]')).toHaveText('2 locations included, then $49 per additional location per month')
+    await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('2 homes included')
+    for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText('2 homes included, then $9 per additional home per month')
     await expect(cards.nth(2).getByRole('link', { name: 'Get Business', exact: true })).toHaveAttribute('href', '/signup?plan=business&redirect=%2Fapi%2Fpost-login%3Fplan%3Dbusiness')
     await expect(page.locator('[data-price-unavailable]')).toHaveCount(0)
   } finally {

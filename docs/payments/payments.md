@@ -14,6 +14,7 @@ from the catalog, and `server/utils/stripe-catalog.ts` validates the catalog.
 | --- | --- |
 | Plan (Growth $49 / Business $149) | flat monthly, quantity 1 |
 | Locations (Growth, Business) | metered, meter `krabiclaw_locations`, formula `last`, graduated: 2 included, then $49 per additional location per month |
+| Homes (Growth, Business) | metered, meter `krabiclaw_homes`, formula `last`, graduated: 2 included, then $9 per additional home per month |
 | Payments fee (Business) | metered, meter `krabiclaw_captured_volume`, formula `sum`, 0.014 cents per captured USD cent (1.4% of payment volume) |
 | Stripe fees (Business) | metered, meter `krabiclaw_stripe_cost`, formula `sum`, 1 cent per cost cent (at cost) |
 | Managed ads (Business) | metered, meter `krabiclaw_ad_spend`, formula `sum`, 0.1 cent per ad-spend cent (10% of monthly ad spend) |
@@ -30,15 +31,18 @@ Business offers are sold; `seats` other than 1 is refused.
 **Billing at period end.** Usage is billed on the subscription's own invoice
 at the end of each monthly period. Adding a location or a fee in the middle of
 a period never charges then; there is no in-period preview or confirmation for
-it. Only locations are billed by count: every active business location,
-including the location a home is at. A home is a product at its location and
-is not billed. The `last` meter bills the last count reported in the period,
-so `reportBillingUsage` (`server/utils/billing.ts`) reports the active
-locations after every write that can change them (`executeWithinCapacity` for
-creating or reactivating a location, and location deletion) and on each
-`customer.subscription.created`/`updated` event, which starts every period and
-every plan change with its count. Basic has no subscription, includes 2
-locations and refuses a third.
+it. Locations and homes are billed by count. A home is an active stay product
+at an active location; the location a home is at is the home's and is not a
+location, so it is never billed as one. Every other active business location
+is a location. The `last` meters bill the last count reported in the period,
+so `reportBillingUsage` (`server/utils/billing.ts`) reports both counts after
+every write that can change them (`executeWithinCapacity` for creating or
+reactivating a location or a stay product, and location or home deletion) and
+on each `customer.subscription.created`/`updated` event, which starts every
+period and every plan change with its counts. Basic has no subscription,
+includes 2 locations and 2 homes, and refuses a third of either
+(`LOCATION_LIMIT`, `HOME_LIMIT`). A subscription from before the homes price
+carries no homes item: its homes are reported and bill nothing.
 
 Captured volume, Stripe's attributable costs (a correction is a negative
 value) and managed ad spend are queued in `payment_usage_events` and delivered

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { assertCatalogModeKey, buildCatalogPlan, sha256Json } from '../../scripts/lib/stripe-catalog-plan.mjs'
+import { assertCatalogModeKey, buildCatalogPlan, PLAN_DEFINITIONS, sha256Json } from '../../scripts/lib/stripe-catalog-plan.mjs'
 import { assertStripeCliIdentity, main, parseCli, parseStripeCliResponse } from '../../scripts/seed-stripe.mjs'
 
 // Catalog mutation must require an explicit live target, before provider access.
@@ -97,7 +97,7 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.equal(plan.providerSnapshotSha256, sha256Json(original))
   assert.deepEqual(plan.operations.filter(operation => operation.type.includes('subscription')), [])
   assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_product').map(operation => operation.planId),
-    ['business', 'locations', 'captured_volume', 'stripe_cost', 'ad_spend', 'site_language', 'strategy'])
+    ['business', 'locations', 'homes', 'captured_volume', 'stripe_cost', 'ad_spend', 'site_language', 'strategy'])
   // Each plan is one flat monthly price; the $39 Growth price a subscription is on is retired for new sales only.
   const growthPrice = plan.operations.find(operation => operation.type === 'create_price' && operation.planId === 'growth')
   assert.deepEqual(growthPrice?.params, { currency: 'usd', recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: 4900 })
@@ -106,7 +106,7 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.deepEqual(businessPrice?.params, { currency: 'usd', recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: 14900 })
   // A meter per billed count or fee, then the monthly metered price on it.
   assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_meter').map(operation => [operation.params.event_name, operation.params.default_aggregation.formula]), [
-    ['krabiclaw_locations', 'last'], ['krabiclaw_captured_volume', 'sum'], ['krabiclaw_stripe_cost', 'sum'], ['krabiclaw_ad_spend', 'sum'],
+    ['krabiclaw_locations', 'last'], ['krabiclaw_homes', 'last'], ['krabiclaw_captured_volume', 'sum'], ['krabiclaw_stripe_cost', 'sum'], ['krabiclaw_ad_spend', 'sum'],
   ])
   assert.deepEqual(plan.operations.find(operation => operation.type === 'create_meter' && operation.planId === 'locations')?.params, {
     display_name: 'Additional location', event_name: 'krabiclaw_locations', default_aggregation: { formula: 'last' },
@@ -115,6 +115,8 @@ test('Business catalog consolidates new sales without repricing existing contrac
   const metered = (planId: string) => plan.operations.find(operation => operation.type === 'create_price' && operation.planId === planId)?.params
   const recurring = (planId: string) => ({ interval: 'month', interval_count: 1, usage_type: 'metered', meter: { ref: { kind: 'meter', planId } } })
   assert.deepEqual(metered('locations'), { currency: 'usd', recurring: recurring('locations'), billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 4900 }] })
+  // Homes are the same graduated shape at $9, on their own meter.
+  assert.deepEqual(metered('homes'), { currency: 'usd', recurring: recurring('homes'), billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 900 }] })
   assert.deepEqual(metered('captured_volume'), { currency: 'usd', recurring: recurring('captured_volume'), billing_scheme: 'per_unit', unit_amount_decimal: '0.014' })
   assert.deepEqual(metered('stripe_cost'), { currency: 'usd', recurring: recurring('stripe_cost'), billing_scheme: 'per_unit', unit_amount_decimal: '1' })
   assert.deepEqual(metered('ad_spend'), { currency: 'usd', recurring: recurring('ad_spend'), billing_scheme: 'per_unit', unit_amount_decimal: '0.1' })
@@ -223,4 +225,10 @@ test('Business moves to the USD 149 offer without repricing a USD 99 subscriptio
   const full = buildCatalogPlan({ snapshot: after })
   assert.deepEqual(full.operations.filter(operation => operation.priceId === 'price_business_99').map(operation => operation.type), ['deactivate_price'])
   assert.equal(full.operations.some(operation => operation.type.includes('subscription')), false)
+})
+
+// Stripe refuses a product marketing feature longer than 80 characters, and refuses it mid-apply.
+test('every catalog marketing feature fits Stripe’s 80-character limit', () => {
+  const tooLong = PLAN_DEFINITIONS.flatMap(definition => definition.features.filter(feature => feature.length > 80).map(feature => `${definition.planId}: ${feature}`))
+  assert.deepEqual(tooLong, [])
 })

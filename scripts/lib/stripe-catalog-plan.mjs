@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_LOCATIONS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalLocationPrice } from '../../shared/billing-model.ts'
+import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalHomePrice, additionalLocationPrice } from '../../shared/billing-model.ts'
 
 export const CATALOG_PLAN_SCHEMA_VERSION = 14
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
@@ -57,6 +57,7 @@ export const PLAN_DEFINITIONS = Object.freeze([
     features: [
       'Business websites for restaurants, experiences and law firms',
       `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`,
+      `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`,
       'Your own domain (yourbusiness.com)',
       'Update supported content, menus and photos through ChatGPT',
       'Bookings, consultation requests and ticketed experiences',
