@@ -11,6 +11,21 @@ collection and paid booking cancellation/rejection return an incomplete
 authenticated dashboard handoff before financial writes. Dashboard payment,
 approval, refund execution and interrupted-operation recovery remain available.
 
+The proposed catalog retains four explicit Google Ads tools and removes the
+combined launcher and partial clone. Page creation describes its additive
+behavior and preserves omitted source identity when creating a translation.
+Translations inherit page order; the dashboard can author configured draft
+languages before publication. Page translation fields now come from the same
+block registry as the content contract, including secondary button and accent
+text. Empty translated experience catalogs use their existing 404 contract
+before checking for branding. Incoming background-sync changes also require
+MCP product edits to disclose their Airbnb listing effects. Bulk product tools
+now accept the canonical stay settings required to create a home, and private
+arrival-guide edits preserve their full channel receipt and Airbnb editor
+advisories. Photo-tour and accessibility tools identify their local scope.
+These source changes require deployed verification before they count as
+production review evidence.
+
 ## Prepared reviewer data
 
 Prepare these independently through the existing dashboard and guest workflows
@@ -70,7 +85,11 @@ After the staging PR is merged and the tested changes are promoted to production
 
 ## Existing submission and portal checks
 
-Use existing app `asdk_app_6a2da16bb89c8191b37484641a83a20c`. The current
+Use the owner's current managed draft
+`plugin_asdk_app_6accb97bbe148191a40020f843575141`, associated with app
+`asdk_app_6accb97bbe148191a40020f843575141`. The rejected October 1 submission
+was app `asdk_app_6a2da16bb89c8191b37484641a83a20c`; do not create another app
+or move the configured production endpoint between them. The current
 [submission flow](https://developers.openai.com/plugins/deploy/submission)
 uses a complete plugin ZIP, tool scans and review details. If the app uses the
 previous form, download its existing release ZIP first and preserve all required
@@ -94,3 +113,69 @@ Production ChatGPT selection, reviewer fixtures, video, paid-booking MCP
 handoff/page verification and the portal rescan/resubmission remain pending
 until those steps are actually executed. Local D1, browser and scripted MCP
 checks support the PR; they do not satisfy these production review gates.
+
+## Current review evidence
+
+On October 23, 2026, authenticated OAuth discovery, PKCE, token exchange,
+MCP initialize, 165-tool discovery, workspace context and organization reads
+passed against the deployed production commit
+`cbb3e59eed7e9eac81700dcce3e951233a1198d6` and staging commit
+`d36dac084a65542d5f043f5a171ed194edbed361`. These are baseline checks of the
+165-tool catalog, not deployed verification of this PR's 163-tool catalog.
+The current Chrome portal draft
+is version `0.1.3`, authorized and domain verified. Its fresh production scan
+completed and shows ten tool findings. All ten saved definitions were inspected:
+nine request further review without identifying a defect, and one questions
+`create_site_page`'s non-destructive annotation. Its canonical operation adds a
+page or translation and refuses existing document IDs and occupied paths; the
+inherited update/move/replacement descriptions are corrected in this PR. Rescan
+after that correction reaches production. A scan completion does not establish
+approval or test-case success.
+
+The dedicated reviewer credential still signs in without an email code and can
+read Ember & Slice. Its saved workspace can point at another demo business:
+review instructions must explicitly select Ember & Slice before the cases.
+The Review Tasting Experience has review confirmation, no required online
+collection and available future sessions. Review Online Tasting retains its
+required online collection. Ember's October payment list is empty and its
+seller Stripe account is not connected. `get_payments_usage.configured` describes
+plan fee pricing, not the seller account connection, and must not be used to
+infer payout availability.
+
+The foreign private booking was independently read by its owner, denied to the
+reviewer with a 404, and read unchanged by its owner afterward. This read-only
+preflight does not establish execution of the negative ChatGPT prompt. Its exact
+identifiers belong only in secure reviewer instructions.
+
+The existing [OpenAI walkthrough](https://media.krabiclaw.com/review/2026-10-12/krabiclaw-live-walkthrough-85a20f3afc89.mp4)
+and [Google Ads OAuth video](https://youtu.be/-ItMxoHlCus) are separate recordings.
+The Google recording demonstrates consent, reporting and campaign changes;
+it does not replace the current OpenAI review cases.
+
+Staging also contains the Airbnb import change from
+[#1542](https://github.com/krabiclaw/krabiclaw/pull/1542), which records a production
+hold until the draft-aware iOS build ships. The owning iOS sessions are handling
+that build. Complete MCP source validation independently, then verify the native
+release evidence before promoting the combined staging branch.
+
+The integrated staging base `760ba5b2d` also includes
+[#1545](https://github.com/krabiclaw/krabiclaw/pull/1545)'s background sync and
+listing-settings pushes. This audit found deterministic preflight, unchanged
+settings, stop/sync ordering, reconnect and bounded-job completion defects in
+those paths. The corrections pass the focused D1/provider cases, including
+paid-host Stripe transport cancellation and terminal usage repair, and the
+final local browser journeys pass bulk-home creation, arrival-guide schema and
+independent readbacks, cleaner scope and photos. The live local catalog has
+163 unique tools with exact generated metadata/schema equality. All 333 unit
+tests, full typecheck, lint and the canonical build pass. The full current
+189-case browser run passed 185 cases with four existing skips at `52d0d074d`.
+Follow-up scheduling changes pass 19 D1 cases: HTTP starts one step and cron
+leaves launch headroom without counting a normal yield as failure. Real draft
+preparation also exposed an AVIF prefilter and incomplete article-create replay.
+The canonical image decoder now owns the format, and replay completes the same
+social-card operation. Native local AVIF-to-JPEG, full PNG rendering and persisted
+same-key repair pass through the existing D1 test. The full final D1 suite,
+refreshed build and deployed verification remain required before promotion. Its staging Worker deployed, but
+[run 39927646225](https://github.com/krabiclaw/krabiclaw/actions/runs/39927646225)
+failed the published-guide check for two articles; read-only tenant rendering
+was skipped. Do not record that run as a completed staging qualification.

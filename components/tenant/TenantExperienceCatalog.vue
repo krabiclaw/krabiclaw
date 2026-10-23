@@ -16,9 +16,6 @@ const presentation = EXPERIENCE_PRESENTATION
 const rawCurrency = config.value.default_currency
 if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMessage: 'Unsupported organization currency' })
 const currency = rawCurrency
-const brandName = String(organization.value?.name ?? '').trim()
-if (!brandName) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
-const { t } = useI18n()
 // The page shows what a guest can book. A product the merchant sells over the
 // counter is on the vertical's own surface, not here.
 const experiences = computed(() => products.value.filter(isExperience))
@@ -28,6 +25,9 @@ const experiences = computed(() => products.value.filter(isExperience))
 // has already left behind resolves with none at all, and answering that with
 // a 404 put an uncaught error on every guest who clicked twice quickly.
 if (pagePayload.value && experiences.value.length === 0) throw createError({ statusCode: 404 })
+const brandName = String(organization.value?.name ?? '').trim()
+if (!brandName) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
+const { t } = useI18n()
 const collectionTitle = computed(() => t('site.experiences.collection_title', { organization: brandName }))
 const productLocations = computed(() => locations.value.map(location => ({ id: String(location.id), slug: String(location.slug), title: String(location.title) })))
 // A page about the business: its image is the organization's.

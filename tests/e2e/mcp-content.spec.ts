@@ -42,11 +42,16 @@ test.describe('stateless MCP server', () => {
     const sourcePages = (await pagesResponse.json() as { pages: Array<{ id: string; page_id: string; path: string }> }).pages
     const home = sourcePages.find(saved => saved.path === '/')
     expect(home, 'The existing fixture has an authored source homepage').toBeDefined()
-    const untranslatedPage = sourcePages.find(saved => saved.path !== '/')
-    expect(untranslatedPage, 'The existing fixture has another source page to keep untranslated').toBeDefined()
+    const dashboardPage = sourcePages.find(saved => saved.path === '/about')
+    expect(dashboardPage, 'The existing fixture has an About page for dashboard authoring').toBeDefined()
     const sourceRead = await request.get(`${editor}/pages/${home!.id}`)
     expect(sourceRead.status()).toBe(200)
     const originalSource = await sourceRead.json()
+    expect(originalSource.page.page_type).toBe('system')
+    expect(originalSource.page.recipe, 'The existing source homepage has a template recipe to inherit').toBe('home')
+    const dashboardSourceRead = await request.get(`${editor}/pages/${dashboardPage!.id}`)
+    expect(dashboardSourceRead.status()).toBe(200)
+    const dashboardSource = (await dashboardSourceRead.json()).page
     const publicSource = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/' } })
     expect(publicSource.status()).toBe(200)
     const originalPublicSource = (await publicSource.json()).page
@@ -63,7 +68,8 @@ test.describe('stateless MCP server', () => {
       expect(addedLanguages).toContainEqual(expect.objectContaining({ locale, status: 'disabled', is_source: false }))
       const privateSettings = await request.get(`${editor}/locales`)
       expect(privateSettings.status()).toBe(200)
-      expect((await privateSettings.json()).languages).toContainEqual(expect.objectContaining({ locale, status: 'disabled' }))
+      const configuredLanguages = (await privateSettings.json()).languages as Array<{ locale: string; label: string; status: string }>
+      expect(configuredLanguages).toContainEqual(expect.objectContaining({ locale, status: 'disabled' }))
 
       const premature = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
@@ -73,14 +79,54 @@ test.describe('stateless MCP server', () => {
       expect(prematureBody.result?.isError).toBe(true)
       expect(prematureBody.result?.content?.[0]?.text).toContain('Translate the homepage before publishing this language')
 
+      const translationArgs = {
+        organization_id: MCP_ORGANIZATION_ID, page_id: home!.page_id, locale, path: '/', title: translatedTitle,
+        blocks: [{ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } }],
+      }
+      for (const [change, message] of [
+        [{ recipe: null }, 'A translated tenant-page variant must use the source page identity'],
+        [{ sortOrder: originalSource.page.sort_order + 1 }, 'Set sortOrder on the source page, not a translation'],
+      ] as const) {
+        const refused = await mcpRequest(request, baseURL!, {
+          method: 'tools/call', toolName: 'create_site_page', args: { ...translationArgs, ...change },
+        })
+        expect(refused.status()).toBe(200)
+        const refusal = await refused.json()
+        expect(refusal.result?.isError).toBe(true)
+        expect(refusal.result?.structuredContent).toBeUndefined()
+        expect(JSON.parse(refusal.result.content[0].text)).toMatchObject({ status: 400, message })
+        const editorRefusal = await request.post(`${editor}/pages`, { data: {
+          pageId: home!.page_id, locale, path: '/', title: translatedTitle, blocks: translationArgs.blocks, ...change,
+        } })
+        expect(editorRefusal.status()).toBe(400)
+        expect(await editorRefusal.text()).toContain(message)
+        const absent = await request.get(localizationPath)
+        expect(absent.status(), await absent.text()).toBe(404)
+        const unchangedSource = await request.get(`${editor}/pages/${home!.id}`)
+        expect(unchangedSource.status()).toBe(200)
+        expect(await unchangedSource.json()).toEqual(originalSource)
+      }
+      await loginAs(page.request, baseURL!)
+      const sourceHero = originalSource.page.blocks.find((block: { type: string }) => block.type === 'hero')
+      expect(sourceHero, 'The existing homepage has a hero with a second button to translate').toBeDefined()
+      expect(sourceHero.data.secondary_label).toBe('View menu')
+      await page.goto(`${baseURL}/dashboard/ember-slice-demo/website/pages/${home!.id}?editMode=translations&locale=${locale}`)
+      await waitForNuxtHydration(page)
+      await expect(page.getByTestId(`localize-field-content:${sourceHero.id}:secondary_label`)).toHaveValue('')
+      await page.getByRole('dialog', { name: 'page translations', exact: true }).getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(page).not.toHaveURL(/[?&]editMode=translations(?:&|$)/)
       const translation = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'put_resource_localization', args: {
-          organization_id: MCP_ORGANIZATION_ID, resource_type: 'content_document', resource_id: home!.page_id,
-          locale, values: { title: translatedTitle },
-          content_blocks: [{ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } }],
-        },
+        method: 'tools/call', toolName: 'create_site_page', args: translationArgs,
       })
       expect(translation.status(), await translation.text()).toBe(200)
+      const created = mcpData<{ page: { id: string } }>(await translation.json()).page
+      const editorTranslation = await request.get(`${editor}/pages/${created.id}`)
+      expect(editorTranslation.status()).toBe(200)
+      expect((await editorTranslation.json()).page).toMatchObject({
+        page_id: home!.page_id, locale, path: '/', title: translatedTitle,
+        page_type: originalSource.page.page_type, recipe: originalSource.page.recipe, sort_order: originalSource.page.sort_order,
+        blocks: [expect.objectContaining({ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } })],
+      })
       const translatedRead = await request.get(localizationPath)
       expect(translatedRead.status()).toBe(200)
       let authored = (await translatedRead.json()).localization
@@ -131,8 +177,90 @@ test.describe('stateless MCP server', () => {
       expect(publicRoute?.status()).toBe(200)
       await expect(page.locator('html')).toHaveAttribute('lang', locale)
       await expect(page.getByText(translatedText, { exact: true })).toBeVisible()
-      const untranslatedRoute = await page.request.get(`${tenantBaseURL}/${locale}${untranslatedPage!.path}`, { headers: tenantExtraHeaders, maxRedirects: 0 })
+      const untranslatedRoute = await page.request.get(`${tenantBaseURL}/${locale}${dashboardPage!.path}`, { headers: tenantExtraHeaders, maxRedirects: 0 })
       expect(untranslatedRoute.status()).toBe(404)
+      // This built-in route owns its catalog, rather than an authored page.
+      const emptyCatalog = await page.request.get(`${tenantBaseURL}/api/public/page`, {
+        headers: tenantExtraHeaders, params: { page: 'experiences', datasets: 'products', locale },
+      })
+      expect(emptyCatalog.status(), await emptyCatalog.text()).toBe(200)
+      expect((await emptyCatalog.json()).products).toEqual([])
+      const emptyCatalogRoute = await page.request.get(`${tenantBaseURL}/${locale}/experiences`, { headers: tenantExtraHeaders, maxRedirects: 0 })
+      expect(emptyCatalogRoute.status()).toBe(404)
+      const disabledForAuthoring = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'disable_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+      })
+      expect(disabledForAuthoring.status()).toBe(200)
+      expect(mcpData<{ locales: Language[] }>(await disabledForAuthoring.json()).locales).toContainEqual(expect.objectContaining({ locale, status: 'disabled' }))
+
+      const dashboardPath = `${baseURL}/dashboard/ember-slice-demo/website/pages/${dashboardPage!.id}?editMode=translations&locale=${locale}`
+      const dashboardTitle = locale === 'vi' ? 'Giới thiệu Ember & Slice' : 'Ember & Sliceについて'
+      await page.goto(dashboardPath)
+      await waitForNuxtHydration(page)
+      const languagePicker = page.getByTestId('localize-language')
+      await expect(languagePicker).toContainText(`${configuredLanguages.find(saved => saved.locale === locale)!.label} (${locale})`)
+      await languagePicker.click()
+      await expect(page.getByRole('option', { name: new RegExp(`\\(${source!.locale}\\)$`) })).toHaveCount(0)
+      await page.keyboard.press('Escape')
+      await expect(page.getByTestId('localize-save')).toBeEnabled()
+      await page.getByTestId('localize-field-title').fill(dashboardTitle)
+      for (const field of await page.getByTestId(/^localize-field-content:/).all()) await field.fill(translatedText)
+      const dashboardCreate = page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return response.request().method() === 'POST' && url.origin === new URL(baseURL!).origin
+          && url.pathname === `/api/editor/organizations/${MCP_ORGANIZATION_ID}/pages`
+      })
+      await page.getByTestId('localize-save').click()
+      const dashboardCreatedResponse = await dashboardCreate
+      expect(dashboardCreatedResponse.status(), await dashboardCreatedResponse.text()).toBe(201)
+      await expect(page).not.toHaveURL(/[?&]editMode=translations(?:&|$)/)
+      const dashboardCreated = (await dashboardCreatedResponse.json()).page
+      const dashboardTranslationRead = await request.get(`${editor}/pages/${dashboardCreated.id}`)
+      expect(dashboardTranslationRead.status()).toBe(200)
+      expect((await dashboardTranslationRead.json()).page).toMatchObject({
+        page_id: dashboardPage!.page_id, locale, path: '/about', title: dashboardTitle,
+        page_type: dashboardSource.page_type, recipe: dashboardSource.recipe, sort_order: dashboardSource.sort_order,
+      })
+      await page.goto(dashboardPath)
+      await waitForNuxtHydration(page)
+      await expect(page.getByTestId('localize-field-title')).toHaveValue(dashboardTitle)
+      const dashboardUpdatedTitle = `${dashboardTitle} · 2`
+      await page.getByTestId('localize-field-title').fill(dashboardUpdatedTitle)
+      const dashboardUpdate = page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return response.request().method() === 'PATCH' && url.origin === new URL(baseURL!).origin
+          && url.pathname === `/api/editor/organizations/${MCP_ORGANIZATION_ID}/pages/${dashboardCreated.id}`
+      })
+      await page.getByTestId('localize-save').click()
+      const dashboardUpdatedResponse = await dashboardUpdate
+      expect(dashboardUpdatedResponse.status(), await dashboardUpdatedResponse.text()).toBe(200)
+      await expect(page).not.toHaveURL(/[?&]editMode=translations(?:&|$)/)
+      const dashboardUpdatedRead = await request.get(`${editor}/pages/${dashboardCreated.id}`)
+      expect(dashboardUpdatedRead.status()).toBe(200)
+      expect((await dashboardUpdatedRead.json()).page).toMatchObject({
+        id: dashboardCreated.id, title: dashboardUpdatedTitle,
+        page_type: dashboardSource.page_type, recipe: dashboardSource.recipe, sort_order: dashboardSource.sort_order,
+      })
+      const dashboardSourceAfter = await request.get(`${editor}/pages/${dashboardPage!.id}`)
+      expect(dashboardSourceAfter.status()).toBe(200)
+      expect((await dashboardSourceAfter.json()).page).toEqual(dashboardSource)
+      const privateDashboardRoute = await page.request.get(`${tenantBaseURL}/${locale}/about`, { headers: tenantExtraHeaders, maxRedirects: 0 })
+      expect(privateDashboardRoute.status()).toBe(404)
+
+      const republished = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+      })
+      expect(republished.status()).toBe(200)
+      expect(mcpData<{ locales: Language[] }>(await republished.json()).locales).toContainEqual(expect.objectContaining({ locale, status: 'published' }))
+      const publicDashboardTranslation = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/about', locale } })
+      expect(publicDashboardTranslation.status(), await publicDashboardTranslation.text()).toBe(200)
+      expect((await publicDashboardTranslation.json()).page).toMatchObject({
+        id: dashboardCreated.id, page_id: dashboardPage!.page_id, locale, path: '/about', title: dashboardUpdatedTitle,
+      })
+      const publicDashboardRoute = await openTenantPage(page, `${tenantBaseURL}/${locale}/about`, tenantExtraHeaders)
+      expect(publicDashboardRoute?.status()).toBe(200)
+      await expect(page.locator('html')).toHaveAttribute('lang', locale)
+      await expect(page.getByText(translatedText, { exact: true }).first()).toBeVisible()
 
       const disabled = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'disable_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },

@@ -858,9 +858,9 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   update_stay_accessibility: { ...D, openWorldHint: true },
   remove_stay_photo_room: { ...D, openWorldHint: true },
   move_stay_photos: { ...D, openWorldHint: true },
-  create_stay: { ...W, idempotentHint: true },
-  update_stay: D,
-  cancel_stay: D,
+  create_stay: { ...W, openWorldHint: true, idempotentHint: true },
+  update_stay: { ...D, openWorldHint: true },
+  cancel_stay: { ...D, openWorldHint: true },
   record_stay_payment: { ...W, idempotentHint: true },
   delete_stay_payment: D,
   set_stay_nights: { ...D, openWorldHint: true, idempotentHint: true },
@@ -982,10 +982,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   update_reservation_policy: { ...D, openWorldHint: true },
   list_google_ads_campaigns: R,
   get_google_ads_campaign: R,
-  create_google_ads_search_campaign: { ...W, openWorldHint: true, idempotentHint: true },
-  clone_google_ads_campaign: { ...W, openWorldHint: true, idempotentHint: true },
+  create_google_ads_search_campaign: { ...D, openWorldHint: true },
   update_google_ads_campaign: { ...D, openWorldHint: true },
-  launch_omnichannel_campaign: { ...D, openWorldHint: true },
 } as const satisfies Record<string, McpToolAnnotations>
 
 export function buildToolAnnotationsByName() {

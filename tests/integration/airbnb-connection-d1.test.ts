@@ -160,7 +160,7 @@ test('a refused provider write releases the lock; one that may have applied keep
     await assert.rejects(owner.start(), (error: unknown) => (error as { uncertain?: boolean }).uncertain === true)
     assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'needs_review', pending_step: 'create_group' })
     const groupsBefore = channex.seen.filter(request => request.path === '/groups').length
-    await assert.rejects(owner.start(), code('CONNECTION_BUSY'))
+    await assert.rejects(owner.start(), { status: 409, message: 'This Airbnb connection needs support review before continuing.', data: { code: 'CONNECTION_NEEDS_REVIEW' } })
     assert.equal(channex.seen.filter(request => request.path === '/groups').length, groupsBefore)
   } finally {
     globalThis.fetch = realFetch
@@ -184,7 +184,7 @@ test('a lock its request abandoned is released when no write was named, and held
     await assert.rejects(owner.start(), code('CONNECTION_BUSY'))
     // A request ended after naming a provider write that may have applied.
     await db.prepare("UPDATE channex_connections SET operation_id = 'dead-writer', pending_step = 'create_group', updated_at = ? WHERE organization_id = ?").bind(stale, ORG).run()
-    await assert.rejects(owner.start(), code('CONNECTION_BUSY'))
+    await assert.rejects(owner.start(), { status: 409, message: 'This Airbnb connection needs support review before continuing.', data: { code: 'CONNECTION_NEEDS_REVIEW' } })
     assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections').first(), { status: 'needs_review', operation_id: 'dead-writer', pending_step: 'create_group' })
   } finally {
     globalThis.fetch = realFetch

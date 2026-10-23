@@ -16,6 +16,8 @@ import { organizationAccessControl, organizationRoles } from '~/utils/organizati
 export interface BillingEnv {
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
+  /** Deadline of a bounded background operation; ordinary billing calls keep SDK defaults. */
+  requestSignal?: AbortSignal
 }
 
 export interface OrganizationBillingStatus {
@@ -42,7 +44,7 @@ const billingAuthorizationOptions = {
 
 export function getStripe(env: BillingEnv): Stripe {
   if (!env.STRIPE_SECRET_KEY) throw new Error('Stripe secret key not configured')
-  return createStripeClient(env.STRIPE_SECRET_KEY)
+  return createStripeClient(env.STRIPE_SECRET_KEY, 'canonical', env.requestSignal)
 }
 
 
@@ -178,24 +180,33 @@ export interface BillingCapacity {
  * period with its counts. An organization on Basic has no subscription and
  * nothing to report. A subscription from before homes were metered carries no
  * homes price: Stripe keeps the count and bills nothing for it.
+ * A caller completing an already committed write supplies that context so a
+ * failed report tells it the write is saved and still needs completion.
  */
-export async function reportBillingUsage(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<void> {
-  // An organization that never had a Stripe customer has never subscribed.
-  const organization = await queryFirst<{ customer: string | null }>(db, 'SELECT "stripeCustomerId" AS customer FROM organization WHERE id=?', [organizationId])
-  if (!organization?.customer) return
-  const rows = (await readOrganizationSubscriptions(env, [organizationId])).get(organizationId) ?? []
-  const billed = rows.filter(row => row.status === 'active' || row.status === 'trialing' || row.status === 'past_due')
-  if (billed.length > 1) throw new Error(`Organization ${organizationId} has more than one billed subscription`)
-  const subscription = billed[0]
-  if (!subscription) return
-  if (subscription.stripeCustomerId !== organization.customer) throw new Error(`Subscription ${subscription.id} does not belong to its organization's Stripe customer`)
-  const stripe = getStripe(env)
-  const [locations, homes] = await Promise.all([countActiveLocations(db, organizationId), countActiveHomes(db, organizationId)])
-  for (const [meter, value] of [[BILLING_METERS.locations, locations], [BILLING_METERS.homes, homes]] as const) {
-    await stripe.billing.meterEvents.create({
-      event_name: meter.eventName,
-      payload: { stripe_customer_id: subscription.stripeCustomerId, value: String(value) },
-    })
+export async function reportBillingUsage(env: CloudflareEnv, db: DbClient, organizationId: string, context?: { committed: true }): Promise<void> {
+  try {
+    // An organization that never had a Stripe customer has never subscribed.
+    const organization = await queryFirst<{ customer: string | null }>(db, 'SELECT "stripeCustomerId" AS customer FROM organization WHERE id=?', [organizationId])
+    if (!organization?.customer) return
+    const rows = (await readOrganizationSubscriptions(env, [organizationId])).get(organizationId) ?? []
+    const billed = rows.filter(row => row.status === 'active' || row.status === 'trialing' || row.status === 'past_due')
+    if (billed.length > 1) throw new Error(`Organization ${organizationId} has more than one billed subscription`)
+    const subscription = billed[0]
+    if (!subscription) return
+    if (subscription.stripeCustomerId !== organization.customer) throw new Error(`Subscription ${subscription.id} does not belong to its organization's Stripe customer`)
+    const stripe = getStripe(env)
+    const [locations, homes] = await Promise.all([countActiveLocations(db, organizationId), countActiveHomes(db, organizationId)])
+    for (const [meter, value] of [[BILLING_METERS.locations, locations], [BILLING_METERS.homes, homes]] as const) {
+      await stripe.billing.meterEvents.create({
+        event_name: meter.eventName,
+        payload: { stripe_customer_id: subscription.stripeCustomerId, value: String(value) },
+      })
+    }
+  } catch (cause) {
+    if (!context?.committed) throw cause
+    const reason = cause instanceof Error ? cause.message : String(cause)
+    throw new HTTPError({ statusCode: 503, message: `The changes were saved, but their billing usage report did not complete. ${reason}`,
+      data: { code: 'POST_WRITE_COMPLETION_FAILED', field: 'billing_usage', committed: true, organization_id: organizationId, reason }, cause })
   }
 }
 
@@ -411,7 +422,7 @@ export async function executeWithinCapacity(
       }
     }
   }
-  await reportBillingUsage(env, db, organizationId)
+  await reportBillingUsage(env, db, organizationId, { committed: true })
   return results
 }
 

@@ -16,7 +16,7 @@ import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { STAY_ARRIVAL_TEXT_LIMITS } from '~/shared/stay-arrival'
 import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/shared/stay-listing'
-import { channexCreate, channexGet, channexRequest, ChannexError } from './client'
+import { channexCreate, channexGet, channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
 import { CALENDAR_NIGHTS, DETAIL_FIELDS, PHOTO_WIDTH, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DescriptionField, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
@@ -187,15 +187,19 @@ const now = () => new Date().toISOString()
 
 export class AirbnbConnection {
   private readonly db: DbClient
-  private readonly env: CloudflareEnv
+  private readonly env: CloudflareEnv & ChannexEnv
   private readonly organizationId: string
   private readonly userId: string
 
-  constructor(db: DbClient, env: CloudflareEnv, organizationId: string, userId: string) {
+  constructor(db: DbClient, env: CloudflareEnv, organizationId: string, userId: string, signal?: AbortSignal) {
     this.db = db
-    this.env = env
+    this.env = signal ? { ...env, requestSignal: signal } : env
     this.organizationId = organizationId
     this.userId = userId
+  }
+
+  private checkSlice(): void {
+    if (this.env.requestSignal?.aborted) fail(504, 'SYNC_SLICE_ENDED', 'The background slice ended before this step finished. Its recorded stage is retained.')
   }
 
   private async row(): Promise<ConnectionRow | null> {
@@ -214,6 +218,7 @@ export class AirbnbConnection {
   }
 
   private async locked<T>(action: (row: ConnectionRow) => Promise<T>): Promise<T> {
+    this.checkSlice()
     await execute(this.db, "INSERT INTO channex_connections (organization_id, status) VALUES (?, 'not_connected') ON CONFLICT (organization_id) DO NOTHING", [this.organizationId])
     const operationId = crypto.randomUUID()
     // Every step under the lock writes updated_at, so a lock left untouched for
@@ -227,17 +232,22 @@ export class AirbnbConnection {
     const taken = await execute(this.db, `UPDATE channex_connections SET operation_id = ?, updated_at = ?
       WHERE organization_id = ? AND (operation_id IS NULL OR (pending_step IS NULL AND updated_at < ?))`,
     [operationId, now(), this.organizationId, abandonedBefore])
-    if (!taken.meta.changes) fail(409, 'CONNECTION_BUSY', 'Airbnb setup is running or needs review. Refresh before continuing.')
+    if (!taken.meta.changes) {
+      if ((await this.row())?.status === 'needs_review') fail(409, 'CONNECTION_NEEDS_REVIEW', 'This Airbnb connection needs support review before continuing.')
+      fail(409, 'CONNECTION_BUSY', 'Airbnb setup is running. Refresh before continuing.')
+    }
     const row = (await this.row())!
     try {
       if (row.status === 'needs_review') fail(409, 'CONNECTION_NEEDS_REVIEW', 'This Airbnb connection needs support review before continuing.')
+      this.checkSlice()
       const result = await action(row)
       await this.save(row, { operation_id: null, pending_step: null })
       return result
     } catch (error) {
       // A write that was sent and not provably refused stays locked for review.
-      const uncertain = row.pending_step !== null && !(error instanceof ChannexError && !error.uncertain)
+      const uncertain = row.pending_step !== null && !(error instanceof ChannexError && error.writeRefused)
       await this.save(row, uncertain ? { status: 'needs_review' } : { operation_id: null, pending_step: null })
+      if (uncertain && error instanceof ChannexError && !error.uncertain) throw new ChannexError(`The pending Channex write needs review because its verification failed: ${error.message}`, error.status, true, error.data)
       throw error
     }
   }
@@ -349,7 +359,7 @@ export class AirbnbConnection {
 
   private async connected(): Promise<ConnectionRow & { channel_id: string }> {
     const row = await this.row()
-    if (!row || row.status !== 'connected' || !row.channel_id || row.operation_id) fail(409, 'NOT_CONNECTED', 'Connect your Airbnb account first.')
+    if (!row || row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect your Airbnb account first.')
     return row as ConnectionRow & { channel_id: string }
   }
 
@@ -437,11 +447,6 @@ export class AirbnbConnection {
         if (existing.channel_id === channelId) return { product_id: existing.product_id, stage: existing.import_stage, waiting: false }
         // A reconnected account re-pushes the inventory of a home it already imported.
         if (existing.enabled || !existing.property_id || !existing.room_type_id || !existing.rate_plan_id) fail(409, 'IMPORT_NEEDS_REVIEW', 'The previous listing connection needs review before reconnecting')
-        await executeWithinCapacity(this.env, this.db, this.organizationId, [{
-          query: "UPDATE product_channel_mappings SET channel_id = ?, import_stage = 'inventory', updated_at = ? WHERE product_id = ? AND provider = 'channex'",
-          params: [channelId, now(), existing.product_id],
-        }], { operation: 'Reconnect an imported Airbnb listing', action: 'reconnect it' })
-        return { product_id: existing.product_id, stage: 'inventory', waiting: false }
       }
 
       const details = await listingDetails(this.env, channelId, listingId, await this.organizationContact())
@@ -466,17 +471,29 @@ export class AirbnbConnection {
       if (!details.checkOutTime) fail(422, 'MISSING_AIRBNB_FIELD', 'Set a checkout time on Airbnb, then import again.', { field: 'booking_settings.check_out_time' })
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
       const contact = this.organizationContactUpdate(details, values)
+      const property: ImportProperty = {
+        title: details.title, currency: details.currency, timezone: values.timezone, property_type: values.propertyType, email: values.email, phone: values.phone,
+        country: values.country, state: values.state, city: values.city, address: values.address, zip_code: values.zipCode, max_guests: details.maxGuests,
+        default_occupancy: details.defaultOccupancy, nightly_rate: details.nightlyRate,
+      }
+      this.checkSlice()
+      if (existing) {
+        // A completed import cleared its source inputs. Re-read and validate
+        // them above before resuming the same home's inventory on this channel.
+        await importStayNights(this.db, this.env, this.manager(), existing.product_id, provided(() => calendar.map(night => importedNight(night, organization.default_currency))))
+        const [reconnected] = await executeWithinCapacity(this.env, this.db, this.organizationId, [{
+          query: "UPDATE product_channel_mappings SET channel_id = ?, import_stage = 'inventory', import_property = ?, import_calendar = ?, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND enabled = 0",
+          params: [channelId, JSON.stringify(property), JSON.stringify(calendar), now(), existing.product_id],
+        }, ...(contact ? [contact] : [])], { operation: 'Reconnect an imported Airbnb listing', action: 'reconnect it' })
+        if (!reconnected?.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
+        return { product_id: existing.product_id, stage: 'inventory', waiting: false }
+      }
       // The home itself is made as a home added by hand is: a draft until it goes live.
       const home = await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
         zip_code: values.zipCode, phone: values.phone, email: values.email, check_in_time: details.checkInTime, check_in_end_time: details.checkInEndTime, check_out_time: details.checkOutTime,
         max_guests: details.maxGuests, min_nights: calendar[0]!.minStay, base_price_minor: provided(() => minorUnits(details.nightlyRate, organization.default_currency)),
       }), `airbnb-listing:${listingId}`)
-      const property: ImportProperty = {
-        title: details.title, currency: details.currency, timezone: values.timezone, property_type: values.propertyType, email: values.email, phone: values.phone,
-        country: values.country, state: values.state, city: values.city, address: values.address, zip_code: values.zipCode, max_guests: details.maxGuests,
-        default_occupancy: details.defaultOccupancy, nightly_rate: details.nightlyRate,
-      }
       // The nights land before the mapping: until the mapping exists a retry
       // runs this whole step again (the location and product replay by their
       // idempotency key, the nights upsert), so no import is left without its calendar.
@@ -783,6 +800,7 @@ export class AirbnbConnection {
     const purgeUpgraded = async () => { if (report.photos_upgraded.length) await purgePublicResourceCacheNow(this.env, this.organizationId) }
     try {
       for (const image of content.images) {
+        this.checkSlice()
         if (report.photos_removed.includes(image.id)) continue
         const assetId = stored.get(image.id)
         if (assetId && onHome.has(assetId)) {
@@ -804,6 +822,7 @@ export class AirbnbConnection {
         budget.left -= 1
         const identity = { idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
         const photo = await this.photo(image)
+        this.checkSlice()
         // Imported photos live in R2 in every environment; Cloudflare Images holds credentials in production only.
         const uploaded = await uploadResolvedMediaToAssetStore({
           db: this.db, env: this.env, organizationId: this.organizationId, userId: null, source: 'external', kind: 'image', provider: 'cloudflare_r2',
@@ -824,6 +843,7 @@ export class AirbnbConnection {
     await purgeUpgraded()
     if (pending) return { report, done: false, written: {} }
     if (assetIds.length) {
+      this.checkSlice()
       const membership = await resolveOrganizationMembership(this.env, { organizationId: this.organizationId, userId: this.userId })
       if (!membership) fail(403, 'NOT_A_MEMBER', 'Only a member of this organization can import listing content')
       await placeStayHomePhotosFirst(this.db, this.env, access, memberAccessPrincipal(membership, { env: this.env }), mapping.product_id, assetIds)
@@ -895,8 +915,10 @@ export class AirbnbConnection {
     }
     const homeWrite = await unedited(body)
     const detailsWrite = await unedited(details)
+    this.checkSlice()
     if (Object.keys(homeWrite).length) await updateStayHome(this.env, this.db, access, mapping.product_id, homeWrite)
     if (Object.keys(detailsWrite).length) {
+      this.checkSlice()
       await updateProduct(this.db, { organizationId: this.organizationId, productId: mapping.product_id, patch: { details_mode: 'merge', details: detailsWrite }, actor: { actorId: this.userId }, env: this.env })
     }
     return { report, done: true, written }
@@ -954,7 +976,8 @@ export class AirbnbConnection {
     const chunks: Uint8Array[] = []
     let total = 0
     try {
-      response = await fetch(image.url, { redirect: 'follow' })
+      this.checkSlice()
+      response = await fetch(image.url, { redirect: 'follow', signal: this.env.requestSignal })
       if (!response.ok) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb answered ${response.status} for photo ${image.id} at ${image.url}. Retry the import.`, detail)
       const declared = Number(response.headers.get('content-length'))
       if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) tooLarge()
@@ -969,6 +992,7 @@ export class AirbnbConnection {
       }
     } catch (error) {
       if (error instanceof HTTPError) throw error
+      this.checkSlice()
       fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} could not be fetched from ${image.url}: ${error instanceof Error ? error.message : String(error)}. Retry the import.`, detail)
     }
     if (!total) fail(502, 'PHOTO_FETCH_FAILED', `Airbnb photo ${image.id} is empty. Retry the import.`, detail)
