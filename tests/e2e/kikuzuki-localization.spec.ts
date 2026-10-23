@@ -228,6 +228,9 @@ test('Kikuzuki translations preserve published addresses and save an added langu
       expect(saveResponse.status()).toBe(200)
       const payload = saveResponse.request().postDataJSON() as { values: { address: unknown } }
       expect(payload.values.address).toEqual({ addressLines: ['325'], sublocality: 'ตำบลอ่าวนาง', locality: 'กระบี่' })
+      const savedThai = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: 'loc-kikuzuki', locale: 'th' } })
+      expect(savedThai.status()).toBe(200)
+      expect((await savedThai.json()).result.structuredContent.localization.values.address).toEqual({ addressLines: ['325'], sublocality: 'ตำบลอ่าวนาง', locality: 'กระบี่' })
       // Saving leaves the mode, so the URL no longer reopens it.
       await expect(cms).not.toHaveURL(/editMode=/)
       await expect(cms.getByTestId('localize-language')).toHaveCount(0)
