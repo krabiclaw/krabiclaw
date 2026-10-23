@@ -51,8 +51,6 @@ interface JobRow {
 const LEASE_MS = 120_000
 /** A cron run stops starting steps after this, so runs two minutes apart never overlap. */
 export const CRON_SLICE_MS = 100_000
-/** The first slice a request starts on its own, within the Worker's waitUntil allowance. */
-export const REQUEST_SLICE_MS = 25_000
 /** Scheduling headroom for cron steps; the deadline still guards stalled I/O. */
 const CRON_START_RESERVE_MS = 30_000
 /** Transient failures are retried this many times in all before the job fails. */
@@ -235,23 +233,22 @@ function advanced(result: { stage: ImportStage; waiting: boolean }): Step {
 }
 
 /**
- * Advance due jobs with a lease. New steps stop at the launch cutoff or the
- * caller's step limit; an already-started step keeps its stall guard until
+ * Advance due jobs with a lease. New steps stop at the cron's launch cutoff;
+ * an already-started step keeps its stall guard until
  * `until`. A job that is done, waiting, or out of its start window is released. A
  * transient failure (the network, a provider's 5xx or 429) is retried with the
  * calendar outbox's backoff up to MAX_ATTEMPTS; any other fails the job. A job whose connection is busy is left for
- * the next run. `organizationId` limits the run to one organization.
+ * the next run.
  */
-export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number, organizationId?: string, options: { maxSteps?: number; startReserveMs?: number } = {}): Promise<{ stepped: number; done: number; failed: number }> {
+export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number, options: { startReserveMs?: number } = {}): Promise<{ stepped: number; done: number; failed: number }> {
   const db = env.DB
   const totals = { stepped: 0, done: 0, failed: 0 }
   const startBy = until - (options.startReserveMs ?? CRON_START_RESERVE_MS)
-  let stepsRemaining = options.maxSteps ?? Infinity
-  const due = await queryAll<JobRow>(db, `SELECT * FROM airbnb_sync_jobs WHERE state IN ('pending', 'error') ${organizationId ? 'AND organization_id = ?' : ''}
+  const due = await queryAll<JobRow>(db, `SELECT * FROM airbnb_sync_jobs WHERE state IN ('pending', 'error')
     AND (next_attempt_at IS NULL OR next_attempt_at <= ?) AND (lease_until IS NULL OR lease_until <= ?)
-    ORDER BY CASE action WHEN 'stop' THEN 0 ELSE 1 END, COALESCE(next_attempt_at, created_at), id`, [...(organizationId ? [organizationId] : []), now(), now()])
+    ORDER BY CASE action WHEN 'stop' THEN 0 ELSE 1 END, COALESCE(next_attempt_at, created_at), id`, [now(), now()])
   for (const job of due) {
-    if (Date.now() >= startBy || stepsRemaining <= 0) break
+    if (Date.now() >= startBy) break
     // The plan admitted this whole change after subtracting its stopped homes.
     // Until they are stopped, activating a replacement would spend their allowance twice.
     const lease = crypto.randomUUID()
@@ -263,11 +260,10 @@ export async function runAirbnbSyncJobs(env: CloudflareEnv, until: number, organ
     const operationEnv = { ...env, requestSignal: signal }
     let outcome: Step = 'continue'
     try {
-      while (outcome === 'continue' && Date.now() < startBy && stepsRemaining > 0) {
+      while (outcome === 'continue' && Date.now() < startBy) {
         // A newer request replaces this job's id; this run must not complete it.
         const current = await queryFirst<JobRow>(db, 'SELECT * FROM airbnb_sync_jobs WHERE id = ? AND lease_token = ? AND lease_until > ?', [job.id, lease, now()])
         if (!current || Date.now() >= startBy) break
-        stepsRemaining--
         outcome = await step(operationEnv, db, current, lease, signal)
         totals.stepped++
         await execute(db, 'UPDATE airbnb_sync_jobs SET lease_until = ?, updated_at = ? WHERE id = ? AND lease_token = ? AND lease_until > ?', [new Date(Date.now() + LEASE_MS).toISOString(), now(), job.id, lease, now()])
