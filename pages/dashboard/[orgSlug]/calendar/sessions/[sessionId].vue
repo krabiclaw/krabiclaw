@@ -175,7 +175,7 @@ async function save() {
     if (dates.length !== 1 || !date) throw new Error('The saved availability did not identify one calendar date.')
     // Keep the saved version if the required calendar read fails; a retry must
     // compare against the write that succeeded, while retaining the draft.
-    if (!creating) data.value = { session: saved[0]! }
+    if (!creating) data.value = { success: true, session: saved[0]! }
     await p.refresh(date)
     await navigateTo({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: productId, locationId: p.scope.value ?? undefined, month: date.slice(0, 7), date } })
     if (creating) creationIntent.value = { key: crypto.randomUUID(), fingerprint: '' }
