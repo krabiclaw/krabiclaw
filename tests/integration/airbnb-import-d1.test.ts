@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import type Stripe from 'stripe'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
@@ -11,6 +12,8 @@ import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-
 import { getProduct } from '../../server/utils/product-management.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { countActiveHomes } from '../../server/utils/billing.ts'
+import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
+import { returnExtrasToDraftsForPlanEnd } from '../../server/utils/billing-plan-end.ts'
 import contentRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/imports/[productId]/content.post.ts'
 import syncPostRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.post.ts'
 import syncGetRoute from '../../server/api/organizations/[organizationId]/integrations/airbnb/sync.get.ts'
@@ -92,6 +95,11 @@ class FakeChannex {
     const method = (init.method ?? 'GET').toUpperCase()
     const path = url.pathname.replace('/api/v1', '').replace(`/channels/${this.channelId}`, '/channels/chan-1')
     const body = typeof init.body === 'string' ? JSON.parse(init.body) as FakeBody : null
+    // Basic's homes quote reads the published price from Stripe's catalog.
+    if (url.origin === 'https://api.stripe.com') {
+      const catalog = publishedCatalogResponse(url)
+      if (catalog) return catalog
+    }
     if (url.origin === CDN) {
       const id = url.pathname.slice('/photos/'.length).replace(/\.jpg$/, '')
       this.photoFetches += 1
@@ -202,7 +210,7 @@ async function boot() {
   try {
     const db = await runtime.getD1Database('DB')
     const env = {
-      ...await runtime.getBindings<CloudflareEnv>(), DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
+      ...await runtime.getBindings<CloudflareEnv>(), DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1',
       BETTER_AUTH_URL: BASE, BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client',
       GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app', MEDIA_BASE_URL: 'https://media.proof.example', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     } as unknown as CloudflareEnv
@@ -670,11 +678,19 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.deepEqual(await job(), { action: 'sync', state: 'done', product_id: productId, last_error_code: null, attempts: 1 })
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'complete', enabled: 1 })
     assert.equal(((await call('GET')).body.listings as Array<Record<string, unknown>>)[0]!.next_attempt_at, null)
-    assert.equal((await call('POST', { stop: [productId] })).status, 202)
-    await runCron()
 
-    // On Basic again, making it live once more would be the third: refused at the request.
-    await db.prepare("DELETE FROM subscription WHERE id = 'sub-org'").run()
+    // Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. On Basic, the newest live home
+    // past the two included, the Airbnb one, goes back to a draft: KrabiClaw queues its stop itself, and the task runs it.
+    await db.prepare("UPDATE organization SET stripeCustomerId = 'cus_org' WHERE id = ?").bind(ORG).run()
+    await db.prepare("UPDATE subscription SET status = 'canceled' WHERE id = 'sub-org'").run()
+    await returnExtrasToDraftsForPlanEnd(env, db, { type: 'customer.subscription.deleted', data: { object: { id: 'sub-org', customer: 'cus_org', status: 'canceled' } } } as unknown as Stripe.Event)
+    assert.deepEqual(await db.prepare('SELECT action, state, requested_by FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), { action: 'stop', state: 'pending', requested_by: null })
+    await runCron()
+    assert.deepEqual(await job(), { action: 'stop', state: 'done', product_id: productId, last_error_code: null, attempts: 0 })
+    assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'draft', enabled: 0 })
+    assert.deepEqual([channex.channel.ratePlans, await countActiveHomes(db, ORG)], [[], 2])
+
+    // On Basic, making it live once more would be the third: refused at the request.
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 402)
     // A request naming nothing, an unknown listing or a home not from Airbnb is refused.
     assert.equal((await call('POST', {})).status, 422)
