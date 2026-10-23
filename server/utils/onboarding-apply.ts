@@ -354,12 +354,10 @@ export async function applyOnboardingDraft(
   }
 
   const draftLocation = payload.preview.locations.find(location => location.id === 'draft-location-main')
-  let updatedSlug: string | null = input.target.locationSlug
+  const locationSlug = input.target.locationSlug
   if (draftLocation) {
-    // buildOnboardingDraftPayload always derives the location slug from the brand name.
-    updatedSlug = draftLocation.slug
     const updateResult = await updateLocation(db, organizationId, locationRow.id, {
-      title: draftLocation.title, slug: updatedSlug, address: draftLocation.address, description: draftLocation.description, phone: draftLocation.phone, website_url: draftLocation.website_url, opening_hours: parseOpeningHours(draftLocation.opening_hours), special_hours: parseSpecialHours(draftLocation.special_hours), rating: draftLocation.rating, review_count: draftLocation.review_count, timezone: payload.source.details.timezone, status: 'active', maps_url: payload.source.place?.mapsUrl, google_place_id: payload.source.placeId, }, userId, env, writeGuard)
+      title: draftLocation.title, address: draftLocation.address, description: draftLocation.description, phone: draftLocation.phone, website_url: draftLocation.website_url, opening_hours: parseOpeningHours(draftLocation.opening_hours), special_hours: parseSpecialHours(draftLocation.special_hours), rating: draftLocation.rating, review_count: draftLocation.review_count, timezone: payload.source.details.timezone, status: 'active', maps_url: payload.source.place?.mapsUrl, google_place_id: payload.source.placeId, }, userId, env, writeGuard)
 
     // updateLocation answers with a status and a message naming the field it
     // refused — a 400 for an unusable timezone or notification phone, a 409 for
@@ -572,5 +570,5 @@ export async function applyOnboardingDraft(
   await publishStayProducts(env, deletedHomes)
   for (const page of productPages) await refreshTenantPageCard(db, env, page, userId)
   if (input.activate) await activateOrganization(db, organizationId, writeGuard, input.draft)
-  return { locationSlug: updatedSlug }
+  return { locationSlug }
 }

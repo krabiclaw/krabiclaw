@@ -50,12 +50,12 @@ test('professional-service blog paths use the canonical /blog route', () => {
 
 test('a location translation retains its saved historical route and refuses an explicit move', () => {
   assert.equal(validateLocalizedRoutePath('business_location', 'th', undefined, 'current-location'), '/th/locations/current-location')
+  assert.equal(validateLocalizedRoutePath('business_location', 'th', null, 'current-location'), '/th/locations/current-location')
   assert.equal(validateLocalizedRoutePath('business_location', 'th', undefined, 'current-location', '/th/locations/historical-name'), '/th/locations/historical-name')
+  assert.equal(validateLocalizedRoutePath('business_location', 'th', null, 'current-location', '/th/locations/historical-name'), '/th/locations/historical-name')
   assert.equal(validateLocalizedRoutePath('business_location', 'th', '/th/locations/historical-name', 'current-location', '/th/locations/historical-name'), '/th/locations/historical-name')
-  for (const path of ['/th/locations/current-location', null]) {
-    assert.throws(() => validateLocalizedRoutePath('business_location', 'th', path, 'current-location', '/th/locations/historical-name'),
-      { statusCode: 422, message: 'A translation keeps its canonical path' })
-  }
+  assert.throws(() => validateLocalizedRoutePath('business_location', 'th', '/th/locations/current-location', 'current-location', '/th/locations/historical-name'),
+    { statusCode: 422, message: 'A translation keeps its canonical path' })
   assert.throws(() => validateLocalizedRoutePath('business_location', 'th', undefined, 'current-location', null),
     { statusCode: 500, message: 'The location translation has no saved route' })
 })

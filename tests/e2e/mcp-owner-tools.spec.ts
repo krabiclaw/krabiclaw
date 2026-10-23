@@ -645,6 +645,9 @@ test.describe('stateless MCP server', () => {
     const publicPage = await browser.newPage()
     const release = await acquireTenantMutationLock(testInfo, qaOrganizationId)
     let createdId: string | undefined
+    const localeUrl = `${baseURL}/api/editor/organizations/${qaOrganizationId}/locales`
+    const translationLocale = 'th'
+    let originalLanguages: Array<{ locale: string; status: string; is_source: boolean }> | undefined
     try {
       const before = await openTenantPage(publicPage, `${blawbyBaseURL}${pagePath}`, blawbyExtraHeaders)
       expect(before?.status()).toBe(200)
@@ -714,6 +717,44 @@ test.describe('stateless MCP server', () => {
       await expect(publishedQuestion.locator('summary')).toBeVisible()
       await publishedQuestion.locator('summary').click()
       await expect(publishedQuestion.getByText(answer, { exact: true })).toBeVisible()
+
+      const languages = await page.request.get(localeUrl)
+      expect(languages.status()).toBe(200)
+      originalLanguages = (await languages.json()).languages
+      expect(originalLanguages).not.toContainEqual(expect.objectContaining({ locale: translationLocale }))
+      const addedLanguage = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'add_organization_language', args: { organization_id: qaOrganizationId, locale: translationLocale } })
+      expect(addedLanguage.status()).toBe(200)
+      mcpData(await addedLanguage.json())
+      const languageReadback = await page.request.get(localeUrl)
+      expect(languageReadback.status()).toBe(200)
+      expect((await languageReadback.json()).languages).toContainEqual(expect.objectContaining({ locale: translationLocale, status: 'disabled', is_source: false }))
+      const localizationPath = `/api/editor/organizations/${qaOrganizationId}/localization/content_document/${createdId}/${translationLocale}`
+      // The second open reads the first authored translation back before it is
+      // revised. Q&A's canonical writer accepts a question and answer, without SEO.
+      for (const [index, translated] of [
+        { title: 'คำถามภาษาไทยเกี่ยวกับราคา', summary: 'คำตอบภาษาไทยสำหรับหน้าราคา' },
+        { title: 'คำถามภาษาไทยเกี่ยวกับราคาที่แก้ไข', summary: 'คำตอบภาษาไทยที่แก้ไขสำหรับหน้าราคา' },
+      ].entries()) {
+        await page.getByTestId('localize-resource').click()
+        await page.getByTestId('localize-language').click()
+        const [loadedTranslation] = await Promise.all([
+          page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === localizationPath),
+          page.getByRole('option', { name: /ไทย \(th\)/ }).click(),
+        ])
+        expect(loadedTranslation.status()).toBe(index === 0 ? 404 : 200)
+        if (index === 1) expect((await loadedTranslation.json()).localization).toMatchObject({ kind: 'qa', title: 'คำถามภาษาไทยเกี่ยวกับราคา', summary: 'คำตอบภาษาไทยสำหรับหน้าราคา', seo_keywords: null })
+        await page.getByTestId('localize-field-title').fill(translated.title)
+        await page.getByTestId('localize-field-summary').fill(translated.summary)
+        const [savedTranslation] = await Promise.all([
+          page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === localizationPath),
+          page.getByTestId('localize-save').click(),
+        ])
+        expect(savedTranslation.status(), await savedTranslation.text()).toBe(200)
+        await expect(page.getByTestId('localize-language')).toHaveCount(0)
+        const translatedReadback = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: qaOrganizationId, resource_type: 'content_document', resource_id: createdId, locale: translationLocale } })
+        expect(translatedReadback.status()).toBe(200)
+        expect(mcpData<{ localization: { kind: string; title: string; summary: string } }>(await translatedReadback.json()).localization).toMatchObject({ kind: 'qa', ...translated })
+      }
     } finally {
       try {
         if (createdId) {
@@ -727,7 +768,21 @@ test.describe('stateless MCP server', () => {
           expect((await after.json()).qa).toEqual([])
         }
       } finally {
-        await Promise.all([publicPage.close(), release()])
+        try {
+          if (originalLanguages && !originalLanguages.some(language => language.locale === translationLocale)) {
+            const languages = await page.request.get(localeUrl)
+            expect(languages.status()).toBe(200)
+            if ((await languages.json()).languages.some((language: { locale: string }) => language.locale === translationLocale)) {
+              const removedLanguage = await page.request.delete(`${localeUrl}/${translationLocale}`)
+              expect(removedLanguage.status(), await removedLanguage.text()).toBe(200)
+            }
+            const restoredLanguages = await page.request.get(localeUrl)
+            expect(restoredLanguages.status()).toBe(200)
+            expect((await restoredLanguages.json()).languages).toEqual(originalLanguages)
+          }
+        } finally {
+          await Promise.all([publicPage.close(), release()])
+        }
       }
     }
   })

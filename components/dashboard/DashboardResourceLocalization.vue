@@ -228,7 +228,7 @@ function applyValues(values: Record<string, unknown>): void {
   // Document writes replace their localized text snapshot. Keep values the
   // current field list does not display, including explicit nulls.
   loadedValues = props.resourceType === 'content_document' && !props.loadValues
-    ? Object.fromEntries(['title', 'summary', 'seo_keywords', 'metadata'].filter(key => Object.hasOwn(values, key)).map(key => [key, structuredClone(values[key])]))
+    ? Object.fromEntries(['title', 'summary', ...(values.kind === 'qa' ? [] : ['seo_keywords']), 'metadata'].filter(key => Object.hasOwn(values, key)).map(key => [key, structuredClone(values[key])]))
     : structuredClone(values)
   for (const field of props.fields) {
     const value = props.loadValues ? values[field.key] : field.key.split('.').reduce<unknown>((value, key) => isRecord(value) ? value[key] : undefined, values)

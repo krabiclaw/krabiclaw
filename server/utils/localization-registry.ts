@@ -159,7 +159,7 @@ export function validateLocalizedRoutePath(resourceType: LocalizedResourceType, 
   }
   if (savedRoutePath !== undefined) {
     if (!savedRoutePath) localizationError(500, 'LOCALIZATION_VALIDATION_FAILED', 'The location translation has no saved route')
-    if (routePath !== undefined && routePath !== savedRoutePath) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'A translation keeps its canonical path')
+    if (routePath != null && routePath !== savedRoutePath) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'A translation keeps its canonical path')
     return savedRoutePath
   }
   if (!canonicalSlug || /[/?#]/.test(canonicalSlug)) localizationError(500, 'LOCALIZATION_VALIDATION_FAILED', 'The location has no valid canonical slug')
