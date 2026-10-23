@@ -354,12 +354,10 @@ export async function applyOnboardingDraft(
   }
 
   const draftLocation = payload.preview.locations.find(location => location.id === 'draft-location-main')
-  let updatedSlug: string | null = input.target.locationSlug
+  const locationSlug = input.target.locationSlug
   if (draftLocation) {
-    // buildOnboardingDraftPayload always derives the location slug from the brand name.
-    updatedSlug = draftLocation.slug
     const updateResult = await updateLocation(db, organizationId, locationRow.id, {
-      title: draftLocation.title, slug: updatedSlug, address: draftLocation.address, description: draftLocation.description, phone: draftLocation.phone, website_url: draftLocation.website_url, opening_hours: parseOpeningHours(draftLocation.opening_hours), special_hours: parseSpecialHours(draftLocation.special_hours), rating: draftLocation.rating, review_count: draftLocation.review_count, timezone: payload.source.details.timezone, status: 'active', maps_url: payload.source.place?.mapsUrl, google_place_id: payload.source.placeId, }, userId, env, writeGuard)
+      title: draftLocation.title, address: draftLocation.address, description: draftLocation.description, phone: draftLocation.phone, website_url: draftLocation.website_url, opening_hours: parseOpeningHours(draftLocation.opening_hours), special_hours: parseSpecialHours(draftLocation.special_hours), rating: draftLocation.rating, review_count: draftLocation.review_count, timezone: payload.source.details.timezone, status: 'active', maps_url: payload.source.place?.mapsUrl, google_place_id: payload.source.placeId, }, userId, env, writeGuard)
 
     // updateLocation answers with a status and a message naming the field it
     // refused — a 400 for an unusable timezone or notification phone, a 409 for
@@ -453,7 +451,7 @@ export async function applyOnboardingDraft(
       actor: { actorId: userId },
       now,
       products: orderedProducts.map(product => ({
-        kind: input.target.vertical === 'restaurant' ? 'dish' : input.target.vertical === 'service' ? 'service' : 'item',
+        kind: input.target.vertical === 'restaurant' ? 'dish' : input.target.vertical === 'service' ? 'service' : 'experience',
         name: product.name,
         description: product.description,
         order_url: product.order_url,
@@ -474,18 +472,20 @@ export async function applyOnboardingDraft(
     productPages = pages
 
     // Publication and location membership are separate rows, and onboarding
-    // states both explicitly.
+    // states both explicitly. Experiences still need their booking setup in
+    // the editor, so onboarding keeps those offerings private.
+    const published = input.target.vertical === 'restaurant' || input.target.vertical === 'service' ? 1 : 0
     orderedProducts.forEach((product, index) => {
       const productId = ids[index]!
       batchQueries.push({
         query: `INSERT INTO product_publications (organization_id, product_id, published, created_at, updated_at, created_by, updated_by)
-                VALUES (?, ?, 1, ?, ?, ?, ?)`,
-        params: [organizationId, productId, now, now, userId, userId],
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        params: [organizationId, productId, published, now, now, userId, userId],
       })
       batchQueries.push({
         query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
-                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?)`,
-        params: [organizationId, productId, locationRow.id, now, now, userId, userId],
+                VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+        params: [organizationId, productId, locationRow.id, published, now, now, userId, userId],
       })
     })
     productIds = ids
@@ -570,5 +570,5 @@ export async function applyOnboardingDraft(
   await publishStayProducts(env, deletedHomes)
   for (const page of productPages) await refreshTenantPageCard(db, env, page, userId)
   if (input.activate) await activateOrganization(db, organizationId, writeGuard, input.draft)
-  return { locationSlug: updatedSlug }
+  return { locationSlug }
 }

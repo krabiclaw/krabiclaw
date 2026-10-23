@@ -7,7 +7,8 @@ import { executeBatch } from '../../server/db/index.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { getPublishedTenantPage, isProductPageConflict, listPublishedTenantPagePaths, prepareTenantPageCreate } from '../../server/utils/content/pages.ts'
-import { createProduct, setProductPublication } from '../../server/utils/product-management.ts'
+import { createProduct, getProduct, productPublicPresentation, reconcileProducts, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
+import { setProductBookingConfig } from '../../server/utils/availability.ts'
 
 // Real D1 and the real Better Auth subscription read. A service is a Product
 // and the page that shows it, written together through the one product writer
@@ -30,7 +31,8 @@ async function boot(plan: 'growth' | null) {
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
-      VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{}', 'blawby-theme-v1', 'USD', 'active', 'complete', 'flat', 'service', ?, 'America/New_York')`).bind(ORG, NOW).run()
+      VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{}', 'blawby-theme-v1', 'USD', 'active', 'active', 'flat', 'service', ?, 'America/New_York')`).bind(ORG, NOW).run()
+    await db.prepare("INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('canonical-domain', ?, 'legal-services.proof.example', 'custom', 'canonical', 'active')").bind(ORG).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@proof.example', 0, 0, 0)").bind(ACTOR.actorId).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('member-owner', ?, ?, 'owner')").bind(ORG, ACTOR.actorId).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('locale-en', ?, 'en', 1, 'published')").bind(ORG).run()
@@ -97,6 +99,27 @@ test('a service, its default variant, its page and their binding commit together
       publication: { published: false }, page: { data: { ...SERVICE_PAGE, title: 'Employment Law' }, env }, idempotencyKey: 'create-family-law',
     }), (error: { statusCode?: number }) => error.statusCode === 409)
     assert.deepEqual(await counts(db), before)
+
+    const productBefore = await db.prepare('SELECT * FROM products WHERE id = ?').bind(created.id).first()
+    await assert.rejects(updateProduct(db, {
+      organizationId: ORG, productId: created.id, actor: ACTOR, env,
+      patch: { name: 'Must not be saved', slug: 'a-different-address' } as never,
+    }), { statusCode: 400, message: 'A product keeps its saved slug' })
+    assert.deepEqual(await db.prepare('SELECT * FROM products WHERE id = ?').bind(created.id).first(), productBefore)
+
+    // Renaming and changing the offering's kind are content edits. The saved
+    // slug and its independently bound page survive both update entry points.
+    await updateProduct(db, { organizationId: ORG, productId: created.id, actor: ACTOR, env,
+      patch: { name: 'Family Law Workshop', kind: 'experience' } })
+    assert.deepEqual(await db.prepare('SELECT kind, name, slug FROM products WHERE id = ?').bind(created.id).first(),
+      { kind: 'experience', name: 'Family Law Workshop', slug: 'family-law' })
+    await reconcileProducts(db, { organizationId: ORG, actor: ACTOR, env,
+      products: [{ product_id: created.id, kind: 'service', name: 'Family Law Consultation' }] })
+    assert.deepEqual(await db.prepare('SELECT kind, name, slug FROM products WHERE id = ?').bind(created.id).first(),
+      { kind: 'service', name: 'Family Law Consultation', slug: 'family-law' })
+    assert.deepEqual(await db.prepare('SELECT id, path, title FROM content_documents WHERE product_id = ?').bind(created.id).first(),
+      { id: created.page!.id, path: '/services/family-law-2', title: 'Family Law' })
+    assert.deepEqual(await counts(db), before)
   } finally {
     await runtime.dispose()
   }
@@ -135,24 +158,34 @@ test('a refused page creates no product, and one page per product holds at the w
   }
 })
 
-test('a bound page is public exactly while its product is published', { timeout: 120_000 }, async () => {
+test('a bound page and its share address follow publication while its booking is unavailable', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot('growth')
   try {
     const product = await createProduct(db, {
-      organizationId: ORG, actor: ACTOR, product: { kind: 'service', name: 'Employment Law' },
-      publication: { published: false }, page: { data: { ...SERVICE_PAGE, title: 'Employment Law' }, env },
+      organizationId: ORG, actor: ACTOR, product: { kind: 'service', name: 'Employment Law', active: false },
+      publication: { published: false }, page: { data: { ...SERVICE_PAGE, title: 'Employment Law', blocks: [{ id: 'employment-copy', type: 'markdown', data: { markdown: 'Employment law information remains available before consultations open.', editor_mode: 'rich' } }] }, env },
     })
     const path = product.page?.path
     assert.equal(path, '/services/employment-law')
     const published = async () => ({
       page: (await getPublishedTenantPage(db, ORG, path!))?.id ?? null,
       listed: (await listPublishedTenantPagePaths(db, ORG)).some(entry => entry.path === path),
+      publicUrl: (await productPublicPresentation(db, env, ORG, await getProduct(db, ORG, product.id))).publicUrl,
     })
-    assert.deepEqual(await published(), { page: null, listed: false })
+    assert.deepEqual(await published(), { page: null, listed: false, publicUrl: null })
     await setProductPublication(db, { organizationId: ORG, productId: product.id, published: true, actor: ACTOR })
-    assert.deepEqual(await published(), { page: product.page?.id, listed: true })
+    const visible = { page: product.page?.id, listed: true, publicUrl: `https://legal-services.proof.example${path}` }
+    assert.deepEqual(await published(), visible)
+    await setProductBookingConfig(db, { organizationId: ORG, productId: product.id, actorId: ACTOR.actorId, env, patch: { duration_minutes: 30 } })
+    const saved = await getProduct(db, ORG, product.id)
+    assert.equal(saved.active, false)
+    const projection = await productPublicPresentation(db, env, ORG, saved)
+    assert.deepEqual(projection.readiness, { ready: false, missing: ['variants.prices', 'booking.schedule'] })
+    assert.deepEqual(await published(), visible)
+    assert.equal((await getPublishedTenantPage(db, ORG, path!))?.blocks[0]?.data.markdown,
+      'Employment law information remains available before consultations open.')
     await setProductPublication(db, { organizationId: ORG, productId: product.id, published: false, actor: ACTOR })
-    assert.deepEqual(await published(), { page: null, listed: false })
+    assert.deepEqual(await published(), { page: null, listed: false, publicUrl: null })
   } finally {
     await runtime.dispose()
   }

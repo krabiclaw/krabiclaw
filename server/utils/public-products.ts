@@ -161,7 +161,7 @@ async function loadProductOrganization(db: DbClient, organizationId: string, rou
      LIMIT 1
   `, [organizationId])
   if (!organization) return null
-  // Supported sites can carry dishes, experiences, services and merchandise.
+  // Supported sites can carry dishes, experiences, practice areas and consultations, and homes.
   const verticalPresentation = resolveProductPresentation(organization.vertical)
   if (!verticalPresentation) return null
   const presentation = presentationForSurface(organization.vertical, routeKind)

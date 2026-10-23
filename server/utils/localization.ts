@@ -475,8 +475,7 @@ interface PriorLocalization {
 }
 
 /**
- * The statements that write one localized representation: the 301 that keeps
- * the old localized route reachable when it moved, and the upsert itself.
+ * The statements that write one localized representation at its saved route.
  *
  * One resource and a batch of them differ only in how many of these they
  * accumulate, so they share this rather than each holding a copy of the SQL.
@@ -494,17 +493,6 @@ function resourceLocalizationWriteQueries(input: {
   now: string
 }): BatchQuery[] {
   const statements: BatchQuery[] = []
-  const priorPath = input.prior?.route_path
-  if (priorPath && input.routePath && priorPath !== input.routePath) {
-    statements.push({
-      query: `INSERT INTO organization_redirects
-        (id, organization_id, locale, owner_type, owner_id, from_path, to_path, status_code, behavior, reason, source, created_at, updated_at)
-        VALUES (?, ?, ?, 'resource_localization', ?, ?, ?, 301, 'redirect', 'localized_route_change', 'localization', ?, ?)
-        ON CONFLICT(organization_id, locale, from_path) DO UPDATE SET owner_type = excluded.owner_type, owner_id = excluded.owner_id,
-          to_path = excluded.to_path, status_code = 301, behavior = 'redirect', reason = excluded.reason, source = excluded.source, updated_at = excluded.updated_at`,
-      params: [crypto.randomUUID(), input.organizationId, input.locale, input.id, priorPath, input.routePath, input.now, input.now],
-    })
-  }
   statements.push({
     query: `INSERT INTO resource_localizations
       (id, organization_id, resource_type, resource_id, locale, values_json, route_path,
@@ -562,13 +550,13 @@ export async function putResourceLocalization(
     const sourceDetails = validateProductDetails('stay', JSON.parse(source.details_json))
     for (const code of STAY_ALARM_AMENITIES) if (Object.hasOwn(values.details, STAY_ALARM_DETAIL_KEYS[code]) && typeof sourceDetails[STAY_ALARM_DETAIL_KEYS[code]] !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', `Write source details.${STAY_ALARM_DETAIL_KEYS[code]} before translating it`, { field: `details.${STAY_ALARM_DETAIL_KEYS[code]}` })
   }
-  const routePath = validateLocalizedRoutePath(resourceType, locale, input.routePath, canonical.slug)
   const existing = await queryFirst<{ id: string; route_path: string | null; created_at: string; created_by_user_id: string }>(db, `
     SELECT id, route_path, created_at, created_by_user_id
       FROM resource_localizations
      WHERE organization_id = ?  AND resource_type = ? AND resource_id = ? AND locale = ?
      LIMIT 1
   `, [input.organizationId, resourceType, input.resourceId, locale])
+  const routePath = validateLocalizedRoutePath(resourceType, locale, input.routePath, canonical.slug, existing?.route_path)
   const id = existing?.id ?? crypto.randomUUID()
   const now = new Date().toISOString()
   const statements: BatchQuery[] = resourceLocalizationWriteQueries({
@@ -620,8 +608,8 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
   }
   if (!input.values || typeof input.values !== 'object' || Array.isArray(input.values)) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'values must be an object')
   const copy = input.values as Record<string, unknown>
-  const textFields = root.kind === 'qa' ? ['title', 'summary'] as const : ['title', 'summary', 'slug', 'seo_keywords'] as const
-  if (Object.keys(copy).some(key => key !== 'metadata' && !textFields.some(field => field === key))) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Unknown translated document field')
+  const textFields = root.kind === 'qa' ? ['title', 'summary'] as const : ['title', 'summary', 'seo_keywords'] as const
+  if (Object.keys(copy).some(key => key !== 'metadata' && !(root.kind !== 'qa' && key === 'slug') && !textFields.some(field => field === key))) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Unknown translated document field')
   // A key a translation leaves out is removed, not stored as JSON null: a
   // social post's translation carries a call to action label or none.
   const clearedMetadata = DOCUMENT_LOCALIZED_METADATA[root.kind]
@@ -646,18 +634,28 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
   }
   const provided = new Set(Object.keys(changes.metadata ?? {}))
   const removeMetadata = clearedMetadata.filter(key => !provided.has(key))
+  const existing = await queryFirst<{ id: string; path: string | null; slug: string | null }>(db,
+    "SELECT id, path, slug FROM content_documents WHERE organization_id = ? AND root_id = ? AND row_role = 'representation' AND locale = ?",
+    [input.organizationId, root.id, locale])
   if (root.kind !== 'qa') {
-    if (typeof input.routePath !== 'string' || !input.routePath.startsWith('/' + locale + '/') || /[?#]/.test(input.routePath) || input.routePath.includes('//')) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'route_path must be a canonical localized path')
-    changes.path = input.routePath.slice(locale.length + 1)
-    if (root.kind !== 'page') changes.slug = input.routePath.split('/').at(-1)!
-  }
-  const existing = await getContentRepresentation(db, { rootId: root.id, locale })
-  if (root.kind === 'page') {
-    const [{ assertTenantPagePathAvailable }, { loadOrganizationTemplate }] = await Promise.all([
-      import('~/server/utils/content/pages'), import('~/server/utils/content/publishing'),
-    ])
-    const { template } = await loadOrganizationTemplate(db, input.organizationId)
-    await assertTenantPagePathAvailable(db, { organizationId: input.organizationId, locale, path: changes.path!, template, excludeVariantId: existing?.id })
+    const { resolvePublicDocumentSourcePath } = await import('~/server/utils/public-locale-representations')
+    const path = existing ? existing.path : await resolvePublicDocumentSourcePath(db, input.organizationId, root.id)
+    if (!path) throw new HTTPError({ statusCode: 500, statusMessage: 'Document representation route is missing' })
+    const routePath = path === '/' ? `/${locale}` : `/${locale}${path}`
+    const slug = existing ? existing.slug : root.kind === 'page' ? null : path.split('/').at(-1)!
+    if (input.routePath !== undefined && input.routePath !== routePath) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'A translation keeps its canonical path')
+    if (copy.slug !== undefined && copy.slug !== slug) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'A translation keeps its canonical slug')
+    if (!existing) {
+      changes.path = path
+      changes.slug = slug
+      if (root.kind === 'page') {
+        const [{ assertTenantPagePathAvailable }, { loadOrganizationTemplate }] = await Promise.all([
+          import('~/server/utils/content/pages'), import('~/server/utils/content/publishing'),
+        ])
+        const { template } = await loadOrganizationTemplate(db, input.organizationId)
+        await assertTenantPagePathAvailable(db, { organizationId: input.organizationId, locale, path, template })
+      }
+    }
   }
   const blocks = input.contentBlocks
   if (blocks !== undefined && !Array.isArray(blocks)) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'content_blocks must be an array')
@@ -672,17 +670,8 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
     : []
   if (existing) {
     if (typeof input.expectedUpdatedAt !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'expected_updated_at is required')
-    const before: BatchQuery[] = changes.path === undefined ? [] : [{
-      query: `INSERT INTO organization_redirects
-        (id, organization_id, locale, owner_type, owner_id, from_path, to_path, status_code, behavior, reason, source, created_at, updated_at)
-        SELECT ?, organization_id, locale, 'content_document', id, '/' || locale || path, ?, 301, 'redirect', 'localized_route_change', 'localization', ?, ?
-          FROM content_documents WHERE id = ? AND path IS NOT NULL AND path != ?
-        ON CONFLICT(organization_id, locale, from_path) DO UPDATE SET owner_type = excluded.owner_type, owner_id = excluded.owner_id,
-          to_path = excluded.to_path, status_code = 301, behavior = 'redirect', reason = excluded.reason, source = excluded.source, updated_at = excluded.updated_at`,
-      params: [crypto.randomUUID(), input.routePath, new Date().toISOString(), new Date().toISOString(), existing.id, changes.path],
-    }]
     await updateContentDocument(db, existing.id, { expected_updated_at: input.expectedUpdatedAt, changes,
-      blocks: prepared?.blocks, additionalQueriesBefore: before, additionalQueriesAfter: [...removal(existing.id), ...after] })
+      blocks: prepared?.blocks, additionalQueriesAfter: [...removal(existing.id), ...after] })
   } else {
     await createContentDocumentWithBlocks(db, { organizationId: input.organizationId,
       kind: root.kind, rowRole: 'representation', rootId: root.id, locale,
@@ -852,21 +841,21 @@ export async function replaceResourceLocalizations(
   if (new Set(ids).size !== ids.length) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Resource IDs must be unique')
   const missing = ids.filter(id => !canonicalById.has(id))
   if (missing.length) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'One or more canonical resources were not found', { resource_type: resourceType, resource_ids: missing })
-  const validated = parsed.map((item) => {
-    const resource = canonicalById.get(item.resourceId)!
-    return {
-      resourceId: item.resourceId,
-      values: validateLocalizedValues(resourceType, item.values, resource.kind,
-        status === 'published' && resourceType === 'organization' ? { publishedLegalPractice: isLegalPracticeSite({ themeId: resource.theme_id, vertical: resource.vertical }) } : undefined),
-      routePath: validateLocalizedRoutePath(resourceType, locale, item.routePath, resource.slug),
-    }
-  })
   const existing = await queryAll<PriorLocalization & { resource_id: string }>(db, `
     SELECT id, resource_id, route_path, created_at, created_by_user_id
       FROM resource_localizations
      WHERE organization_id = ?  AND resource_type = ? AND locale = ?
   `, [input.organizationId, resourceType, locale])
   const byResource = new Map(existing.map(row => [row.resource_id, row]))
+  const validated = parsed.map((item) => {
+    const resource = canonicalById.get(item.resourceId)!
+    return {
+      resourceId: item.resourceId,
+      values: validateLocalizedValues(resourceType, item.values, resource.kind,
+        status === 'published' && resourceType === 'organization' ? { publishedLegalPractice: isLegalPracticeSite({ themeId: resource.theme_id, vertical: resource.vertical }) } : undefined),
+      routePath: validateLocalizedRoutePath(resourceType, locale, item.routePath, resource.slug, byResource.get(item.resourceId)?.route_path),
+    }
+  })
   const now = new Date().toISOString()
   const statements: BatchQuery[] = []
   for (const item of validated) {

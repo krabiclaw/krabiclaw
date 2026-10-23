@@ -215,7 +215,7 @@ export default definePlugin((nitroApp) => {
            ORDER BY bl.slug, p.slug
         `, [organizationId, candidate.locale, publicProductIds])
         for (const product of localizedProducts) {
-          const presentation = presentationForProduct(organization.vertical, product)
+          const presentation = presentationForProduct(product)
           const locationSlug = product.location_path?.split('/').filter(Boolean).at(-1)
           if (product.kind !== 'experience' && product.kind !== 'stay' && !locationSlug) continue
           entries.push({ loc: `/${candidate.locale}${presentation.productPath(locationSlug ?? '', product.slug)}`, lastmod: product.updated_at })
@@ -298,7 +298,7 @@ export default definePlugin((nitroApp) => {
         ? products
             .filter(product => product.slug && (product.kind === 'experience' || product.kind === 'stay' || product.location_slug))
             .map(product => ({
-              loc: presentationForProduct(organization.vertical, { kind: product.kind as ProductKind })
+              loc: presentationForProduct({ kind: product.kind as ProductKind })
                 .productPath(String(product.location_slug ?? ''), String(product.slug)),
               lastmod: product.updated_at as string | undefined,
             }))

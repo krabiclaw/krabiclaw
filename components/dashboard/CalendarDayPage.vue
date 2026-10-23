@@ -5,11 +5,15 @@
   -->
   <DashboardIndexPanel :id="personalScope ? 'account-calendar-day' : 'calendar-day'" :title="title" column="leaf">
     <template v-if="sessionProduct" #right>
-      <UButton v-if="!calendarSessions?.providerHours.value" label="Add availability" icon="i-lucide-plus" :to="calendarSessions?.canCreate.value ? calendarSessions.addTo(day) : undefined" :disabled="!calendarSessions?.canCreate.value" />
-      <UButton v-else-if="sessionProduct.booking?.held_online" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
+      <UButton v-if="!calendarSessions?.providerHours.value && calendarSessions?.canCreate.value" label="Add availability" icon="i-lucide-plus" :to="calendarSessions.addTo(day)" />
+      <UButton v-else-if="calendarSessions?.providerHours.value && sessionProduct.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
     </template>
     <div class="space-y-6">
       <UAlert v-if="errorMessage" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
+      <p v-if="calendarSessions?.creationUnavailable.value" data-testid="calendar-availability-state" class="text-sm text-muted">
+        {{ calendarSessions.creationUnavailable.value.message }}
+        <NuxtLink :to="calendarSessions.creationUnavailable.value.to" class="font-medium text-highlighted underline">{{ calendarSessions.creationUnavailable.value.label }}</NuxtLink>
+      </p>
       <!--
         Airbnb's day sheet leads with the date's state and why, and the one
         action that flips it. A closure is the tenant's whole day, written to

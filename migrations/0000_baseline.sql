@@ -87,7 +87,7 @@ CREATE INDEX `analytics_events_org_session_idx` ON `analytics_events` (`organiza
 CREATE INDEX `analytics_events_org_visitor_idx` ON `analytics_events` (`organization_id`,`kind`,`visitor_id`);--> statement-breakpoint
 CREATE INDEX `analytics_events_conversion_name_idx` ON `analytics_events` (`kind`,(payload_json ->> '$.event_name'),`created_at`);--> statement-breakpoint
 CREATE INDEX `analytics_events_conversion_entity_idx` ON `analytics_events` (`organization_id`,(payload_json ->> '$.entity_type'),(payload_json ->> '$.entity_id')) WHERE kind IN ('conversion', 'interaction');--> statement-breakpoint
-CREATE UNIQUE INDEX `analytics_events_conversion_entity_unique` ON `analytics_events` (`organization_id`,(payload_json ->> '$.event_name'),(payload_json ->> '$.entity_type'),(payload_json ->> '$.entity_id')) WHERE kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined', 'payments_fee_invoice_paid');--> statement-breakpoint
+CREATE UNIQUE INDEX `analytics_events_conversion_entity_unique` ON `analytics_events` (`organization_id`,(payload_json ->> '$.event_name'),(payload_json ->> '$.entity_type'),(payload_json ->> '$.entity_id')) WHERE kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined');--> statement-breakpoint
 CREATE TABLE `analytics_summaries` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
@@ -202,7 +202,7 @@ CREATE TABLE `broadcasts` (
 	`provider_broadcast_id` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`content_document_id`) REFERENCES `content_documents`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "broadcasts_category_check" CHECK(category IN ('account_security', 'reservations_bookings', 'guest_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')),
+	CONSTRAINT "broadcasts_category_check" CHECK(category IN ('account_security', 'reservations_bookings', 'guest_messages', 'team_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')),
 	CONSTRAINT "broadcasts_created_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)
 );
 --> statement-breakpoint
@@ -214,6 +214,7 @@ CREATE TABLE `business_locations` (
 	`slug` text NOT NULL,
 	`title` text NOT NULL,
 	`address` text,
+	`stay_map_sharing` text DEFAULT 'general' NOT NULL,
 	`phone` text,
 	`website_url` text,
 	`maps_url` text,
@@ -239,13 +240,17 @@ CREATE TABLE `business_locations` (
 	`seo_title` text,
 	`seo_description` text,
 	`canonical_url` text,
+	`assigned_member_id` text,
+	`assigned_team_id` text,
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`assigned_team_id`) REFERENCES `team`(`id`) ON UPDATE no action ON DELETE set null,
 	CONSTRAINT "business_locations_instants_check" CHECK((last_synced_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', last_synced_at, '+0 days') IS last_synced_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)),
 	CONSTRAINT "business_locations_address_check" CHECK(address IS NULL OR (json_valid(address) AND json_type(address) IS 'object' AND json_type(address, '$.regionCode') IS 'text' AND trim(address ->> '$.regionCode') <> '' AND json_type(address, '$.addressLines') IS 'array' AND json_array_length(address, '$.addressLines') > 0 AND (json_type(address, '$.languageCode') IS NULL OR json_type(address, '$.languageCode') IS 'text') AND (json_type(address, '$.locality') IS NULL OR json_type(address, '$.locality') IS 'text') AND (json_type(address, '$.sublocality') IS NULL OR json_type(address, '$.sublocality') IS 'text') AND (json_type(address, '$.administrativeArea') IS NULL OR json_type(address, '$.administrativeArea') IS 'text') AND (json_type(address, '$.postalCode') IS NULL OR json_type(address, '$.postalCode') IS 'text'))),
 	CONSTRAINT "business_locations_categories_check" CHECK(categories IS NULL OR (json_valid(categories) AND json_type(categories) IS 'array')),
 	CONSTRAINT "business_locations_opening_hours_check" CHECK(opening_hours IS NULL OR (json_valid(opening_hours) AND json_type(opening_hours) IS 'object' AND json_type(opening_hours, '$.periods') IS 'array')),
 	CONSTRAINT "business_locations_special_hours_check" CHECK(special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array')),
-	CONSTRAINT "business_locations_timezone_check" CHECK(timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*')
+	CONSTRAINT "business_locations_timezone_check" CHECK(timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'),
+	CONSTRAINT "business_locations_stay_map_sharing_check" CHECK(stay_map_sharing IN ('general', 'specific'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `business_locations_organization_id_slug_unique` ON `business_locations` (`organization_id`,`slug`);--> statement-breakpoint
@@ -557,6 +562,25 @@ CREATE TABLE `guest_thread_deliveries` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `guest_thread_deliveries_provider_message_unique` ON `guest_thread_deliveries` (`provider`,`provider_message_id`) WHERE provider_message_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `guest_thread_deliveries_entry_status_idx` ON `guest_thread_deliveries` (`entry_id`,`status`);--> statement-breakpoint
+CREATE TABLE `guest_thread_invites` (
+	`id` text PRIMARY KEY NOT NULL,
+	`request_id` text NOT NULL,
+	`token_hash` text NOT NULL,
+	`created_by_user_id` text,
+	`expires_at` text NOT NULL,
+	`claimed_at` text,
+	`claimed_user_id` text,
+	`revoked_at` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	FOREIGN KEY (`request_id`) REFERENCES `requests`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`claimed_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "guest_thread_invites_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at AND (claimed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', claimed_at, '+0 days') IS claimed_at) AND (revoked_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', revoked_at, '+0 days') IS revoked_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at),
+	CONSTRAINT "guest_thread_invites_state_check" CHECK((claimed_at IS NULL OR revoked_at IS NULL) AND (claimed_user_id IS NULL OR claimed_at IS NOT NULL))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `guest_thread_invites_token_hash_unique` ON `guest_thread_invites` (`token_hash`);--> statement-breakpoint
+CREATE UNIQUE INDEX `guest_thread_invites_open_request_unique` ON `guest_thread_invites` (`request_id`) WHERE claimed_at IS NULL AND revoked_at IS NULL;--> statement-breakpoint
 CREATE TABLE `inventory_items` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -738,7 +762,7 @@ CREATE TABLE `media_placements` (
 	FOREIGN KEY (`organization_id`,`asset_id`) REFERENCES `media_assets`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "media_placements_presentation_check" CHECK(presentation_json IS NULL OR (json_valid(presentation_json) AND json_extract(presentation_json, '$.shape') IN ('original', 'square', 'circle') AND json_type(presentation_json, '$.focus.x') IN ('integer', 'real') AND json_type(presentation_json, '$.focus.y') IN ('integer', 'real')) IS TRUE),
 	CONSTRAINT "media_placements_instants_check" CHECK((created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)),
-	CONSTRAINT "media_placements_owner_type_check" CHECK(owner_type IN ('organization', 'business_location', 'product', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry')),
+	CONSTRAINT "media_placements_owner_type_check" CHECK(owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')),
 	CONSTRAINT "media_placements_sort_order_check" CHECK(sort_order >= 0)
 );
 --> statement-breakpoint
@@ -1152,6 +1176,22 @@ CREATE TABLE `organization_redirects` (
 CREATE INDEX `organization_redirects_organization_id_idx` ON `organization_redirects` (`organization_id`);--> statement-breakpoint
 CREATE INDEX `organization_redirects_owner_idx` ON `organization_redirects` (`owner_type`,`owner_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `organization_redirects_org_locale_from_path_unique` ON `organization_redirects` (`organization_id`,`locale`,`from_path`);--> statement-breakpoint
+CREATE TABLE `organization_services` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`service` text NOT NULL,
+	`terms_version` text NOT NULL,
+	`agreed_by_user_id` text,
+	`agreed_at` text NOT NULL,
+	`ended_by_user_id` text,
+	`ended_at` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`agreed_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`ended_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `organization_services_current_unique` ON `organization_services` (`organization_id`,`service`) WHERE ended_at IS NULL;--> statement-breakpoint
 CREATE TABLE `payment_attempts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`payment_id` text NOT NULL,
@@ -1185,17 +1225,6 @@ CREATE TABLE `payment_authorizations` (
 	FOREIGN KEY (`payment_id`) REFERENCES `payments`(`id`) ON UPDATE no action ON DELETE restrict
 );
 --> statement-breakpoint
-CREATE TABLE `payment_billing_accounts` (
-	`organization_id` text PRIMARY KEY NOT NULL,
-	`stripe_billing_customer_id` text NOT NULL,
-	`metronome_customer_id` text,
-	`metronome_contract_id` text,
-	`contract_start_at` text NOT NULL,
-	`currency` text NOT NULL,
-	`status` text NOT NULL,
-	`updated_at` text NOT NULL
-);
---> statement-breakpoint
 CREATE TABLE `payment_checkout_holds` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -1219,10 +1248,11 @@ CREATE TABLE `payment_checkout_holds` (
 	`created_at` text NOT NULL,
 	`converted_booking_id` text,
 	`converted_reservation_id` text,
+	`converted_stay_id` text,
 	FOREIGN KEY (`buyer_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`payment_id`) REFERENCES `payments`(`id`) ON UPDATE no action ON DELETE restrict,
 	CONSTRAINT "payment_holds_quantity_check" CHECK(quantity > 0 AND amount > 0),
-	CONSTRAINT "payment_holds_subject_check" CHECK((product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL))
+	CONSTRAINT "payment_holds_subject_check" CHECK((product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_reservation_id IS NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `payment_checkout_holds_payment_id_unique` ON `payment_checkout_holds` (`payment_id`);--> statement-breakpoint
@@ -1347,15 +1377,12 @@ CREATE TABLE `payment_usage_events` (
 	`provider_occurred_at` text NOT NULL,
 	`delivery_at` text,
 	`error` text,
-	`billing_timestamp` text,
-	`credit_note_id` text,
 	`dead_letter_at` text,
 	`created_at` text NOT NULL,
 	FOREIGN KEY (`payment_id`) REFERENCES `payments`(`id`) ON UPDATE no action ON DELETE restrict
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `payment_usage_events_source_id_unique` ON `payment_usage_events` (`source_id`);--> statement-breakpoint
-CREATE UNIQUE INDEX `payment_usage_events_credit_note_id_unique` ON `payment_usage_events` (`credit_note_id`);--> statement-breakpoint
 CREATE TABLE `payments` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -1537,6 +1564,7 @@ CREATE TABLE `product_channel_mappings` (
 	`import_stage` text NOT NULL,
 	`import_property` text,
 	`import_calendar` text,
+	`import_content` text,
 	`enabled` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
@@ -1544,11 +1572,12 @@ CREATE TABLE `product_channel_mappings` (
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "product_channel_mappings_provider_check" CHECK(provider = 'channex'),
-	CONSTRAINT "product_channel_mappings_stage_check" CHECK(import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'messages', 'complete')),
+	CONSTRAINT "product_channel_mappings_stage_check" CHECK(import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'content', 'messages', 'complete')),
 	CONSTRAINT "product_channel_mappings_ids_check" CHECK((import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)),
 	CONSTRAINT "product_channel_mappings_calendar_check" CHECK(import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')),
 	CONSTRAINT "product_channel_mappings_property_json_check" CHECK(import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')),
-	CONSTRAINT "product_channel_mappings_enabled_check" CHECK(enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))),
+	CONSTRAINT "product_channel_mappings_content_json_check" CHECK(import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')),
+	CONSTRAINT "product_channel_mappings_enabled_check" CHECK(enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'content', 'messages', 'complete'))),
 	CONSTRAINT "product_channel_mappings_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)
 );
 --> statement-breakpoint
@@ -1692,15 +1721,58 @@ CREATE INDEX `product_sessions_product_start_idx` ON `product_sessions` (`produc
 CREATE INDEX `product_sessions_location_start_idx` ON `product_sessions` (`location_id`,`starts_at`,`status`);--> statement-breakpoint
 CREATE UNIQUE INDEX `product_sessions_org_id_unique` ON `product_sessions` (`organization_id`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `product_sessions_org_product_id_unique` ON `product_sessions` (`organization_id`,`product_id`,`id`);--> statement-breakpoint
+CREATE TABLE `product_stay_accessibility` (
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`feature_code` text NOT NULL,
+	`available` integer NOT NULL,
+	PRIMARY KEY(`organization_id`, `product_id`, `feature_code`),
+	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "product_stay_accessibility_feature_check" CHECK(feature_code IN ('disabled_parking_spot', 'path_to_entrance_lit_at_night', 'home_step_free_access', 'home_wide_doorway', 'pool_hoist', 'ceiling_hoist')),
+	CONSTRAINT "product_stay_accessibility_available_check" CHECK(available IN (0, 1))
+);
+--> statement-breakpoint
+CREATE TABLE `product_stay_accessibility_photos` (
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`feature_code` text NOT NULL,
+	`asset_id` text NOT NULL,
+	PRIMARY KEY(`organization_id`, `product_id`, `feature_code`, `asset_id`),
+	FOREIGN KEY (`organization_id`,`product_id`,`feature_code`) REFERENCES `product_stay_accessibility`(`organization_id`,`product_id`,`feature_code`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`asset_id`) REFERENCES `media_assets`(`organization_id`,`id`) ON UPDATE no action ON DELETE restrict
+);
+--> statement-breakpoint
+CREATE INDEX `product_stay_accessibility_photos_asset_idx` ON `product_stay_accessibility_photos` (`organization_id`,`asset_id`);--> statement-breakpoint
 CREATE TABLE `product_stay_configs` (
 	`product_id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
 	`location_id` text NOT NULL,
 	`check_in_time` text NOT NULL,
+	`check_in_end_time` text,
 	`check_out_time` text NOT NULL,
 	`max_guests` integer NOT NULL,
 	`min_nights` integer DEFAULT 1 NOT NULL,
 	`check_in_instructions` text,
+	`property_type_group` text,
+	`property_type` text,
+	`listing_type` text,
+	`total_floors` integer,
+	`listing_floor` integer,
+	`year_built` integer,
+	`property_size` real,
+	`property_size_unit` text,
+	`bedrooms` integer,
+	`beds` integer,
+	`bathrooms` real,
+	`amenities` text DEFAULT '[]' NOT NULL,
+	`cancellation_policy` text,
+	`long_term_cancellation_policy` text,
+	`check_in_method` text,
+	`wifi_network` text,
+	`wifi_password` text,
+	`directions` text,
+	`house_manual` text,
+	`checkout_instructions` text DEFAULT '[]' NOT NULL,
 	`assigned_member_id` text,
 	`assigned_team_id` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
@@ -1714,12 +1786,101 @@ CREATE TABLE `product_stay_configs` (
 	FOREIGN KEY (`organization_id`,`assigned_team_id`) REFERENCES `team`(`organizationId`,`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "product_stay_configs_instants_check" CHECK((created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)),
 	CONSTRAINT "product_stay_configs_times_check" CHECK(check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'),
+	CONSTRAINT "product_stay_configs_check_in_end_check" CHECK(check_in_end_time IS NULL OR (check_in_end_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_end_time < '24:00')),
 	CONSTRAINT "product_stay_configs_guests_check" CHECK(max_guests >= 1),
 	CONSTRAINT "product_stay_configs_min_nights_check" CHECK(min_nights >= 1),
-	CONSTRAINT "product_stay_configs_instructions_check" CHECK(check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000))
+	CONSTRAINT "product_stay_configs_instructions_check" CHECK(check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)),
+	CONSTRAINT "product_stay_configs_property_type_group_check" CHECK(property_type_group IS NULL OR property_type_group IN ('apartments', 'houses', 'secondary_units', 'unique_homes', 'bnb', 'boutique_hotels_and_more')),
+	CONSTRAINT "product_stay_configs_property_type_check" CHECK((property_type IS NULL AND property_type_group IS NULL) OR (property_type IS NOT NULL AND property_type_group IS NOT NULL AND property_type_group || ':' || property_type IN ('apartments:apartment', 'apartments:condominium', 'apartments:serviced_apartment', 'apartments:loft', 'houses:house', 'houses:townhouse', 'houses:bungalow', 'houses:cabin', 'houses:chalet', 'houses:earthhouse', 'houses:hut', 'houses:lighthouse', 'houses:villa', 'houses:dome', 'houses:cottage', 'houses:farmstay', 'houses:houseboat', 'houses:tiny_house', 'secondary_units:guesthouse', 'secondary_units:private_suite', 'secondary_units:farmstay', 'unique_homes:boat', 'unique_homes:castle', 'unique_homes:cave', 'unique_homes:earthhouse', 'unique_homes:hut', 'unique_homes:igloo', 'unique_homes:island', 'unique_homes:lighthouse', 'unique_homes:plane', 'unique_homes:rv', 'unique_homes:tent', 'unique_homes:tipi', 'unique_homes:train', 'unique_homes:treehouse', 'unique_homes:yurt', 'unique_homes:other', 'unique_homes:dome', 'unique_homes:barn', 'unique_homes:campsite', 'unique_homes:farmstay', 'unique_homes:houseboat', 'unique_homes:tiny_house', 'unique_homes:windmill', 'unique_homes:bus', 'unique_homes:holiday_park', 'unique_homes:ranch', 'unique_homes:religious_building', 'unique_homes:riad', 'unique_homes:shipping_container', 'unique_homes:tower', 'bnb:bnb', 'bnb:nature_eco_lodge', 'bnb:farmstay', 'boutique_hotels_and_more:boutique_hotel', 'boutique_hotels_and_more:nature_eco_lodge', 'boutique_hotels_and_more:hostel', 'boutique_hotels_and_more:serviced_apartment', 'boutique_hotels_and_more:aparthotel', 'boutique_hotels_and_more:hotel', 'boutique_hotels_and_more:resort'))),
+	CONSTRAINT "product_stay_configs_bedrooms_check" CHECK(bedrooms IS NULL OR bedrooms BETWEEN 0 AND 50),
+	CONSTRAINT "product_stay_configs_listing_type_check" CHECK(listing_type IS NULL OR listing_type IN ('entire_place', 'private_room', 'shared_room')),
+	CONSTRAINT "product_stay_configs_total_floors_check" CHECK(total_floors IS NULL OR (typeof(total_floors) = 'integer' AND total_floors BETWEEN 1 AND 9007199254740991)),
+	CONSTRAINT "product_stay_configs_listing_floor_check" CHECK(listing_floor IS NULL OR (typeof(listing_floor) = 'integer' AND listing_floor BETWEEN 1 AND 9007199254740991 AND (total_floors IS NULL OR listing_floor <= total_floors))),
+	CONSTRAINT "product_stay_configs_year_built_check" CHECK(year_built IS NULL OR (typeof(year_built) = 'integer' AND year_built BETWEEN 1 AND 9007199254740991)),
+	CONSTRAINT "product_stay_configs_property_size_check" CHECK(property_size IS NULL OR (typeof(property_size) IN ('integer', 'real') AND property_size > 0 AND property_size <= 1.7976931348623157e308)),
+	CONSTRAINT "product_stay_configs_property_size_unit_check" CHECK((property_size IS NULL AND property_size_unit IS NULL) OR (property_size IS NOT NULL AND property_size_unit IS NOT NULL AND property_size_unit IN ('square_meters', 'square_feet'))),
+	CONSTRAINT "product_stay_configs_beds_check" CHECK(beds IS NULL OR beds BETWEEN 1 AND 50),
+	CONSTRAINT "product_stay_configs_bathrooms_check" CHECK(bathrooms IS NULL OR (bathrooms BETWEEN 0 AND 50 AND bathrooms * 2 = CAST(bathrooms * 2 AS INTEGER))),
+	CONSTRAINT "product_stay_configs_amenities_check" CHECK(json_valid(amenities) AND json_type(amenities) = 'array'),
+	CONSTRAINT "product_stay_configs_cancellation_check" CHECK(cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')),
+	CONSTRAINT "product_stay_configs_long_term_cancellation_check" CHECK(long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')),
+	CONSTRAINT "product_stay_configs_check_in_method_check" CHECK(check_in_method IS NULL OR check_in_method IN ('smart_lock', 'keypad', 'lockbox', 'building_staff', 'in_person', 'other')),
+	CONSTRAINT "product_stay_configs_wifi_network_check" CHECK(wifi_network IS NULL OR length(trim(wifi_network)) BETWEEN 1 AND 100),
+	CONSTRAINT "product_stay_configs_wifi_password_check" CHECK(wifi_password IS NULL OR length(wifi_password) BETWEEN 1 AND 100),
+	CONSTRAINT "product_stay_configs_directions_check" CHECK(directions IS NULL OR length(trim(directions)) BETWEEN 1 AND 5000),
+	CONSTRAINT "product_stay_configs_house_manual_check" CHECK(house_manual IS NULL OR length(trim(house_manual)) BETWEEN 1 AND 5000),
+	CONSTRAINT "product_stay_configs_checkout_instructions_check" CHECK(json_valid(checkout_instructions) AND json_type(checkout_instructions) = 'array')
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `product_stay_configs_org_product_unique` ON `product_stay_configs` (`organization_id`,`product_id`);--> statement-breakpoint
+CREATE TABLE `product_stay_photo_room_amenities` (
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`room_id` text NOT NULL,
+	`amenity_code` text NOT NULL,
+	PRIMARY KEY(`organization_id`, `product_id`, `room_id`, `amenity_code`),
+	FOREIGN KEY (`organization_id`,`product_id`,`room_id`) REFERENCES `product_stay_photo_rooms`(`organization_id`,`product_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "product_stay_photo_room_amenities_code_check" CHECK(amenity_code IN ('ac', 'dryer', 'essentials', 'heating', 'hot_water', 'kitchen', 'tv', 'washer', 'wireless_internet', 'bathtub', 'bidet', 'body_soap', 'cleaning_products', 'conditioner', 'hair_dryer', 'alfresco_shower', 'shampoo', 'shower_gel', 'bed_linens', 'wardrobe_or_closet', 'clothes_drying_rack', 'extra_pillows_and_blankets', 'hangers', 'iron', 'mosquito_net', 'room_darkening_shades', 'safe', 'arcade_machine', 'batting_cage', 'books', 'bowling_alley', 'climbing_wall', 'ethernet_connection', 'exercise_equipment', 'game_console', 'laser_tag', 'life_size_games', 'mini_golf', 'home_theater', 'piano', 'ping_pong_table', 'pool_table', 'record_player', 'skate_ramp', 'sound_system', 'theme_room', 'baby_bath', 'baby_monitor', 'childrens_bike', 'playroom', 'stair_gates', 'babysitter_recommendations', 'board_games', 'changing_table', 'childrens_books_and_toys', 'childrens_dinnerware', 'crib', 'fireplace_guards', 'high_chair', 'playground', 'outlet_covers', 'pack_n_play_travel_crib', 'table_corner_guards', 'window_guards', 'ceiling_fan', 'fireplace', 'portable_fans', 'carbon_monoxide_detector', 'fire_extinguisher', 'first_aid_kit', 'smoke_detector', 'laptop_friendly_workspace', 'pocket_wifi', 'baking_sheet', 'barbeque_utensils', 'bread_maker', 'blender', 'coffee', 'coffee_maker', 'cooking_basics', 'dining_table', 'dishes_and_silverware', 'dishwasher', 'freezer', 'hot_water_kettle', 'kitchenette', 'microwave', 'mini_fridge', 'oven', 'refrigerator', 'rice_maker', 'stove', 'toaster', 'trash_compacter', 'wine_glasses', 'beach_access', 'lake_access', 'laundromat_nearby', 'private_entrance', 'resort_access', 'ski_in_ski_out', 'waterfront', 'garden_or_backyard', 'bbq_area', 'beach_essentials', 'bicycle', 'boat_slip', 'fire_pit', 'hammock', 'kayak', 'alfresco_dining', 'outdoor_seating', 'outdoor_kitchen', 'patio_or_belcony', 'sun_loungers', 'free_parking', 'street_parking', 'paid_parking_on_premises', 'paid_parking', 'free_parking_off_premises', 'elevator', 'ev_charger', 'hockey_rink', 'gym', 'jacuzzi', 'pool', 'private_living_room', 'sauna', 'single_level_home', 'ebike_charger', 'solar_power', 'recycling', 'composting', 'doorman', 'gated_community', 'breakfast', 'cleaning_before_checkout', 'long_term_stays_allowed', 'luggage_dropoff_allowed', 'bay_view', 'beach_view', 'canal_view', 'city_view', 'courtyard_view', 'desert_view', 'garden_view', 'golf_view', 'harbor_view', 'lake_view', 'marina_view', 'mountain_view', 'ocean_view', 'park_view', 'pool_view', 'resort_view', 'river_view', 'sea_view', 'valley_view', 'vineyard_view', 'landmark_view'))
+);
+--> statement-breakpoint
+CREATE TABLE `product_stay_photo_room_memberships` (
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`asset_id` text NOT NULL,
+	`room_id` text NOT NULL,
+	PRIMARY KEY(`organization_id`, `product_id`, `asset_id`),
+	FOREIGN KEY (`organization_id`,`product_id`,`room_id`) REFERENCES `product_stay_photo_rooms`(`organization_id`,`product_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`asset_id`) REFERENCES `media_assets`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE INDEX `product_stay_photo_room_memberships_room_idx` ON `product_stay_photo_room_memberships` (`organization_id`,`product_id`,`room_id`);--> statement-breakpoint
+CREATE INDEX `product_stay_photo_room_memberships_asset_idx` ON `product_stay_photo_room_memberships` (`organization_id`,`asset_id`);--> statement-breakpoint
+CREATE TABLE `product_stay_photo_rooms` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`type` text NOT NULL,
+	`details_version` integer DEFAULT 1 NOT NULL,
+	`sleeping_arrangements` text,
+	`private_attached_bathroom` integer,
+	`sort_order` integer NOT NULL,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`created_by` text NOT NULL,
+	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "product_stay_photo_rooms_type_check" CHECK(type IN ('art_studio', 'backyard', 'balcony', 'bedroom', 'bowling_alley', 'childrens_playroom', 'courtyard', 'darkroom', 'deck', 'dining_area', 'event_room', 'exterior', 'front_yard', 'full_bathroom', 'full_kitchen', 'game_room', 'garage', 'garden', 'gym', 'half_bathroom', 'hot_tub', 'kitchenette', 'laundry_area', 'library', 'living_room', 'movie_theater', 'music_studio', 'office', 'patio', 'photography_studio', 'pool', 'porch', 'rooftop', 'sunroom', 'terrace', 'theme_room', 'wine_cellar', 'woodshop', 'workshop', 'workspace')),
+	CONSTRAINT "product_stay_photo_rooms_order_check" CHECK(sort_order >= 0),
+	CONSTRAINT "product_stay_photo_rooms_created_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at),
+	CONSTRAINT "product_stay_photo_rooms_details_version_check" CHECK(details_version >= 1),
+	CONSTRAINT "product_stay_photo_rooms_sleeping_arrangements_check" CHECK(sleeping_arrangements IS NULL OR (json_valid(sleeping_arrangements) AND json_type(sleeping_arrangements) = 'array')),
+	CONSTRAINT "product_stay_photo_rooms_private_bathroom_check" CHECK(private_attached_bathroom IS NULL OR (type = 'bedroom' AND private_attached_bathroom IN (0, 1)))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `product_stay_photo_rooms_scope_id_unique` ON `product_stay_photo_rooms` (`organization_id`,`product_id`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `product_stay_photo_rooms_scope_order_unique` ON `product_stay_photo_rooms` (`organization_id`,`product_id`,`sort_order`);--> statement-breakpoint
+CREATE TABLE `product_stay_room_accessibility` (
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`room_id` text NOT NULL,
+	`feature_code` text NOT NULL,
+	`available` integer NOT NULL,
+	PRIMARY KEY(`organization_id`, `product_id`, `room_id`, `feature_code`),
+	FOREIGN KEY (`organization_id`,`product_id`,`room_id`) REFERENCES `product_stay_photo_rooms`(`organization_id`,`product_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "product_stay_room_accessibility_feature_check" CHECK(feature_code IN ('step_free_access', 'wide_doorway')),
+	CONSTRAINT "product_stay_room_accessibility_available_check" CHECK(available IN (0, 1))
+);
+--> statement-breakpoint
+CREATE TABLE `product_stay_room_accessibility_photos` (
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`room_id` text NOT NULL,
+	`feature_code` text NOT NULL,
+	`asset_id` text NOT NULL,
+	PRIMARY KEY(`organization_id`, `product_id`, `room_id`, `feature_code`, `asset_id`),
+	FOREIGN KEY (`organization_id`,`product_id`,`room_id`,`feature_code`) REFERENCES `product_stay_room_accessibility`(`organization_id`,`product_id`,`room_id`,`feature_code`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`asset_id`) REFERENCES `media_assets`(`organization_id`,`id`) ON UPDATE no action ON DELETE restrict
+);
+--> statement-breakpoint
+CREATE INDEX `product_stay_room_accessibility_photos_asset_idx` ON `product_stay_room_accessibility_photos` (`organization_id`,`asset_id`);--> statement-breakpoint
 CREATE TABLE `product_variant_option_values` (
 	`organization_id` text NOT NULL,
 	`product_id` text NOT NULL,
@@ -1781,7 +1942,7 @@ CREATE TABLE `products` (
 	CONSTRAINT "products_instants_check" CHECK((created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)),
 	CONSTRAINT "products_name_not_blank_check" CHECK(trim(name) <> ''),
 	CONSTRAINT "products_slug_check" CHECK(slug <> '' AND slug = lower(slug) AND slug NOT GLOB '*[^a-z0-9-]*' AND slug NOT LIKE '-%' AND slug NOT LIKE '%-' AND slug NOT LIKE '%--%'),
-	CONSTRAINT "products_kind_check" CHECK(kind IN ('dish', 'experience', 'service', 'item', 'stay')),
+	CONSTRAINT "products_kind_check" CHECK(kind IN ('dish', 'experience', 'service', 'stay')),
 	CONSTRAINT "products_active_check" CHECK(active IN (0, 1)),
 	CONSTRAINT "products_marketing_features_check" CHECK(json_valid(marketing_features) AND json_type(marketing_features) = 'array'),
 	CONSTRAINT "products_details_json_check" CHECK(json_valid(details_json) AND json_type(details_json) = 'object'),
@@ -2058,14 +2219,18 @@ CREATE TABLE `stay_nights` (
 	`organization_id` text NOT NULL,
 	`product_id` text NOT NULL,
 	`date` text NOT NULL,
-	`stay_id` text NOT NULL,
+	`stay_id` text,
+	`hold_id` text,
 	PRIMARY KEY(`product_id`, `date`),
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`hold_id`) REFERENCES `payment_checkout_holds`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`organization_id`,`product_id`,`stay_id`) REFERENCES `stays`(`organization_id`,`product_id`,`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "stay_nights_date_check" CHECK(date(date, '+0 days') IS date)
+	CONSTRAINT "stay_nights_date_check" CHECK(date(date, '+0 days') IS date),
+	CONSTRAINT "stay_nights_claimant_check" CHECK((stay_id IS NULL) <> (hold_id IS NULL))
 );
 --> statement-breakpoint
 CREATE INDEX `stay_nights_stay_idx` ON `stay_nights` (`stay_id`);--> statement-breakpoint
+CREATE INDEX `stay_nights_hold_idx` ON `stay_nights` (`hold_id`);--> statement-breakpoint
 CREATE TABLE `stay_payments` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -2126,6 +2291,7 @@ CREATE TABLE `stays` (
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`created_by` text,
 	`updated_by` text,
+	`cancellation_policy` text,
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`request_id`) REFERENCES `requests`(`id`) ON UPDATE no action ON DELETE set null,
@@ -2141,6 +2307,7 @@ CREATE TABLE `stays` (
 	CONSTRAINT "stays_money_check" CHECK(total_minor >= 0 AND length(currency) = 3 AND currency = upper(currency)),
 	CONSTRAINT "stays_provider_check" CHECK(provider IS NULL OR provider = 'channex'),
 	CONSTRAINT "stays_version_check" CHECK(version >= 1),
+	CONSTRAINT "stays_cancellation_policy_check" CHECK(cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict', 'long_term_firm', 'long_term_strict')),
 	CONSTRAINT "stays_booking_received_at_check" CHECK(booking_received_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', booking_received_at, '+0 days') IS booking_received_at),
 	CONSTRAINT "stays_instants_check" CHECK((cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at))
 );
@@ -2285,6 +2452,59 @@ CREATE TABLE `teamMember` (
 CREATE UNIQUE INDEX `teamMember_membershipKey_unique` ON `teamMember` (`membershipKey`);--> statement-breakpoint
 CREATE INDEX `teamMember_teamId_idx` ON `teamMember` (`teamId`);--> statement-breakpoint
 CREATE INDEX `teamMember_userId_idx` ON `teamMember` (`userId`);--> statement-breakpoint
+CREATE TABLE `team_messages` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`thread_id` text NOT NULL,
+	`sender_user_id` text,
+	`body` text NOT NULL,
+	`idempotency_key` text NOT NULL,
+	`request_hash` text NOT NULL,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	FOREIGN KEY (`sender_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`organization_id`,`thread_id`) REFERENCES `team_threads`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "team_messages_body_check" CHECK(length(body) <= 5000 AND body = trim(body)),
+	CONSTRAINT "team_messages_idempotency_check" CHECK(length(idempotency_key) BETWEEN 1 AND 200),
+	CONSTRAINT "team_messages_created_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `team_messages_thread_idempotency_unique` ON `team_messages` (`thread_id`,`idempotency_key`);--> statement-breakpoint
+CREATE INDEX `team_messages_thread_created_idx` ON `team_messages` (`thread_id`,`created_at`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `team_messages_org_id_unique` ON `team_messages` (`organization_id`,`id`);--> statement-breakpoint
+CREATE TABLE `team_thread_members` (
+	`thread_id` text NOT NULL,
+	`organization_id` text NOT NULL,
+	`member_id` text NOT NULL,
+	`last_read_at` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	PRIMARY KEY(`thread_id`, `member_id`),
+	FOREIGN KEY (`organization_id`,`thread_id`) REFERENCES `team_threads`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`member_id`,`organization_id`) REFERENCES `member`(`id`,`organizationId`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "team_thread_members_instants_check" CHECK((last_read_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', last_read_at, '+0 days') IS last_read_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)
+);
+--> statement-breakpoint
+CREATE INDEX `team_thread_members_member_idx` ON `team_thread_members` (`member_id`);--> statement-breakpoint
+CREATE TABLE `team_threads` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`stay_id` text,
+	`location_id` text,
+	`created_by_user_id` text,
+	`participants_key` text NOT NULL,
+	`last_message_at` text NOT NULL,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`organization_id`,`stay_id`) REFERENCES `stays`(`organization_id`,`id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`organization_id`,`location_id`) REFERENCES `business_locations`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "team_threads_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `team_threads_participants_unique` ON `team_threads` (`organization_id`,`participants_key`);--> statement-breakpoint
+CREATE INDEX `team_threads_org_activity_idx` ON `team_threads` (`organization_id`,`last_message_at`);--> statement-breakpoint
+CREATE INDEX `team_threads_org_stay_idx` ON `team_threads` (`organization_id`,`stay_id`);--> statement-breakpoint
+CREATE INDEX `team_threads_org_location_idx` ON `team_threads` (`organization_id`,`location_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `team_threads_org_id_unique` ON `team_threads` (`organization_id`,`id`);--> statement-breakpoint
 CREATE TABLE `usage_events` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -2335,9 +2555,10 @@ CREATE TABLE `user_notification_preferences` (
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	PRIMARY KEY(`user_id`, `category`),
 	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "user_notification_preferences_category_check" CHECK(category IN ('account_security', 'reservations_bookings', 'guest_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')),
+	CONSTRAINT "user_notification_preferences_category_check" CHECK(category IN ('account_security', 'reservations_bookings', 'guest_messages', 'team_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')),
 	CONSTRAINT "user_notification_preferences_updated_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at),
-	CONSTRAINT "user_notification_preferences_account_security_check" CHECK(category != 'account_security' OR email_enabled = 1)
+	CONSTRAINT "user_notification_preferences_account_security_check" CHECK(category != 'account_security' OR email_enabled = 1),
+	CONSTRAINT "user_notification_preferences_push_only_check" CHECK(category NOT IN ('team_messages') OR (email_enabled = 0 AND whatsapp_enabled = 0))
 );
 --> statement-breakpoint
 CREATE TABLE `user_workspace_state` (

@@ -8,7 +8,6 @@
         :resource-id="postId"
         resource-label="post"
         :fields="postLocalizationFields"
-        :route-path="localizedPostPath"
         :language-settings-path="organizationLocalizationSettingsPath"
       />
     </template>
@@ -266,11 +265,6 @@ const postLocalizationFields = computed(() => [
   { key: 'summary', label: 'Caption', source: post.value?.body, multiline: true, rows: 6 },
   ...(isRecord(post.value?.call_to_action) ? [{ key: 'metadata.call_to_action.label', label: 'Link button label', source: post.value.call_to_action.label }] : []),
 ])
-function localizedPostPath(locale: string): string {
-  const slug = post.value?.slug
-  if (typeof slug !== 'string' || !slug) throw new Error('The post slug is unavailable.')
-  return `/${locale}/posts/${slug}`
-}
 
 useSeoMeta({ title: () => `${isNew.value ? newTitle.value : editor.form.title || 'Post'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 provide(postEditorKey, { editor, organizationLocations, organizationId, postId, isNew, post, loadError, sectionLabels, saveLabel, saveDisabled, revert, save: saveCurrentEditor })

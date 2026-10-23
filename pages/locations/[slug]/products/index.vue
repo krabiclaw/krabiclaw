@@ -1,5 +1,5 @@
 <template>
-  <ProductCollectionPage :products="goods" :collections="collections" :locations="productLocations" :location-id="locationId" :currency="currency" :presentation="presentation" :vertical="vertical" :title="`${locationTitle} Products`" :brand-name="brandName" />
+  <ProductCollectionPage :products="offerings" :collections="collections" :locations="productLocations" :location-id="locationId" :currency="currency" :presentation="presentation" :vertical="vertical" :title="`${locationTitle} Products`" :brand-name="brandName" />
 </template>
 
 <script setup lang="ts">
@@ -9,16 +9,15 @@ import { presentationForSurface, productSurfaceOf } from '~/utils/product-presen
 
 definePageMeta({ layout: 'tenant' })
 const { products, collections, locations, location, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
-// What the merchant sells over the counter. A dish, an Experience and a home
-// each have their own surface, so none is listed twice.
-const goods = computed(() => products.value.filter(product => productSurfaceOf(null, product) === 'products'))
-// A surface with nothing on it is not a page: a studio that sells no
-// merchandise has no /products, rather than an indexable empty one. The
-// navigation hides it for the same reason.
+// Practice areas and consultations use the products surface. Dishes,
+// experiences and homes each have their own surface.
+const offerings = computed(() => products.value.filter(product => productSurfaceOf(null, product) === 'products'))
+// A surface with no offerings has no indexable page. Its navigation follows
+// the same rule.
 // Only a loaded payload can say the catalog is empty. A navigation the router
 // has already left behind resolves with none at all, and answering that with
 // a 404 put an uncaught error on every guest who clicked twice quickly.
-if (pagePayload.value && goods.value.length === 0) throw createError({ statusCode: 404 })
+if (pagePayload.value && offerings.value.length === 0) throw createError({ statusCode: 404 })
 const currentLocation = location.value
 if (!currentLocation) throw createError({ statusCode: 404 })
 const brandName = organization.value?.name

@@ -14,7 +14,7 @@ import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay
 import { isStayHomeAccessibility, type StayHomeAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
-import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
+import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
@@ -35,7 +35,8 @@ import {
   type PriceSelection,
 } from '~/shared/prices'
 import { assertProductKind, patchProductDetails, validateProductDetails, validateStayAlarmDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
-import type { CatalogCounts } from '~/utils/product-presentation'
+import { presentationForProduct, type CatalogCounts } from '~/utils/product-presentation'
+import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
 import type {
   Collection,
   CreateCollectionInput,
@@ -403,6 +404,35 @@ export async function getProduct(db: DbClient, organizationId: string, productId
   if (!row) notFound()
   const [product] = await hydrate(db, organizationId, [mapProductRow(row)])
   return product!
+}
+
+/** The saved routes a guest may open, shared by MCP and both dashboard editor scopes. */
+export async function productPublicPresentation(db: DbClient, env: CloudflareEnv, organizationId: string, product: Product) {
+  const readiness = product.kind === 'experience' || product.kind === 'stay' || product.booking
+    ? await productBookingReadiness(db, organizationId, product, { env }) : null
+  const published = await queryFirst(db, `SELECT p.id FROM products p
+    JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+    WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`, [organizationId, product.id])
+  const origin = published ? await resolvePublicTenantOrigin(db, env, organizationId) : null
+  const siteProduct = product.kind === 'experience' || product.kind === 'stay'
+  const path = siteProduct
+    ? presentationForProduct(product).productPath('', product.slug) : product.page?.path ?? null
+  // An authored Page remains readable when its offering cannot be booked.
+  // Its publication owner also proves the saved binding and source address.
+  const page = !siteProduct && product.page
+    ? await resolvePublishedTenantPageIdentity(db, organizationId, product.page.path) : null
+  const publicPath = siteProduct ? path && (!readiness || readiness.ready) ? path : null
+    : page && page.id === product.page?.id && page.product_id === product.id ? page.path : null
+  const publicUrls: Record<string, string> = {}
+  if (origin && product.kind === 'dish') {
+    const locations = await queryAll<{ id: string; slug: string }>(db, `
+      SELECT l.id, l.slug FROM business_locations l
+      JOIN product_locations pl ON pl.organization_id = l.organization_id AND pl.location_id = l.id
+      WHERE l.organization_id = ? AND pl.product_id = ? AND l.status = 'active' AND pl.published = 1
+    `, [organizationId, product.id])
+    for (const location of locations) publicUrls[location.id] = new URL(presentationForProduct(product).productPath(location.slug, product.slug), origin).toString()
+  }
+  return { readiness, publicUrl: origin && publicPath ? new URL(publicPath, origin).toString() : null, publicUrls }
 }
 
 export async function listProducts(db: DbClient, organizationId: string): Promise<Product[]> {
@@ -996,6 +1026,7 @@ async function planProduct(
   context: {
     organizationId?: string
     existingId?: string
+    existingSlug?: string
     defaultCurrency?: CurrencyCode | null
     takenSlugs?: Set<string>
     /** Preloaded answers for a batch: same rules, one round trip instead of per product. */
@@ -1047,7 +1078,7 @@ async function planProduct(
   return {
     id: context.existingId ?? crypto.randomUUID(),
     name,
-    slug: await createProductSlug(db, organizationId, name, context.existingId, context.takenSlugs, context.knownSlugs),
+    slug: context.existingSlug ?? await createProductSlug(db, organizationId, name, context.existingId, context.takenSlugs, context.knownSlugs),
     // An empty description is a real choice, not a missing field. Only its
     // length is constrained.
     description: normalizeOptionalProductString(input.description, 'description', PRODUCT_LIMITS.description) ?? '',
@@ -1571,6 +1602,7 @@ async function planProductUpdate(db: DbClient, input: {
   cacheInvalidations: BatchQuery[]
 }): Promise<{ writes: BatchQuery[]; keptVariants: string; product: PlannedProduct }> {
   const { current, patch, organizationId } = input
+  if ('slug' in patch && patch.slug !== undefined && patch.slug !== current.slug) invalid('A product keeps its saved slug')
   if (patch.expected_updated_at !== undefined) {
     if (typeof patch.expected_updated_at !== 'string' || !Number.isFinite(Date.parse(patch.expected_updated_at))) invalid('expected_updated_at must be the Product updated_at value from the latest read')
     if (patch.expected_updated_at !== current.updated_at) throw new HTTPError({ statusCode: 409, statusMessage: 'The product changed while you were editing. Nothing was changed; read it again before saving.', data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: current.id } })
@@ -1629,12 +1661,9 @@ async function planProductUpdate(db: DbClient, input: {
   if (current.stay && patchedLocation !== undefined && patchedLocation !== current.stay.location_id) conflict('A place to stay keeps its location; create a new place to stay instead')
   if ((current.kind === 'stay') !== (merged.kind === 'stay')) invalid('A place to stay keeps its kind, and another kind cannot become one; create a new place to stay instead')
   const planned = await planProduct(db, organizationId, merged, {
-    organizationId: input.organizationId, existingId: productId, defaultCurrency: input.defaultCurrency,
+    organizationId: input.organizationId, existingId: productId, existingSlug: current.slug, defaultCurrency: input.defaultCurrency,
     takenSlugs: input.takenSlugs, idOwners: input.idOwners, knownSlugs: input.knownSlugs,
   })
-  // A patch that does not rename keeps the slug it has: a public path is not
-  // re-derived because something else about the product changed.
-  planned.slug = patch.name === undefined ? current.slug : planned.slug
   planned.source = current.source
   assertVariantPricesConsistent(planned)
 

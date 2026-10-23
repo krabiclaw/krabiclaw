@@ -176,7 +176,7 @@ export async function listPublicTenantPageProductRows(
     const scopes = locationId ? [locationId] : [...offered.map(location => location.location_id), ...(online ? [null] : [])]
     const prices = summarizeProductPrices(product.variants, scopes.map(location_id => ({ currency, location_id, at })))
     const locationSlug = locationId ? locations.get(locationId)?.slug ?? null : null
-    const presentation = presentationForProduct(null, product)
+    const presentation = presentationForProduct(product)
     const sourcePath = product.page?.path ?? (product.kind === 'experience'
       ? EXPERIENCE_PRESENTATION.productPath('', product.slug) + (locationId ? `?location_id=${encodeURIComponent(locationId)}` : '')
       : locationSlug && presentation ? presentation.productPath(locationSlug, product.slug) : null)

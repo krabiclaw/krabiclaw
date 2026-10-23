@@ -1,5 +1,5 @@
 <template>
-  <USelect :model-value="selected" :items="items" aria-label="Offering" icon="i-lucide-calendar-days" placeholder="Choose an offering" class="h-10 min-w-48 max-w-full rounded-full" :disabled="disabled" @update:model-value="choose" />
+  <USelect :model-value="selected" :items="items" aria-label="Calendar" icon="i-lucide-calendar-days" placeholder="Choose a calendar" class="h-10 min-w-48 max-w-full rounded-full" :disabled="disabled" @update:model-value="choose" />
 </template>
 
 <script setup lang="ts">

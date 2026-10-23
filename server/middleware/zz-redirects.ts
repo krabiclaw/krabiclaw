@@ -88,7 +88,7 @@ async function resolveRetiredSiteProductPath(event: H3Event, path: string) {
      LIMIT 1
   `, [organizationId, slug])
   if (!product) return null
-  return presentationForProduct(null, product).productPath('', product.slug)
+  return presentationForProduct(product).productPath('', product.slug)
 }
 
 async function resolveTenantRedirectForRequest(event: H3Event) {

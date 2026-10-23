@@ -109,6 +109,38 @@ test.describe('stateless MCP server', () => {
         blocks: Array<{ id: string; type: string; level: number | null; parent_block_id: string | null; source_block_id: string | null; data: Record<string, unknown>; media: unknown[] }>
       }
     }>(await pageBefore.json()).page
+    const pageSnapshot = {
+      path: pageBeforeData.path, title: pageBeforeData.title,
+      sortOrder: pageBeforeData.sort_order, pageType: pageBeforeData.page_type, recipe: pageBeforeData.recipe,
+      blocks: pageBeforeData.blocks.map(({ id, type, level, parent_block_id, source_block_id, data, media }) =>
+        ({ id, type, level, parent_block_id, source_block_id, data, media })),
+    }
+    const pageEditorPath = `${baseURL}/api/editor/organizations/${organizationId}/pages/${homeVariant!.id}`
+    const editorPageBefore = await request.get(pageEditorPath)
+    expect(editorPageBefore.status()).toBe(200)
+    const savedPageBefore = (await editorPageBefore.json()).page
+    const pathChange = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'update_site_page', args: {
+        organization_id: organizationId, variant_id: homeVariant!.id, expected_updated_at: pageBeforeData.updated_at,
+        ...pageSnapshot, path: '/another-home-address', title: 'Must not be saved',
+      },
+    })
+    expect(pathChange.status()).toBe(200)
+    const pathChangeResult = (await pathChange.json()).result
+    expect(pathChangeResult.isError).toBe(true)
+    expect(pathChangeResult.content).toHaveLength(1)
+    expect(pathChangeResult.content[0].type).toBe('text')
+    expect(JSON.parse(pathChangeResult.content[0].text)).toEqual({ status: 400, message: 'A page keeps its saved path' })
+    const unchangedPageRead = await request.get(pageEditorPath)
+    expect(unchangedPageRead.status()).toBe(200)
+    expect((await unchangedPageRead.json()).page).toEqual(savedPageBefore)
+    const httpPathChange = await request.patch(pageEditorPath, { data: {
+      ...pageSnapshot, expectedUpdatedAt: pageBeforeData.updated_at, path: '/another-home-address', title: 'Must not be saved',
+    } })
+    expect(httpPathChange.status()).toBe(400)
+    const unchangedHttpPageRead = await request.get(pageEditorPath)
+    expect(unchangedHttpPageRead.status()).toBe(200)
+    expect((await unchangedHttpPageRead.json()).page).toEqual(savedPageBefore)
     for (const [type, data, message] of [
       ['showcase', { items: [{ title: ' ' }] }, /title/],
       ['steps', { items: [{}] }, /required.*title/],
@@ -135,6 +167,7 @@ test.describe('stateless MCP server', () => {
     // update_site_page replaces the document, so the writer states the path,
     // title and identity it read rather than leaving them to be filled in from
     // the stored row. Order is the array's; there is no position to send.
+    const renamedPageTitle = `MCP page title ${Date.now()}`
     const contentUpdate = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'update_site_page',
@@ -143,7 +176,7 @@ test.describe('stateless MCP server', () => {
         variant_id: homeVariant!.id,
         expected_updated_at: pageBeforeData.updated_at,
         path: pageBeforeData.path,
-        title: pageBeforeData.title,
+        title: renamedPageTitle,
         sortOrder: pageBeforeData.sort_order,
         pageType: pageBeforeData.page_type,
         recipe: pageBeforeData.recipe,
@@ -172,6 +205,9 @@ test.describe('stateless MCP server', () => {
     const mergedBody = await contentRead.json()
     const mergedHero = mcpData<{ page: { blocks: Array<{ type: string; data: Record<string, unknown> }> } }>(mergedBody).page.blocks.find(item => item.type === 'hero')
     expect(mergedHero?.data.title).toContain('MCP Hero')
+    const renamedPage = await request.get(pageEditorPath)
+    expect(renamedPage.status()).toBe(200)
+    expect((await renamedPage.json()).page).toMatchObject({ path: pageBeforeData.path, title: renamedPageTitle })
 
     const settingsBefore = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
@@ -493,6 +529,19 @@ test.describe('stateless MCP server', () => {
       args: { organization_id: organizationId, location_id: locationId },
     })
     expect(locationRead.status()).toBe(200)
+    const originalLocation = mcpData<{ location: { title: string; slug: string; phone: string | null; updated_at: string } }>(await locationRead.json()).location
+    const locationApiPath = `${baseURL}/api/organizations/${organizationId}/locations/${locationId}`
+    const locationBefore = await request.get(locationApiPath)
+    expect(locationBefore.status()).toBe(200)
+    const originalLocationRead = await locationBefore.json()
+    for (const path of [locationApiPath, `${baseURL}/api/dashboard/locations/${locationId}`]) {
+      const moved = await request.patch(path, { data: { slug: 'another-location-address', title: 'Must not be saved' } })
+      expect(moved.status()).toBe(400)
+      expect(await moved.json()).toMatchObject({ error: 'A location keeps its saved slug', code: 'INVALID_LOCATION_FIELD', field: 'slug' })
+      const unchanged = await request.get(locationApiPath)
+      expect(unchanged.status()).toBe(200)
+      expect(await unchanged.json()).toEqual(originalLocationRead)
+    }
 
     // Unique per run. A constant would pass on a value a previous run had left
     // on the row, which is the exact failure this read-back exists to catch.
@@ -515,11 +564,12 @@ test.describe('stateless MCP server', () => {
     })
     expect(afterRefusal.status()).toBe(200)
     expect(mcpData<{ location: { phone: string | null } }>(await afterRefusal.json()).location.phone)
-      .toBe(mcpData<{ location: { phone: string | null } }>(await locationRead.json()).location.phone)
+      .toBe(originalLocation.phone)
+    const renamedLocationTitle = `${originalLocation.title} ${Date.now()}`
     const locationUpdate = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'update_location',
-      args: { organization_id: organizationId, location_id: locationId, phone: updatedPhone },
+      args: { organization_id: organizationId, location_id: locationId, phone: updatedPhone, title: renamedLocationTitle },
     })
     expect(locationUpdate.status()).toBe(200)
     // A 200 is the tool answering, not the row changing. updateTenantPage
@@ -533,7 +583,18 @@ test.describe('stateless MCP server', () => {
     })
     expect(locationAfter.status()).toBe(200)
     expect(mcpData<{ location: { phone: string } }>(await locationAfter.json()).location)
-      .toMatchObject({ phone: `+1202555${lineNumber}` })
+      .toMatchObject({ phone: `+1202555${lineNumber}`, title: renamedLocationTitle, slug: originalLocation.slug })
+    const independentlyReadLocation = await request.get(locationApiPath)
+    expect(independentlyReadLocation.status()).toBe(200)
+    expect((await independentlyReadLocation.json()).location).toMatchObject({ title: renamedLocationTitle, slug: originalLocation.slug, phone: `+1202555${lineNumber}` })
+    const restoredTitle = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'update_location', args: { organization_id: organizationId, location_id: locationId, title: originalLocation.title },
+    })
+    expect(restoredTitle.status()).toBe(200)
+    expect(mcpData<{ ok: boolean }>(await restoredTitle.json()).ok).toBe(true)
+    const locationAfterRestore = await request.get(locationApiPath)
+    expect(locationAfterRestore.status()).toBe(200)
+    expect((await locationAfterRestore.json()).location).toMatchObject({ title: originalLocation.title, slug: originalLocation.slug, phone: `+1202555${lineNumber}` })
 
     const reviewsList = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
@@ -584,6 +645,9 @@ test.describe('stateless MCP server', () => {
     const publicPage = await browser.newPage()
     const release = await acquireTenantMutationLock(testInfo, qaOrganizationId)
     let createdId: string | undefined
+    const localeUrl = `${baseURL}/api/editor/organizations/${qaOrganizationId}/locales`
+    const translationLocale = 'th'
+    let originalLanguages: Array<{ locale: string; status: string; is_source: number }> | undefined
     try {
       const before = await openTenantPage(publicPage, `${blawbyBaseURL}${pagePath}`, blawbyExtraHeaders)
       expect(before?.status()).toBe(200)
@@ -653,6 +717,44 @@ test.describe('stateless MCP server', () => {
       await expect(publishedQuestion.locator('summary')).toBeVisible()
       await publishedQuestion.locator('summary').click()
       await expect(publishedQuestion.getByText(answer, { exact: true })).toBeVisible()
+
+      const languages = await page.request.get(localeUrl)
+      expect(languages.status()).toBe(200)
+      originalLanguages = (await languages.json()).languages
+      expect(originalLanguages).not.toContainEqual(expect.objectContaining({ locale: translationLocale }))
+      const addedLanguage = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'add_organization_language', args: { organization_id: qaOrganizationId, locale: translationLocale } })
+      expect(addedLanguage.status()).toBe(200)
+      mcpData(await addedLanguage.json())
+      const languageReadback = await page.request.get(localeUrl)
+      expect(languageReadback.status()).toBe(200)
+      expect((await languageReadback.json()).languages).toContainEqual(expect.objectContaining({ locale: translationLocale, status: 'disabled', is_source: 0 }))
+      const localizationPath = `/api/editor/organizations/${qaOrganizationId}/localization/content_document/${createdId}/${translationLocale}`
+      // The second open reads the first authored translation back before it is
+      // revised. Q&A's canonical writer accepts a question and answer, without SEO.
+      for (const [index, translated] of [
+        { title: 'คำถามภาษาไทยเกี่ยวกับราคา', summary: 'คำตอบภาษาไทยสำหรับหน้าราคา' },
+        { title: 'คำถามภาษาไทยเกี่ยวกับราคาที่แก้ไข', summary: 'คำตอบภาษาไทยที่แก้ไขสำหรับหน้าราคา' },
+      ].entries()) {
+        await page.getByTestId('localize-resource').click()
+        await page.getByTestId('localize-language').click()
+        const [loadedTranslation] = await Promise.all([
+          page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === localizationPath),
+          page.getByRole('option', { name: /ไทย \(th\)/ }).click(),
+        ])
+        expect(loadedTranslation.status()).toBe(index === 0 ? 404 : 200)
+        if (index === 1) expect((await loadedTranslation.json()).localization).toMatchObject({ kind: 'qa', title: 'คำถามภาษาไทยเกี่ยวกับราคา', summary: 'คำตอบภาษาไทยสำหรับหน้าราคา', seo_keywords: null })
+        await page.getByTestId('localize-field-title').fill(translated.title)
+        await page.getByTestId('localize-field-summary').fill(translated.summary)
+        const [savedTranslation] = await Promise.all([
+          page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === localizationPath),
+          page.getByTestId('localize-save').click(),
+        ])
+        expect(savedTranslation.status(), await savedTranslation.text()).toBe(200)
+        await expect(page.getByTestId('localize-language')).toHaveCount(0)
+        const translatedReadback = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: qaOrganizationId, resource_type: 'content_document', resource_id: createdId, locale: translationLocale } })
+        expect(translatedReadback.status()).toBe(200)
+        expect(mcpData<{ localization: { kind: string; title: string; summary: string } }>(await translatedReadback.json()).localization).toMatchObject({ kind: 'qa', ...translated })
+      }
     } finally {
       try {
         if (createdId) {
@@ -666,7 +768,21 @@ test.describe('stateless MCP server', () => {
           expect((await after.json()).qa).toEqual([])
         }
       } finally {
-        await Promise.all([publicPage.close(), release()])
+        try {
+          if (originalLanguages && !originalLanguages.some(language => language.locale === translationLocale)) {
+            const languages = await page.request.get(localeUrl)
+            expect(languages.status()).toBe(200)
+            if ((await languages.json()).languages.some((language: { locale: string }) => language.locale === translationLocale)) {
+              const removedLanguage = await page.request.delete(`${localeUrl}/${translationLocale}`)
+              expect(removedLanguage.status(), await removedLanguage.text()).toBe(200)
+            }
+            const restoredLanguages = await page.request.get(localeUrl)
+            expect(restoredLanguages.status()).toBe(200)
+            expect((await restoredLanguages.json()).languages).toEqual(originalLanguages)
+          }
+        } finally {
+          await Promise.all([publicPage.close(), release()])
+        }
       }
     }
   })
@@ -886,7 +1002,7 @@ test.describe('stateless MCP server', () => {
       await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
       await waitForNuxtHydration(page)
       await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
-      await expect(page.getByRole('link', { name: 'Guest limit Up to 10 guests per session', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Client limit Up to 10 clients per consultation', exact: true })).toBeVisible()
       const scheduleConcern = page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-schedule')
       await expect(scheduleConcern).toHaveAccessibleName(`Weekly schedule ${location.title} · Sunday`)
       await expect(scheduleConcern).toHaveAttribute('href', `/dashboard/ember-slice-demo/products/${created.id}/booking/schedule?location_id=loc-demo`)
@@ -912,7 +1028,7 @@ test.describe('stateless MCP server', () => {
       expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
       await page.getByRole('button', { name: 'Remove start time 1', exact: true }).click()
       await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page.getByRole('link', { name: 'Sunday No sessions', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Sunday No consultations', exact: true })).toBeVisible()
       const cleared = await request.get(`${url}/availability?location_id=loc-demo`)
       expect(cleared.status()).toBe(200)
       expect((await cleared.json()).rules).toEqual([])
@@ -940,12 +1056,13 @@ test.describe('stateless MCP server', () => {
       const starts = draft.getByLabel('Starts', { exact: true })
       const ends = draft.getByLabel('Ends', { exact: true })
       const add = draft.getByRole('button', { name: 'Add to calendar', exact: true })
-      const locationChoice = draft.getByRole('combobox', { name: 'Location*', exact: true })
+      const locationChoice = draft.getByRole('combobox', { name: 'Office*', exact: true })
+      await expect(draft.getByRole('spinbutton', { name: 'Client limit', exact: true })).toHaveValue('2')
       await locationChoice.click()
       await expect(page.getByRole('listbox')).toBeVisible()
       await page.keyboard.press('Escape')
-      await expect(draft.getByText('Choose a location.', { exact: true })).toBeVisible()
-      await expect(locationChoice).toHaveAccessibleDescription('Choose a location.')
+      await expect(draft.getByText('Choose an office.', { exact: true })).toBeVisible()
+      await expect(locationChoice).toHaveAccessibleDescription('Choose an office.')
       await expect(date).toHaveValue(gapDate)
       await expect(starts).toBeDisabled()
       await expect(ends).toBeDisabled()
@@ -1141,8 +1258,6 @@ test.describe('stateless MCP server', () => {
         const creation = { kind: 'experience', name, idempotency_key: crypto.randomUUID(), variants: [{ name: 'Per person', prices: [{ unit_amount: 13000, currency: settings.settings.default_currency }] }],
           booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false, assigned_member_id: host.memberId,
             sessions: [{ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3600000).toISOString(), capacity: 6 }] } }
-        const missing = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'create_product',args:{organization_id:organizationId,kind:'experience',name,idempotency_key:crypto.randomUUID()}})
-        expect((await missing.json()).result.isError).toBe(true)
         const { product } = await call<{ product: { id: string; slug: string; public_url: string; booking_readiness: { ready: boolean; missing: string[] } } }>('create_product', creation)
         experienceId = product.id
         expect(product.booking_readiness).toEqual({ ready: true, missing: [] })
@@ -1192,9 +1307,13 @@ test.describe('stateless MCP server', () => {
         page.on('request', countCreation)
         const calendarFailure = 'The newly saved calendar could not be read for this verification.'
         const interceptCalendar = (url: URL) => url.pathname === sessionEndpoint
-        await page.route(interceptCalendar, async route => route.request().method() === 'GET'
-          ? await route.fulfill({ status: 503, json: { error: calendarFailure } })
-          : await route.continue())
+        await page.route(interceptCalendar, async route => {
+          if (route.request().method() !== 'GET') return route.continue()
+          // The failed read completes after the saved editor is visible, so
+          // a save handler left on a discarded /new instance cannot pass.
+          await expect(availability.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
+          await route.fulfill({ status: 503, json: { error: calendarFailure } })
+        })
         const added = page.waitForResponse(response => new URL(response.url()).pathname === sessionEndpoint && response.request().method() === 'POST')
         const refusedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
         await availability.getByRole('button', { name: 'Add to calendar', exact: true }).click()

@@ -78,16 +78,16 @@
 import type { Component, ComputedRef, InjectionKey, Reactive, Ref } from 'vue'
 import type { DashboardArticleCategory } from '~/composables/useArticleCategories'
 
-export type SettingsSection = 'category' | 'excerpt' | 'publishing' | 'share' | 'url'
-export const SETTINGS_SECTIONS: SettingsSection[] = ['category', 'excerpt', 'publishing', 'share', 'url']
+export type SettingsSection = 'category' | 'excerpt' | 'publishing' | 'share'
+export const SETTINGS_SECTIONS: SettingsSection[] = ['category', 'excerpt', 'publishing', 'share']
 export const SETTINGS_LABELS: Record<SettingsSection, string> = {
   category: 'Category', excerpt: 'Excerpt', publishing: 'Visibility',
-  share: 'Share preview', url: 'URL',
+  share: 'Share preview',
 }
 
 /** The post's draft and what its leaves show beside their one field. */
 export interface BlogEditor {
-  form: Reactive<{ title: string; collection: ArticleCollection; category_id: string; excerpt: string; slug: string; visibility: 'listed' | 'unlisted'; redirect_old_slug: boolean }>
+  form: Reactive<{ title: string; collection: ArticleCollection; category_id: string; excerpt: string; visibility: 'listed' | 'unlisted' }>
   post: Ref<BlogPost | null>
   loadError: Ref<string>
   actionError: Ref<string>
@@ -96,12 +96,9 @@ export interface BlogEditor {
   /** The post's collection's categories, the Category leaf's choices. */
   categories: Ref<DashboardArticleCategory[] | undefined>
   categoriesError: Ref<unknown>
-  generatedSlug: ComputedRef<string>
   resolvedExcerpt: ComputedRef<string>
   resolvedPrimaryImageUrl: ComputedRef<string | null>
   resolvedPrimaryVideoUrl: ComputedRef<string | null>
-  slugResetRequested: Ref<boolean>
-  resetSlugOverride: () => void
   revert: () => void
   save: () => Promise<void>
 }
@@ -115,7 +112,7 @@ import EditorNavigationList, { type EditorNavigationGroup } from '~/components/d
 import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS } from '~/utils/article-collections'
 import { youTubeVideoId } from '~/shared/youtube-video'
 import type { BlogLifecycleState, BlogPostRepository, BlogPost, BlogEditorBlock, BlogPostUpdateInput } from './types'
-import { cloneEditorBlocks, generatedExcerpt, initialBlogEditorBlocks, normalizeBlogSlug } from '~/utils/blog-editor'
+import { cloneEditorBlocks, generatedExcerpt, initialBlogEditorBlocks } from '~/utils/blog-editor'
 import { getErrorMessage } from '~/utils/errors'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 
@@ -135,7 +132,6 @@ const savingExplicitly = ref(false)
 const contentDirty = ref(false)
 let applyingServerSnapshot = false
 let serverPostUpdatedAt: string | undefined
-const slugResetRequested = ref(false)
 
 /** This post's own URL, which its rows hang off. */
 const level = useRouteLevel()
@@ -145,7 +141,7 @@ const section = computed<SettingsSection | null>(() => {
   return segment && (SETTINGS_SECTIONS as string[]).includes(segment) ? segment as SettingsSection : null
 })
 
-const form = reactive({ title: '', collection: 'blog' as ArticleCollection, category_id: '', excerpt: '', slug: '', visibility: 'listed' as 'listed' | 'unlisted', redirect_old_slug: true })
+const form = reactive({ title: '', collection: 'blog' as ArticleCollection, category_id: '', excerpt: '', visibility: 'listed' as 'listed' | 'unlisted' })
 const templateName = computed(() => post.value?.editor_template || 'tenant')
 const collectionOptions = ARTICLE_COLLECTION_SLUGS.map(slug => ({ label: ARTICLE_COLLECTIONS[slug].label, value: slug }))
 if (!props.organizationId) throw new Error('The blog editor needs the organization it edits')
@@ -176,7 +172,6 @@ const statusLabel = computed(() => {
   if (post.value.status === 'draft') return 'Draft'
   return 'Published'
 })
-const generatedSlug = computed(() => normalizeBlogSlug(form.title))
 const resolvedExcerpt = computed(() => generatedExcerpt(blocks.value))
 /**
  * The post's cover is its leading image block and nothing else. The post's
@@ -226,7 +221,6 @@ const settingsGroups = computed<EditorNavigationGroup[]>(() => {
       label: 'Publishing',
       items: [
         { id: 'publishing', to: `${postPath.value}/publishing`, label: 'Visibility', icon: 'i-lucide-eye', summary: publishingSummary.value },
-        row('url', 'URL', form.slug || generatedSlug.value, 'Generated from the headline'),
       ],
     },
     {
@@ -283,8 +277,6 @@ async function saveArticle() {
     syncServerVersion(updated)
     applyingServerSnapshot = true
     post.value = updated
-    form.slug = updated.slug || form.slug
-    slugResetRequested.value = false
     if (updated.content_document?.blocks) adoptServerBlockIds(payload.content_blocks ?? [], updated.content_document.blocks)
     contentDirty.value = false
     saveState.value = 'saved'
@@ -334,8 +326,7 @@ function applyLoadedPost(loaded: BlogPost) {
     if (!loaded.content_document) throw new Error('Blog content document is missing')
     syncServerVersion(loaded)
     post.value = loaded
-    Object.assign(form, { title: loaded.title, collection: loaded.collection ?? 'blog', category_id: loaded.category?.id ?? '', excerpt: loaded.excerpt || '', slug: loaded.slug || '', visibility: loaded.visibility || 'listed', redirect_old_slug: true })
-    slugResetRequested.value = false
+    Object.assign(form, { title: loaded.title, collection: loaded.collection ?? 'blog', category_id: loaded.category?.id ?? '', excerpt: loaded.excerpt || '', visibility: loaded.visibility || 'listed' })
     blocks.value = cloneEditorBlocks(loaded.content_document.blocks || [])
     ensureTrailingTextBlock()
     contentDirty.value = false
@@ -369,7 +360,7 @@ function savedBlocks() {
   return cloneEditorBlocks(toRaw(blocks.value)).filter(isSavable)
 }
 function buildSavePayload(): BlogPostUpdateInput {
-  return { title: form.title, collection: form.collection, category_id: form.category_id || undefined, excerpt: form.excerpt || null, slug: slugResetRequested.value ? null : form.slug !== post.value?.slug ? form.slug : undefined, reset_slug_override: slugResetRequested.value || undefined, redirect_old_slug: form.redirect_old_slug, visibility: form.visibility, content_blocks: savedBlocks() }
+  return { title: form.title, collection: form.collection, category_id: form.category_id || undefined, excerpt: form.excerpt || null, visibility: form.visibility, content_blocks: savedBlocks() }
 }
 function lifecycleVersionInput() {
   if (!serverPostUpdatedAt) throw new Error('Blog lifecycle version is unavailable. Reload the editor.')
@@ -534,7 +525,6 @@ function changeImage(index: number, value: unknown) {
   }
 }
 
-function resetSlugOverride() { slugResetRequested.value = true; form.slug = generatedSlug.value }
 function syncServerVersion(value: BlogPost) { serverPostUpdatedAt = value.updated_at }
 
 provide(blogEditorKey, {
@@ -546,12 +536,9 @@ provide(blogEditorKey, {
   collectionOptions,
   categories,
   categoriesError,
-  generatedSlug,
   resolvedExcerpt,
   resolvedPrimaryImageUrl,
   resolvedPrimaryVideoUrl,
-  slugResetRequested,
-  resetSlugOverride,
   // A cancelled leaf puts the loaded post back before it closes.
   revert: () => { if (post.value) applyLoadedPost(post.value) },
   save: saveSection,
