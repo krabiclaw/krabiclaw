@@ -184,11 +184,12 @@ yarn test:e2e:mcp
 
 Cloudflare Images credentials exist only in production, on purpose. Local, E2E,
 staging and preview run on copies of production's rows, so a token there stores
-into and deletes from production's images. Anything that stores an image outside
-production (an upload, a social card) answers 503 "Cloudflare Images is not
-configured in this environment, by design". That is the expected result, not a
-missing setup step: a spec asserts against images the data already holds, and
-never adds the token to pass.
+into and deletes from production's images. Uploads and generated social cards
+that use Cloudflare Images outside production answer 503 "Cloudflare Images is
+not configured in this environment, by design". That is the expected result,
+not a missing setup step: a spec never adds the token to pass. AVIF uploads use
+the environment's own R2 media binding and can use the ordinary media upload
+operation without Cloudflare Images credentials.
 
 The CIMD OAuth cases need `MCP_CIMD_CLIENT_URL` and
 `MCP_PRIVATE_CIMD_CLIENT_URL` to name reachable public HTTPS metadata
