@@ -512,8 +512,8 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
     }
 
     case 'create_product': {
-      // Experience creation requests publication so the canonical writer
-      // requires its booking setup or external destination before committing.
+      // Booking setup or an experience's external destination requests
+      // publication. An experience without either starts as a private draft.
       // A supplied page is created and bound in that same batch.
       const page = args.page === undefined ? undefined : args.page as { title: string; path?: string; summary?: string | null; pageType?: 'custom' | 'recipe' | 'legal' | 'system'; recipe?: string | null; sortOrder?: number; blocks: unknown }
       const idempotencyKey = requiredString(args, 'idempotency_key')
@@ -525,7 +525,7 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
         organizationId: organization.organizationId,
         env: organization.env,
         product: omit(args, ['page', 'booking', 'idempotency_key']) as unknown as CreateProductInput, actor,
-        publication: { published: Boolean(booking || args.kind === 'experience') },
+        publication: { published: Boolean(booking || (args.kind === 'experience' && args.order_url)) },
         ...(booking ? { booking: { data: booking, env: organization.env } } : {}),
         ...(page ? { page: { data: page, env: organization.env } } : {}),
         idempotencyKey,

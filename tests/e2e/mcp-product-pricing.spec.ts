@@ -42,6 +42,35 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   const smallSku = `MCP-SALMON-6-${runId}`
   const largeSku = `MCP-SALMON-12-${runId}`
 
+  // An owner can begin an experience before its booking facts are known.
+  // The independent editor read must show a private draft with no invented setup.
+  const experienceName = `MCP Sushi Workshop Draft ${runId}`
+  const createDraft = await mcpRequest(request, baseURL!, {
+    method: 'tools/call', toolName: 'create_product',
+    args: { organization_id: organizationId, kind: 'experience', name: experienceName, idempotency_key: `pricing-experience-draft-${runId}` },
+  })
+  expect(createDraft.status()).toBe(200)
+  const draftId = mcpData<{ product: Product }>(await createDraft.json()).product.id
+  const draftPath = `${baseURL}/api/editor/organizations/${organizationId}/products/${draftId}`
+  try {
+    const draftRead = await request.get(draftPath)
+    expect(draftRead.status()).toBe(200)
+    const savedDraft = await draftRead.json() as { product: Product; public_url: string | null }
+    expect(savedDraft.product).toMatchObject({ id: draftId, name: experienceName, kind: 'experience', booking: null, stay: null, order_url: null })
+    expect(savedDraft.product.publications).toEqual([{ organization_id: organizationId, published: false }])
+    expect(savedDraft.product.variants).toHaveLength(1)
+    expect(savedDraft.product.variants[0]!.prices).toEqual([])
+    expect(savedDraft.public_url).toBeNull()
+  } finally {
+    const deleteDraft = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'delete_product', args: { organization_id: organizationId, product_id: draftId },
+    })
+    expect(deleteDraft.status()).toBe(200)
+    expect(mcpData<{ deleted: boolean }>(await deleteDraft.json()).deleted).toBe(true)
+    const deletedDraft = await request.get(draftPath)
+    expect(deletedDraft.status()).toBe(404)
+  }
+
   const create = await mcpRequest(request, baseURL!, {
     method: 'tools/call',
     toolName: 'create_product',
