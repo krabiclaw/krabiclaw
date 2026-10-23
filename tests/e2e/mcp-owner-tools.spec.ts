@@ -1185,13 +1185,43 @@ test.describe('stateless MCP server', () => {
         await expect(availability.getByLabel('Ends', { exact: true })).toHaveValue(`${additionalEndLocal.date}T${additionalEndLocal.time}`)
         await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('4')
         await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        let creations = 0
+        const countCreation = (request: import('@playwright/test').Request) => {
+          if (new URL(request.url()).pathname === sessionEndpoint && request.method() === 'POST') creations++
+        }
+        page.on('request', countCreation)
+        const calendarFailure = 'The newly saved calendar could not be read for this verification.'
+        const interceptCalendar = (url: URL) => url.pathname === sessionEndpoint
+        await page.route(interceptCalendar, async route => route.request().method() === 'GET'
+          ? await route.fulfill({ status: 503, json: { error: calendarFailure } })
+          : await route.continue())
         const added = page.waitForResponse(response => new URL(response.url()).pathname === sessionEndpoint && response.request().method() === 'POST')
+        const refusedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
         await availability.getByRole('button', { name: 'Add to calendar', exact: true }).click()
         const addedResponse = await added
         expect(addedResponse.status(), await addedResponse.text()).toBe(201)
         const addedSessions = (await addedResponse.json() as { sessions: SessionAvailability[] }).sessions
         expect(addedSessions).toHaveLength(1)
         const addedId = addedSessions[0]!.id
+        expect((await refusedCalendar).status()).toBe(503)
+        await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/sessions/${addedId}`)
+        await expect(availability.getByText(calendarFailure, { exact: true })).toBeVisible()
+        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('4')
+        const beforeRetry = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+          product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
+        })
+        expect(beforeRetry.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 4, remaining: 4 })])
+        await page.unroute(interceptCalendar)
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('5')
+        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        const retried = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'PATCH')
+        const savedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
+        await availability.getByRole('button', { name: 'Save', exact: true }).click()
+        const retriedResponse = await retried
+        expect(retriedResponse.status(), await retriedResponse.text()).toBe(200)
+        expect((await savedCalendar).status()).toBe(200)
+        page.off('request', countCreation)
+        expect(creations).toBe(1)
         await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('locationId') === locationId)
         expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: product.id, locationId, month: additionalSeating!.date.slice(0, 7), date: additionalSeating!.date })
         await expect(page.locator(`#dashboard-panel-org-calendar [data-session-id="${addedId}"]:visible`)).toBeVisible()
@@ -1202,14 +1232,14 @@ test.describe('stateless MCP server', () => {
         })
         expect(persisted.sessions).toEqual([expect.objectContaining({
           id: addedId, organization_id: organizationId, product_id: product.id, location_id: locationId, timezone: location.timezone,
-          starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), capacity: 4, status: 'scheduled', claimed: 0, remaining: 4, is_full: false,
+          starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), capacity: 5, status: 'scheduled', claimed: 0, remaining: 5, is_full: false,
         })])
         const publicReadback = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, { headers: tenantTestExtraHeaders(), params: { location_id: locationId } })
         expect(publicReadback.status(), await publicReadback.text()).toBe(200)
         const publicSessions = (await publicReadback.json() as { sessions: Array<Pick<SessionAvailability, 'id' | 'starts_at' | 'ends_at' | 'location_id' | 'timezone' | 'remaining' | 'is_full'>> }).sessions
         expect(publicSessions).toHaveLength(2)
         expect(publicSessions.find(session => session.id === addedId)).toMatchObject({
-          id: addedId, location_id: locationId, timezone: location.timezone, starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), remaining: 4, is_full: false,
+          id: addedId, location_id: locationId, timezone: location.timezone, starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), remaining: 5, is_full: false,
         })
         // Online is a public booking scope, not a physical Product location.
         // Removing it from its own focused editor returns to the same Product

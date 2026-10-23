@@ -173,12 +173,19 @@ async function save() {
     const dates = [...new Set(saved.map(session => localNow(session.timezone, new Date(session.starts_at)).date))]
     const [date] = dates
     if (dates.length !== 1 || !date) throw new Error('The saved availability did not identify one calendar date.')
+    if (creating) {
+      if (saved.length !== 1) throw new Error('The saved availability did not identify one session.')
+      await router.replace({ path: `/dashboard/${route.params.orgSlug}/calendar/sessions/${saved[0]!.id}`, query: { ...route.query, month: date.slice(0, 7), date } })
+      creationIntent.value = { key: crypto.randomUUID(), fingerprint: '' }
+      await refreshSession()
+      if (error.value) throw error.value
+      reset()
+    }
     // Keep the saved version if the required calendar read fails; a retry must
     // compare against the write that succeeded, while retaining the draft.
     if (!creating) data.value = { success: true, session: saved[0]! }
     await p.refresh(date)
     await navigateTo({ path: `/dashboard/${route.params.orgSlug}/calendar`, query: { product_id: productId, locationId: p.scope.value ?? undefined, month: date.slice(0, 7), date } })
-    if (creating) creationIntent.value = { key: crypto.randomUUID(), fingerprint: '' }
   } catch (failure) { saveError.value = getErrorMessage(failure, 'Session could not be saved') }
   finally { saving.value = false }
 }
