@@ -36,15 +36,15 @@ Generated placeholder rows are no longer part of onboarding or site creation. Te
 
 | # | Step | Required | Lands on |
 |---|---|---|---|
-| 1 | Business basics (Google Maps search or manual: name, vertical, address, contact) | Required | `/dashboard/onboarding` |
-| 2 | Site preview (the pending site on its own subdomain, preview token) | Alongside every step, in the preview pane | `https://<subdomain>/` |
+| 1 | Business type, source language and name (Google Maps search or manual) | Required; address and contact are optional later steps | `/dashboard/onboarding` |
+| 2 | Site preview (the pending site on its own subdomain, preview token) | Available after the first save on leaving the currency step | `https://<subdomain>/` |
 | 3 | Brand and homepage hero — colour, logo, photo, headline, description | Optional (skippable) | `/dashboard/onboarding/look` |
-| 4 | Operations — timezone (before the first save), notification phone | Required | `/dashboard/onboarding/hours` |
+| 4 | Timezone and pricing currency (before the first save) | Required; opening hours and the business contact number are optional | `/dashboard/onboarding/hours`, `/dashboard/onboarding/currency`, `/dashboard/onboarding/contact` |
 | 5 | Initial catalog entries — restaurant menu items or experience offerings; Legal Services and lodging skip this step | Optional; lodging homes and their stay settings are added in Catalog after site setup | `/dashboard/onboarding/products` |
 | 7 | Story — about, founder story, FAQ seeds | Optional | Dashboard CMS |
 | 8 | Channels — Facebook/Instagram, ChatGPT app install, ChowBot intro | Optional | Dashboard (not part of the onboarding flow) |
 | 9 | Team — invite admins/editors | Optional, explicitly skippable | Dashboard settings |
-| 10 | Launch readiness — domain, final review, publish | Required to go live, not required to keep working in draft | `/dashboard/[orgSlug]/website/domains` |
+| 10 | Final review and **Create my site** | Required to publish on the included site address; a custom domain is optional after setup | `/dashboard/onboarding/review`; optional domain setup at `/dashboard/[orgSlug]/website/domains` |
 
 ### Location-level (once per location, including the first)
 
