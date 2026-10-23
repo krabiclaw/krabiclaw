@@ -269,13 +269,13 @@ export const publicTemplateMarketing: Record<MarketedTemplateSlug, TemplateMarke
       },
       {
         label: 'Welcome your next overnight guest.',
-        description: 'Present each home with photos, amenities and stay details. Let guests choose dates and book directly, then manage availability, arrivals, departures and guest conversations from your dashboard.',
+        description: 'Present each home with photos, amenities and stay details. Offer direct paid stay booking with Business and completed Stripe setup. Manage availability, arrivals, departures and guest conversations from your dashboard.',
       },
     ],
     included: [
       'Restaurant menus and dish pages',
       'Experience pages and booking flows',
-      'Home listings, nightly availability, and direct stay booking',
+      'Home listings and nightly availability',
       'Location pages with hours and directions',
       'Photos, reviews, and guest questions',
       'Posts, articles, and your brand story',
