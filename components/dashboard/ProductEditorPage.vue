@@ -797,8 +797,11 @@ const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   const billed = homeLive.value ? quote.homes.used > quote.homes.included : quote.adding.additional_homes > 0
   if (!billed) return { text: homeLive.value ? `This home is one of your ${quote.homes.included} included homes.` : `Published, this home is one of your ${quote.homes.included} included homes.` }
   if (!quote.homes.additional_price_minor) return { text: 'This home is not billed on your current subscription.' }
+  const adds = `${homeLive.value ? 'This home adds' : 'Published, this home adds'} ${formatPlanPrice(quote.homes.additional_price_minor)} per month to your plan`
+  // Stripe bills no usage in a free trial: the home is billed from the period that starts when the trial ends.
+  if (quote.billing.trial_end) return { text: `${adds} once your free trial ends on ${formatExactDateTime(quote.billing.trial_end)}. It is free until then.` }
   if (!quote.billing.period_end) throw new Error('A billed home has no billing period')
-  return { text: `${homeLive.value ? 'This home adds' : 'Published, this home adds'} ${formatPlanPrice(quote.homes.additional_price_minor)} per month to your plan, billed on your next invoice on ${formatExactDateTime(quote.billing.period_end)}.` }
+  return { text: `${adds}, billed on your next invoice on ${formatExactDateTime(quote.billing.period_end)}.` }
 })
 // One key per product being created, kept across the walk's leaves and retries.
 const createKeyName = `product-create-key:${organizationId}`

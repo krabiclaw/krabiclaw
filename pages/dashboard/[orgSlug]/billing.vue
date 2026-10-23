@@ -95,16 +95,30 @@ const card = computed(() => {
   return main ? `${cardBrandLabel(main.brand)} •••• ${main.last4}` : null
 })
 // "Renews Nov 4, 2026 · Visa •••• 4242": what happens next, and the card it is billed to.
+// In a free trial, Stripe's own end behavior says what happens without a card.
 const planLine = computed(() => {
   const status = billing.value
   if (!status || onStarter.value) return ''
   const parts: string[] = []
-  if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
+  const trial = status.subscriptionPrice?.trial
+  if (trial) {
+    parts.push(`Free trial ends ${formatExactDateTime(trial.end)}`)
+    // A change already set for the period's end is what happens; only without one does the card decide.
+    if (status.cancelAtPeriodEnd) parts.push(`${planName.value} ends with the trial`)
+    else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
+    else if (!card.value) parts.push(TRIAL_WITHOUT_CARD[trial.withoutPaymentMethod](planName.value))
+  } else if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
   else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
   else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)
   if (card.value) parts.push(card.value)
   return parts.join(' · ')
 })
+const TRIAL_WITHOUT_CARD = {
+  cancel: (plan: string) => `Add a card to stay on ${plan}; without one the plan ends with the trial`,
+  pause: (plan: string) => `Add a card to stay on ${plan}; without one the plan pauses when the trial ends`,
+  create_invoice: (plan: string) => `Add a card to pay for ${plan} when the trial ends`,
+} as const
+
 // The plan's one change: up from Basic or Growth, or to Growth from Business, each its own leaf; none while a change is pending.
 const change = computed<{ label: string; to: string; outline?: boolean } | null>(() => {
   const status = billing.value
@@ -135,7 +149,7 @@ const homesRow = computed<EditorNavigationItem | null>(() => {
   const summary = onStarter.value
     ? `${counted} · ${current.homes.included} included · ${nameOf(STARTER_PLAN_ID)} stops at ${current.homes.included}`
     : current.homes.additional_price_minor
-      ? `${counted} · ${current.homes.included} included · ${formatPrice(current.homes.amount_minor)} per month`
+      ? `${counted} · ${current.homes.included} included · ${formatPrice(current.homes.amount_minor)} per month${current.billing.trial_end ? ' after your free trial' : ''}`
       : `${counted} · not billed on this subscription`
   return { id: 'homes', label: 'Homes', summary }
 })

@@ -6,11 +6,11 @@ import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
-import { ADDITIONAL_HOME_PRICE, BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
+import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
-import { planSubscriptionItem, recurringPriceAmount } from '~/server/utils/stripe-catalog'
+import { planSubscriptionItem, readStripeCatalog, recurringPriceAmount, selectMeteredPrices } from '~/server/utils/stripe-catalog'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
 
 export interface BillingEnv {
@@ -31,10 +31,16 @@ export interface OrganizationBillingStatus {
   stripeScheduleId?: string
   billingInterval?: 'month'
   /** The plan item's own charge, and the metered prices the subscription carries: an earlier contract may lack one added since. */
-  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month'; meters: BillingMeterKey[] }
+  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month'; meters: BillingMeterKey[]; trial: SubscriptionTrial | null }
   /** What the plan bills by count: its active locations and live homes. */
   usage: BillingCapacity
   entitlements: EntitlementsMap
+}
+
+/** A free trial as Stripe runs it: when it ends, and what Stripe does then when no card is on file. */
+export interface SubscriptionTrial {
+  end: string
+  withoutPaymentMethod: Stripe.Subscription.TrialSettings.EndBehavior.MissingPaymentMethod
 }
 
 const billingAuthorizationOptions = {
@@ -109,7 +115,14 @@ export async function getOrganizationSubscriptionPrice(
   if (!interval || item.price.recurring?.interval_count !== 1) throw new Error('Stripe subscription has an unsupported billing interval')
   const currency = item.price.currency.toUpperCase()
   if (!isCurrencyCode(currency)) throw new Error(`Stripe subscription has unsupported currency ${item.price.currency}`)
-  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency, interval, meters: subscriptionMeters(native) }
+  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency, interval, meters: subscriptionMeters(native), trial: subscriptionTrial(native) }
+}
+
+/** The subscription's free trial while it is in one. */
+function subscriptionTrial(native: Stripe.Subscription): SubscriptionTrial | null {
+  if (native.status !== 'trialing') return null
+  if (!native.trial_end || !native.trial_settings) throw new Error(`Stripe subscription ${native.id} is trialing without its trial end and settings`)
+  return { end: new Date(native.trial_end * 1000).toISOString(), withoutPaymentMethod: native.trial_settings.end_behavior.missing_payment_method }
 }
 
 /** The metered prices a subscription carries, read from its items' products (expanded): one from before a meter was added lacks it. */
@@ -126,7 +139,7 @@ function billingInterval(value: string | undefined): 'month' | undefined {
 // Only an active location is on the site, so only an active one is billed. A
 // location a home (a stay product) is at is the home's, not a location: the
 // home is billed in its place while it is live.
-const HOME_LOCATIONS_SQL = "SELECT c.location_id FROM product_stay_configs c JOIN products p ON p.id = c.product_id WHERE p.organization_id = ? AND p.kind = 'stay'"
+export const HOME_LOCATIONS_SQL = "SELECT c.location_id FROM product_stay_configs c JOIN products p ON p.id = c.product_id WHERE p.organization_id = ? AND p.kind = 'stay'"
 const ACTIVE_LOCATIONS_SQL = `SELECT COUNT(*) FROM business_locations l WHERE l.organization_id = ? AND l.status = 'active' AND l.id NOT IN (${HOME_LOCATIONS_SQL})`
 
 /**
@@ -307,7 +320,8 @@ export interface HomesQuote {
   homes: { used: number; drafts: number; included: number; additional_price_minor: number; amount_minor: number }
   /** `count` is homes about to go live. */
   adding: { count: number; additional_homes: number; amount_minor: number; allowed: boolean }
-  billing: { period_end: string | null; prorated: false }
+  /** `trial_end` is when a subscription's free trial ends, `null` when it has none: usage in a trial is not billed. */
+  billing: { period_end: string | null; trial_end: string | null; prorated: false }
 }
 
 /** The `adding` query of a homes quote, homes about to go live: absent is one home; otherwise an integer from 0 to the most one quote covers. */
@@ -320,9 +334,26 @@ export function parseHomesAdding(value: unknown): number {
   return count
 }
 
-/** Homes beyond the included ones, priced: what `used` homes cost now, or what `adding` more would add. */
-function additionalHomes(used: number, adding: number): number {
-  return Math.max(0, used + adding - INCLUDED_HOMES) - Math.max(0, used - INCLUDED_HOMES)
+/** Homes beyond the `included` ones, priced: what `used` homes cost now, or what `adding` more would add. */
+function additionalHomes(included: number, used: number, adding: number): number {
+  return Math.max(0, used + adding - included) - Math.max(0, used - included)
+}
+
+/**
+ * A homes price as Stripe bills it: its graduated tiers at no charge are the
+ * included homes, and the open-ended tier after them is each further home.
+ * Any other shape is not one KrabiClaw sells and fails visibly.
+ */
+function homesPriceTerms(price: Stripe.Price): { included: number; additional: number } {
+  const tiers = price.tiers
+  if (price.billing_scheme !== 'tiered' || price.tiers_mode !== 'graduated' || !tiers?.length) throw new Error(`Stripe homes price ${price.id} is not read with graduated tiers`)
+  const free = tiers.slice(0, -1)
+  const further = tiers.at(-1)!
+  if (free.some(tier => tier.up_to === null || tier.unit_amount !== 0 || (tier.flat_amount ?? 0) !== 0)
+    || further.up_to !== null || !Number.isSafeInteger(further.unit_amount) || (further.flat_amount ?? 0) !== 0) {
+    throw new Error(`Stripe homes price ${price.id} must include homes at no charge and price each further one`)
+  }
+  return { included: free.at(-1)?.up_to ?? 0, additional: further.unit_amount! }
 }
 
 /**
@@ -340,31 +371,39 @@ export async function homeAllowance(env: CloudflareEnv, db: DbClient, organizati
 }
 
 /**
- * The quote for adding `adding` homes to this organization. A paid plan bills
- * each home past the included ones at the end of the period through the
- * homes price on its subscription; a subscription from before homes were
- * priced carries none and is charged nothing for them, so its price per home
- * is 0. Basic has no period and is quoted the published price, what the homes
- * past its included ones cost once Growth or Business is chosen.
+ * The quote for adding `adding` homes to this organization, priced as Stripe
+ * bills them. A paid plan bills each home past the included ones at the end of
+ * the period through the homes price on its subscription, read with its tiers;
+ * a subscription from before homes were priced carries none and is charged
+ * nothing for them, so its price per home is 0. A subscription in its free
+ * trial bills no usage until the trial ends, which `trial_end` says. Basic has
+ * no period and is quoted the published homes price from the Stripe catalog,
+ * what the homes past its included ones cost once Growth or Business is chosen.
  */
 export async function homesQuote(env: CloudflareEnv, db: DbClient, organizationId: string, adding: number): Promise<HomesQuote> {
   const [{ plan, used, subscription, allowed }, drafts] = await Promise.all([homeAllowance(env, db, organizationId, adding), queryFirst<{ homes: number }>(db, `SELECT (${DRAFT_HOMES_SQL}) AS homes`, [organizationId])])
   if (!drafts) throw new Error('Billing usage could not be read')
-  let price = ADDITIONAL_HOME_PRICE
+  const stripe = getStripe(env)
+  let terms: { included: number; additional: number }
+  let trialEnd: string | null = null
   if (subscription) {
     if (!subscription.stripeSubscriptionId) throw new Error(`Subscription ${subscription.id} has no Stripe subscription`)
-    const native = await getStripe(env).subscriptions.retrieve(subscription.stripeSubscriptionId, { expand: ['items.data.price.product'] })
+    const native = await stripe.subscriptions.retrieve(subscription.stripeSubscriptionId, { expand: ['items.data.price.product', 'items.data.price.tiers'] })
     const customerId = typeof native.customer === 'string' ? native.customer : native.customer.id
     if (customerId !== subscription.stripeCustomerId) throw new Error('Stripe subscription customer does not match its organization')
-    if (!subscriptionMeters(native).includes('homes')) price = 0
+    const homes = native.items.data.find(row => typeof row.price.product !== 'string' && !row.price.product.deleted && row.price.product.metadata.product_family === 'homes')
+    terms = homes ? homesPriceTerms(homes.price) : { included: INCLUDED_HOMES, additional: 0 }
+    trialEnd = subscriptionTrial(native)?.end ?? null
+  } else {
+    terms = { included: INCLUDED_HOMES, additional: homesPriceTerms(selectMeteredPrices(await readStripeCatalog(stripe)).homes).additional }
   }
-  const added = additionalHomes(used, adding)
+  const added = additionalHomes(terms.included, used, adding)
   return {
     plan,
     currency: 'USD',
-    homes: { used, drafts: drafts.homes, included: INCLUDED_HOMES, additional_price_minor: price, amount_minor: additionalHomes(0, used) * price },
-    adding: { count: adding, additional_homes: added, amount_minor: added * price, allowed },
-    billing: { period_end: subscription?.periodEnd?.toISOString() ?? null, prorated: false },
+    homes: { used, drafts: drafts.homes, included: terms.included, additional_price_minor: terms.additional, amount_minor: additionalHomes(terms.included, 0, used) * terms.additional },
+    adding: { count: adding, additional_homes: added, amount_minor: added * terms.additional, allowed },
+    billing: { period_end: subscription?.periodEnd?.toISOString() ?? null, trial_end: trialEnd, prorated: false },
   }
 }
 

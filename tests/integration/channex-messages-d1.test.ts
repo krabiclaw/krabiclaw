@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
+import { H3 } from 'h3'
+import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, type ChannelBooking } from '../../server/domain/stays.ts'
@@ -12,7 +14,9 @@ import { listGuestThreads } from '../../server/domain/guest-threads/repository.t
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { createDeliveryReceipt } from '../../server/domain/guest-threads/deliveries.ts'
 import { getGuestRequest } from '../../server/domain/requests.ts'
-import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
+import todayRoute from '../../server/api/dashboard/today.get.ts'
+import type { TodayFeedPayload } from '../../shared/dashboard-today.ts'
 import { guestThreadListPage, parseGuestThreadListQuery } from '../../server/utils/dashboard-guest-threads.ts'
 import { assertAssignedBookingAccess, memberAccessPrincipal } from '../../server/utils/member-access.ts'
 
@@ -70,7 +74,7 @@ async function boot() {
     name: 'channel-messages-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'channel-messages-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'channel-messages-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
@@ -81,7 +85,7 @@ async function boot() {
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('owner-member', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('location', ?, 'cabin', 'Cabin', 'active', 'America/Denver', ?, ?)`).bind(ORG, NOW, NOW).run()
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests' } as CloudflareEnv
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'location', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'owner-member', assigned_team_id: null },
@@ -116,6 +120,28 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.deepEqual(detail.entries.map(entry => [entry.body, entry.actorKind, entry.providerTimestamp]), [['Hello', 'guest', RAW], [null, 'system', RAW]])
     assert.equal(detail.entries[1]!.attachments[0]!.url, 'https://channex.test/attachment/file')
     assert.notEqual(detail.entries[0]!.occurredAt, RAW)
+    // The actual imported inquiry has no guest identity or linked stay. Today
+    // displays its recorded conversation title without inventing either one.
+    const password = 'ChannelInquiryProof123!'
+    await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('owner-credential', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(password)).run()
+    const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password }, asResponse: true })
+    assert.equal(login.status, 200)
+    const token = login.headers.get('set-auth-token')
+    assert.ok(token)
+    const app = new H3()
+    app.get('/api/dashboard/today', todayRoute)
+    const response = await app.request(Object.assign(new Request('https://proof.example/api/dashboard/today?org=org', { headers: { authorization: `Bearer ${token}` } }),
+      { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    assert.equal(response.status, 200)
+    const today = await response.json() as TodayFeedPayload
+    assert.deepEqual(today.cards.filter(card => card.priority === 'attention').map(card => ({ id: card.id, headline: card.headline, to: card.to, bookingKind: card.bookingKind,
+      stayId: card.stayId, occurrenceAt: card.occurrenceAt, timeZone: card.timeZone, imageIcon: card.imageIcon })), [{
+      id: `attention:${rows[0]!.id}`, headline: 'Review conversation: Conversation supplied by Airbnb', to: `/dashboard/org/messages/${rows[0]!.id}`,
+      bookingKind: null, stayId: null, occurrenceAt: null, timeZone: null, imageIcon: 'i-lucide-message-circle',
+    }])
+    const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
+    assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
+    assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 0)
     const principal = (userId: string) => memberAccessPrincipal({ userId, organizationId: ORG, role: 'member' }, { env })
     await assertAssignedBookingAccess(db, { ...principal(OWNER), requestId: rows[0]!.id })
     await assert.rejects(assertAssignedBookingAccess(db, { ...principal('unassigned-user'), requestId: rows[0]!.id }), code('THREAD_NOT_FOUND'))

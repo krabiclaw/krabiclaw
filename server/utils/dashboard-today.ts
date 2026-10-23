@@ -42,16 +42,17 @@ function card(input: Pick<TodayCard, 'id' | 'to' | 'eyebrow' | 'headline' | 'pri
 }
 
 function attentionCard(thread: GuestThreadListItemViewModel, organization: DashboardOrganizationRow): TodayCard {
-  if (typeof thread.guestName !== 'string' || !thread.guestName.trim()) throw new Error(`Guest name is missing for request ${thread.id}`)
-  const bookingKind = thread.submissionType === 'contact' ? null : thread.submissionType
+  if (thread.guestName !== null && (typeof thread.guestName !== 'string' || !thread.guestName.trim())) throw new Error(`Guest name is missing for request ${thread.id}`)
+  const conversation = thread.guestName === null
+  const bookingKind = thread.submissionType === 'contact' || conversation && thread.operationalStatus === null ? null : thread.submissionType
   const pending = bookingKind === 'booking' && thread.operationalStatus === 'pending'
-  const reply = thread.submissionType === 'contact' || thread.latestMessageFromGuest
+  const reply = conversation || thread.submissionType === 'contact' || thread.latestMessageFromGuest
   const noun = bookingKind === 'stay' ? 'stay' : bookingKind ? resolveBookingPresentation(bookingKind, organization.vertical).noun : null
   return card({
     id: `attention:${thread.id}`, priority: 'attention',
     to: bookingKind !== null && bookingKind !== 'stay' && (pending || !reply) ? bookingEditorPath(organization.slug, bookingKind, thread.id) : guestConversationPath(organization.slug, thread.id),
     eyebrow: pending ? 'Awaiting your decision' : 'Needs attention',
-    headline: pending ? `Review ${thread.guestName}’s ${noun}` : reply
+    headline: conversation ? `Review conversation: ${thread.participantLabel}` : pending ? `Review ${thread.guestName}’s ${noun}` : reply
       ? `Reply to ${thread.guestName}` : `Review ${thread.guestName}’s ${noun}`,
     description: [thread.locationLabel, thread.whenLabel, reply ? thread.preview?.text : null].filter(Boolean).join(' · '),
     imageUrl: thread.imageUrl, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
