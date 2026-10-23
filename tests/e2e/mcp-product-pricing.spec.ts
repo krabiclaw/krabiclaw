@@ -22,7 +22,7 @@ test.afterEach(async () => {
  * prices nested under variants, refuses a Product whose variant carries no
  * price it can quote, and never invents an amount to stand in for one.
  */
-test('deployed MCP transport prices variants, and refuses to invent a missing amount', async ({ request, baseURL }) => {
+test('deployed MCP transport prices variants, and refuses to invent a missing amount', async ({ request, baseURL, browser }) => {
 
   await loginAs(request, baseURL!)
   const toolsResponse = await mcpRequest(request, baseURL!, { method: 'tools/list' })
@@ -97,9 +97,16 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   const before = (await beforeResponse.json() as { product: Product }).product
   expect(before.id).toBe(created.id)
   // Dishes have prices and options, but no booking editor at either depth.
-  for (const section of ['booking', 'booking/enabled']) {
-    const unsupportedBooking = await request.get(`${baseURL}/dashboard/${organizationId}/products/${created.id}/${section}`)
-    expect(unsupportedBooking.status()).toBe(404)
+  // Dashboard documents serve the app shell; its route guard shows the refusal.
+  const bookingContext = await browser.newContext({ storageState: await request.storageState() })
+  try {
+    const bookingPage = await bookingContext.newPage()
+    for (const section of ['booking', 'booking/enabled']) {
+      await bookingPage.goto(`${baseURL}/dashboard/${organizationId}/products/${created.id}/${section}`)
+      await expect(bookingPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
+    }
+  } finally {
+    await bookingContext.close()
   }
 
   // The ChatGPT-style price edit names only the variant, price and new amount.
