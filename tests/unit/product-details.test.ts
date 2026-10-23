@@ -7,16 +7,17 @@ test('a product kind closes its descriptive fields and defaults to unfeatured', 
   assert.equal(assertProductKind('dish'), 'dish')
   assert.throws(() => assertProductKind(undefined), ProductDetailError)
   assert.throws(() => assertProductKind('other'), ProductDetailError)
+  assert.throws(() => assertProductKind('item'), ProductDetailError)
   assert.deepEqual(validateProductDetails('dish', { allergens: ['Peanuts'], dietary_notes: ['Vegetarian'] }), { featured: false, allergens: ['Peanuts'], dietary_notes: ['Vegetarian'] })
   assert.throws(() => validateProductDetails('dish', { arbitrary: 'value' }), /not a field/)
   assert.throws(() => validateProductDetails('service', { allergens: ['Peanuts'] }), /not a field for service/)
-  assert.throws(() => validateProductDetails('item', { meeting_point: 'Gate 3' }), /not a field for item/)
+  assert.throws(() => validateProductDetails('dish', { meeting_point: 'Gate 3' }), /not a field for dish/)
 })
 
 test('inclusions and what to bring remain independent customer facts', () => {
   assert.deepEqual(validateProductDetails('experience', { included_items: ['Clay', 'Apron'], what_to_bring: ['Towel'], meeting_point: 'Gate 3\nBy the fountain' }), { featured: false, included_items: ['Clay', 'Apron'], what_to_bring: ['Towel'], meeting_point: 'Gate 3\nBy the fountain' })
   assert(productDetailFields('service').some(field => field.key === 'preparation'))
-  assert(productDetailFields('item').some(field => field.key === 'care_instructions'))
+  assert(productDetailFields('experience').some(field => field.key === 'meeting_point'))
 })
 
 test('customer facts reject wrong types, blanks, duplicate lists and excessive values', () => {
@@ -24,8 +25,8 @@ test('customer facts reject wrong types, blanks, duplicate lists and excessive v
   assert.throws(() => validateProductDetails('dish', { allergens: ['Peanuts', 'Peanuts'] }), /distinct/)
   assert.throws(() => validateProductDetails('dish', { allergens: [''] }), /must not be blank/)
   assert.throws(() => validateProductDetails('dish', { tagline: 'two\nlines' }), /single line/)
-  assert.throws(() => validateProductDetails('item', { dimensions: 5 }), /must be a string/)
-  assert.throws(() => validateProductDetails('item', { care_instructions: 'a'.repeat(10001) }), /at most/)
+  assert.throws(() => validateProductDetails('dish', { tagline: 5 }), /must be a string/)
+  assert.throws(() => validateProductDetails('service', { preparation: 'a'.repeat(10001) }), /at most/)
 })
 
 test('stay descriptions preserve multiline content up to the existing product text limit', () => {

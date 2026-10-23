@@ -15,7 +15,7 @@ import {
 import { getMediaAsset, listMediaAssets } from '~/server/utils/media-asset-manager'
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
 import { parseLocationPayload } from '~/server/utils/location-payload'
-import { getProduct, hydrateProductMedia, summarizeLocationProducts } from '~/server/utils/product-management'
+import { getProduct, hydrateProductMedia, productPublicPresentation, summarizeLocationProducts } from '~/server/utils/product-management'
 import { getLocationReservationConfig } from '~/server/utils/reservations'
 import { requireBlogAccess } from '~/server/utils/blog-access'
 import { getBlogPost, listBlogPosts } from '~/server/utils/content/publishing'
@@ -246,7 +246,7 @@ export async function loadDashboardProduct(
   locationId: string | null,
   productId: string,
 ) {
-  const { db, organization } = await requireProductAccess(event, organizationId, productId)
+  const { env, db, organization } = await requireProductAccess(event, organizationId, productId)
   const product = await getProduct(db, organization.id, productId)
   // The catalog is organization-owned, so being offered here is what makes
   // this location's editor the right place to open it.
@@ -255,5 +255,6 @@ export async function loadDashboardProduct(
   }
   // Both editor scopes show the same organization-owned media as the catalog.
   const [hydrated] = await hydrateProductMedia(db, organization.id, [product])
-  return { success: true as const, product: hydrated! }
+  const { publicUrl, publicUrls } = await productPublicPresentation(db, env, organization.id, hydrated!)
+  return { success: true as const, product: hydrated!, public_url: publicUrl, public_urls: publicUrls }
 }

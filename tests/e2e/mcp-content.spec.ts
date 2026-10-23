@@ -113,7 +113,7 @@ test.describe('stateless MCP server', () => {
       await page.goto(`${baseURL}/dashboard/ember-slice-demo/website/pages/${home!.id}?editMode=translations&locale=${locale}`)
       await waitForNuxtHydration(page)
       await expect(page.getByTestId(`localize-field-content:${sourceHero.id}:secondary_label`)).toHaveValue('')
-      await page.getByRole('dialog', { name: 'Localize page' }).getByRole('button', { name: 'Cancel', exact: true }).click()
+      await page.getByRole('dialog', { name: 'page translations', exact: true }).getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(page).not.toHaveURL(/[?&]editMode=translations(?:&|$)/)
       const translation = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'create_site_page', args: translationArgs,
@@ -129,11 +129,35 @@ test.describe('stateless MCP server', () => {
       })
       const translatedRead = await request.get(localizationPath)
       expect(translatedRead.status()).toBe(200)
-      const authored = (await translatedRead.json()).localization
+      let authored = (await translatedRead.json()).localization
       expect(authored).toMatchObject({ root_id: home!.page_id, locale, title: translatedTitle, path: '/' })
       expect(authored.content_blocks).toContainEqual(expect.objectContaining({ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } }))
       const privateRoute = await page.request.get(`${tenantBaseURL}/${locale}`, { headers: tenantExtraHeaders, maxRedirects: 0 })
       expect(privateRoute.status()).toBe(404)
+
+      for (const identity of [{ route_path: `/${locale}/moved-home` }, { values: { title: 'Must not be saved', slug: 'moved-home' } }]) {
+        const moved = await request.put(localizationPath, { data: {
+          values: { title: 'Must not be saved' }, expected_updated_at: authored.updated_at, ...identity,
+        } })
+        expect(moved.status(), await moved.text()).toBe(422)
+        const unchanged = await request.get(localizationPath)
+        expect(unchanged.status()).toBe(200)
+        expect((await unchanged.json()).localization).toEqual(authored)
+      }
+      const renamed = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'put_resource_localization', args: {
+          organization_id: MCP_ORGANIZATION_ID, resource_type: 'content_document', resource_id: home!.page_id,
+          locale, expected_updated_at: authored.updated_at, values: { title: translatedTitle + ' · Updated' },
+        },
+      })
+      expect(renamed.status()).toBe(200)
+      expect(mcpData<{ localization: { path: string } }>(await renamed.json()).localization.path).toBe('/')
+      const renamedRead = await request.get(localizationPath)
+      expect(renamedRead.status()).toBe(200)
+      const renamedLocalization = (await renamedRead.json()).localization
+      expect(renamedLocalization).toMatchObject({ id: authored.id, path: '/', slug: authored.slug, title: translatedTitle + ' · Updated', content_blocks: authored.content_blocks })
+      expect(renamedLocalization.updated_at).not.toBe(authored.updated_at)
+      authored = renamedLocalization
 
       const published = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
@@ -146,7 +170,7 @@ test.describe('stateless MCP server', () => {
       const publicTranslation = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/', locale } })
       expect(publicTranslation.status(), await publicTranslation.text()).toBe(200)
       expect((await publicTranslation.json()).page).toMatchObject({
-        id: authored.id, page_id: home!.page_id, locale, title: translatedTitle,
+        id: authored.id, page_id: home!.page_id, locale, title: authored.title,
         blocks: [expect.objectContaining({ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } })],
       })
       const publicRoute = await openTenantPage(page, `${tenantBaseURL}/${locale}`, tenantExtraHeaders)
@@ -349,12 +373,49 @@ test.describe('stateless MCP server', () => {
         method: 'tools/call', toolName: 'get_post', args: { organization_id: organizationId, post_id: created.post.id },
       })
       expect(read.status()).toBe(200)
-      const draft = mcpData<{ post: { status: string; slug: string; updated_at: string; published_at: string | null; public_url: string | null; preview_url: string | null } }>(await read.json()).post
+      let draft = mcpData<{ post: { status: string; slug: string; updated_at: string; published_at: string | null; public_url: string | null; preview_url: string | null } }>(await read.json()).post
       expect(draft.status).toBe('draft')
       expect(draft.published_at).toBeNull()
       expect(draft.public_url).toBeNull()
       expect(draft.preview_url).toContain('preview_token=')
       expect((await request.get(`${tenantBaseURL}/api/public/posts/${encodeURIComponent(draft.slug)}`, { headers: tenantExtraHeaders })).status()).toBe(404)
+
+      const postEditorPath = `${baseURL}/api/editor/organizations/${organizationId}/posts/${created.post.id}`
+      const beforeRename = await request.get(postEditorPath)
+      expect(beforeRename.status()).toBe(200)
+      const originalDraft = (await beforeRename.json()).post
+      const move = await request.patch(postEditorPath, { data: {
+        expected_updated_at: draft.updated_at, title: 'Must not be saved', slug: 'another-post-address',
+      } })
+      expect(move.status()).toBe(400)
+      expect((await move.json()).error).toBe('A post keeps its saved slug')
+      const afterRefusedMove = await request.get(postEditorPath)
+      expect(afterRefusedMove.status()).toBe(200)
+      const unchangedDraft = (await afterRefusedMove.json()).post
+      const { preview_url: originalDraftPreview, ...originalDraftFields } = originalDraft
+      const { preview_url: unchangedDraftPreview, ...unchangedDraftFields } = unchangedDraft
+      expect(unchangedDraftFields).toEqual(originalDraftFields)
+      // Each read issues a fresh signed preview link. Its saved route remains
+      // exact even though the short-lived credential can change.
+      for (const previewUrl of [originalDraftPreview, unchangedDraftPreview]) {
+        const preview = new URL(previewUrl, baseURL)
+        expect(preview.pathname).toBe(originalDraft.public_path)
+        expect(preview.searchParams.get('preview_token')).toBeTruthy()
+      }
+      const rename = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'update_post', args: {
+          organization_id: organizationId, post_id: created.post.id, expected_updated_at: draft.updated_at,
+          title: `Renamed short post ${now}`,
+        },
+      })
+      expect(rename.status()).toBe(200)
+      mcpData(await rename.json())
+      const afterRename = await request.get(postEditorPath)
+      expect(afterRename.status()).toBe(200)
+      const renamedPost = (await afterRename.json()).post
+      expect(renamedPost).toMatchObject({ title: `Renamed short post ${now}`, slug: created.post.slug, body: createArgs.body })
+      expect(renamedPost.updated_at).not.toBe(draft.updated_at)
+      draft = { ...draft, ...renamedPost }
 
       // Facebook is named with what get_social_connections reports; this
       // organization has no Page connected, so the outcome is exactly the
@@ -421,7 +482,7 @@ test.describe('stateless MCP server', () => {
     }
   })
 
-  test('tenant blog tools preserve the canonical block document', async ({ request, baseURL }) => {
+  test('tenant blog tools preserve the canonical block document', async ({ request, page, baseURL }) => {
     await loginAs(request, baseURL!)
     const organizationId = MCP_ORGANIZATION_ID
     const discovery = await mcpRequest(request, baseURL!, { method: 'tools/list' })
@@ -431,6 +492,7 @@ test.describe('stateless MCP server', () => {
     expect(blogTool).toBeDefined()
     const validateBlog = new Ajv({ strict: false, allErrors: true }).compile(blogTool!.outputSchema)
     let postId = ''
+    let addedLocale = ''
     try {
       const categoryList = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'list_article_categories',
@@ -486,6 +548,7 @@ test.describe('stateless MCP server', () => {
           organization_id: organizationId,
           post_id: postId,
           expected_updated_at: readPost.updated_at,
+          title: 'Renamed canonical article',
           content_blocks: [
             { type: 'heading', level: 2, data: { text: 'Edited through MCP' } },
             { type: 'markdown', data: { markdown: 'Still one shared **document**.', editor_mode: 'rich' } },
@@ -509,9 +572,84 @@ test.describe('stateless MCP server', () => {
       expect(updatedReadPost.public_url).toBeNull()
       const editorRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/blog/${postId}`)
       expect(editorRead.status()).toBe(200)
-      const editorPost = (await editorRead.json() as { post: { body: string } }).post
+      const editorPost = (await editorRead.json() as { post: { body: string; title: string; slug: string; updated_at: string; public_path: string; preview_url: string } }).post
       expect(editorPost.body).toContain('Edited through MCP')
       expect(editorPost.body).toContain('Still one shared **document**.')
+      expect(editorPost.title).toBe('Renamed canonical article')
+      expect(editorPost.slug).toBe(readPost.slug)
+      const rejectedMove = await request.patch(`${baseURL}/api/editor/organizations/${organizationId}/blog/${postId}`, { data: {
+        title: 'Must not be saved', slug: 'another-article-address', expected_updated_at: editorPost.updated_at,
+      } })
+      expect(rejectedMove.status()).toBe(400)
+      expect((await rejectedMove.json()).error).toBe('An article keeps its saved slug')
+      const unchangedArticle = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/blog/${postId}`)
+      expect(unchangedArticle.status()).toBe(200)
+      const unchangedArticlePost = (await unchangedArticle.json()).post
+      const { preview_url: originalArticlePreview, ...originalArticleFields } = editorPost
+      const { preview_url: unchangedArticlePreview, ...unchangedArticleFields } = unchangedArticlePost
+      expect(unchangedArticleFields).toEqual(originalArticleFields)
+      for (const previewUrl of [originalArticlePreview, unchangedArticlePreview]) {
+        const preview = new URL(previewUrl, baseURL)
+        expect(preview.pathname).toBe(editorPost.public_path)
+        expect(preview.searchParams.get('preview_token')).toBeTruthy()
+      }
+
+      const editor = `${baseURL}/api/editor/organizations/${organizationId}`
+      const languageSettingsResponse = await request.get(`${editor}/locales`)
+      expect(languageSettingsResponse.status()).toBe(200)
+      const languageSettings = await languageSettingsResponse.json() as { languages: Array<{ locale: string }>; available_catalogs: Array<{ locale: string }> }
+      const language = languageSettings.available_catalogs.find(candidate => !languageSettings.languages.some(saved => saved.locale === candidate.locale))
+      expect(language, 'The paid fixture has a language available for private article authoring').toBeDefined()
+      addedLocale = language!.locale
+      const added = await request.post(`${editor}/locales/${addedLocale}/add`)
+      expect(added.status(), await added.text()).toBe(200)
+      expect((await added.json()).language).toMatchObject({ locale: addedLocale, status: 'disabled' })
+      const savedLanguagesResponse = await request.get(`${editor}/locales`)
+      expect(savedLanguagesResponse.status()).toBe(200)
+      const savedLanguages = await savedLanguagesResponse.json() as { languages: Array<{ locale: string; status: string }> }
+      expect(savedLanguages.languages.find(language => language.locale === addedLocale)).toMatchObject({ locale: addedLocale, status: 'disabled' })
+      const translatedBlocks = [
+        { type: 'heading', level: 2, data: { text: 'Translated article heading' } },
+        { type: 'markdown', data: { markdown: 'Translated **article** body.', editor_mode: 'rich' } },
+        { type: 'faq', data: { source: 'page_qa' } },
+      ]
+      const translation = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'put_resource_localization', args: {
+        organization_id: organizationId, resource_type: 'content_document', resource_id: postId, locale: addedLocale,
+        values: { title: 'Translated article title', summary: 'Translated article excerpt', seo_keywords: 'Preserved translated keywords', metadata: {} },
+        content_blocks: translatedBlocks,
+      } })
+      expect(translation.status(), await translation.text()).toBe(200)
+      const authoredTranslation = mcpData<{ localization: { title: string; summary: string; updated_at: string; path: string; slug: string; seo_keywords: string; metadata: Record<string, unknown> } }>(await translation.json()).localization
+      expect(authoredTranslation).toMatchObject({ title: 'Translated article title', summary: 'Translated article excerpt', seo_keywords: 'Preserved translated keywords', metadata: {} })
+      await loginAs(page.request, baseURL!)
+      expect(readPost.admin_edit_url).toEqual(expect.any(String))
+      const translationEditor = new URL(String(readPost.admin_edit_url), baseURL)
+      translationEditor.searchParams.set('editMode', 'translations')
+      translationEditor.searchParams.set('locale', addedLocale)
+      await page.goto(translationEditor.toString())
+      await waitForNuxtHydration(page)
+      await expect(page.getByTestId('localize-field-title')).toHaveValue(authoredTranslation.title)
+      await expect(page.getByTestId('localize-field-summary')).toHaveValue(authoredTranslation.summary)
+      await page.getByTestId('localize-field-title').fill('')
+      await page.getByTestId('localize-field-summary').fill('')
+      const localizationPath = `/api/editor/organizations/${organizationId}/localization/content_document/${postId}/${addedLocale}`
+      const cleared = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === localizationPath),
+        page.getByTestId('localize-save').click(),
+      ]).then(([response]) => response)
+      expect(cleared.status(), await cleared.text()).toBe(200)
+      const clearedWrite = cleared.request().postDataJSON()
+      expect(clearedWrite.values).toEqual({ title: null, summary: null, seo_keywords: authoredTranslation.seo_keywords, metadata: authoredTranslation.metadata })
+      expect(clearedWrite.expected_updated_at).toBe(authoredTranslation.updated_at)
+      const clearedRead = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_resource_localization', args: {
+        organization_id: organizationId, resource_type: 'content_document', resource_id: postId, locale: addedLocale,
+      } })
+      expect(clearedRead.status()).toBe(200)
+      const clearedTranslation = mcpData<{ localization: { title: string | null; summary: string | null; updated_at: string; path: string; slug: string; seo_keywords: string; metadata: Record<string, unknown>; content_blocks: Array<{ type: string; data: Record<string, unknown> }> } }>(await clearedRead.json()).localization
+      expect(clearedTranslation).toMatchObject({ title: null, summary: null, path: authoredTranslation.path, slug: authoredTranslation.slug, seo_keywords: authoredTranslation.seo_keywords, metadata: authoredTranslation.metadata })
+      expect(clearedTranslation.metadata).toEqual(authoredTranslation.metadata)
+      expect(clearedTranslation.updated_at).not.toBe(authoredTranslation.updated_at)
+      expect(clearedTranslation.content_blocks.map(({ type, data }) => ({ type, data }))).toEqual(translatedBlocks.map(({ type, data }) => ({ type, data })))
 
       // Articles publish now or stay drafts: there is no scheduling.
       const schedule = await mcpRequest(request, baseURL!, {
@@ -551,6 +689,15 @@ test.describe('stateless MCP server', () => {
           method: 'tools/call', toolName: 'delete_blog_post', args: { organization_id: organizationId, post_id: postId },
         })
         expect(cleanup.status()).toBe(200)
+      }
+      if (addedLocale) {
+        const cleanupLanguage = await request.delete(`${baseURL}/api/editor/organizations/${organizationId}/locales/${addedLocale}`)
+        expect(cleanupLanguage.status(), await cleanupLanguage.text()).toBe(200)
+        expect(await cleanupLanguage.json()).toEqual({ deleted: true, locale: addedLocale })
+        const languagesAfterCleanup = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/locales`)
+        expect(languagesAfterCleanup.status(), await languagesAfterCleanup.text()).toBe(200)
+        const cleanedLanguages = await languagesAfterCleanup.json() as { languages: Array<{ locale: string }> }
+        expect(cleanedLanguages.languages.map(language => language.locale)).not.toContain(addedLocale)
       }
     }
   })

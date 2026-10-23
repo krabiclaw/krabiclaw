@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:af880b3911b6c26312ba7de2f128137ea0eab7b535348a00a8415431debde231",
-  "documentationFingerprint": "sha256:d5296fb0af6e747aa53e14df82f71ce3f3287ae1a27f16c10a46baa784dfba96",
+  "fingerprint": "sha256:70a83684d33c885030713b92567376bad175704243ac7f6e02d461d847550f0b",
+  "documentationFingerprint": "sha256:284503f878272e8ed75b7651dc70ac9bf39d75e3b8a56044258f390ce399464a",
   "tools": [
     {
       "name": "add_organization_language",
@@ -8061,13 +8061,6 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
-                    "care_instructions": {
-                      "description": "How to care for the item, shown in its details.",
-                      "maxLength": 10000,
-                      "minLength": 1,
-                      "pattern": "\\S",
-                      "type": "string"
-                    },
                     "climbing_structures": {
                       "description": "Play or climbing structures are available to guests.",
                       "type": "boolean"
@@ -8105,13 +8098,6 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
-                    },
-                    "dimensions": {
-                      "description": "Item measurements including their units, shown in its details.",
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
                     },
                     "events_allowed": {
                       "description": "Whether guests may host events at the property.",
@@ -8194,18 +8180,6 @@
                       "minLength": 1,
                       "pattern": "\\S",
                       "type": "string"
-                    },
-                    "materials": {
-                      "description": "Materials the item is made from, shown in its details.",
-                      "items": {
-                        "maxLength": 1000,
-                        "minLength": 1,
-                        "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                        "type": "string"
-                      },
-                      "maxItems": 100,
-                      "type": "array",
-                      "uniqueItems": true
                     },
                     "meeting_point": {
                       "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -8522,12 +8496,11 @@
                   "type": "object"
                 },
                 "kind": {
-                  "description": "The customer-facing kind: dish, experience, service, item or stay (a place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
+                  "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
                   "enum": [
                     "dish",
                     "experience",
                     "service",
-                    "item",
                     "stay"
                   ],
                   "type": "string"
@@ -9554,13 +9527,6 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
-                    "care_instructions": {
-                      "description": "How to care for the item, shown in its details.",
-                      "maxLength": 10000,
-                      "minLength": 1,
-                      "pattern": "\\S",
-                      "type": "string"
-                    },
                     "climbing_structures": {
                       "description": "Play or climbing structures are available to guests.",
                       "type": "boolean"
@@ -9598,13 +9564,6 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
-                    },
-                    "dimensions": {
-                      "description": "Item measurements including their units, shown in its details.",
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
                     },
                     "events_allowed": {
                       "description": "Whether guests may host events at the property.",
@@ -9687,18 +9646,6 @@
                       "minLength": 1,
                       "pattern": "\\S",
                       "type": "string"
-                    },
-                    "materials": {
-                      "description": "Materials the item is made from, shown in its details.",
-                      "items": {
-                        "maxLength": 1000,
-                        "minLength": 1,
-                        "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                        "type": "string"
-                      },
-                      "maxItems": 100,
-                      "type": "array",
-                      "uniqueItems": true
                     },
                     "meeting_point": {
                       "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -10168,7 +10115,6 @@
                     "dish",
                     "experience",
                     "service",
-                    "item",
                     "stay"
                   ],
                   "type": "string"
@@ -19921,7 +19867,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional route segment for /posts/<slug>. Allocated from the title or body when omitted, and fixed once the post is published."
+            "description": "Optional route segment for /posts/<slug>. Allocated from the title or body when omitted, and fixed when the post is created."
           },
           "title": {
             "anyOf": [
@@ -20278,7 +20224,7 @@
     {
       "name": "create_product",
       "title": "Create product",
-      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
+      "description": "Add food or drink, an experience or class, a practice area or consultation, or a place to stay. An experience can start as a private draft without booking setup. To make it public, configure its booking flow or supply an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -22080,13 +22026,6 @@
                 "pattern": "\\S",
                 "type": "string"
               },
-              "care_instructions": {
-                "description": "How to care for the item, shown in its details.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
-              },
               "climbing_structures": {
                 "description": "Play or climbing structures are available to guests.",
                 "type": "boolean"
@@ -22124,13 +22063,6 @@
                 "maxItems": 100,
                 "type": "array",
                 "uniqueItems": true
-              },
-              "dimensions": {
-                "description": "Item measurements including their units, shown in its details.",
-                "maxLength": 1000,
-                "minLength": 1,
-                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                "type": "string"
               },
               "events_allowed": {
                 "description": "Whether guests may host events at the property.",
@@ -22213,18 +22145,6 @@
                 "minLength": 1,
                 "pattern": "\\S",
                 "type": "string"
-              },
-              "materials": {
-                "description": "Materials the item is made from, shown in its details.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
               },
               "meeting_point": {
                 "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -22547,12 +22467,11 @@
             "type": "string"
           },
           "kind": {
-            "description": "The customer-facing kind: dish, experience, service, item or stay (a place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
+            "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
             "enum": [
               "dish",
               "experience",
               "service",
-              "item",
               "stay"
             ],
             "type": "string"
@@ -24597,7 +24516,7 @@
                 "type": "string"
               },
               "path": {
-                "description": "The page's public path. A service may omit it to get the first free /services/<slug>.",
+                "description": "The page's public path. A practice area or consultation may omit it to get the first free /services/<slug>.",
                 "type": "string"
               },
               "recipe": {
@@ -25568,13 +25487,6 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "care_instructions": {
-                    "description": "How to care for the item, shown in its details.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
                   "climbing_structures": {
                     "description": "Play or climbing structures are available to guests.",
                     "type": "boolean"
@@ -25612,13 +25524,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "dimensions": {
-                    "description": "Item measurements including their units, shown in its details.",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                    "type": "string"
                   },
                   "events_allowed": {
                     "description": "Whether guests may host events at the property.",
@@ -25701,18 +25606,6 @@
                     "minLength": 1,
                     "pattern": "\\S",
                     "type": "string"
-                  },
-                  "materials": {
-                    "description": "Materials the item is made from, shown in its details.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
                   },
                   "meeting_point": {
                     "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -26182,7 +26075,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay"
                 ],
                 "type": "string"
@@ -51866,13 +51758,6 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "care_instructions": {
-                    "description": "How to care for the item, shown in its details.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
                   "climbing_structures": {
                     "description": "Play or climbing structures are available to guests.",
                     "type": "boolean"
@@ -51910,13 +51795,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "dimensions": {
-                    "description": "Item measurements including their units, shown in its details.",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                    "type": "string"
                   },
                   "events_allowed": {
                     "description": "Whether guests may host events at the property.",
@@ -51999,18 +51877,6 @@
                     "minLength": 1,
                     "pattern": "\\S",
                     "type": "string"
-                  },
-                  "materials": {
-                    "description": "Materials the item is made from, shown in its details.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
                   },
                   "meeting_point": {
                     "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -52480,7 +52346,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay"
                 ],
                 "type": "string"
@@ -54198,7 +54063,6 @@
                     "dish",
                     "experience",
                     "service",
-                    "item",
                     "stay"
                   ],
                   "type": "string"
@@ -54247,13 +54111,6 @@
                               "pattern": "\\S",
                               "type": "string"
                             },
-                            "care_instructions": {
-                              "description": "How to care for the item, shown in its details.",
-                              "maxLength": 10000,
-                              "minLength": 1,
-                              "pattern": "\\S",
-                              "type": "string"
-                            },
                             "climbing_structures_details": {
                               "description": "Host-authored details about climbing or play structures. Requires its disclosure to be Yes.",
                               "maxLength": 300,
@@ -54279,13 +54136,6 @@
                               "maxItems": 100,
                               "type": "array",
                               "uniqueItems": true
-                            },
-                            "dimensions": {
-                              "description": "Item measurements including their units, shown in its details.",
-                              "maxLength": 1000,
-                              "minLength": 1,
-                              "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                              "type": "string"
                             },
                             "exterior_security_cameras_details": {
                               "description": "Host-authored details about exterior security cameras. Requires its disclosure to be Yes.",
@@ -54352,18 +54202,6 @@
                               "minLength": 1,
                               "pattern": "\\S",
                               "type": "string"
-                            },
-                            "materials": {
-                              "description": "Materials the item is made from, shown in its details.",
-                              "items": {
-                                "maxLength": 1000,
-                                "minLength": 1,
-                                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                                "type": "string"
-                              },
-                              "maxItems": 100,
-                              "type": "array",
-                              "uniqueItems": true
                             },
                             "meeting_point": {
                               "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -54622,13 +54460,6 @@
                           "pattern": "\\S",
                           "type": "string"
                         },
-                        "care_instructions": {
-                          "description": "How to care for the item, shown in its details.",
-                          "maxLength": 10000,
-                          "minLength": 1,
-                          "pattern": "\\S",
-                          "type": "string"
-                        },
                         "climbing_structures": {
                           "description": "Play or climbing structures are available to guests.",
                           "type": "boolean"
@@ -54666,13 +54497,6 @@
                           "maxItems": 100,
                           "type": "array",
                           "uniqueItems": true
-                        },
-                        "dimensions": {
-                          "description": "Item measurements including their units, shown in its details.",
-                          "maxLength": 1000,
-                          "minLength": 1,
-                          "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                          "type": "string"
                         },
                         "events_allowed": {
                           "description": "Whether guests may host events at the property.",
@@ -54755,18 +54579,6 @@
                           "minLength": 1,
                           "pattern": "\\S",
                           "type": "string"
-                        },
-                        "materials": {
-                          "description": "Materials the item is made from, shown in its details.",
-                          "items": {
-                            "maxLength": 1000,
-                            "minLength": 1,
-                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                            "type": "string"
-                          },
-                          "maxItems": 100,
-                          "type": "array",
-                          "uniqueItems": true
                         },
                         "meeting_point": {
                           "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -57209,13 +57021,6 @@
                                 "pattern": "\\S",
                                 "type": "string"
                               },
-                              "care_instructions": {
-                                "description": "How to care for the item, shown in its details.",
-                                "maxLength": 10000,
-                                "minLength": 1,
-                                "pattern": "\\S",
-                                "type": "string"
-                              },
                               "climbing_structures_details": {
                                 "description": "Host-authored details about climbing or play structures. Requires its disclosure to be Yes.",
                                 "maxLength": 300,
@@ -57241,13 +57046,6 @@
                                 "maxItems": 100,
                                 "type": "array",
                                 "uniqueItems": true
-                              },
-                              "dimensions": {
-                                "description": "Item measurements including their units, shown in its details.",
-                                "maxLength": 1000,
-                                "minLength": 1,
-                                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                                "type": "string"
                               },
                               "exterior_security_cameras_details": {
                                 "description": "Host-authored details about exterior security cameras. Requires its disclosure to be Yes.",
@@ -57314,18 +57112,6 @@
                                 "minLength": 1,
                                 "pattern": "\\S",
                                 "type": "string"
-                              },
-                              "materials": {
-                                "description": "Materials the item is made from, shown in its details.",
-                                "items": {
-                                  "maxLength": 1000,
-                                  "minLength": 1,
-                                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                                  "type": "string"
-                                },
-                                "maxItems": 100,
-                                "type": "array",
-                                "uniqueItems": true
                               },
                               "meeting_point": {
                                 "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -67316,7 +67102,6 @@
               "dish",
               "experience",
               "service",
-              "item",
               "stay"
             ],
             "type": "string"
@@ -67361,10 +67146,6 @@
                     "minimum": 0,
                     "type": "integer"
                   },
-                  "item": {
-                    "minimum": 0,
-                    "type": "integer"
-                  },
                   "service": {
                     "minimum": 0,
                     "type": "integer"
@@ -67378,7 +67159,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay"
                 ],
                 "type": "object"
@@ -67447,7 +67227,6 @@
                     "dish",
                     "experience",
                     "service",
-                    "item",
                     "stay"
                   ],
                   "type": "string"
@@ -67600,7 +67379,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay",
                   "all"
                 ],
@@ -69983,7 +69761,6 @@
               "dish",
               "experience",
               "service",
-              "item",
               "stay"
             ],
             "type": "string"
@@ -70023,10 +69800,6 @@
                     "minimum": 0,
                     "type": "integer"
                   },
-                  "item": {
-                    "minimum": 0,
-                    "type": "integer"
-                  },
                   "service": {
                     "minimum": 0,
                     "type": "integer"
@@ -70040,7 +69813,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay"
                 ],
                 "type": "object"
@@ -70109,7 +69881,6 @@
                     "dish",
                     "experience",
                     "service",
-                    "item",
                     "stay"
                   ],
                   "type": "string"
@@ -70262,7 +70033,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay",
                   "all"
                 ],
@@ -77359,7 +77129,7 @@
     {
       "name": "put_resource_localization",
       "title": "Put resource localization",
-      "description": "Replace an exact translation. Existing documents require expected_updated_at. Documents require route_path; authored Q&A uses title and summary without a route or blocks. Imported Q&A remains read-only.",
+      "description": "Replace an exact translation. Existing documents require expected_updated_at. Document addresses are assigned from their source and remain stable; authored Q&A uses title and summary without blocks. Imported Q&A remains read-only.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -80979,13 +80749,6 @@
             ],
             "type": "string"
           },
-          "route_path": {
-            "description": "Document path including the language prefix. Resource routes are automatic.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "values": {
             "additionalProperties": false,
             "properties": {
@@ -81073,13 +80836,6 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "care_instructions": {
-                    "description": "How to care for the item, shown in its details.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
                   "climbing_structures_details": {
                     "description": "Host-authored details about climbing or play structures. Requires its disclosure to be Yes.",
                     "maxLength": 300,
@@ -81105,13 +80861,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "dimensions": {
-                    "description": "Item measurements including their units, shown in its details.",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                    "type": "string"
                   },
                   "exterior_security_cameras_details": {
                     "description": "Host-authored details about exterior security cameras. Requires its disclosure to be Yes.",
@@ -81178,18 +80927,6 @@
                     "minLength": 1,
                     "pattern": "\\S",
                     "type": "string"
-                  },
-                  "materials": {
-                    "description": "Materials the item is made from, shown in its details.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
                   },
                   "meeting_point": {
                     "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -81445,12 +81182,6 @@
               },
               "short_description": {
                 "type": "string"
-              },
-              "slug": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "summary": {
                 "type": [
@@ -83283,13 +83014,6 @@
                                 "pattern": "\\S",
                                 "type": "string"
                               },
-                              "care_instructions": {
-                                "description": "How to care for the item, shown in its details.",
-                                "maxLength": 10000,
-                                "minLength": 1,
-                                "pattern": "\\S",
-                                "type": "string"
-                              },
                               "climbing_structures_details": {
                                 "description": "Host-authored details about climbing or play structures. Requires its disclosure to be Yes.",
                                 "maxLength": 300,
@@ -83315,13 +83039,6 @@
                                 "maxItems": 100,
                                 "type": "array",
                                 "uniqueItems": true
-                              },
-                              "dimensions": {
-                                "description": "Item measurements including their units, shown in its details.",
-                                "maxLength": 1000,
-                                "minLength": 1,
-                                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                                "type": "string"
                               },
                               "exterior_security_cameras_details": {
                                 "description": "Host-authored details about exterior security cameras. Requires its disclosure to be Yes.",
@@ -83388,18 +83105,6 @@
                                 "minLength": 1,
                                 "pattern": "\\S",
                                 "type": "string"
-                              },
-                              "materials": {
-                                "description": "Materials the item is made from, shown in its details.",
-                                "items": {
-                                  "maxLength": 1000,
-                                  "minLength": 1,
-                                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                                  "type": "string"
-                                },
-                                "maxItems": 100,
-                                "type": "array",
-                                "uniqueItems": true
                               },
                               "meeting_point": {
                                 "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -86378,13 +86083,6 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
-                    "care_instructions": {
-                      "description": "How to care for the item, shown in its details.",
-                      "maxLength": 10000,
-                      "minLength": 1,
-                      "pattern": "\\S",
-                      "type": "string"
-                    },
                     "climbing_structures": {
                       "description": "Play or climbing structures are available to guests.",
                       "type": "boolean"
@@ -86422,13 +86120,6 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
-                    },
-                    "dimensions": {
-                      "description": "Item measurements including their units, shown in its details.",
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
                     },
                     "events_allowed": {
                       "description": "Whether guests may host events at the property.",
@@ -86511,18 +86202,6 @@
                       "minLength": 1,
                       "pattern": "\\S",
                       "type": "string"
-                    },
-                    "materials": {
-                      "description": "Materials the item is made from, shown in its details.",
-                      "items": {
-                        "maxLength": 1000,
-                        "minLength": 1,
-                        "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                        "type": "string"
-                      },
-                      "maxItems": 100,
-                      "type": "array",
-                      "uniqueItems": true
                     },
                     "meeting_point": {
                       "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -86839,12 +86518,11 @@
                   "type": "object"
                 },
                 "kind": {
-                  "description": "The customer-facing kind: dish, experience, service, item or stay (a place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
+                  "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
                   "enum": [
                     "dish",
                     "experience",
                     "service",
-                    "item",
                     "stay"
                   ],
                   "type": "string"
@@ -87900,13 +87578,6 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
-                    "care_instructions": {
-                      "description": "How to care for the item, shown in its details.",
-                      "maxLength": 10000,
-                      "minLength": 1,
-                      "pattern": "\\S",
-                      "type": "string"
-                    },
                     "climbing_structures": {
                       "description": "Play or climbing structures are available to guests.",
                       "type": "boolean"
@@ -87944,13 +87615,6 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
-                    },
-                    "dimensions": {
-                      "description": "Item measurements including their units, shown in its details.",
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
                     },
                     "events_allowed": {
                       "description": "Whether guests may host events at the property.",
@@ -88033,18 +87697,6 @@
                       "minLength": 1,
                       "pattern": "\\S",
                       "type": "string"
-                    },
-                    "materials": {
-                      "description": "Materials the item is made from, shown in its details.",
-                      "items": {
-                        "maxLength": 1000,
-                        "minLength": 1,
-                        "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                        "type": "string"
-                      },
-                      "maxItems": 100,
-                      "type": "array",
-                      "uniqueItems": true
                     },
                     "meeting_point": {
                       "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -88514,7 +88166,6 @@
                     "dish",
                     "experience",
                     "service",
-                    "item",
                     "stay"
                   ],
                   "type": "string"
@@ -91439,13 +91090,6 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "care_instructions": {
-                    "description": "How to care for the item, shown in its details.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
                   "climbing_structures": {
                     "description": "Play or climbing structures are available to guests.",
                     "type": "boolean"
@@ -91483,13 +91127,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "dimensions": {
-                    "description": "Item measurements including their units, shown in its details.",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                    "type": "string"
                   },
                   "events_allowed": {
                     "description": "Whether guests may host events at the property.",
@@ -91572,18 +91209,6 @@
                     "minLength": 1,
                     "pattern": "\\S",
                     "type": "string"
-                  },
-                  "materials": {
-                    "description": "Materials the item is made from, shown in its details.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
                   },
                   "meeting_point": {
                     "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -92053,7 +91678,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay"
                 ],
                 "type": "string"
@@ -101797,13 +101421,6 @@
                           "pattern": "\\S",
                           "type": "string"
                         },
-                        "care_instructions": {
-                          "description": "How to care for the item, shown in its details.",
-                          "maxLength": 10000,
-                          "minLength": 1,
-                          "pattern": "\\S",
-                          "type": "string"
-                        },
                         "climbing_structures_details": {
                           "description": "Host-authored details about climbing or play structures. Requires its disclosure to be Yes.",
                           "maxLength": 300,
@@ -101829,13 +101446,6 @@
                           "maxItems": 100,
                           "type": "array",
                           "uniqueItems": true
-                        },
-                        "dimensions": {
-                          "description": "Item measurements including their units, shown in its details.",
-                          "maxLength": 1000,
-                          "minLength": 1,
-                          "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                          "type": "string"
                         },
                         "exterior_security_cameras_details": {
                           "description": "Host-authored details about exterior security cameras. Requires its disclosure to be Yes.",
@@ -101902,18 +101512,6 @@
                           "minLength": 1,
                           "pattern": "\\S",
                           "type": "string"
-                        },
-                        "materials": {
-                          "description": "Materials the item is made from, shown in its details.",
-                          "items": {
-                            "maxLength": 1000,
-                            "minLength": 1,
-                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                            "type": "string"
-                          },
-                          "maxItems": 100,
-                          "type": "array",
-                          "uniqueItems": true
                         },
                         "meeting_point": {
                           "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -104064,7 +103662,6 @@
                     "dish",
                     "experience",
                     "service",
-                    "item",
                     "stay"
                   ],
                   "type": "string"
@@ -106293,13 +105890,6 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "care_instructions": {
-                    "description": "How to care for the item, shown in its details.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
                   "climbing_structures": {
                     "description": "Play or climbing structures are available to guests.",
                     "type": "boolean"
@@ -106337,13 +105927,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "dimensions": {
-                    "description": "Item measurements including their units, shown in its details.",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                    "type": "string"
                   },
                   "events_allowed": {
                     "description": "Whether guests may host events at the property.",
@@ -106426,18 +106009,6 @@
                     "minLength": 1,
                     "pattern": "\\S",
                     "type": "string"
-                  },
-                  "materials": {
-                    "description": "Materials the item is made from, shown in its details.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
                   },
                   "meeting_point": {
                     "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -106907,7 +106478,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay"
                 ],
                 "type": "string"
@@ -108502,13 +108072,6 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "care_instructions": {
-                    "description": "How to care for the item, shown in its details.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
                   "climbing_structures": {
                     "description": "Play or climbing structures are available to guests.",
                     "type": "boolean"
@@ -108546,13 +108109,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "dimensions": {
-                    "description": "Item measurements including their units, shown in its details.",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                    "type": "string"
                   },
                   "events_allowed": {
                     "description": "Whether guests may host events at the property.",
@@ -108635,18 +108191,6 @@
                     "minLength": 1,
                     "pattern": "\\S",
                     "type": "string"
-                  },
-                  "materials": {
-                    "description": "Materials the item is made from, shown in its details.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
                   },
                   "meeting_point": {
                     "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -109116,7 +108660,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay"
                 ],
                 "type": "string"
@@ -114086,20 +113629,6 @@
             "description": "Post id or slug.",
             "type": "string"
           },
-          "redirect_old_slug": {
-            "description": "Defaults true after first publish.",
-            "type": "boolean"
-          },
-          "reset_slug_override": {
-            "type": "boolean"
-          },
-          "slug": {
-            "description": "Manual URL slug override. Published slug changes preserve a permanent redirect by default.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "title": {
             "type": "string"
           },
@@ -118202,7 +117731,7 @@
     {
       "name": "update_location",
       "title": "Update location",
-      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
+      "description": "Update a location's own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -118426,13 +117955,6 @@
               "null"
             ]
           },
-          "slug": {
-            "description": "URL slug for the location page. Normalized, and suffixed -2, -3… when another location already uses it. Changes the public URL.",
-            "maxLength": 200,
-            "minLength": 1,
-            "pattern": "\\S",
-            "type": "string"
-          },
           "special_hours": {
             "anyOf": [
               {
@@ -118570,7 +118092,7 @@
             "type": "string"
           },
           "title": {
-            "description": "Location name shown to guests. Changing it regenerates the slug from the new name unless slug is given in the same call.",
+            "description": "Location name shown to guests. Renaming keeps its saved public address.",
             "maxLength": 200,
             "minLength": 1,
             "pattern": "\\S",
@@ -118839,13 +118361,6 @@
                             "pattern": "\\S",
                             "type": "string"
                           },
-                          "care_instructions": {
-                            "description": "How to care for the item, shown in its details.",
-                            "maxLength": 10000,
-                            "minLength": 1,
-                            "pattern": "\\S",
-                            "type": "string"
-                          },
                           "climbing_structures": {
                             "description": "Play or climbing structures are available to guests.",
                             "type": "boolean"
@@ -118883,13 +118398,6 @@
                             "maxItems": 100,
                             "type": "array",
                             "uniqueItems": true
-                          },
-                          "dimensions": {
-                            "description": "Item measurements including their units, shown in its details.",
-                            "maxLength": 1000,
-                            "minLength": 1,
-                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                            "type": "string"
                           },
                           "events_allowed": {
                             "description": "Whether guests may host events at the property.",
@@ -118972,18 +118480,6 @@
                             "minLength": 1,
                             "pattern": "\\S",
                             "type": "string"
-                          },
-                          "materials": {
-                            "description": "Materials the item is made from, shown in its details.",
-                            "items": {
-                              "maxLength": 1000,
-                              "minLength": 1,
-                              "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                              "type": "string"
-                            },
-                            "maxItems": 100,
-                            "type": "array",
-                            "uniqueItems": true
                           },
                           "meeting_point": {
                             "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -119863,13 +119359,6 @@
                             "pattern": "\\S",
                             "type": "string"
                           },
-                          "care_instructions": {
-                            "description": "How to care for the item, shown in its details.",
-                            "maxLength": 10000,
-                            "minLength": 1,
-                            "pattern": "\\S",
-                            "type": "string"
-                          },
                           "climbing_structures": {
                             "description": "Play or climbing structures are available to guests.",
                             "type": "boolean"
@@ -119907,13 +119396,6 @@
                             "maxItems": 100,
                             "type": "array",
                             "uniqueItems": true
-                          },
-                          "dimensions": {
-                            "description": "Item measurements including their units, shown in its details.",
-                            "maxLength": 1000,
-                            "minLength": 1,
-                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                            "type": "string"
                           },
                           "events_allowed": {
                             "description": "Whether guests may host events at the property.",
@@ -119996,18 +119478,6 @@
                             "minLength": 1,
                             "pattern": "\\S",
                             "type": "string"
-                          },
-                          "materials": {
-                            "description": "Materials the item is made from, shown in its details.",
-                            "items": {
-                              "maxLength": 1000,
-                              "minLength": 1,
-                              "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                              "type": "string"
-                            },
-                            "maxItems": 100,
-                            "type": "array",
-                            "uniqueItems": true
                           },
                           "meeting_point": {
                             "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -120477,7 +119947,6 @@
                           "dish",
                           "experience",
                           "service",
-                          "item",
                           "stay"
                         ],
                         "type": "string"
@@ -122664,17 +122133,6 @@
           "post_id": {
             "type": "string"
           },
-          "slug": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Optional route segment for /posts/<slug>. Allocated from the title or body when omitted, and fixed once the post is published."
-          },
           "title": {
             "anyOf": [
               {
@@ -123218,21 +122676,6 @@
                 ],
                 "description": "Share where each carbon monoxide alarm is located."
               },
-              "care_instructions": {
-                "anyOf": [
-                  {
-                    "description": "How to care for the item, shown in its details.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "How to care for the item, shown in its details."
-              },
               "climbing_structures": {
                 "description": "Play or climbing structures are available to guests.",
                 "type": [
@@ -123303,21 +122746,6 @@
                   }
                 ],
                 "description": "Merchant-stated dietary facts displayed with a dish."
-              },
-              "dimensions": {
-                "anyOf": [
-                  {
-                    "description": "Item measurements including their units, shown in its details.",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Item measurements including their units, shown in its details."
               },
               "events_allowed": {
                 "description": "Whether guests may host events at the property.",
@@ -123476,26 +122904,6 @@
                   }
                 ],
                 "description": "Host-authored details about limited essential amenities. Requires its disclosure to be Yes."
-              },
-              "materials": {
-                "anyOf": [
-                  {
-                    "description": "Materials the item is made from, shown in its details.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Materials the item is made from, shown in its details."
               },
               "meeting_point": {
                 "anyOf": [
@@ -124079,12 +123487,11 @@
             "type": "string"
           },
           "kind": {
-            "description": "The customer-facing kind: dish, experience, service, item or stay (a place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
+            "description": "The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.",
             "enum": [
               "dish",
               "experience",
               "service",
-              "item",
               "stay"
             ],
             "type": "string"
@@ -125138,13 +124545,6 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
-                  "care_instructions": {
-                    "description": "How to care for the item, shown in its details.",
-                    "maxLength": 10000,
-                    "minLength": 1,
-                    "pattern": "\\S",
-                    "type": "string"
-                  },
                   "climbing_structures": {
                     "description": "Play or climbing structures are available to guests.",
                     "type": "boolean"
@@ -125182,13 +124582,6 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
-                  },
-                  "dimensions": {
-                    "description": "Item measurements including their units, shown in its details.",
-                    "maxLength": 1000,
-                    "minLength": 1,
-                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                    "type": "string"
                   },
                   "events_allowed": {
                     "description": "Whether guests may host events at the property.",
@@ -125271,18 +124664,6 @@
                     "minLength": 1,
                     "pattern": "\\S",
                     "type": "string"
-                  },
-                  "materials": {
-                    "description": "Materials the item is made from, shown in its details.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
                   },
                   "meeting_point": {
                     "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
@@ -125752,7 +125133,6 @@
                   "dish",
                   "experience",
                   "service",
-                  "item",
                   "stay"
                 ],
                 "type": "string"
@@ -131278,7 +130658,7 @@
             "type": "string"
           },
           "path": {
-            "description": "The page path to write. Send the current path unless you are moving the page; a different path moves it and creates the locale-scoped redirect.",
+            "description": "The saved page path. A page keeps this address when its content or title changes.",
             "type": "string"
           },
           "product_id": {
@@ -140852,18 +140232,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:76acab81db84367a3b24535ea874c2f6616548d967dd4ce24cd2aca0598588bc",
-        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
+        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
+        "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
-        "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
+        "list_location_products": "sha256:cc4fdac62f5da6e406f16fc6016f0180702e39ad213e71f26ba7375010ce4a1a",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:74cfeaa62833b8d945f248c7fb4645224115952a2f094f62c941a014e572cb09",
+        "reconcile_products": "sha256:9542abb15f2a1371124fcf07a9c8debdedf0685fdd52e64222af7bde655af39f",
         "reorder_collections": "sha256:76c649e913d6bda4e000b36748b4899a2aae89625a0c1c354b2d149998f9528a",
-        "set_collection_products": "sha256:8c3df1adb1002b9c3177788b9de6f3cf14b4ed0be42a9ccad2a576e651848fe0",
-        "update_menu": "sha256:79bef9496304887ef8a666cf02473e7af7f22ebc8cd869335b5ca02208f29378",
-        "update_product": "sha256:7c778f27426231bc6862e1f7bf175cc41e77d109c55636a47e1d5b5114c5eb19"
+        "set_collection_products": "sha256:dc4ea7d0380826d81e8a9a170a679d1695a933a4621aeae67ff42177b6a1610f",
+        "update_menu": "sha256:f68c72c72504a0df3cdd77685f526413e1c0883b56f63f4e4911b7502cefb1d5",
+        "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528"
       }
     },
     {
@@ -140886,7 +140266,7 @@
         "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
       },
       "toolContracts": {
-        "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
+        "create_post": "sha256:b92f874ccdfc79c9f47f353fec0f017f51fe58263b056a02aba6a71a737bf46e",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843"
@@ -140908,12 +140288,12 @@
       },
       "toolContracts": {
         "attach_media": "sha256:fb767338cefb7392e96c8d7cb09a9af397665f7217d7e26c401e858e5876ed57",
-        "create_product": "sha256:76acab81db84367a3b24535ea874c2f6616548d967dd4ce24cd2aca0598588bc",
-        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
+        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
+        "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
-        "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
+        "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b"
       }
     },
@@ -140958,7 +140338,7 @@
         "remove_media": "sha256:3acbf051ac7a7ddecfd26f0c010c17a2f6a6b8f156ad2fe9843c1b78f2ddee35",
         "reorder_media": "sha256:ef32f1e9cd46f5e97b726d70eb9496b685d5495627411775ac8a6ecbabd162b7",
         "set_media": "sha256:8061a4584c3deae1b0babbbad9a13e5916a6b07128569833592b7158b353500f",
-        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
+        "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
     {
@@ -140973,7 +140353,7 @@
         "attach_media": "sha256:fb767338cefb7392e96c8d7cb09a9af397665f7217d7e26c401e858e5876ed57",
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
+        "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
@@ -140989,20 +140369,20 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:76acab81db84367a3b24535ea874c2f6616548d967dd4ce24cd2aca0598588bc",
+        "create_product": "sha256:f09c549a7ecb9362486b1da354d17ecefd2abff5c109c496ddd9ec413400eafb",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
+        "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
-        "update_menu": "sha256:79bef9496304887ef8a666cf02473e7af7f22ebc8cd869335b5ca02208f29378",
+        "update_menu": "sha256:f68c72c72504a0df3cdd77685f526413e1c0883b56f63f4e4911b7502cefb1d5",
         "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
-        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
+        "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
     {
@@ -141015,15 +140395,15 @@
       },
       "toolContracts": {
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
-        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
+        "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
-        "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
+        "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:c007ea9559df74ac50714b2adf181eb57053b53523366adb89d0df9fff291b3b",
-        "update_product": "sha256:7c778f27426231bc6862e1f7bf175cc41e77d109c55636a47e1d5b5114c5eb19",
+        "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -141040,11 +140420,11 @@
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
+        "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:8061a4584c3deae1b0babbbad9a13e5916a6b07128569833592b7158b353500f",
-        "update_product": "sha256:7c778f27426231bc6862e1f7bf175cc41e77d109c55636a47e1d5b5114c5eb19",
-        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
+        "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528",
+        "update_site_page": "sha256:f2ea3239f00d6e1a00a87236cad6db750554b6c94258d65bdcce5e318d554e13"
       }
     },
     {
@@ -141056,17 +140436,17 @@
         "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
-        "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
+        "create_post": "sha256:b92f874ccdfc79c9f47f353fec0f017f51fe58263b056a02aba6a71a737bf46e",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:9cefa0a9158269dbd5b5e5d1b69b2cad708446df5edfb4e8619dc02c0c2b72aa",
-        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
+        "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
-        "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
+        "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:7c778f27426231bc6862e1f7bf175cc41e77d109c55636a47e1d5b5114c5eb19"
+        "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528"
       }
     }
   ],
@@ -141096,15 +140476,15 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:6748717c9562459b96ea32d8e36a0a94fc941a53cc780c15f33fca0740d25a03",
+        "get_product": "sha256:534a777ad17abd34ac593a9cd4edffa6e47e52d872d190a6b9fe4b24d0684834",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
-        "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
+        "list_location_products": "sha256:cc4fdac62f5da6e406f16fc6016f0180702e39ad213e71f26ba7375010ce4a1a",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:76c649e913d6bda4e000b36748b4899a2aae89625a0c1c354b2d149998f9528a",
-        "set_collection_products": "sha256:8c3df1adb1002b9c3177788b9de6f3cf14b4ed0be42a9ccad2a576e651848fe0",
-        "update_menu": "sha256:79bef9496304887ef8a666cf02473e7af7f22ebc8cd869335b5ca02208f29378"
+        "set_collection_products": "sha256:dc4ea7d0380826d81e8a9a170a679d1695a933a4621aeae67ff42177b6a1610f",
+        "update_menu": "sha256:f68c72c72504a0df3cdd77685f526413e1c0883b56f63f4e4911b7502cefb1d5"
       }
     },
     {
@@ -141147,14 +140527,14 @@
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
         "create_blog_post": "sha256:04ebcf9dff460dd7c58bee894fff23a76431073dc3e2deb1ac1be33be6d37150",
-        "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
+        "create_post": "sha256:b92f874ccdfc79c9f47f353fec0f017f51fe58263b056a02aba6a71a737bf46e",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
         "publish_blog_post": "sha256:844a8eb04331dba2c4b7e738b192222e3f68e0b3d24ca3555dd7c7b7a5c17440",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
-        "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"
+        "update_post": "sha256:1b604fc6ccdf57844a762edd34dbb9bbc85721df0d54e586f513d5ce90a57724"
       }
     },
     {

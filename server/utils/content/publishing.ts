@@ -2,7 +2,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { blogEditorPath } from '~/server/utils/dashboard-links'
 import { HTTPError } from 'nitro';
 
-import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import {
   attachContentBlockMedia,
   createContentDocumentWithBlocks,
@@ -25,7 +25,7 @@ import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-re
 import { slugifyTitle } from '~/utils/post-slugs'
 import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, isArticleCollection, type ArticleCollection } from '~/utils/article-collections'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
-import { normalizeBlogSlug, resolveSlugMutation } from '~/utils/blog-editor'
+import { normalizeBlogSlug } from '~/utils/blog-editor'
 import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
 import { resolvePublicTemplate } from '~/utils/template-registry'
@@ -60,8 +60,6 @@ export const BLOG_UPDATE_MUTATION_FIELDS: Array<keyof PlatformBlogUpdateInput> =
   'seo_keywords',
   'visibility',
   'slug',
-  'redirect_old_slug',
-  'reset_slug_override',
   'content_blocks',
 ]
 
@@ -95,8 +93,6 @@ export interface PlatformBlogUpdateInput {
   seo_keywords?: string | null
   visibility?: 'listed' | 'unlisted'
   slug?: string | null
-  redirect_old_slug?: boolean
-  reset_slug_override?: boolean
   content_blocks?: Array<ContentBlockInput & { id?: string }>
   expected_updated_at?: string
 }
@@ -172,7 +168,7 @@ function assertStringLength(value: string | null | undefined, max: number, field
   }
 }
 
-function articleCollectionOf(value: unknown): ArticleCollection {
+export function articleCollectionOf(value: unknown): ArticleCollection {
   if (value === undefined || value === null) return 'blog'
   if (!isArticleCollection(value)) badRequest(`collection must be one of: ${ARTICLE_COLLECTION_SLUGS.join(', ')}`)
   return value
@@ -368,7 +364,6 @@ async function resolveTenantContext(db: DbClient, organizationId: string, env?: 
 
 function validateBlogCommon(input: Partial<PlatformBlogCreateInput>, operation: 'create' | 'update') {
   const writable = new Set<string>([...BLOG_UPDATE_MUTATION_FIELDS, ...(operation === 'create' ? [] : ['expected_updated_at'])])
-  if (operation === 'create') { writable.delete('redirect_old_slug'); writable.delete('reset_slug_override') }
   const unknown = Object.keys(input).find(field => !writable.has(field))
   if (unknown) badRequest(unknown + ' is not writable through article ' + operation)
   if ('visibility' in input && input.visibility !== undefined && !['listed', 'unlisted'].includes(String(input.visibility))) badRequest('visibility must be listed or unlisted')
@@ -504,7 +499,7 @@ export async function getBlogPost(db: DbClient, postIdOrSlug: string, organizati
     db,
     `SELECT
        p.id, p.title, p.slug, p.summary AS excerpt, (p.metadata_json ->> '$.collection') AS collection, ${ARTICLE_CATEGORY_SELECT}, p.status, p.visibility,
-       p.first_published_at, (p.metadata_json ->> '$.slug_manually_overridden') AS slug_manually_overridden,
+       p.first_published_at,
        p.seo_keywords, p.sort_order,
        ${COVER_SELECT},
        p.organization_id, p.kind, p.row_role, p.root_id, p.locale,
@@ -701,7 +696,7 @@ export async function createBlogPost(
         id, rowRole: 'root', locale: await getSourceLocale(db, organizationId), kind: 'article', organizationId,
         title: article.title, slug, summary: article.excerpt ?? null, status: 'draft', visibility: article.visibility ?? 'listed',
         authorId, seoKeywords: article.seo_keywords,
-        metadata: { collection, slug_manually_overridden: customSlug ? 1 : 0 },
+        metadata: { collection },
       }, canonicalBlocks, { bodyMarkdown: canonicalBody,
         additionalQueriesAfter: [
           ...(article.category_id === undefined ? [] : [await articleCategoryMembershipQuery(db, { organizationId, articleId: id, collection, categoryId: article.category_id })]),
@@ -783,12 +778,11 @@ export async function updateBlogPost(
   if (!BLOG_UPDATE_MUTATION_FIELDS.some(field => input[field] !== undefined)) badRequest('At least one blog mutation field is required')
   const postId = await resolvePlatformContentId(db, 'article', postIdOrSlug, 'Post not found', organizationId)
   validateBlogCommon(input, 'update')
-  const current = await queryFirst<{ organization_id: string; collection: string | null; title: string; slug: string;
-    first_published_at: string | null; slug_manually_overridden: number; updated_at: string }>(db, `
-    SELECT organization_id, metadata_json ->> '$.collection' AS collection, title, slug, first_published_at,
-      metadata_json ->> '$.slug_manually_overridden' AS slug_manually_overridden, updated_at
+  const current = await queryFirst<{ organization_id: string; collection: string | null; slug: string; updated_at: string }>(db, `
+    SELECT organization_id, metadata_json ->> '$.collection' AS collection, slug, updated_at
     FROM content_documents WHERE id = ? AND kind = 'article' AND row_role = 'root'`, [postId])
   if (!current) notFound('Post not found')
+  if (input.slug !== undefined && input.slug !== current.slug) badRequest('An article keeps its saved slug')
   if (input.content_blocks !== undefined && !input.expected_updated_at) badRequest('expected_updated_at is required with content_blocks')
   const effectiveCollection = articleCollectionOf(input.collection === undefined ? current.collection : input.collection)
   // Its category belongs to its collection, so moving an article to the other
@@ -804,19 +798,7 @@ export async function updateBlogPost(
   if (input.title !== undefined) {
     if (!input.title.trim()) badRequest('title cannot be blank')
     changes.title = input.title
-    if (!current.first_published_at && !current.slug_manually_overridden && input.slug === undefined) changes.slug = normalizeBlogSlug(input.title)
   }
-  if (input.reset_slug_override && input.slug !== undefined && input.slug !== null) badRequest('reset_slug_override cannot be combined with a manual slug')
-  const slugMutation = resolveSlugMutation({ requestedSlug: input.reset_slug_override ? null : input.slug,
-    title: input.title ?? current.title, currentSlug: current.slug, manuallyOverridden: Boolean(current.slug_manually_overridden) })
-  const requestedSlug = input.slug !== undefined || input.reset_slug_override ? slugMutation.slug : changes.slug
-  if (requestedSlug && requestedSlug !== current.slug) {
-    const redirect = await queryFirst<{ id: string }>(db, `SELECT id FROM organization_redirects WHERE organization_id = ? AND locale = (SELECT locale FROM organization_locales WHERE organization_id = ? AND is_source = 1) AND from_path IN (?, ?, ?) LIMIT 1`,
-      [organizationId, organizationId, `/blog/${requestedSlug}`, `/article/${requestedSlug}`, `/${requestedSlug}`])
-    if (redirect) badRequest('Slug collides with redirect history')
-    changes.slug = requestedSlug
-    if (input.slug !== undefined || input.reset_slug_override) metadata.slug_manually_overridden = slugMutation.manuallyOverridden ? 1 : 0
-  } else if (input.reset_slug_override) metadata.slug_manually_overridden = 0
   for (const field of ['seo_keywords', 'visibility'] as const) {
     if (input[field] !== undefined) changes[field] = input[field]
   }
@@ -830,9 +812,6 @@ export async function updateBlogPost(
         ...categoryMembership,
         ...(input.visibility === undefined && input.category_id === undefined ? [] : [publicResourceCacheInvalidationQuery(organizationId, 'article-visibility')])],
     })
-    if (requestedSlug && requestedSlug !== current.slug && current.first_published_at && input.redirect_old_slug !== false) {
-      await createBlogRedirect(db, postId, organizationId, current.slug)
-    }
     const post = await getBlogPost(db, postId, organizationId, env)
     // Title and excerpt are drawn on the card, and the blocks hold its leading
     // picture. Slug and visibility are not on it.
@@ -853,28 +832,4 @@ export async function deleteBlogPost(db: D1Database, postIdOrSlug: string, organ
   await executeBatch(db, prepareContentDocumentDeletion({ documentId: document.id,
     organizationId: document.organization_id }))
   return { success: true }
-}
-
-/**
- * The permanent redirect a published article's old address keeps when its slug
- * changes. It lives beside the slug change that needs it.
- */
-async function createBlogRedirect(db: D1Database, postId: string, organizationId: string, oldSlug: string) {
-  const now = new Date().toISOString()
-  const post = await queryFirst<{ id: string; organization_id: string; slug: string; theme_id: string | null }>(db, `
-    SELECT p.id, p.organization_id, p.slug, s.theme_id
-      FROM content_documents p JOIN organization s ON s.id = p.organization_id
-     WHERE p.kind = 'article' AND p.row_role = 'root' AND p.id = ? AND p.organization_id = ? LIMIT 1
-  `, [postId, organizationId])
-  if (!post) throw new HTTPError({ statusCode: 400, statusMessage: 'Blog redirect scope must match its post' })
-  const oldPath = tenantBlogPostPath(oldSlug)
-  const newPath = tenantBlogPostPath(post.slug)
-  // The scope check is the SELECT above: the post was read under the caller's
-  // organization, so the redirect cannot be written against another tenant's.
-  await execute(db, `INSERT INTO organization_redirects
-    (id, organization_id, locale, owner_type, owner_id, from_path, to_path, status_code, behavior, reason, source, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 301, 'redirect', ?, ?, ?, ?)
-    ON CONFLICT(organization_id, locale, from_path) DO UPDATE SET owner_type = excluded.owner_type, owner_id = excluded.owner_id,
-      to_path = excluded.to_path, status_code = 301, behavior = 'redirect', reason = excluded.reason, source = excluded.source, updated_at = excluded.updated_at`,
-  [crypto.randomUUID(), post.organization_id, await getSourceLocale(db, post.organization_id), 'content_document', postId, oldPath, newPath, 'blog_slug_change', 'blog', now, now])
 }

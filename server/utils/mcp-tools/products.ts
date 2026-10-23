@@ -1,11 +1,9 @@
 import { STAY_HOME_ACCESSIBILITY_SCHEMA, STAY_LISTING_SCHEMA, STAY_LISTING_WRITE_SCHEMA, STAY_PHOTO_ROOM_SCHEMA } from './stays'
-import { presentationForProduct } from '~/utils/product-presentation'
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
 import { pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool } from './shared'
 import { TENANT_PAGE_BLOCKS_SCHEMA, TENANT_PAGE_METADATA_SCHEMA } from './content'
 import { productEditorPath } from '~/server/utils/dashboard-links'
-import { queryFirst } from '~/server/db'
 import { PRODUCT_LIMITS } from '~/server/utils/product-validation'
 import { SUPPORTED_CURRENCIES } from '~/shared/currencies'
 import { PRODUCT_KINDS, productDetailsSchema } from '~/shared/product-details'
@@ -34,8 +32,7 @@ import {
   updateCollection,
   updateProduct,
   updateMenu,
-  productBookingReadiness,
-  PUBLIC_PRODUCT_SQL,
+  productPublicPresentation,
   type MenuSectionInput,
   type ProductListResult,
 } from '~/server/utils/product-management'
@@ -293,7 +290,7 @@ const productListResultObject = {
 
 
 const productWrite = {
-  kind: { type: 'string', enum: [...PRODUCT_KINDS], description: 'The customer-facing kind: dish, experience, service, item or stay (a place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.' },
+  kind: { type: 'string', enum: [...PRODUCT_KINDS], description: 'The customer-facing kind: dish (food or drink), experience (experience or class), service (practice area or consultation), or stay (place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.' },
   name: { type: 'string' },
   description: { type: 'string' },
   active: { type: 'boolean', description: 'Enable or disable sale of this product. Independent of site and location publication.' },
@@ -345,7 +342,7 @@ export const PRODUCTS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'list_products', description: "List products carried by the selected site, published or withheld. Results include products across the site; list_location_products narrows to one location.", domain: 'products', minimumRole: 'member', inputSchema: { kind: { type: 'string', enum: [...PRODUCT_KINDS] }, featured: { type: 'boolean' }, published_only: { type: 'boolean' }, ...paginationInputSchema }, required: [], outputSchema: productListResultObject }),
   organizationTool({ name: 'list_location_products', description: 'List product identities offered at one selected location. Results are paginated; published_only narrows to published offerings. Use list_products for the whole site.', domain: 'products', minimumRole: 'admin', inputSchema: { location_id: { type: 'string' }, kind: { type: 'string', enum: [...PRODUCT_KINDS] }, featured: { type: 'boolean' }, published_only: { type: 'boolean' }, ...paginationInputSchema }, required: ['location_id'], outputSchema: productListResultObject }),
   organizationTool({ name: 'get_product', description: "Read one site product before reviewing or editing its options, variants, prices, media, publication, locations, collections, named product facts or booking defaults. Prices belong to variants; booking defaults apply to new sessions.", domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: productResult }),
-  organizationTool({ name: 'create_product', description: 'Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.' , domain: 'products', minimumRole: 'admin', inputSchema: { ...productWrite, booking: bookingSetup, stay: staySetup, page: { type: 'object', description: 'A source page created with this product and bound to it, in the same write. Omit for a product without a page of its own.', properties: { ...TENANT_PAGE_METADATA_SCHEMA, path: { type: 'string', description: "The page's public path. A service may omit it to get the first free /services/<slug>." }, blocks: TENANT_PAGE_BLOCKS_SCHEMA }, required: ['title', 'blocks'], additionalProperties: false }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Repeat the same key with the same request to get the product it created instead of a second one.' } }, required: ['name', 'kind', 'idempotency_key'], outputSchema: productResult }),
+  organizationTool({ name: 'create_product', description: 'Add food or drink, an experience or class, a practice area or consultation, or a place to stay. An experience can start as a private draft without booking setup. To make it public, configure its booking flow or supply an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.' , domain: 'products', minimumRole: 'admin', inputSchema: { ...productWrite, booking: bookingSetup, stay: staySetup, page: { type: 'object', description: 'A source page created with this product and bound to it, in the same write. Omit for a product without a page of its own.', properties: { ...TENANT_PAGE_METADATA_SCHEMA, path: { type: 'string', description: "The page's public path. A practice area or consultation may omit it to get the first free /services/<slug>." }, blocks: TENANT_PAGE_BLOCKS_SCHEMA }, required: ['title', 'blocks'], additionalProperties: false }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Repeat the same key with the same request to get the product it created instead of a second one.' } }, required: ['name', 'kind', 'idempotency_key'], outputSchema: productResult }),
   organizationTool({ name: 'update_product', description: 'Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying.', domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' }, ...productPatch, booking: bookingSetup, stay: stayPatch, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Required with booking setup. Repeat the same key with the same request for an identical retry.' } }, required: ['product_id'], outputSchema: productMutationResult }),
   organizationTool({ name: 'delete_product', description: 'Delete a product and its public page. Booking history prevents deletion; pause bookings or withhold publication to retain it.', domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: { type: 'object', properties: { deleted: { type: 'boolean' } }, required: ['deleted'] } }),
   organizationTool({ name: 'set_product_publication', description: "Publish or withhold a product when the user wants to change its visibility on the selected site. This setting is independent of whether the product is available for sale and of visibility at individual locations.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, published: { type: 'boolean' } }, required: ['product_id', 'published'], outputSchema: productResult }),
@@ -396,13 +393,7 @@ async function productResponse(ctx: McpExecutorContext, product: Product) {
   const [hydrated] = await hydrateProductMedia(ctx.organization.db, ctx.organization.organizationId, [product])
   const slug = ctx.organization.organizationSlug
   const value = hydrated!
-  const path = value.kind === 'experience' || value.kind === 'stay' ? presentationForProduct(null, value).productPath('', value.slug) : value.page?.path ?? null
-  const readiness = value.kind === 'experience' || value.kind === 'stay' || value.booking ? await productBookingReadiness(ctx.organization.db, ctx.organization.organizationId, value, { env: ctx.organization.env }) : null
-  const published = path && await queryFirst(ctx.organization.db, `SELECT p.id FROM products p
-    JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
-    WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_PRODUCT_SQL}`, [ctx.organization.organizationId, value.id])
-  const publicUrl = path && published && (!readiness || readiness.ready) && ctx.organization.publicUrl
-    ? new URL(path, ctx.organization.publicUrl).toString() : null
+  const { readiness, publicUrl } = await productPublicPresentation(ctx.organization.db, ctx.organization.env, ctx.organization.organizationId, value)
   return { product: { ...mcpProduct(value), booking_readiness: readiness ? {ready:readiness.ready,missing:readiness.missing} : null, public_url: publicUrl, admin_edit_url: slug ? productEditorPath(slug, value.id) : null } }
 }
 
@@ -521,8 +512,8 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
     }
 
     case 'create_product': {
-      // Experience creation requests publication so the canonical writer
-      // requires its booking setup or external destination before committing.
+      // Booking setup or an experience's external destination requests
+      // publication. An experience without either starts as a private draft.
       // A supplied page is created and bound in that same batch.
       const page = args.page === undefined ? undefined : args.page as { title: string; path?: string; summary?: string | null; pageType?: 'custom' | 'recipe' | 'legal' | 'system'; recipe?: string | null; sortOrder?: number; blocks: unknown }
       const idempotencyKey = requiredString(args, 'idempotency_key')
@@ -534,7 +525,7 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
         organizationId: organization.organizationId,
         env: organization.env,
         product: omit(args, ['page', 'booking', 'idempotency_key']) as unknown as CreateProductInput, actor,
-        publication: { published: Boolean(booking || args.kind === 'experience') },
+        publication: { published: Boolean(booking || (args.kind === 'experience' && args.order_url)) },
         ...(booking ? { booking: { data: booking, env: organization.env } } : {}),
         ...(page ? { page: { data: page, env: organization.env } } : {}),
         idempotencyKey,

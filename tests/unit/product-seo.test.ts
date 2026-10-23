@@ -137,7 +137,7 @@ test('extractDietarySchemaUrls maps product dietary notes to standard Schema.org
     name: 'Pad Thai',
     slug: 'pad-thai',
     description: 'Delicious noodles',
-    kind: 'item' as const,
+    kind: 'dish' as const,
     variants: [],
     collections: [],
     details: {},

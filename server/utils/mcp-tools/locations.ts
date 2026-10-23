@@ -81,13 +81,12 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_location',
-      description: 'Update a location\'s own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming changes the location\'s slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.',
+      description: 'Update a location\'s own details: its name and descriptions, regular opening hours, temporary closures/special hours, contact info, saved map coordinates, and map sharing for its places to stay. Renaming keeps the saved public address. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
         location_id: { type: 'string', description: 'Internal location ID returned by list_locations or get_workspace_context.' },
-        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Changing it regenerates the slug from the new name unless slug is given in the same call.' },
-        slug: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'URL slug for the location page. Normalized, and suffixed -2, -3… when another location already uses it. Changes the public URL.' },
+        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
         status: { type: 'string', enum: ['published', 'draft', 'active', 'inactive'], description: 'published/active keeps the location on the website; draft/inactive takes the location off the website and frees its plan slot.' },

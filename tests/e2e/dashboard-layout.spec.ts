@@ -732,7 +732,7 @@ test.describe('dashboard pane hierarchy', () => {
       const calendar = page.locator('#dashboard-panel-org-calendar')
       const locationFilter = calendar.getByRole('combobox', { name: 'Location', exact: true })
       await expect(calendar.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(product.name)
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${product.name}`)
       await expect(locationFilter).toContainText('All locations')
       const unscopedAdd = calendar.getByRole('link', { name: 'Add availability', exact: true })
       const unscopedAddHref = new URL((await unscopedAdd.getAttribute('href'))!, baseURL)
@@ -806,7 +806,7 @@ test.describe('dashboard pane hierarchy', () => {
       await waitForNuxtHydration(page)
       expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: productId, month: nextMonth, locationId: location!.id })
       await expect(calendar.locator(`time[datetime="${nextMonth}"]`)).toHaveText(nextMonthLabel)
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(product.name)
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${product.name}`)
       await expect(locationFilter).toContainText(location!.title)
       const calendarTimeZone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
       const currentCalendarMonth = localNow(calendarTimeZone).date.slice(0, 7)
@@ -863,8 +863,8 @@ test.describe('dashboard pane hierarchy', () => {
       const beforeOfferingChange = new URL(page.url()).searchParams
       expect(Object.fromEntries(beforeOfferingChange)).toEqual({ product_id: productId, locationId: location!.id, date: sessionDay, ...returnedMonthQuery, view: 'list' })
       const otherSessionsRead = page.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${otherOffering!.id}/sessions` && response.request().method() === 'GET')
-      await calendar.getByRole('combobox', { name: 'Offering', exact: true }).click()
-      await page.getByRole('option', { name: otherOffering!.name, exact: true }).click()
+      await calendar.getByRole('combobox', { name: 'Calendar', exact: true }).click()
+      await page.getByRole('option', { name: `Availability: ${otherOffering!.name}${otherOffering!.active ? '' : ' · Paused'}`, exact: true }).click()
       const otherSessionsResponse = await otherSessionsRead
       expect(otherSessionsResponse.status(), await otherSessionsResponse.text()).toBe(200)
       await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('product_id') === otherOffering!.id)
@@ -873,7 +873,7 @@ test.describe('dashboard pane hierarchy', () => {
         ...(beforeOfferingChange.has('month') ? { month: beforeOfferingChange.get('month') } : {}),
         ...(beforeOfferingChange.has('view') ? { view: beforeOfferingChange.get('view') } : {}),
       })
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(otherOffering!.name)
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${otherOffering!.name}${otherOffering!.active ? '' : ' · Paused'}`)
       await expect(locationFilter).toContainText('All locations')
       await expect(calendar.getByRole('button', { name: 'View: List', exact: true })).toBeVisible()
     } finally {
@@ -1119,7 +1119,7 @@ test.describe('dashboard pane hierarchy', () => {
       const calendarMonth = calendarDay.slice(0, 7)
       await open(memberPage, `/dashboard/${org}/calendar?product_id=${productId}&month=${calendarMonth}`)
       const calendar = memberPage.locator('#dashboard-panel-org-calendar')
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText(editedName)
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${editedName}`)
       await expect(calendar.getByRole('link', { name: 'Add availability', exact: true })).toBeVisible()
       // A month cell shows two times; the next future time can be its third.
       await calendar.locator(`[data-day="${calendarDay}"]`).getByRole('link').first().click()
@@ -1235,7 +1235,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect(desktopImage!.width / desktopImage!.height).toBeCloseTo(20 / 19, 2)
 
     // A kind pill narrows the grid in place and is held in the URL.
-    const kind = (['experience', 'item', 'service'] as const).find(value => offerings.some(product => product.kind === value))
+    const kind = (['experience', 'service'] as const).find(value => offerings.some(product => product.kind === value))
     expect(kind, 'The demo offers something besides its menu').toBeDefined()
     await catalog.getByTestId(`catalog-kind-${kind}`).click()
     await expect(page).toHaveURL(`${ORG}/products?kind=${kind}`)
@@ -2041,8 +2041,8 @@ test.describe('dashboard pane hierarchy', () => {
     await page.locator('#dashboard-panel-catalog').getByTestId('catalog-add').click()
     await expect(page).toHaveURL(`${services}/products/new/kind`)
     const kind = page.locator('#dashboard-panel-product-kind')
-    await kind.getByText('Service or appointment', { exact: true }).click()
-    await expect(kind.getByRole('radio', { name: 'Service or appointment', exact: true })).toBeChecked()
+    await kind.getByText('Practice area or consultation', { exact: true }).click()
+    await expect(kind.getByRole('radio', { name: 'Practice area or consultation', exact: true })).toBeChecked()
     await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
     await expect(page).toHaveURL(`${services}/products/new/name`)
     // The level is named for what is being made, and the step's own footer is the only commit.
@@ -2059,10 +2059,12 @@ test.describe('dashboard pane hierarchy', () => {
     const productId = (await response.json() as { product: { id: string } }).product.id
     let pageId: string | null = null
     try {
-      await expect(page).toHaveURL(`${services}/products/${productId}/price`)
-      await expectPanes(page, ['product', 'product-price'])
+      await expect(page).toHaveURL(`${services}/products/${productId}/name`)
+      await expectPanes(page, ['product', 'product-name'])
       // Read back through other paths than the one that wrote it.
-      const product = (await (await page.request.get(`${editor}/products/${productId}`)).json() as { product: { kind: string; active: boolean; name: string; variants: unknown[]; publications: Array<{ published: boolean }>; booking: unknown; page: { id: string; path: string; title: string } | null } }).product
+      const productRead = await page.request.get(`${editor}/products/${productId}`)
+      expect(productRead.status(), await productRead.text()).toBe(200)
+      const product = (await productRead.json() as { product: Product }).product
       expect(product).toMatchObject({ kind: 'service', active: false, name, publications: [{ published: false }], booking: null })
       expect(product.variants).toHaveLength(1)
       expect(product.page).toMatchObject({ title: name })
@@ -2070,15 +2072,66 @@ test.describe('dashboard pane hierarchy', () => {
       pageId = product.page!.id
       const bound = (await (await page.request.get(`${editor}/pages/${pageId}`)).json() as { page: { product_id: string | null } }).page
       expect(bound.product_id).toBe(productId)
+      const cards = page.getByTestId('legal-editor-cards')
+      await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'Legal Services editor', exact: true })).toBeVisible()
+      await expect(cards.getByTestId('editor-card-assignment')).toHaveCount(0)
+      await expect(cards.getByTestId('editor-card-booking')).toContainText('No consultation calendar')
+      const renamed = `${name} revised`
+      const nameLeaf = page.locator('#dashboard-panel-product-name')
+      await nameLeaf.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed)
+      await expect(cards.getByTestId('editor-card-name')).toContainText(name)
+      await expect(cards.getByTestId('editor-card-name')).not.toContainText(renamed)
+      await nameLeaf.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(nameLeaf.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(name)
+      await nameLeaf.getByRole('textbox', { name: 'Name', exact: true }).fill(renamed)
+      const renamedResponse = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products/${productId}` && response.request().method() === 'PATCH')
+      await nameLeaf.getByRole('button', { name: 'Save', exact: true }).click()
+      expect((await renamedResponse).status()).toBe(200)
+      await expect(cards.getByTestId('editor-card-name')).toContainText(renamed)
+      const renamedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: 'org-ncls-blawby', product_id: productId } })
+      expect(renamedRead.status(), await renamedRead.text()).toBe(200)
+      expect(mcpData<{ product: Product }>(await renamedRead.json()).product).toMatchObject({ name: renamed, slug: product.slug, page: { id: pageId, path: product.page!.path, title: name } })
+
+      const officesRead = await page.request.get('/api/dashboard/locations', { params: { org: 'north-carolina-legal-services', organization: 'true', status: 'all' } })
+      expect(officesRead.status(), await officesRead.text()).toBe(200)
+      const office = (await officesRead.json() as { locations: DashboardLocation[] }).locations.find(location => location.status === 'active')
+      expect(office, 'the firm has an authored active office').toBeDefined()
+      await open(page, `${services}/products/${productId}/locations/${office!.id}`)
+      const officeLeaf = page.locator('#dashboard-panel-product-location')
+      await officeLeaf.getByRole('switch', { name: 'Show at this office', exact: true }).check()
+      await officeLeaf.getByRole('switch', { name: 'Available at this office', exact: true }).check()
+      const officeSaved = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products/${productId}/locations/${encodeURIComponent(office!.id)}` && response.request().method() === 'PUT')
+      await officeLeaf.getByRole('button', { name: 'Save', exact: true }).click()
+      expect((await officeSaved).status()).toBe(200)
+      const officeReadback = await page.request.get(`${editor}/products/${productId}`)
+      expect(officeReadback.status(), await officeReadback.text()).toBe(200)
+      expect((await officeReadback.json() as { product: Product }).product.locations).toEqual([{ location_id: office!.id, active: true, published: true }])
+      await expect(cards.getByTestId('editor-card-locations')).toContainText(office!.title)
+
+      await page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true }).click()
+      const preview = page.getByRole('dialog', { name: 'Legal Services preview', exact: true })
+      const frame = preview.getByTestId('content-preview-frame')
+      await expect(frame).toHaveAttribute('src', new RegExp(`${product.page!.path.replaceAll('/', '\\/')}\\?preview_token=`))
+      await expect(preview.getByTestId('preview-private')).toBeVisible()
+      await expect(preview.getByTestId('preview-share')).toHaveCount(0)
+      await preview.getByRole('tab', { name: 'Mobile view', exact: true }).click()
+      await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'mobile')
+      await expect(frame).toHaveCSS('max-width', '390px')
+      await page.setViewportSize(PHONE)
+      await expect(preview).toBeVisible()
+      await expect(preview.getByTestId('preview-private')).toBeVisible()
+      await preview.getByRole('button', { name: 'Close', exact: true }).click()
+      await expect(preview).toHaveCount(0)
+      await page.setViewportSize(WIDE)
       await page.locator('#dashboard-panel-product').getByTestId('dashboard-navbar-back').click()
       await expect(page).toHaveURL(`${services}/products`)
       await expectPanes(page, ['catalog'])
       const catalogService = page.getByTestId('catalog-grid').getByTestId(`selector-item-${productId}`)
       await expect(catalogService).toHaveAttribute('href', `${services}/products/${productId}`)
-      await expect(catalogService).toContainText(name)
+      await expect(catalogService).toContainText(renamed)
       await expect(catalogService).toContainText('No photo')
       await expect(catalogService).toContainText('No price set')
-      await expect(catalogService).toContainText('No locations set')
+      await expect(catalogService).toContainText(office!.title)
       // MCP reads the same pair, and the editor URL it hands an agent opens this record.
       const viaMcp = mcpData<{ product: { page: { id: string; path: string } | null; admin_edit_url: string | null } }>(await (await mcpRequest(page.request, baseURL!, {
         method: 'tools/call', toolName: 'get_product', args: { organization_id: 'org-ncls-blawby', product_id: productId },
@@ -2086,10 +2139,10 @@ test.describe('dashboard pane hierarchy', () => {
       expect(viaMcp.page).toMatchObject({ id: pageId, path: product.page!.path })
       expect(viaMcp.admin_edit_url).toBe(`${services}/products/${productId}`)
       await open(page, viaMcp.admin_edit_url!)
-      await expect(page.locator('#dashboard-panel-product')).toContainText(name)
+      await expect(page.locator('#dashboard-panel-product')).toContainText(renamed)
 
       // Its Page content row opens the page in Pages, the one page editor.
-      await page.locator('#dashboard-panel-product').getByRole('link', { name: new RegExp(`^Page content ${product.page!.path.replaceAll('/', '\\/')}`) }).click()
+      await page.locator('#dashboard-panel-product').getByTestId('editor-card-page').click()
       await expect(page).toHaveURL(new RegExp(`${services}/website/pages/${pageId}`))
       await expect(page.locator('#dashboard-panel-organization-page')).toContainText(name)
     } finally {
@@ -2187,7 +2240,9 @@ test.describe('dashboard pane hierarchy', () => {
 
   // Choosing, opening and deleting an organization are the account's; the
   // organization's own Website has no delete row.
-  test('Account settings → Organizations deletes exactly the organization it names', async ({ page, baseURL }) => {
+  test('Account settings → Organizations deletes exactly the organization it names', async ({ page, baseURL }, testInfo) => {
+    const release = await acquireTenantMutationLock(testInfo, 'user-e2e-onboarding-wizard')
+    try {
     await page.setViewportSize(WIDE)
     await page.context().clearCookies()
     await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
@@ -2223,6 +2278,9 @@ test.describe('dashboard pane hierarchy', () => {
         const removed = await page.request.post('/api/auth/organization/delete', { headers: authRequestHeaders(baseURL!), data: { organizationId } })
         expect(removed.status(), await removed.text()).toBe(200)
       }
+    }
+    } finally {
+      await release()
     }
   })
 })

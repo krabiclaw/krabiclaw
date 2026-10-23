@@ -11,7 +11,7 @@
   >
     <template #right>
       <div class="flex items-center gap-1">
-        <UButton v-if="sessionProduct && !providerHours" label="Add availability" icon="i-lucide-plus" :to="canCreate ? addAvailabilityTo : undefined" :disabled="!canCreate || Boolean(level.child.value)" />
+        <UButton v-if="sessionProduct && !providerHours && canCreate" label="Add availability" icon="i-lucide-plus" :to="addAvailabilityTo" :disabled="Boolean(level.child.value)" />
         <UButton v-else-if="providerHours && sessionProduct?.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
         <UButton
           v-if="!personalScope && !sessionProduct && chosenLocation && !selecting && view === 'month'"
@@ -41,7 +41,7 @@
 
     <div>
       <UAlert v-if="offeringsError" class="mb-6" color="error" variant="soft" title="Offerings could not be loaded" :description="offeringsError" />
-      <!-- Offering and Location choose scope; repeating-time settings belong to the chosen location. -->
+      <!-- Calendar chooses bookings or one offering's availability; Location narrows that scope. -->
       <div v-if="!personalScope" class="mb-8 flex flex-wrap items-center gap-3">
         <CalendarOfferingFilter :items="offeringItems ?? []" :disabled="Boolean(level.child.value)" />
         <DashboardLocationFilter v-model="filters.locationId" :items="locationItems" :disabled="Boolean(level.child.value)" />
@@ -57,6 +57,10 @@
         title="The location could not be loaded"
         :description="getErrorMessage(locationError, 'Location request failed')"
       />
+      <p v-if="creationUnavailable && !level.child.value" data-testid="calendar-availability-state" class="mb-6 text-sm text-muted">
+        {{ creationUnavailable.message }}
+        <NuxtLink :to="creationUnavailable.to" class="font-medium text-highlighted underline">{{ creationUnavailable.label }}</NuxtLink>
+      </p>
 
       <!-- The period and its date navigation share one quiet toolbar. -->
       <header class="flex items-center justify-between py-2">
@@ -260,6 +264,7 @@ export const calendarSessionsKey = Symbol('calendar-sessions') as InjectionKey<{
   addTo: (date: string) => { path: string; query: LocationQueryRaw }
   canCreate: ComputedRef<boolean>
   providerHours: ComputedRef<boolean>
+  creationUnavailable: ComputedRef<{ message: string; label: string; to: string } | null>
   refresh: (date: string) => Promise<void>
 }>
 </script>
@@ -370,6 +375,16 @@ const scopeError = computed(() => {
 })
 const canCreate = computed(() => Boolean(sessionProduct.value?.booking && !scopeError.value && (physicalLocation.value ? physicalLocation.value.status === 'active' : scope.value !== 'online' && productLocations.value.some(location => location.status === 'active'))))
 const providerHours = computed(() => Boolean(sessionProduct.value?.booking?.held_online && (scope.value === 'online' || !scope.value && !productLocations.value.some(location => location.status === 'active'))))
+const creationUnavailable = computed(() => {
+  const product = sessionProduct.value
+  if (!product?.booking || canCreate.value || providerHours.value || scopeError.value) return null
+  const office = product.kind === 'service'
+  return {
+    message: physicalLocation.value ? `${physicalLocation.value.title} is inactive.` : `No active ${office ? 'office' : 'location'} is assigned to this ${office ? 'consultation' : 'experience'}.`,
+    label: office ? 'Edit offices' : 'Edit locations',
+    to: `/dashboard/${route.params.orgSlug}/products/${product.id}/locations`,
+  }
+})
 function addTo(date?: string) {
   return { path: `/dashboard/${route.params.orgSlug}/calendar/sessions/new`, query: { product_id: sessionProduct.value?.id, locationId: physicalLocation.value?.id, date, month: monthKey.value, view: view.value === 'month' ? undefined : view.value } }
 }
@@ -648,7 +663,7 @@ if (organizationId) provide(calendarSessionsKey, {
   product: sessionProduct, organizationId, locations: productLocations, allLocations: computed(() => props.sessionLocations ?? []),
   locationId: computed(() => physicalLocation.value?.id ?? null), scope, location: physicalLocation,
   itemsOn, status: computed(() => month.value.status), error: computed(() => month.value.status === 'error' ? month.value.cause : null),
-  addTo, canCreate, providerHours,
+  addTo, canCreate, providerHours, creationUnavailable,
   refresh: async (date) => {
     const next = parseDate(date)
     view.value = 'month'

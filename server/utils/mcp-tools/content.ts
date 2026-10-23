@@ -43,7 +43,7 @@ import { NOT_HANDLED, omit, mutationContextPayload, optionalString, requiredStri
 // Page writes provide complete required metadata; omitted optional values retain
 // their stored values on update.
 export const TENANT_PAGE_METADATA_SCHEMA = {
-  path: { type: 'string', description: 'The page path to write. Send the current path unless you are moving the page; a different path moves it and creates the locale-scoped redirect.' },
+  path: { type: 'string', description: 'The saved page path. A page keeps this address when its content or title changes.' },
   title: { type: 'string', description: "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept." },
   summary: { type: ['string', 'null'], description: 'Omit to preserve on update; null clears it.' },
   pageType: { type: 'string', enum: ['custom', 'recipe', 'legal', 'system'], description: "The page's type. Send the page_type from the last read unless you are changing it." },

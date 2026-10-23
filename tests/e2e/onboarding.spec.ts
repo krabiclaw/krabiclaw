@@ -1,10 +1,12 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { dismissPreviewToolbar } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { tenantHostIsAddressable, testBaseUrl } from './test-env'
 import { environmentTenantAliasSlug } from '../../server/utils/tenant-hosts'
 import { formatMinorAmount } from '../../shared/prices'
 import { starterPalette } from '../../shared/site-palette'
+import type { Product } from '../../server/types/products'
 
 /**
  * The subdomain the site is stored under, from the host this environment frames
@@ -32,21 +34,31 @@ function organizationSubdomain(origin: string): string {
 // this owner's menu section takes. A collection slug is unique within its
 // organization, so the new site gets the same slug for its own section rather
 // than failing to save it.
-// The new-site journeys sign in as the same fixture owner, and each one
-// discards that owner's active draft before it starts. Run in parallel, one
-// discarded the draft the other was reading back, so this file runs in order.
+// The new-site journeys share one fixture owner and active draft. Keep this
+// file in order, and share its actor lock with the account organization journey.
 test.describe.configure({ mode: 'default' })
 
 const otherTenantId = 'org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX'
 let otherTenant: { owner: APIRequestContext; collectionId: string } | null = null
+let releaseWizardMutationLock: (() => Promise<void>) | undefined
+
+test.beforeEach(async ({ request: _request }, testInfo) => {
+  releaseWizardMutationLock = await acquireTenantMutationLock(testInfo, 'user-e2e-onboarding-wizard')
+})
 
 test.afterEach(async () => {
-  if (!otherTenant) return
-  const { owner, collectionId } = otherTenant
-  otherTenant = null
-  const removed = await owner.delete(`/api/editor/organizations/${otherTenantId}/collections/${collectionId}`)
-  expect(removed.status(), await removed.text()).toBe(200)
-  await owner.dispose()
+  try {
+    if (!otherTenant) return
+    const { owner, collectionId } = otherTenant
+    otherTenant = null
+    const removed = await owner.delete(`/api/editor/organizations/${otherTenantId}/collections/${collectionId}`)
+    expect(removed.status(), await removed.text()).toBe(200)
+    await owner.dispose()
+  } finally {
+    const release = releaseWizardMutationLock
+    releaseWizardMutationLock = undefined
+    await release?.()
+  }
 })
 
 test('a new owner builds a draft and creates a site through the routed flow', async ({ page, request, baseURL, browser, playwright }) => {
@@ -259,6 +271,57 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(section).toContainText(formatMinorAmount(18000, 'THB'))
   await visitor.close()
   expect(placesRequests).toEqual([])
+})
+
+test('a new experience site saves its first experience privately until booking setup is complete', async ({ page, baseURL }) => {
+  await dismissPreviewToolbar(page)
+  await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
+  const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
+  expect(discarded.status(), await discarded.text()).toBe(200)
+  const empty = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(empty.status(), await empty.text()).toBe(200)
+  expect(await empty.json()).toEqual({ success: true, draft: null })
+  try {
+    const created = await page.request.post('/api/dashboard/onboarding/drafts/active', {
+      data: { sourceType: 'manual', vertical: 'experience', name: `E2E experience ${Date.now().toString(36)}`, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', phone: '+66812345678' } },
+    })
+    expect(created.status(), await created.text()).toBe(200)
+    const { organizationId } = await created.json() as { organizationId: string }
+    await page.goto('/dashboard/onboarding/products')
+    await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
+    const products = page.locator('[data-onboarding-step="products"]')
+    await expect(products).toContainText('Booking details are required before an experience can be published.')
+    await page.getByPlaceholder('Sunset kayak tour').fill('Mangrove kayak trip')
+    await products.getByLabel('Price', { exact: true }).fill('850')
+    await page.getByRole('button', { name: 'Add experience', exact: true }).click()
+    await page.getByRole('button', { name: 'Next', exact: true }).click()
+    await expect(page.locator('[data-onboarding-step="look"]')).toBeVisible()
+
+    // Read the actual catalog independently of the onboarding draft writer.
+    const catalog = await page.request.get(`/api/editor/organizations/${organizationId}/products`)
+    expect(catalog.status(), await catalog.text()).toBe(200)
+    const saved = (await catalog.json() as { products: Product[] }).products
+    expect(saved).toHaveLength(1)
+    const experience = saved[0]!
+    expect(experience).toMatchObject({ kind: 'experience', name: 'Mangrove kayak trip', booking: null, stay: null, order_url: null })
+    expect(experience.variants).toHaveLength(1)
+    expect(experience.variants[0]!.prices).toEqual([expect.objectContaining({ unit_amount: 85000, currency: 'THB' })])
+    expect(experience.publications).toEqual([expect.objectContaining({ organization_id: organizationId, published: false })])
+    expect(experience.locations).toEqual([expect.objectContaining({ active: true, published: false })])
+    const publication = await page.request.put(`/api/editor/organizations/${organizationId}/products/${experience.id}/publication`, { data: { published: true } })
+    expect(publication.status(), await publication.text()).toBe(409)
+    const readBack = await page.request.get(`/api/editor/organizations/${organizationId}/products/${experience.id}`)
+    expect(readBack.status(), await readBack.text()).toBe(200)
+    expect((await readBack.json() as { product: Product }).product.publications).toEqual([expect.objectContaining({ published: false })])
+    await page.goto('/dashboard/onboarding/products')
+    await expect(page.locator('[data-onboarding-step="products"]')).toContainText('Mangrove kayak trip')
+  } finally {
+    const removed = await page.request.delete('/api/dashboard/onboarding/drafts/active')
+    expect(removed.status(), await removed.text()).toBe(200)
+    const discardedDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
+    expect(discardedDraft.status(), await discardedDraft.text()).toBe(200)
+    expect(await discardedDraft.json()).toEqual({ success: true, draft: null })
+  }
 })
 
 test('an owner changes their restaurant draft to lodging, restores it and opens the home editor', async ({ page, baseURL }) => {

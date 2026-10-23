@@ -106,9 +106,9 @@ export function productCtaKey(kind: string | null | undefined): string {
 }
 
 /** The surface this product is read on, and the paths and words that go with it. */
-export function presentationForProduct(vertical: string | null | undefined, product: Pick<Product, 'kind'>, themeId?: string): ProductPresentation {
+export function presentationForProduct(product: Pick<Product, 'kind'>, themeId?: string): ProductPresentation {
   if (product.kind === 'stay') return STAY_PRESENTATION
-  return product.kind === 'experience' ? EXPERIENCE_PRESENTATION : product.kind === 'dish' ? requireProductPresentation('restaurant') : requireProductPresentation(product.kind === 'service' ? 'service' : 'experience', themeId)
+  return product.kind === 'experience' ? EXPERIENCE_PRESENTATION : product.kind === 'dish' ? requireProductPresentation('restaurant') : requireProductPresentation('service', themeId)
 }
 
 /** The words one surface owns: experiences read the same on every vertical. */

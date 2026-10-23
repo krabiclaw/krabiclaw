@@ -10,6 +10,8 @@ import organizationQaRoute from '../../server/api/editor/organizations/[organiza
 import { createQa, deleteQa, listQa, reorderQa, updateQa } from '../../server/utils/location-qa.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { getMediaAsset, updateMediaAssetMetadata } from '../../server/utils/media-asset-manager.ts'
+import { applyOnboardingDraft } from '../../server/utils/onboarding-apply.ts'
+import { buildOnboardingDraftPayload } from '../../server/utils/onboarding-drafts.ts'
 
 const ORG = 'org'
 const OTHER_ORG = 'other-org'
@@ -19,7 +21,7 @@ async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'location-qa-media-metadata-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' } },
   } }] })
   const db = await runtime.getD1Database('DB')
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
@@ -32,6 +34,41 @@ async function boot() {
   }
   return { runtime, db }
 }
+
+test('resuming onboarding updates the existing location without changing its historical public path', async () => {
+  const { runtime, db } = await boot()
+  try {
+    const userId = 'onboarding-owner'
+    await db.prepare("INSERT INTO user (id, name, email, emailVerified) VALUES (?, 'Owner', 'onboarding@proof.example', 1)").bind(userId).run()
+    await db.prepare("UPDATE organization SET onboarding_status = 'pending' WHERE id = ?").bind(ORG).run()
+    await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, timezone)
+      VALUES ('historic-location', ?, 'original-restaurant', 'Original Restaurant', 'Asia/Bangkok')`).bind(ORG).run()
+    const payload = buildOnboardingDraftPayload({
+      name: 'Renamed Restaurant', vertical: 'restaurant', place: null,
+      details: {
+        name: 'Renamed Restaurant', streetAddress: '88 Beach Road', addressLine2: null, city: 'Ao Nang', region: null, postalCode: null,
+        country: 'TH', phone: null, websiteUrl: null, openingHours: null, specialHours: null,
+        timezone: 'Asia/Bangkok', currency: 'THB', sourceLocale: 'en',
+      },
+    })
+    const draft = { id: 'onboarding-draft', user_id: userId, updated_at: NOW }
+    await db.prepare(`INSERT INTO onboarding_drafts (id, user_id, organization_id, name, vertical, source_type, payload_json, updated_at)
+      VALUES (?, ?, ?, ?, 'restaurant', 'manual', ?, ?)`).bind(draft.id, userId, ORG, payload.preview.brandName, JSON.stringify(payload), NOW).run()
+    assert.equal(payload.preview.locations[0]?.slug, 'main')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), DB: db } as CloudflareEnv
+    const result = await applyOnboardingDraft(env, db, {
+      userId, draft, payload,
+      target: { vertical: 'restaurant', organizationId: ORG, subdomain: 'org', locationId: 'historic-location', locationSlug: 'original-restaurant', defaultCurrency: 'THB', timezone: 'Asia/Bangkok' },
+    })
+    assert.deepEqual(result, { locationSlug: 'original-restaurant' })
+    const saved = await db.prepare('SELECT id, slug, title, address FROM business_locations WHERE organization_id = ?').bind(ORG).all<{ id: string; slug: string; title: string; address: string }>()
+    assert.equal(saved.results.length, 1)
+    assert.deepEqual({ ...saved.results[0], address: JSON.parse(saved.results[0]!.address) }, {
+      id: 'historic-location', slug: 'original-restaurant', title: 'Renamed Restaurant',
+      address: { regionCode: 'TH', addressLines: ['88 Beach Road'], locality: 'Ao Nang' },
+    })
+  } finally { await runtime.dispose() }
+})
 
 test('organization Q&A route finds a page record by id without widening tenant access', async () => {
   const { runtime, db } = await boot()

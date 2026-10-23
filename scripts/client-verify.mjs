@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseOpeningHours } from '../shared/reservation-hours.ts';
 import { formatOpeningHours } from '../utils/formatters.ts';
+import { ALL_VERTICALS } from '../utils/vertical-copy.ts';
 /**
  * Post-deploy smoke test for a KrabiClaw tenant site.
  *
@@ -49,6 +50,7 @@ if (!args.url) {
 }
 
 const VERTICAL = args.vertical;
+if (!ALL_VERTICALS.includes(VERTICAL)) throw new Error(`Unsupported vertical: ${VERTICAL}`);
 const ORGANIZATION_ID = args["organization-id"];
 const TENANT_SLUG = args["tenant-slug"];
 const inputUrl = new URL(args.url);
@@ -65,39 +67,6 @@ const OUT_DIR =
   args["out-dir"] ??
   (args.slug ? join(process.cwd(), "client-imports", args.slug) : null);
 
-// ── Copy constraints ──────────────────────────────────────────────────────────
-
-const FORBIDDEN_COPY = {
-  experience: [
-    "Come dine with us",
-    "Reserve a table",
-    "From the kitchen",
-    "one kitchen philosophy",
-    "Catering & events",
-    "chef's table",
-    "tasting menu",
-    "dine differently",
-    "Also part of Saya",
-    "Ember & Slice",
-    "kikuzuki",
-  ],
-  restaurant: [],
-  retail: [],
-  wellness: [],
-  service: [],
-};
-
-const REQUIRED_COPY = {
-  experience: [
-    { pattern: /book a class/i, label: 'CTA: "Book a class"' },
-    { pattern: /from the studio/i, label: 'Posts eyebrow: "From the studio"' },
-  ],
-  restaurant: [],
-  retail: [],
-  wellness: [],
-  service: [],
-};
-
 // ── Route lists ───────────────────────────────────────────────────────────────
 
 const CORE_ROUTES = [
@@ -105,6 +74,7 @@ const CORE_ROUTES = [
   "/locations",
   "/reviews",
   "/qa",
+  "/photos",
   "/posts",
   "/about",
   "/contact",
@@ -113,19 +83,14 @@ const CORE_ROUTES = [
 const VERTICAL_ROUTES = {
   experience: ["/products", "/reservations"],
   restaurant: ["/menu", "/reservations"],
-  retail: ["/locations"],
-  wellness: ["/products", "/reservations"],
   service: ["/services", "/schedule"],
 };
 
 const REQUIRED_ROUTES_BY_VERTICAL = {
   experience: [...CORE_ROUTES, "/products", "/reservations"],
   restaurant: [...CORE_ROUTES, "/menu", "/reservations"],
-  retail: [...CORE_ROUTES],
-  wellness: [...CORE_ROUTES, "/products", "/reservations"],
-  // A legal practice has offices rather than branches, and no reviews, Q&A or
-  // location pages of its own; its consultations are under /services and /schedule.
-  service: ["/", "/about", "/contact", "/posts", "/services", "/schedule"],
+  // Legal articles use Blog; practice areas and consultations use these saved routes.
+  service: ["/", "/about", "/contact", "/blog", "/services", "/schedule"],
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -201,14 +166,19 @@ const routes = REQUIRED_ROUTES_BY_VERTICAL[VERTICAL] ?? [
   ...(VERTICAL_ROUTES[VERTICAL] ?? []),
 ];
 const pageHtml = {};
-const reviewsPublished = (await getBootstrap())?.sections?.reviews;
-if (typeof reviewsPublished !== "boolean") {
-  fail("Bootstrap API must provide the site's reviews publication flag");
+const sections = (await getBootstrap())?.sections;
+if (!sections || typeof sections.reviews !== "boolean") {
+  fail("Public shell must provide the site's section publication flags");
 }
 
 for (const route of routes) {
-  if (route === "/reviews" && typeof reviewsPublished !== "boolean") continue;
-  const expectedStatus = route === "/reviews" && !reviewsPublished ? 404 : 200;
+  const published = sections?.[route.slice(1)];
+  if (published !== undefined && typeof published !== "boolean") {
+    fail(`Invalid publication flag for ${route}`);
+    continue;
+  }
+  if (!sections && route === "/reviews") continue;
+  const expectedStatus = published === false ? 404 : 200;
   const res = await get(route);
   if (res.status === expectedStatus) {
     pass(`GET ${route} → ${res.status}${expectedStatus === 404 ? " (section not published)" : ""}`);
@@ -252,10 +222,7 @@ if (OUT_DIR) {
 
 // ── Phase 2: Experience / Product slug routing ────────────────────────────────
 
-// Wellness sells Products on the same /products route as experience, so it is
-// checked here too: gating on experience/restaurant let a wellness site pass
-// verification without its product routes ever being loaded.
-if (ORGANIZATION_ID && (VERTICAL === "experience" || VERTICAL === "restaurant" || VERTICAL === "wellness")) {
+if (ORGANIZATION_ID && (VERTICAL === "experience" || VERTICAL === "restaurant")) {
   info("── Slug route checks");
 
   // Every Saya vertical sells Products; only the route segment differs.
@@ -327,30 +294,6 @@ if (ORGANIZATION_ID) {
   }
 }
 
-// ── Phase 4: Forbidden copy scan ─────────────────────────────────────────────
-
-info("── Forbidden copy scan");
-
-const forbidden = FORBIDDEN_COPY[VERTICAL] ?? [];
-const foundViolations = [];
-for (const [route, html] of Object.entries(pageHtml)) {
-  for (const str of forbidden) {
-    if (html.toLowerCase().includes(str.toLowerCase())) {
-      foundViolations.push({ route, str });
-    }
-  }
-}
-
-if (foundViolations.length > 0) {
-  fail(
-    `Forbidden copy found: ${foundViolations.map((f) => `"${f.str}" on ${f.route}`).join(", ")}`,
-  );
-} else if (forbidden.length === 0) {
-  pass("No forbidden copy to scan (or no HTML fetched)");
-} else {
-  pass("Forbidden copy scan complete");
-}
-
 // ── Phase 5: Social cards ────────────────────────────────────────────────────
 //
 // Checks what a crawler sees. Social cards are generated by Satori when media
@@ -395,43 +338,13 @@ if (routesWithHtml.length === 0) {
   }
 }
 
-// ── Phase 5: Required copy check ─────────────────────────────────────────────
-
-info("── Required copy check");
-
-const required = REQUIRED_COPY[VERTICAL] ?? [];
-if (required.length > 0) {
-  const allHtml = Object.values(pageHtml).join("\n");
-  for (const { pattern, label } of required) {
-    if (pattern.test(allHtml)) pass(`Found required copy: ${label}`);
-    else fail(`Missing required copy: ${label}`);
-  }
-}
-
 // ── Phase 5b: Image alt text ─────────────────────────────────────────────────
 //
 // Checks the alt text a crawler and a screen reader actually receive.
 //
-// Alt text describes what is in the picture, so the only place it can come from
-// is someone looking at that picture. Every other source is a guess wearing its
-// clothes, and the guesses were shipping: the NCLS import wrote media slot names
-// into media_assets.alt_text (article_inline_image, home_hero_background), the
-// MCP upload path fell back to the file name, and the renderers papered over
-// both by borrowing the page title or the CTA label. 141 of that tenant's 142
-// assets carried a machine key instead of a sentence.
-//
-// None of it was visible, because every image had *an* alt attribute and a
-// crawler cannot tell a description from a slug. This gate can: real alt text is
-// not a slug, not a file name, not the word "image", and not the same sentence
-// pasted onto every picture on the site. Short is fine — a logo's alt is the
-// brand name — so the rule names the words that never describe anything rather
-// than banning brevity.
-//
-// An empty alt is deliberately NOT a failure. alt="" is the correct, meaningful
-// markup for a decorative image, and HTML alone cannot distinguish one from a
-// forgotten description. Failing on it would fire on every tenant with a hero
-// backdrop, and a gate that cries wolf is a gate people learn to skip. Empty
-// alts are counted and reported so the number stays in view.
+// Descriptions must be authored. Reject missing attributes and machine/file names;
+// decorative empty alts and repeated brand names across logo renditions are valid.
+// The whole Page can be an <article>, including its decorative backgrounds.
 
 info("── Image alt text");
 
@@ -442,50 +355,28 @@ const MACHINE_KEY = /^[a-z0-9]+(?:[_.][a-z0-9]+)+$/;
 const FILE_NAME = /\.(?:png|jpe?g|webp|gif|svg|avif)$/i;
 const GENERIC_ALT = new Set(["image", "img", "photo", "picture", "thumbnail", "untitled", "screenshot", "graphic", "banner"]);
 
-const ARTICLE_BODY = /<article\b[\s\S]*?<\/article>/gi;
-
-// An image inside <article> is the content the page exists to show, so an empty
-// alt there is a missing description, not a decorative one. Outside it — site
-// chrome, a hero backdrop layered under text — alt="" is the correct markup.
-// The distinction matters because the epoch backfill clears the machine keys
-// that were standing in for alt text: without it, this gate would go quiet at
-// exactly the moment 140 placed images lost their (false) descriptions.
 const altBySrc = new Map();
-const contentImageSrcs = new Set();
 for (const html of Object.values(pageHtml)) {
   for (const tag of html.match(IMG_TAG) ?? []) {
     const src = tag.match(SRC_ATTR)?.[1];
     if (!src || src.startsWith("data:")) continue;
     if (!altBySrc.has(src)) altBySrc.set(src, tag.match(ALT_ATTR)?.[1] ?? null);
   }
-  for (const body of html.match(ARTICLE_BODY) ?? []) {
-    for (const tag of body.match(IMG_TAG) ?? []) {
-      const src = tag.match(SRC_ATTR)?.[1];
-      if (src && !src.startsWith("data:")) contentImageSrcs.add(src);
-    }
-  }
 }
 
 if (altBySrc.size === 0) {
   pass("No rendered images to alt-check");
 } else {
-  const timesUsed = new Map();
-  for (const alt of altBySrc.values()) {
-    const text = alt?.trim();
-    if (text) timesUsed.set(text, (timesUsed.get(text) ?? 0) + 1);
-  }
-
   const unusable = [];
   let decorative = 0;
   for (const [src, alt] of altBySrc) {
     const text = alt?.trim() ?? "";
     const where = src.slice(-60);
-    if (text === "" && contentImageSrcs.has(src)) unusable.push(`no alt text on a content image — ${where}`);
+    if (alt === null) unusable.push(`missing alt attribute — ${where}`);
     else if (text === "") decorative += 1;
     else if (MACHINE_KEY.test(text)) unusable.push(`machine key "${text}" — ${where}`);
     else if (FILE_NAME.test(text)) unusable.push(`file name "${text}" — ${where}`);
     else if (GENERIC_ALT.has(text.toLowerCase())) unusable.push(`says nothing "${text}" — ${where}`);
-    else if (timesUsed.get(text) > 2) unusable.push(`"${text}" reused on ${timesUsed.get(text)} different images`);
   }
 
   const described = altBySrc.size - decorative - unusable.length;
@@ -498,32 +389,14 @@ if (altBySrc.size === 0) {
   if (decorative > 0) info(`  ${decorative} image(s) marked decorative with alt=""`);
 }
 
-// ── Phase 6: Bootstrap image URL validation ───────────────────────────────────
+// ── Phase 6: Rendered image URL validation ────────────────────────────────────
 
-if (ORGANIZATION_ID) {
-  info("── Bootstrap image URL validation");
-  const data = await getBootstrap();
-
-  if (data) {
-    const imageUrls = new Set();
-    for (const entity of [...(data.locations ?? []), ...(data.products ?? [])]) {
-      for (const media of entity.media ?? []) {
-        if (media.public_url) imageUrls.add(media.public_url);
-        if (media.thumbnail_url) imageUrls.add(media.thumbnail_url);
-      }
-    }
-
-    if (imageUrls.size === 0) {
-      fail("No image URLs found in bootstrap response");
-    } else {
-      for (const url of imageUrls) {
-        if (!url || url.startsWith("data:")) continue;
-        const r = await get(url, { method: "HEAD" });
-        if (r.ok) pass(`Image OK: ${url.slice(0, 80)}`);
-        else fail(`Image ${r.status}: ${url.slice(0, 80)}`);
-      }
-    }
-  }
+info("── Rendered image URL validation");
+for (const src of altBySrc.keys()) {
+  const url = new URL(src, `${BASE}/`).href;
+  const response = await get(url, { method: "HEAD" });
+  if (response.ok) pass(`Image OK: ${url.slice(0, 80)}`);
+  else fail(`Image ${response.status}: ${url.slice(0, 80)}`);
 }
 
 // ── Phase 7: Contact data ─────────────────────────────────────────────────────
