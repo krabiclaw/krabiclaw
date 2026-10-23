@@ -4,7 +4,7 @@ import { jsonResponse } from '~/server/utils/api-response'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 import { AirbnbConnection } from '~/server/integrations/channex/airbnb-connection'
 
-// Starts importing a listing as a home: {missingDetails}, only the fields the listing's details report missing. 202 until the import completes.
+// Starts importing a listing as a home: {missingDetails}, only the fields the listing's details report missing. 202 while the import is under way; 200 at rest, as a draft or complete.
 export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organizationId')
   const listingId = getRouterParam(event, 'listingId')
@@ -21,5 +21,5 @@ export default defineHandler(async (event) => {
   if (!missing || typeof missing !== 'object' || Array.isArray(missing)) return jsonResponse({ error: 'missingDetails must be an object', code: 'VALIDATION_ERROR', field: 'missingDetails' }, { status: 400 })
   const { childBeds: _childBeds, infantCots: _infantCots, ...missingDetails } = missing as Record<string, unknown>
   const result = await new AirbnbConnection(env.DB, env, organization.id, session.user.id).prepare(listingId, { missingDetails })
-  return jsonResponse(result, { status: result.stage === 'complete' ? 200 : 202 })
+  return jsonResponse(result, { status: result.stage === 'complete' || result.stage === 'draft' ? 200 : 202 })
 })

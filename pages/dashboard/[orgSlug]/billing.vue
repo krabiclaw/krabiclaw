@@ -87,7 +87,7 @@ const scheduledPlan = computed(() => billing.value?.scheduledPlan ?? null)
 const planName = computed(() => billing.value?.subscriptionPrice?.name ?? (billing.value ? nameOf(billing.value.plan) : ''))
 const price = computed(() => {
   const subscription = billing.value?.subscriptionPrice
-  return subscription ? formatRecurring(subscription.amount, subscription.currency, subscription.interval) : 'Free'
+  return subscription ? formatRecurring(subscription.amount, subscription.currency) : 'Free'
 })
 const card = computed(() => {
   const cards = methods.value?.payment_methods ?? []
@@ -124,13 +124,14 @@ const locationsRow = computed<EditorNavigationItem | null>(() => {
   if (used === undefined) return null
   return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
 })
-// Homes from the quote the capacity check answers by: in use, included, and what
-// the ones past those cost each month. A subscription from before homes were
-// priced carries no homes price and is charged nothing for them, so the row says so.
+// Homes from the quote the capacity check answers by: live (billed), drafts
+// (free), included, and what the live ones past those cost each month. A
+// subscription from before homes were priced carries no homes price and is
+// charged nothing for them, so the row says so.
 const homesRow = computed<EditorNavigationItem | null>(() => {
   const current = homes.value
   if (!current) return null
-  const counted = `${current.homes.used} ${current.homes.used === 1 ? 'home' : 'homes'}`
+  const counted = `${current.homes.used} live · ${current.homes.drafts} ${current.homes.drafts === 1 ? 'draft' : 'drafts'}`
   const summary = onStarter.value
     ? `${counted} · ${current.homes.included} included · ${nameOf(STARTER_PLAN_ID)} stops at ${current.homes.included}`
     : current.homes.additional_price_minor
@@ -147,7 +148,7 @@ const serviceRows = computed<EditorNavigationItem[]>(() => {
       summary: `${current.managed_ads ? `since ${formatExactDateTime(current.managed_ads.agreed_at)} · ` : ''}${SERVICES.managed_ads.price}` },
     { id: 'strategy', label: SERVICES.strategy.name, to: to('strategy'),
       summary: current.strategy
-        ? `since ${formatExactDateTime(current.strategy.since)} · ${formatRecurring(current.strategy.amount, current.strategy.currency, current.strategy.interval)}`
+        ? `since ${formatExactDateTime(current.strategy.since)} · ${formatRecurring(current.strategy.amount, current.strategy.currency)}`
         : monthly(SERVICE_PRICES.strategy.monthly) },
   ]
 })

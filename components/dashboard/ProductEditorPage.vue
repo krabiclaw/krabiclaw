@@ -793,18 +793,22 @@ const draft = useState<ProductForm>(draftKey, () => ({
 }))
 const form = reactive(draft.value)
 
-// A home's cost on the plan: the one about to be added, or this one among the homes in use.
-const homeQuoted = computed(() => isNew.value ? form.kind === 'stay' : product.value?.kind === 'stay')
-const { quote: homeQuote, quoteError: homeQuoteError, refreshQuote: refreshHomeQuote } = await useHomesQuote(organizationId, () => isNew.value ? 1 : 0, () => homeQuoted.value && !arrivalTab.value)
+// A home's cost on the plan. A new home is a free draft; a draft's line is what
+// publishing it would cost, from the quote the publish is decided by; a live
+// home's is its share of the homes billed now.
+const homeQuoted = computed(() => !isNew.value && product.value?.kind === 'stay')
+const homeLive = computed(() => product.value?.stay?.live === true)
+const { quote: homeQuote, quoteError: homeQuoteError, refreshQuote: refreshHomeQuote } = await useHomesQuote(organizationId, () => homeLive.value ? 0 : 1, () => homeQuoted.value && !arrivalTab.value)
 const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
+  if (isNew.value && form.kind === 'stay') return { text: 'A new home is a free draft until it is published or synced with Airbnb.' }
   const quote = homeQuote.value
   if (!quote) return null
-  if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} homes. Choose Growth or Business to add more.`, billing: `/dashboard/${String(route.params.orgSlug)}/billing` }
-  const billed = isNew.value ? quote.adding.additional_homes > 0 : quote.homes.used > quote.homes.included
-  if (!billed) return { text: `This home is one of your ${quote.homes.included} included homes.` }
+  if (!quote.adding.allowed) return { text: `Basic includes ${quote.homes.included} live homes. Choose Growth or Business to publish this one.`, billing: `/dashboard/${String(route.params.orgSlug)}/billing` }
+  const billed = homeLive.value ? quote.homes.used > quote.homes.included : quote.adding.additional_homes > 0
+  if (!billed) return { text: homeLive.value ? `This home is one of your ${quote.homes.included} included homes.` : `Published, this home is one of your ${quote.homes.included} included homes.` }
   if (!quote.homes.additional_price_minor) return { text: 'This home is not billed on your current subscription.' }
   if (!quote.billing.period_end) throw new Error('A billed home has no billing period')
-  return { text: `This home adds ${formatPlanPrice(quote.homes.additional_price_minor)} per month to your plan, billed on your next invoice on ${formatExactDateTime(quote.billing.period_end)}.` }
+  return { text: `${homeLive.value ? 'This home adds' : 'Published, this home adds'} ${formatPlanPrice(quote.homes.additional_price_minor)} per month to your plan, billed on your next invoice on ${formatExactDateTime(quote.billing.period_end)}.` }
 })
 // One key per product being created, kept across the walk's leaves and retries.
 const createKeyName = `product-create-key:${organizationId}`
