@@ -74,7 +74,7 @@ A home has Airbnb's check-in window: a start, an end, and a checkout time. All t
 
 - **Read:** every home response (`GET /api/dashboard/stay-homes`, `GET /api/dashboard/stay-homes/:productId`, and the `home` in every write's answer) always carries `check_in_end_time`, `null` included.
 - **Create:** `POST /api/dashboard/stay-homes` accepts `check_in_end_time` (string or `null`); left out, it is `null`.
-- **Change:** `PATCH /api/dashboard/stay-homes/:productId` accepts `check_in_end_time` on its own or with the other fields. Sending `null` makes the end flexible; leaving the key out keeps it. A value that is not `HH:MM` or equals the start is 422 `INVALID_DETAIL` with `field: "check_in_end_time"`.
+- **Change:** `PATCH /api/dashboard/stay-homes/:productId` accepts `check_in_end_time` on its own or with the other fields. Sending `null` makes the end flexible; leaving the key out keeps it. A value that is not `HH:MM`, including a blank string, is 422 `INVALID_DETAIL` with `field: "check_in_end_time"`. A value equal to the home's `check_in_time` is 400 `INVALID_STAY_FIELD` with `field: "stay.check_in_end_time"`.
 - The product API and MCP carry the same field as `stay.check_in_end_time`; the guest page shows "Check-in 4:00 PM – 9:00 PM", or "Check-in after 4:00 PM" when the end is `null`.
 
 ### 3.3 Importing an Airbnb listing

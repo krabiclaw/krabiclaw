@@ -675,37 +675,47 @@ export class AirbnbConnection {
     const onHome = new Set(home.photos.map(photo => photo.id))
     let capacity = MAX_ORDERED_MEDIA_ASSETS - home.photos.length
     const assetIds: string[] = []
-    for (const image of content.images) {
-      if (report.photos_removed.includes(image.id)) continue
-      const assetId = stored.get(image.id)
-      if (assetId && onHome.has(assetId)) {
-        await this.keep(assetId, image, report)
-        assetIds.push(assetId)
-        continue
+    // A photo's new file shows on the site's cached pages only once they are purged, including when a later photo stops the stage.
+    const purgeUpgraded = async () => { if (report.photos_upgraded.length) await purgePublicResourceCacheNow(this.env, this.organizationId) }
+    try {
+      for (const image of content.images) {
+        if (report.photos_removed.includes(image.id)) continue
+        const assetId = stored.get(image.id)
+        if (assetId && onHome.has(assetId)) {
+          await this.keep(assetId, image, report)
+          assetIds.push(assetId)
+          continue
+        }
+        if (capacity <= 0) {
+          report.photos_unplaced.push(image.id)
+          continue
+        }
+        capacity -= 1
+        if (assetId) {
+          await this.keep(assetId, image, report)
+          assetIds.push(assetId)
+          continue
+        }
+        const identity = { idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
+        const photo = await this.photo(image)
+        // Imported photos live in R2 in every environment; Cloudflare Images holds credentials in production only.
+        const uploaded = await uploadResolvedMediaToAssetStore({
+          db: this.db, env: this.env, organizationId: this.organizationId, userId: null, source: 'external', kind: 'image', provider: 'cloudflare_r2',
+          ...photo, idempotencyKey: identity.idempotencyKey, sourceFileId: identity.sourceFileId,
+        })
+        await this.caption(uploaded.assetId, image)
+        assetIds.push(uploaded.assetId)
+        report.photos_imported.push(image.id)
       }
-      if (capacity <= 0) {
-        report.photos_unplaced.push(image.id)
-        continue
+    } catch (error) {
+      try {
+        await purgeUpgraded()
+      } catch (purgeError) {
+        throw new AggregateError([error, purgeError], 'The content stage stopped and the photos it had already upgraded could not be purged from the cached pages', { cause: purgeError })
       }
-      capacity -= 1
-      if (assetId) {
-        await this.keep(assetId, image, report)
-        assetIds.push(assetId)
-        continue
-      }
-      const identity = { idempotencyKey: `airbnb-photo:${mapping.listing_id}:${image.id}`, sourceFileId: image.id }
-      const photo = await this.photo(image)
-      // Imported photos live in R2 in every environment; Cloudflare Images holds credentials in production only.
-      const uploaded = await uploadResolvedMediaToAssetStore({
-        db: this.db, env: this.env, organizationId: this.organizationId, userId: null, source: 'external', kind: 'image', provider: 'cloudflare_r2',
-        ...photo, idempotencyKey: identity.idempotencyKey, sourceFileId: identity.sourceFileId,
-      })
-      await this.caption(uploaded.assetId, image)
-      assetIds.push(uploaded.assetId)
-      report.photos_imported.push(image.id)
+      throw error
     }
-    // A photo's new file shows on the site's cached pages only once they are purged.
-    if (report.photos_upgraded.length) await purgePublicResourceCacheNow(this.env, this.organizationId)
+    await purgeUpgraded()
     if (assetIds.length) {
       const membership = await resolveOrganizationMembership(this.env, { organizationId: this.organizationId, userId: this.userId })
       if (!membership) fail(403, 'NOT_A_MEMBER', 'Only a member of this organization can import listing content')

@@ -495,6 +495,8 @@ function homeDetails(body: Record<string, unknown>) {
     return value
   }
   const time = (key: 'check_in_time' | 'check_in_end_time' | 'check_out_time', required: boolean) => {
+    // A blank end is not a flexible one: only null clears it.
+    if (key === 'check_in_end_time' && typeof body[key] === 'string' && !(body[key] as string).trim()) fail(422, 'INVALID_DETAIL', `${key} must be a 24-hour HH:MM time, or null for a flexible end`, key)
     const value = text(key, 5, required)
     if (value !== null && !TIME.test(value)) fail(422, 'INVALID_DETAIL', `${key} must be a 24-hour HH:MM time`, key)
     return value
