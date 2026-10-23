@@ -1550,6 +1550,10 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	import_calendar: text(),
 	// What the content stage left out, as JSON (ImportContentReport); null until it ran.
 	import_content: text(),
+	// SHA-256 of each text and count the content stage last wrote, as JSON
+	// { field: hash }: a later refresh writes only a field still holding it,
+	// so a host's own edit is never overwritten. Null until the stage ran.
+	import_written: text(),
 	enabled: integer({ mode: "boolean" }).default(false).notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -1569,6 +1573,44 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	check("product_channel_mappings_content_json_check", sql`import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')`),
 	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))`),
 	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
+
+// What a host asked KrabiClaw to do with each Airbnb listing of its connected
+// account, done in the background: `sync` imports the listing as a home if it
+// is not one yet and makes it live; `stop` takes its home back to a free draft.
+// One row per listing; a new request for it replaces the row. Leased and
+// retried by the airbnb-sync cron task the way google_calendar_cleanup_jobs
+// are: `error` (a transient provider failure) is retried after
+// next_attempt_at up to a cap, `failed` waits for a new request, `done` is
+// finished. product_id is the home once it exists.
+export const airbnb_sync_jobs = sqliteTable("airbnb_sync_jobs", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	listing_id: text().notNull(),
+	product_id: text(),
+	action: text({ enum: ["sync", "stop"] }).notNull(),
+	// The listing fields the host supplied for a sync, as JSON { field: value }: what Airbnb leaves out and the organization does not fill.
+	details: text(),
+	state: text({ enum: ["pending", "error", "done", "failed"] }).default("pending").notNull(),
+	requested_by: text().references(() => user.id, { onDelete: "set null" }),
+	attempts: integer().default(0).notNull(),
+	last_error_code: text(),
+	last_error: text(),
+	next_attempt_at: text(),
+	lease_token: text(),
+	lease_until: text(),
+	completed_at: text(),
+	created_at: text().notNull(),
+	updated_at: text().notNull(),
+}, table => [
+	uniqueIndex("airbnb_sync_jobs_listing_unique").on(table.organization_id, table.listing_id),
+	index("airbnb_sync_jobs_due_idx").on(table.state, table.next_attempt_at),
+	check("airbnb_sync_jobs_action_check", sql`action IN ('sync', 'stop')`),
+	check("airbnb_sync_jobs_state_check", sql`state IN ('pending', 'error', 'done', 'failed')`),
+	// A retried row keeps its last error until it succeeds; an error or failure always names one.
+	check("airbnb_sync_jobs_error_check", sql`state NOT IN ('error', 'failed') OR (last_error_code IS NOT NULL AND last_error IS NOT NULL)`),
+	check("airbnb_sync_jobs_lease_check", sql`(lease_token IS NULL) = (lease_until IS NULL)`),
+	check("airbnb_sync_jobs_details_check", sql`details IS NULL OR (action = 'sync' AND json_valid(details) AND json_type(details) = 'object')`),
 ]);
 
 // Every exchange with a channel that changed or refused something: a booking

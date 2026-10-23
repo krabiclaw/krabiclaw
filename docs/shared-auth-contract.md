@@ -36,7 +36,7 @@ Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1,
 | Team | `/api/dashboard/team/members`, `/api/dashboard/team/threads[/:threadId/messages\|/read]`, `PUT /api/dashboard/team/members/:memberId/homes` | A thread seat is a member row and cascades with it. |
 | Homes, stays, nights | `/api/dashboard/stay-homes[/:productId]`, `/api/dashboard/stays[/:stayId]` | A home's check-in window: §3.2. Every home carries `live`: §3.4. |
 | Guest messaging | `/api/dashboard/guest-threads`, `/api/dashboard/message-templates`, `/api/dashboard/scheduled-guest-messages` | Airbnb conversations through Channex. |
-| Airbnb connection | `/api/organizations/:id/integrations/airbnb/*` | Disconnect is separate from account and organization deletion. Importing a listing: §3.3; an import stops as a draft until Activate makes it live: §3.5. |
+| Airbnb connection | `/api/organizations/:id/integrations/airbnb/*` | Disconnect is separate from account and organization deletion. Importing a listing: §3.3; syncing listings in the background, edits sent to Airbnb and what stays Airbnb's: §3.5. |
 | Homes quote | `GET /api/organizations/:id/billing/homes?adding=N` | What making homes live costs before they go live; §3.1. The write that then makes them live answers by the same rule, so a quote that allows them is one the write allows. A refused write is 402 `HOME_LIMIT` with `homes: {used, covered}`; the app offers Business there. |
 | Payouts | `POST /api/dashboard/connect`, `POST /api/dashboard/connect/status`, `GET /api/dashboard/connect` | Stripe-hosted payouts onboarding from the app with `returnTo: "app"`; §3.6. |
 | Push | `POST/DELETE /api/dashboard/devices`, `/api/user/notification-preferences` | A device token belongs to a Better Auth session and cascades with it. |
@@ -95,7 +95,7 @@ The import takes everything it can from Airbnb and asks only for what Airbnb lea
 
    `missingFields` lists only these keys: `timezone`, `email`, `phone`, `country`, `state`, `city`, `address`, `zipCode`, `propertyType`. `childBeds` and `infantCots` no longer exist; Airbnb counts neither, so Channex receives 0 for both. `checkInTime`, `checkInEndTime` and `checkOutTime` are Airbnb's `booking_settings.check_in_time_start`, `check_in_time_end` and `check_out_time` as `HH:MM`, for display only. `checkInEndTime` is `null` for Airbnb's `FLEXIBLE`. A start or checkout Airbnb has not set is `null`.
 2. `POST /api/organizations/:id/integrations/airbnb/listings/:listingId/import` with `{"missingDetails": {…}}`, holding only keys from `missingFields`, each a non-empty string. The fields earlier apps send are read and discarded, never refused: top-level `checkInTime` and `checkOutTime` (the home takes Airbnb's window), and `missingDetails.childBeds` and `missingDetails.infantCots` (Channex gets 0 for both). Any other top-level key is 400 `VALIDATION_ERROR` with `field` naming the key. Any other `missingDetails` key not in `missingFields` is 422 `ONLY_MISSING_DETAILS`. A listing whose Airbnb start or checkout is not set is 422 `MISSING_AIRBNB_FIELD` with `field: "booking_settings.check_in_time_start"` or `"booking_settings.check_out_time"`, and nothing is created; the host sets it on Airbnb and imports again. Success is 202 `{product_id, stage, waiting}`. The new home has Airbnb's check-in window (§3.2).
-3. `POST …/imports/:productId/advance` until `stage` is `draft`; then Activate (§3.5) and `advance` until `complete`. Each answer is `{product_id, stage, waiting, content}`. `content` is the content stage's report once that stage has run, else `null`. The same report is `import.content` in `GET …/listings`.
+3. A new build syncs listings with the sync request (§3.5). Builds that drive an import step by step call `POST …/imports/:productId/advance` until `complete`. Each answer is `{product_id, stage, waiting, content}`. `content` is the content stage's report once that stage has run, else `null`. The same report is `import.content` in `GET …/listings`.
 4. `POST …/imports/:productId/content` runs the content stage again on a completed import (owner or admin): 200 `{product_id, stage: "complete", content}`.
 
 The content report:
@@ -118,8 +118,8 @@ A photo Airbnb cannot serve at 2560 px stops the stage with 502 `PHOTO_FETCH_FAI
 
 A home is **live** when it is active at its active location and either published on the site (`product_publications.published = 1`) or synced with Airbnb (its Channex mapping is enabled). Any other home is a **draft**: free and unlimited on every plan. Billing (`homes.used`, the Stripe homes meter) and Basic's limit count live homes only.
 
-- Adding a home (`POST /api/dashboard/stay-homes`) and importing one (§3.5) are never refused for the plan: the new home is a draft.
-- Publishing a home (`PATCH /api/dashboard/stay-homes/:productId` `{published: true}`, the product publication route, the MCP tool), activating an import (§3.5), reconnecting a listing, turning a home or its location back on: each that makes one more home live past Basic's 2 is refused with 402:
+- Adding a home (`POST /api/dashboard/stay-homes`) and importing one (§3.3) are never refused for the plan: the new home is a draft.
+- Publishing a home (`PATCH /api/dashboard/stay-homes/:productId` `{published: true}`, the product publication route, the MCP tool), syncing an Airbnb listing (§3.5), reconnecting a listing, turning a home or its location back on: each that makes one more home live past Basic's 2 is refused with 402:
 
 ```json
 { "error": "Basic includes 2 homes. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 2, "covered": 2 } }
@@ -128,18 +128,78 @@ A home is **live** when it is active at its active location and either published
   On Growth and Business nothing is refused, and every change to the live count is reported to the Stripe homes meter.
 - Every `home` and `homes[]` from `/api/dashboard/stay-homes…`, and the `stay` object of the product API (`/api/editor/organizations/:id/products…`), carries `"live": true | false`, always present. The public site's product projection does not carry it. No other field changed type.
 
-### 3.5 Airbnb import: draft, Activate, complete
+### 3.5 Airbnb listings: sync in the background
 
-Stages, in order: `property`, `room`, `rate`, `inventory`, `verify_inventory`, `content`, `draft`, `mapping`, `activate`, `reservations`, `messages`, `complete`. `draft` is new and `content` moved before it; each value appears in `import.stage` of `GET …/integrations/airbnb/listings` and in every import response.
+Stages of a listing's import, in order: `property`, `room`, `rate`, `inventory`, `verify_inventory`, `content`, `draft`, `mapping`, `activate`, `reservations`, `messages`, `complete`. `draft` is new and `content` moved before it; each value appears in `import.stage` of `GET …/integrations/airbnb/listings`, in `stage` below and in every import response. A home at `draft` is built (calendar, content, Channex property) and syncs nothing: it is a free draft (`live: false`). From `mapping` on the listing syncs, and from `reservations` its mapping is enabled.
 
-- `POST /api/organizations/:id/integrations/airbnb/listings/:listingId/import` starts an import (202 `{product_id, stage: "property", waiting: false}`); `POST …/imports/:productId/advance` runs one stage each call and answers `{product_id, stage, waiting, content}`. A new import advances until `{stage: "draft", waiting: false}` and stops: the home, its calendar, its content and its Channex property, room type and rate plan exist; nothing is mapped to the Airbnb channel, nothing syncs, and the home is a draft (`live: false`, `channel.status: "importing"`). `advance` on a draft answers `{product_id, stage: "draft", waiting: false, content}` unchanged and writes nothing. Both routes answer 200 at rest (`draft`, `complete`) and 202 otherwise.
-- `POST /api/organizations/:id/integrations/airbnb/imports/:productId/activate`, owner or admin, bearer session. On a draft it checks the plan for one more live home before anything is written to Channex (402 `HOME_LIMIT` as in §3.4, the import left at `draft`), then moves the import to `mapping` and answers 200:
+**Sync request.** `POST /api/organizations/:id/integrations/airbnb/sync`, owner or admin, bearer session:
 
 ```json
-{ "product_id": "8d0c…", "stage": "mapping", "waiting": false }
+{ "sync": [{ "listing_id": "39313043" }, { "listing_id": "40112808", "details": { "zipCode": "84103", "propertyType": "apartment" } }], "stop": ["8d0c…"] }
 ```
 
-  The app then calls `advance` until `complete`, as before; the `mapping` stage checks the plan again before Channex maps the listing, and the `activate` stage enables the mapping, which makes the home live. On an import already past `draft` it answers 200 with its current `{product_id, stage, waiting: false}` unchanged; on one not yet at `draft` it is 409 `IMPORT_IN_PROGRESS`. 404 `IMPORT_NOT_FOUND` when the home is not this connection's import.
+`sync` names listings of the connected Airbnb account to import (if they are not homes yet) and make live, each with `details` (optional): values for the fields `GET …/listings/:listingId` reports in `missingFields`, each text, used when the home is made. Contact email and phone default to the organization's. `stop` names homes imported from the account to take back to free drafts. The plan is checked once for the whole request, before anything is queued: the live homes it leaves are the live homes now, plus each synced listing not live yet, less each stopped home that is not also published on the site. Past Basic's 2 it is 402, nothing queued:
+
+```json
+{ "error": "Basic includes 2 homes. Choose Growth or Business in Billing to add more.", "code": "HOME_LIMIT", "homes": { "used": 2, "covered": 2 }, "quote": { "plan": "free", "currency": "USD", "homes": { "used": 2, "drafts": 0, "included": 2, "additional_price_minor": 900, "amount_minor": 0 }, "adding": { "count": 1, "additional_homes": 1, "amount_minor": 900, "allowed": false }, "billing": { "period_end": null, "prorated": false } } }
+```
+
+`quote` is the homes quote (§3.1) with `adding` the increase. Otherwise 202 with the named listings as `GET` returns them; each replaces any earlier request for that listing. 422 `VALIDATION_ERROR` when it names nothing or names a listing in both; 404 `LISTING_NOT_FOUND` (`listing_id`) for a listing not on the account, 404 `IMPORT_NOT_FOUND` (`product_id`) for a home not imported from it.
+
+**Progress.** `GET /api/organizations/:id/integrations/airbnb/sync`, owner or admin:
+
+```json
+{ "listings": [
+  { "listing_id": "39313043", "product_id": "8d0c…", "action": "sync", "status": "running", "stage": "content", "error": null, "attempts": 0, "next_attempt_at": null, "updated_at": "2026-10-23T07:20:00.000Z" },
+  { "listing_id": "40112808", "product_id": null, "action": "sync", "status": "failed", "stage": null, "error": { "code": "MISSING_DETAIL", "message": "zipCode is required" }, "attempts": 1, "next_attempt_at": null, "updated_at": "…" }
+] }
+```
+
+- `status`: `queued` (waiting its turn), `running` (being worked on, or its import is between stages; `stage` says where), `done`, `failed` (needs a new request). `product_id` is the home once it exists; `stage` is its import stage, `null` before the home exists.
+- `error` is the last failure's code and message. A transient failure (the network, a provider answering 5xx or 429) is retried on its own, after 30 s doubling up to an hour, 8 attempts in all: meanwhile the listing stays `queued` or `running` with that `error`, its `attempts` and `next_attempt_at` (the next retry; `null` when none is due). Any other failure is `failed` until a new request names the listing: `MISSING_DETAIL` (a field Airbnb leaves out that the request's `details` and the organization's contact do not fill; send it in `details`), `ONLY_MISSING_DETAILS`, `INVALID_DETAIL`, `CURRENCY_MISMATCH`, `MISSING_AIRBNB_FIELD`, `LISTING_NOT_FOUND`, `LISTING_LINKED_ELSEWHERE`, `HOME_LIMIT`, `PROVIDER_VERIFICATION_FAILED`, `CONNECTION_NEEDS_REVIEW`, `REQUESTER_REMOVED`.
+- A listing's home found partway (an import or activation that stopped at any stage) is carried on from that stage.
+- The work runs on KrabiClaw: the request starts it, and a task every two minutes carries it on, a few photos per step, until each listing is `done` or `failed`. The app needs to stay open for none of it, and can show progress by reading `GET`.
+
+`GET …/integrations/airbnb/listings/:listingId` stays: the listing's details and `missingFields`, for the app's review before a sync. The step-by-step routes (`…/listings/:listingId/import`, `…/imports/:productId/advance`, `activate`, `deactivate`) are removed: the sync request replaces them.
+
+**Listing rows.** Each `GET …/integrations/airbnb/listings` row is `{id, title, city, country_code, import}`, with `import` either `{"status": "not_imported"}` or:
+
+```json
+{ "status": "imported", "product_id": "8d0c…", "stage": "complete", "syncing": true, "content": { "photos_imported": ["…"], "photos_skipped": [], "photos_upgraded": [], "photos_removed": [], "photos_unplaced": [], "unmatched_amenities": [], "unmapped_check_in_category": null, "truncated_fields": [], "photo_rooms_skipped": 0, "kept_host_edits": [] } }
+```
+
+`syncing` is whether the listing syncs with Airbnb now (its mapping is enabled): `false` at `draft`, `true` at `complete`, either while in progress. `content` is `null` until the content stage has finished. `kept_host_edits` (new, absent from reports written before it) lists fields the host changed in KrabiClaw since Airbnb's value was last written, which a content refresh kept as the host has them.
+
+**Stopping a listing** (a `stop`) removes this listing's rate plan mapping from the Airbnb channel (`DELETE /channels/{channel}/mappings/{mapping}`, which Channex passes on to Airbnb), uninstalls the property's Channex Messages app, and moves the import back to `draft` with the mapping disabled. The channel stays active for the account's other listings; the home, its photos, texts, rates, calendar and stays are kept, and a later `sync` makes it live again.
+
+### 3.5.1 What an edit sends to Airbnb
+
+Editing a home that syncs with Airbnb (`PATCH /api/dashboard/stay-homes/:productId`, the product editor, MCP) sends what Airbnb takes through Channex, right after the save:
+
+| KrabiClaw field | Airbnb (through Channex) |
+|---|---|
+| `check_in_time` | booking settings `check_in_time_start`, whole hours "8"–"26" (a start from 00:00 to 02:00 is the next day, "24"–"26") |
+| `check_in_end_time` | `check_in_time_end`: `null` is "FLEXIBLE"; an end earlier than the start is the next day (up to "27") |
+| `check_out_time` | `check_out_time`, the hour |
+| `pets_allowed`, `smoking_allowed`, `events_allowed` | `guest_controls` `allows_pets_as_host`, `allows_smoking_as_host`, `allows_events_as_host`, when set |
+| `cancellation_policy` | `cancellation_policy_category`: flexible → `flexible`, moderate → `moderate`, limited → `firm_14`, firm → `better_strict_with_grace_period` (Airbnb's options of the same title and wording). Airbnb offers no Strict: setting `strict` on a home syncing with Airbnb is refused before it is saved, 422 `AIRBNB_UNSUPPORTED_VALUE` with `field: "cancellation_policy"`. |
+| `long_term_cancellation_policy` | `lts_cancellation_policy_id`: firm → `CANCEL_LONG_TERM_FAIR`, strict → `CANCEL_LONG_TERM_WITH_GRACE_PERIOD` |
+| `min_nights` | availability settings `default_min_nights` (each night's own minimum goes with the nightly calendar, as before) |
+
+A value Airbnb cannot take (a time with minutes, a start before 08:00 that is not after midnight) is saved and not sent: 503 `CHANNEL_PUSH_FAILED` with `committed: true` and the reason, as a calendar push failure is. Prices are not sent as listing settings: every night's price (the base price for nights without their own) already reaches Airbnb with the nightly calendar, and Airbnb's default nightly price takes whole amounts only. KrabiClaw has no field for weekend price, extra-guest price, fees, maximum nights by default, booking lead time, instant book, children, infants or pet count, or Airbnb's listed/unlisted state, so none of them is sent; `published` is the home on the KrabiClaw site, not on Airbnb.
+
+### 3.5.2 What stays Airbnb's
+
+Channex cannot write a listing's title, description, photos, amenities, guest count, check-in method, wifi, directions or house manual. They stay editable in KrabiClaw for the KrabiClaw site. A save that changes one of them on a home syncing with Airbnb answers which, with where to make the same change on Airbnb; `airbnb_unsynced` is always present, `[]` when nothing applies:
+
+```json
+{ "home": { "…": "…" }, "channel_push": null, "airbnb_unsynced": [
+  { "field": "description", "airbnb_url": "https://www.airbnb.com/hosting/listings/editor/39313043/details/description" },
+  { "field": "wifi", "airbnb_url": "https://www.airbnb.com/hosting/listings/editor/39313043/arrival/wifi-details" }
+] }
+```
+
+`field` is one of `name` (`/details/title`), `description` (`/details/description`), `photos` (`/details/photo-tour`), `amenities` (`/details/amenities`, from `amenities` or `amenity_answers`), `max_guests` (`/details/number-of-guests`), `check_in_method` (`/arrival/check-in-method`, from `check_in_method` or `check_in_instructions`), `wifi` (`/arrival/wifi-details`, from `wifi_network` or `wifi_password`), `directions` (`/arrival/directions`), `house_manual` (`/arrival/house-manual`). Routes that carry it: `PATCH /api/dashboard/stay-homes/:productId` (`{home, channel_push, airbnb_unsynced}`), and `POST`/`PUT …/photos`, `PATCH`/`DELETE …/photos/:photoId` and `PUT …/photos/move` (`{home, airbnb_unsynced}`). Every home carries `airbnb_listing_id` and `airbnb_editor_url` (`https://www.airbnb.com/hosting/listings/editor/<id>/details`), both `null` for a home not imported from Airbnb. A content refresh from Airbnb never overwrites a field the host changed here: it writes only fields still holding what the last import wrote, and lists the others in `kept_host_edits`.
 
 ### 3.6 Payouts
 

@@ -3,7 +3,7 @@ import { getRouterParam } from 'nitro/h3'
 import { jsonResponse, readRequiredBody } from '~/server/utils/api-response'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
-import { reorderStayHomePhotos, stayAccessFor } from '~/server/domain/stays'
+import { airbnbUnsynced, reorderStayHomePhotos, stayAccessFor } from '~/server/domain/stays'
 
 // Put a place to stay's photos in order; the first is its cover.
 export default defineHandler(async (event) => {
@@ -11,5 +11,7 @@ export default defineHandler(async (event) => {
   const principal = memberAccessPrincipal(organization, { env, event })
   const access = await stayAccessFor(principal)
   const body = await readRequiredBody<Record<string, unknown>>(event)
-  return jsonResponse({ home: await reorderStayHomePhotos(db, env, access, principal, getRouterParam(event, 'productId') ?? '', body) })
+  const home = await reorderStayHomePhotos(db, env, access, principal, getRouterParam(event, 'productId') ?? '', body)
+  // Photos are Airbnb's to hold: a home syncing with Airbnb names where to change them there too.
+  return jsonResponse({ home, airbnb_unsynced: airbnbUnsynced(home, ['photos']) })
 })

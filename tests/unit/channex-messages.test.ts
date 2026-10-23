@@ -74,6 +74,9 @@ test('provider timestamps retain microseconds and explicit offsets while refusin
 test('inquiry system metadata distinguishes absence, null and actual structured data', () => {
   const plain = parseChannexMessage(message, env)
   assert.equal(plain.sender, 'system')
+  // An Airbnb agent's message, as a live Airbnb thread carries it (2026-10-23): read, not refused; any other sender is.
+  assert.equal(parseChannexMessage({ ...message, attributes: { ...message.attributes, sender: 'agent', meta: { name: 'Airbnb', role: 'AGENT' } } }, env).sender, 'agent')
+  assert.throws(() => parseChannexMessage({ ...message, attributes: { ...message.attributes, sender: 'robot' } }, env), invalidField('sender'))
   assert.equal(Object.hasOwn(plain, 'meta'), false)
   assert.equal(parseChannexMessage({ ...message, attributes: { ...message.attributes, meta: null } }, env).meta, null)
   const meta = { booking_details: { guest_name: 'Actual inquiry guest', checkin_date: '2023-12-02' } }

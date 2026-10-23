@@ -176,6 +176,13 @@
       "when": 1792728931307,
       "tag": "0024_airbnb_import_draft",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1792740785361,
+      "tag": "0025_airbnb_sync_jobs",
+      "breakpoints": true
     }
   ]
 }
