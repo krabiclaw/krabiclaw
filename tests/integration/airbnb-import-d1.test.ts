@@ -551,17 +551,15 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     const login = await createAuth(env).api.signInEmail({ body: { email: 'owner@example.test', password: PASSWORD }, asResponse: true })
     const token = login.headers.get('set-auth-token')
     assert.ok(token, 'Better Auth answers a bearer token for the app')
-    // The first slice a request starts runs after the answer, as the Worker's waitUntil runs it.
-    const background: Array<Promise<unknown>> = []
     // As the iPhone app calls: a bearer session and no browser origin.
     const call = async (method: string, body?: unknown) => {
       const response = await app.request(Object.assign(new Request(`${BASE}/api/organizations/${ORG}/integrations/airbnb/sync`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) }),
-        { runtime: { name: 'cloudflare', cloudflare: { env, context: { waitUntil: (promise: Promise<unknown>) => background.push(promise) } } } }))
+        { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       return { status: response.status, body: await response.json() as Record<string, unknown> }
     }
-    const settle = async () => { await Promise.all(background.splice(0)) }
-    // The cron task's run: as many as it takes, each a slice of its own.
-    const cron = async () => { for (let run = 0; run < 6; run++) await runAirbnbSyncJobs(env, Date.now() + 60_000) }
+    // The cron task's runs: one, or as many as it takes, each a slice of its own.
+    const settle = async () => { await runAirbnbSyncJobs(env, Date.now() + 60_000) }
+    const cron = async () => { for (let run = 0; run < 6; run++) await settle() }
     const job = () => db.prepare('SELECT action, state, product_id, last_error_code, attempts FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first<Record<string, unknown>>()
 
     // Basic with two live homes: syncing a third is refused before anything is queued, with the quote.
@@ -592,6 +590,10 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     channex.extraPhotos = 8
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING, details: form.missingDetails }] })).status, 202)
     await settle()
+    // While a run holds the connection, as one stopped mid-step leaves it, the listings stay readable with their stage.
+    await db.prepare("UPDATE channex_connections SET operation_id = 'run-in-progress'").run()
+    assert.deepEqual((await new AirbnbConnection(db, env, ORG, OWNER).listings()).map(listing => [listing.id, listing.import.status]), [[LISTING, 'imported']])
+    await db.prepare('UPDATE channex_connections SET operation_id = NULL').run()
     await cron()
     const done = await job()
     assert.deepEqual({ ...done, product_id: null }, { action: 'sync', state: 'done', product_id: null, last_error_code: null, attempts: 0 })

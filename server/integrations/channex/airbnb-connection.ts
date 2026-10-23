@@ -349,7 +349,7 @@ export class AirbnbConnection {
 
   private async connected(): Promise<ConnectionRow & { channel_id: string }> {
     const row = await this.row()
-    if (!row || row.status !== 'connected' || !row.channel_id || row.operation_id) fail(409, 'NOT_CONNECTED', 'Connect your Airbnb account first.')
+    if (!row || row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect your Airbnb account first.')
     return row as ConnectionRow & { channel_id: string }
   }
 
