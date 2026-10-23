@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e1c783abc6c51144da401bbbd8523aa8d6371fcca5f3520119ee69b0cf507226",
-  "documentationFingerprint": "sha256:f76415e1b8923f5bc27849b23ade47b4b6e2b4c024e5e8256815b2c3f2c96290",
+  "fingerprint": "sha256:5dfbbe66450498b68702bb94e17323117fb139283309f8f440d925c4ef8ced10",
+  "documentationFingerprint": "sha256:6095b96fa615004ef373a52757ccbe95446bc9062aceadf496e90c53b0ad6715",
   "tools": [
     {
       "name": "add_organization_language",
@@ -34714,7 +34714,7 @@
     {
       "name": "create_stay",
       "title": "Create stay",
-      "description": "Add a stay the host took directly (phone, repeat guest) at a place to stay. It holds its nights; a night another stay already holds refuses it with STAY_OVERLAP. Takes no payment and sends no guest email.",
+      "description": "Add a stay the host took directly (phone, repeat guest) at a place to stay. It holds its nights; a night another stay already holds refuses it with STAY_OVERLAP. Takes no payment. Applies existing automatic guest-message schedules and updates connected Airbnb availability through Channex. CHANNEL_PUSH_FAILED with committed:true means the stay was saved; inspect the calendar before retrying.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
