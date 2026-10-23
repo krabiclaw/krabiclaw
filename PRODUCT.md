@@ -85,17 +85,18 @@ A push that Apple refuses is recorded as failed.
 
 ## Airbnb listings
 
-A host connects their Airbnb account through Channex and imports a listing as a
-home. The import asks only for what Airbnb leaves out (the organization's
-contact details, until it has them) and takes everything else from Airbnb. A
-listing without a check-in start or checkout time on Airbnb is refused, naming
-the field to set there. Import first prepares the Channex property, room type and
-rate plan, calendar and listing content, then stops at a free draft. The host
-explicitly activates the import after reviewing the home allowance. The apps
-then advance mapping, activation, future reservations and the conversation feed
-until complete. A draft import does not sync with Airbnb; activation checks the
-plan before mapping the listing. This connection applies to the selected
-Airbnb account and mapped homes, not every booking channel.
+A host connects their Airbnb account through Channex and requests which listings
+to sync. The request checks the resulting live-home allowance before queuing
+anything. KrabiClaw imports new homes and completes their setup, mapping,
+activation, future reservations and conversation feed in the background; the
+app need not stay open or advance each stage. A draft is an intermediate state,
+not a separate activation decision. Progress and failures are read from the
+sync request's status. The import asks only for what Airbnb leaves out, using
+the organization's contact details where available. A listing without a check-in
+start or checkout time on Airbnb fails before creating a home, naming the field
+to set there before requesting sync again. This connection applies to the
+selected Airbnb account and listings, not every booking channel. See the
+[Airbnb sync contract](docs/shared-auth-contract.md#35-airbnb-listings-sync-in-the-background).
 
 The content stage copies the listing onto the home, one Airbnb field to one
 home field:
