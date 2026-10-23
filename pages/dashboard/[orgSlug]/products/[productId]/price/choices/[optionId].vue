@@ -62,10 +62,9 @@ const optionId = computed(() => String(route.params.optionId))
 const index = computed(() => p.form.options.findIndex(entry => entry.id === optionId.value))
 const option = computed(() => p.form.options[index.value] ?? null)
 const savedVariants = computed(() => p.form.variants.filter(variant => variant.id))
-const requiresMapping = computed(() => Boolean(option.value && p.product.value && !p.product.value.options.some(saved => saved.id === option.value!.id)))
+const requiresMapping = computed(() => Boolean(option.value && p.product.value && (!p.product.value.options.some(saved => saved.id === option.value!.id) || !p.validChoiceSelections(savedVariants.value))))
 const mappingError = computed(() => {
-  const pending = p.form.options.filter(option => !p.product.value?.options.some(saved => saved.id === option.id))
-  if (!pending.length || !p.form.options.every(option => option.name.trim() && option.values.length)) return ''
+  if (!p.form.options.every(option => option.name.trim() && option.values.length) || p.validChoiceSelections(savedVariants.value)) return ''
   const missing = p.form.options.filter(option => savedVariants.value.some(variant => !option.values.some(value => (value.id ?? value.value) === variant.selections[option.id])))
   if (missing.length) return `Set ${missing.map(option => option.name).join(' and ')} for each saved priced choice before saving.`
   const selections = savedVariants.value.map(variant => JSON.stringify(p.form.options.map(option => variant.selections[option.id])))

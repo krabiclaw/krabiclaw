@@ -25,13 +25,13 @@
   >
     <template v-if="p.isNew.value || p.product.value">
       <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/{{ PRODUCT_LIMITS.description }} available</p>
-      <UTextarea ref="descriptionTextarea" v-model="p.form.description" :aria-label="p.sectionLabels.description" variant="none" :rows="1" :maxlength="PRODUCT_LIMITS.description" autoresize autofocus class="w-full" />
+      <UTextarea ref="descriptionTextarea" v-model="p.form.description" :aria-label="p.sectionLabels.description" variant="none" :rows="1" :maxlength="PRODUCT_LIMITS.description" :ui="{ base: 'resize-none' }" autofocus class="w-full" />
     </template>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
-import { useElementSize } from '@vueuse/core'
+import { useTextareaAutosize } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
@@ -46,10 +46,7 @@ const router = useRouter()
 const isStay = computed(() => p.product.value?.kind === 'stay')
 const charactersRemaining = computed(() => PRODUCT_LIMITS.description - p.form.description.length)
 const descriptionTextarea = useTemplateRef('descriptionTextarea')
-const { width: descriptionWidth } = useElementSize(() => descriptionTextarea.value?.textareaRef)
-watch(descriptionWidth, (width) => {
-  if (width > 0) descriptionTextarea.value?.autoResize()
-}, { flush: 'post' })
+useTextareaAutosize({ element: computed(() => descriptionTextarea.value?.textareaRef), input: computed(() => p.form.description) })
 const descriptionFields = productDetailFields('stay').filter(field => (STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(field.key))
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'description',

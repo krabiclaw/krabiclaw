@@ -297,6 +297,7 @@ export interface ProductEditor {
   removeOption: (index: number) => void
   setOptionValues: (index: number, values: string[]) => void
   setOptionSelection: (variant: VariantDraft, optionId: string, value: string) => void
+  validChoiceSelections: (variants: readonly VariantDraft[]) => boolean
   setDetail: (definition: ProductDetailField, value: ProductDetailValue) => void
   listValue: (definition: ProductDetailField) => string[]
   textValue: (definition: ProductDetailField) => string
@@ -947,6 +948,20 @@ function setOptionSelection(variant: VariantDraft, optionId: string, value: stri
   rebuildVariants()
 }
 
+/** Every retained version explicitly selects one valid, distinct combination. */
+function validChoiceSelections(variants: readonly VariantDraft[]): boolean {
+  if (!form.options.length) return true
+  const keys = new Set<string>()
+  return form.options.every(option => option.name.trim() && option.values.length)
+    && variants.every(variant => {
+      if (!form.options.every(option => option.values.some(value => (value.id ?? value.value) === variant.selections[option.id]))) return false
+      const key = combinationKey(variant.selections)
+      if (keys.has(key)) return false
+      keys.add(key)
+      return true
+    })
+}
+
 /**
  * Every combination of option values, once each.
  *
@@ -954,15 +969,9 @@ function setOptionSelection(variant: VariantDraft, optionId: string, value: stri
  * option's values must not move a price onto a different thing.
  */
 function rebuildVariants() {
-  // Every choice editor shares this draft. Changing an existing dimension may
-  // not bypass the explicit mapping still required by a new dimension.
-  if (product.value && form.options.some(option => !product.value!.options.some(saved => saved.id === option.id))) {
-    const saved = form.variants.filter(variant => variant.id)
-    if (!form.options.every(option => option.name.trim() && option.values.length)
-      || !saved.every(variant => form.options.every(option => option.values.some(value => (value.id ?? value.value) === variant.selections[option.id])))) return
-    const keys = saved.map(variant => combinationKey(variant.selections))
-    if (new Set(keys).size !== keys.length) return
-  }
+  // Clearing or removing an existing dimension can invalidate saved mappings
+  // just as adding one can. Retain every saved row until the host resolves it.
+  if (!validChoiceSelections(form.variants.filter(variant => variant.id))) return
   const options = form.options.filter(option => option.name.trim() && option.values.length)
   if (!options.length) {
     // Removing a dimension retains the things sold under it, including their
@@ -1038,18 +1047,7 @@ const sectionValid = computed(() => {
     return !invalidBedrooms && !invalidBeds && !invalidBaths
   }
   if (editorKey.value === 'team') return true
-  if (editorKey.value === 'price' && typeof route.params.optionId === 'string') {
-    if (!form.options.length) return true
-    const combinations = new Set<string>()
-    return form.options.every(option => option.name.trim() && option.values.length > 0)
-      && form.variants.every(variant => {
-        if (!form.options.every(option => option.values.some(value => (value.id ?? value.value) === variant.selections[option.id]))) return false
-        const combination = JSON.stringify(form.options.map(option => variant.selections[option.id]))
-        if (combinations.has(combination)) return false
-        combinations.add(combination)
-        return true
-      })
-  }
+  if (editorKey.value === 'price' && typeof route.params.optionId === 'string') return validChoiceSelections(form.variants)
   return true
 })
 
@@ -2238,6 +2236,7 @@ provide(productEditorKey, {
   removeOption,
   setOptionValues,
   setOptionSelection,
+  validChoiceSelections,
   setDetail,
   listValue,
   textValue,

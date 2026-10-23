@@ -1644,16 +1644,28 @@ test.describe('dashboard pane hierarchy', () => {
       for (const item of past) {
         await expect(page.getByTestId(`account-activity-${item.kind}-${item.id}`)).toContainText(item.title)
       }
+      const ownedDetails = await Promise.all(activity.activities.map(async (item) => {
+        const read = await page.request.get(`/api/account/bookings/${item.kind}/${encodeURIComponent(item.id)}`)
+        expect(read.status(), await read.text()).toBe(200)
+        const detail = await read.json()
+        expect(isBookingDetailsResponse(detail), 'the independent account detail read returns the owned record').toBe(true)
+        if (!isBookingDetailsResponse(detail)) throw new Error('Invalid account booking details response')
+        return { kind: item.kind, id: item.id, booking: detail.booking }
+      }))
+      const expectedPaymentIds = new Set<string>()
+      for (const detail of ownedDetails) {
+        for (const { payment, refunds } of detail.booking.payments ?? []) {
+          if (payment.captured_amount <= 0) continue
+          expectedPaymentIds.add(`paid:${payment.id}`)
+          for (const refund of refunds) if (refund.status === 'succeeded') expectedPaymentIds.add(`refund:${refund.id}`)
+        }
+      }
       // The copied actor's own history may be empty; never create a purchase to
       // make the dashboard assert its fabricated premise.
       if (past.length) {
         const item = past[0]!
         // A visit and a purchase open the same record screen, on the account's own read.
-        const read = await page.request.get(`/api/account/bookings/${item.kind}/${item.id}`)
-        expect(read.status(), await read.text()).toBe(200)
-        const detail = await read.json()
-        expect(isBookingDetailsResponse(detail), 'the account detail API returns the canonical record').toBe(true)
-        if (!isBookingDetailsResponse(detail)) throw new Error('Invalid account booking details response')
+        const detail = ownedDetails.find(read => read.kind === item.kind && read.id === item.id)!
         const paymentCount = (detail.booking.payments ?? []).length
         await page.getByTestId(`account-activity-${item.kind}-${item.id}`).click()
         await expect(page).toHaveURL(`/dashboard/account/activity/${item.kind}/${item.id}`)
@@ -1674,7 +1686,8 @@ test.describe('dashboard pane hierarchy', () => {
       expect(paymentsRead.status(), await paymentsRead.text()).toBe(200)
       const { entries } = await paymentsRead.json() as { entries: BuyerPaymentEntry[] }
       expect(Array.isArray(entries) && entries.every(isBuyerPaymentEntry), 'Payments returns this account’s actual payments and refunds').toBe(true)
-      await expect(payments.locator('[data-testid^="account-payment-"]')).toHaveCount(Math.min(entries.length, 10))
+      expect(entries.map(entry => entry.id).sort(), 'Payments contains exactly the captures and completed refunds from independent owned-record reads').toEqual([...expectedPaymentIds].sort())
+      await expect(payments.locator('[data-testid^="account-payment-"]')).toHaveCount(Math.min(expectedPaymentIds.size, 10))
       for (const entry of entries.slice(0, 10)) {
         const row = payments.getByTestId(`account-payment-${entry.id}`)
         await expect(row).toHaveAttribute('href', entry.to)
@@ -1684,7 +1697,7 @@ test.describe('dashboard pane hierarchy', () => {
         await expect(row).toContainText(entry.currency)
         if (entry.organizationName) await expect(row).toContainText(entry.organizationName)
       }
-      if (!entries.length) await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
+      if (!expectedPaymentIds.size) await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
       await payments.getByTestId('dashboard-navbar-close').click()
       await expect(page).toHaveURL('/dashboard/account/profile')
       await expect(page.getByRole('dialog')).toHaveCount(0)
@@ -2243,7 +2256,7 @@ test.describe('dashboard pane hierarchy', () => {
   // Account settings carries no organization in its URL. Better Auth's active
   // organization keeps the shell in it, and a member's own availability —
   // where Google Calendar connects — is that organization's page.
-  test('Account settings keeps the active organization\'s shell', async ({ page, baseURL }, testInfo) => {
+  test('Account settings keeps the active organization\'s shell', async ({ page, baseURL, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Account writes and the unconfigured image-provider response use isolated local data only.')
     const organizationId = 'org-ncls-blawby'
     const release = await acquireTenantMutationLock(testInfo, organizationId)
@@ -2254,10 +2267,12 @@ test.describe('dashboard pane hierarchy', () => {
     let previous: MemberSchedule = null
     let bioSaved = false
     let nameSaved = false
+    let cleanupRequest: APIRequestContext | undefined
     const failures: unknown[] = []
     try {
     await page.context().clearCookies()
     await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
+    cleanupRequest = await playwright.request.newContext({ baseURL, storageState: await page.request.storageState() })
     const activated = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId } })
     expect(activated.status(), await activated.text()).toBe(200)
     await page.setViewportSize({ width: 390, height: 844 })
@@ -2358,6 +2373,26 @@ test.describe('dashboard pane hierarchy', () => {
       page.off('request', observeReload)
     }
 
+    await bioLeaf.getByTestId('dashboard-navbar-close').click()
+    await expect(page).toHaveURL(`${availability}/profile`)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    const publishProfile = page.getByRole('link', { name: /^Publish profile/ })
+    await expect(publishProfile).toBeVisible()
+    await publishProfile.click()
+    const approvalLeaf = page.locator('#dashboard-panel-member-published')
+    await expect(approvalLeaf.getByRole('switch', { name: 'Publish profile', exact: true })).not.toBeChecked()
+    await approvalLeaf.getByRole('switch', { name: 'Publish profile', exact: true }).check()
+    const approvalWrite = page.waitForResponse(response => new URL(response.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && response.request().method() === 'PUT')
+    await approvalLeaf.getByRole('button', { name: 'Save', exact: true }).click()
+    const approvalResponse = await approvalWrite
+    expect(approvalResponse.status(), await approvalResponse.text()).toBe(200)
+    expect(approvalResponse.request().postDataJSON()).toEqual({ public_approved: true, expected_updated_at: concurrent.updated_at })
+    const approvalRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+    expect(approvalRead.status(), await approvalRead.text()).toBe(200)
+    const approved = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await approvalRead.json()).scheduling
+    expect(approved).toEqual({ ...concurrent, public_approved: 1, updated_at: approved.updated_at, updated_by: originalUser.id })
+    expect(approved.updated_at).not.toBe(concurrent.updated_at)
+
     await open(page, '/dashboard/account/profile/personal')
     const personal = page.locator('#dashboard-panel-account-personal')
     const nameRow = personal.locator('.divide-y > div').filter({ has: page.getByText('Display name', { exact: true }) })
@@ -2397,10 +2432,9 @@ test.describe('dashboard pane hierarchy', () => {
     const payments = page.locator('#dashboard-panel-account-payments')
     const paymentsRead = await page.request.get('/api/account/payments')
     expect(paymentsRead.status(), await paymentsRead.text()).toBe(200)
-    const { entries } = await paymentsRead.json() as { entries: BuyerPaymentEntry[] }
-    expect(Array.isArray(entries) && entries.every(isBuyerPaymentEntry)).toBe(true)
-    await expect(payments.locator('[data-testid^="account-payment-"]')).toHaveCount(Math.min(entries.length, 10))
-    if (!entries.length) await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
+    expect(await paymentsRead.json(), 'the fictional NCLS owner has no owned payments or refunds').toEqual({ entries: [] })
+    await expect(payments.locator('[data-testid^="account-payment-"]')).toHaveCount(0)
+    await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
     await page.setViewportSize(WIDE)
     await expect(payments.getByRole('heading', { name: 'Payments', exact: true })).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath('shared-payments-desktop.png') })
@@ -2414,27 +2448,28 @@ test.describe('dashboard pane hierarchy', () => {
     finally {
       try {
         if (nameSaved && originalUser) {
-          const restored = await page.request.post('/api/auth/update-user', { headers: authRequestHeaders(baseURL!), data: { name: originalUser.name } })
+          const restored = await cleanupRequest!.post('/api/auth/update-user', { headers: authRequestHeaders(baseURL!), data: { name: originalUser.name } })
           expect(restored.status(), await restored.text()).toBe(200)
-          const read = await page.request.get('/api/auth/get-session', { params: { disableCookieCache: 'true' } })
+          const read = await cleanupRequest!.get('/api/auth/get-session', { params: { disableCookieCache: 'true' } })
           expect(read.status(), await read.text()).toBe(200)
           expect((await read.json()).user).toMatchObject(originalUser)
         }
       } catch (error) { failures.push(error) }
       try {
         if (bioSaved && memberId && originalUser) {
-          const current = await page.request.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
+          const current = await cleanupRequest!.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
           expect(current.status(), await current.text()).toBe(200)
           const record = (await current.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
-          const restored = await page.request.put(`/api/organizations/${organizationId}/members/${memberId}/scheduling`, { data: { public_bio: previous?.public_bio ?? null, public_approved: Boolean(previous?.public_approved), expected_updated_at: record.updated_at } })
+          const restored = await cleanupRequest!.put(`/api/organizations/${organizationId}/members/${memberId}/scheduling`, { data: { public_bio: previous?.public_bio ?? null, public_approved: Boolean(previous?.public_approved), expected_updated_at: record.updated_at } })
           expect(restored.status(), await restored.text()).toBe(200)
-          const independent = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+          const independent = await mcpRequest(cleanupRequest!, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
           expect(independent.status(), await independent.text()).toBe(200)
           const read = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await independent.json()).scheduling
           if (previous) expect(read).toEqual({ ...previous, updated_at: read.updated_at, updated_by: originalUser.id })
           else expect(read).toMatchObject({ public_bio: null, public_name: null, public_photo_url: null, public_approved: 0, timezone: null, weekly: null, time_off: null, calendar_account_id: null, calendar_ids: [], busy_from: null, busy_until: null, busy_checked_at: null, busy_error: null, calendar_status: 'internal' })
         }
       } catch (error) { failures.push(error) }
+      try { await cleanupRequest?.dispose() } catch (error) { failures.push(error) }
       try { await release() } catch (error) { failures.push(error) }
     }
     if (failures.length) throw new AggregateError(failures, 'Account profile verification or restoration failed')

@@ -707,8 +707,8 @@ A URL names a record, a concern, a keyed item, a tab or a mode, and a direct
 entry or a reload reconstructs it. A control's temporary state — a picker, a
 popover, a filter chip, a confirmation — is not in it.
 
-- **Keyed items use their ids.** An option is `options/:optionId`, a price
-  `options/prices/:variantId`, a block `sections/:blockId`; never an index, a
+- **Keyed items use their ids.** A price choice is `price/choices/:optionId`, an amount
+  `price/amounts/:variantId`, a block `sections/:blockId`; never an index, a
   name or a combination label, so reordering or renaming never changes which
   item a saved URL edits.
 - **Views keep their query.** Blog or Docs is `?collection=`, Q&A or Reviews

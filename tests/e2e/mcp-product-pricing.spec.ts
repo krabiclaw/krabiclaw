@@ -177,7 +177,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     await values.press('Enter')
     await values.fill('Blue')
     await values.press('Enter')
-    await pricing.getByRole('link', { name: 'Portion', exact: false }).click()
+    await pricing.getByTestId(`editor-row-option-${portion.id}`).click()
     await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Portion')
     await choice.getByRole('button', { name: 'Small portion', exact: true }).click()
     await values.fill('Small portion')
@@ -188,11 +188,94 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     await expect(pricing.getByRole('link', { name: 'Twelve pieces', exact: false })).toContainText('9.00 USD')
     await expect(choice.getByText('Set Portion and Color for each saved priced choice before saving.', { exact: true })).toBeVisible()
     await expect(choice.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await choice.getByRole('button', { name: 'Cancel', exact: true }).click()
+    const pendingDimension = await request.get(`${baseURL}${editorPath}`)
+    expect(pendingDimension.status()).toBe(200)
+    expect((await pendingDimension.json() as { product: Product }).product).toEqual(before)
+    for (const [name, selection] of [['Six pieces', 'Small portion'], ['Twelve pieces', 'Large portion']] as const) {
+      await choice.getByRole('combobox', { name, exact: true }).click()
+      await bookingPage.getByRole('option', { name: selection, exact: true }).click()
+    }
+    await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    for (const [name, selection] of [['Six pieces', 'Red'], ['Twelve pieces', 'Blue']] as const) {
+      await choice.getByRole('combobox', { name, exact: true }).click()
+      await bookingPage.getByRole('option', { name: selection, exact: true }).click()
+    }
+    const colorWrite = bookingPage.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === editorPath)
+    await choice.getByRole('button', { name: 'Save', exact: true }).click()
+    const colorResponse = await colorWrite
+    expect(colorResponse.status(), await colorResponse.text()).toBe(200)
     await expect(bookingPage).toHaveURL(`${baseURL}${productPath}/price`)
-    const cancelledDimension = await request.get(`${baseURL}${editorPath}`)
-    expect(cancelledDimension.status()).toBe(200)
-    expect((await cancelledDimension.json() as { product: Product }).product).toEqual(before)
+    const matrixRead = await request.get(`${baseURL}${editorPath}`)
+    expect(matrixRead.status()).toBe(200)
+    const matrix = (await matrixRead.json() as { product: Product }).product
+    expect(matrix.variants).toHaveLength(4)
+    expect(matrix.options.map(option => option.name)).toEqual(['Portion', 'Color'])
+    for (const previous of before.variants) {
+      const saved = matrix.variants.find(variant => variant.id === previous.id)!
+      expect({ ...saved, option_values: previous.option_values }).toEqual(previous)
+    }
+    expect(matrix.variants.filter(variant => !before.variants.some(previous => previous.id === variant.id)).map(variant => ({ name: variant.name, prices: variant.prices }))).toEqual([
+      { name: 'Large portion / Red', prices: [] }, { name: 'Small portion / Blue', prices: [] },
+    ])
+    expect({ ...matrix, options: before.options, variants: before.variants, updated_at: before.updated_at, updated_by: before.updated_by }).toEqual(before)
+    before = matrix
+
+    // Clearing an existing dimension must retain all four saved identities.
+    // Editing the remaining one cannot collapse rows onto duplicate keys.
+    await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    await choice.getByRole('button', { name: 'Red', exact: true }).click()
+    await choice.getByRole('button', { name: 'Blue', exact: true }).click()
+    await pricing.getByTestId(`editor-row-option-${portion.id}`).click()
+    await choice.getByRole('button', { name: 'Large portion', exact: true }).click()
+    await values.fill('Large portion')
+    await values.press('Enter')
+    for (const variant of before.variants) {
+      const row = pricing.getByRole('link', { name: variant.name, exact: false })
+      await expect(row).toHaveAttribute('href', `${productPath}/price/amounts/${variant.id}`)
+      if (variant.name === 'Six pieces') await expect(row).toContainText('5.00 USD')
+      if (variant.name === 'Twelve pieces') await expect(row).toContainText('9.00 USD')
+    }
+    await expect(choice.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    const unchangedMatrix = await request.get(`${baseURL}${editorPath}`)
+    expect(unchangedMatrix.status()).toBe(200)
+    expect((await unchangedMatrix.json() as { product: Product }).product).toEqual(before)
+    const matrixPortion = before.options.find(option => option.name === 'Portion')!
+    const matrixColor = before.options.find(option => option.name === 'Color')!
+    for (const variant of before.variants) {
+      const selection = matrixPortion.values.find(value => value.id === variant.option_values[matrixPortion.id])!.value
+      await choice.getByRole('combobox', { name: variant.name, exact: true }).click()
+      await bookingPage.getByRole('option', { name: selection, exact: true }).click()
+    }
+    await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    await values.fill('Red')
+    await values.press('Enter')
+    await values.fill('Blue')
+    await values.press('Enter')
+    for (const variant of before.variants) {
+      const selection = matrixColor.values.find(value => value.id === variant.option_values[matrixColor.id])!.value
+      await choice.getByRole('combobox', { name: variant.name, exact: true }).click()
+      await bookingPage.getByRole('option', { name: selection, exact: true }).click()
+    }
+    const remapWrite = bookingPage.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === editorPath)
+    await choice.getByRole('button', { name: 'Save', exact: true }).click()
+    const remapResponse = await remapWrite
+    expect(remapResponse.status(), await remapResponse.text()).toBe(200)
+    await expect(bookingPage).toHaveURL(`${baseURL}${productPath}/price`)
+    const remapRead = await request.get(`${baseURL}${editorPath}`)
+    expect(remapRead.status()).toBe(200)
+    const remapped = (await remapRead.json() as { product: Product }).product
+    expect(remapped.variants).toHaveLength(4)
+    for (const previous of before.variants) {
+      const saved = remapped.variants.find(variant => variant.id === previous.id)!
+      expect({ ...saved, option_values: previous.option_values }).toEqual(previous)
+      for (const previousOption of before.options) {
+        const savedOption = remapped.options.find(option => option.id === previousOption.id)!
+        expect(savedOption.values.find(value => value.id === saved.option_values[savedOption.id])!.value)
+          .toBe(previousOption.values.find(value => value.id === previous.option_values[previousOption.id])!.value)
+      }
+    }
+    expect({ ...remapped, options: before.options, variants: before.variants, updated_at: before.updated_at, updated_by: before.updated_by }).toEqual(before)
+    before = remapped
 
     // The same price leaf edits one offer after choices are mapped, preserving
     // the sibling, other currency and every stored term of the changed offer.
@@ -217,7 +300,8 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     expect({ ...savedPrice, unit_amount: originalPrice.unit_amount, updated_at: originalPrice.updated_at, updated_by: originalPrice.updated_by }).toEqual(originalPrice)
     expect({ ...savedSix, prices: six.prices }).toEqual(six)
     expect(savedSix.prices.find(price => price.currency === 'GBP')).toEqual(six.prices.find(price => price.currency === 'GBP'))
-    expect(priced.variants.find(variant => variant.name === 'Twelve pieces')).toEqual(before.variants.find(variant => variant.name === 'Twelve pieces'))
+    expect(priced.variants).toHaveLength(4)
+    expect(priced.variants.filter(variant => variant.id !== six.id)).toEqual(before.variants.filter(variant => variant.id !== six.id))
     expect({ ...priced, variants: before.variants, updated_at: before.updated_at, updated_by: before.updated_by }).toEqual(before)
     before = priced
 
@@ -245,10 +329,10 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   const readback = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
   expect(readback.status()).toBe(200)
   const edited = (await readback.json() as { product: Product }).product
-  expect(edited.variants).toHaveLength(2)
+  expect(edited.variants).toHaveLength(4)
   expect(edited.options).toEqual(before.options)
   expect([edited.description, edited.unit_label, edited.metadata]).toEqual([before.description, before.unit_label, before.metadata])
-  expect(edited.variants.find(variant => variant.name === 'Twelve pieces')).toEqual(before.variants.find(variant => variant.name === 'Twelve pieces'))
+  expect(edited.variants.filter(variant => variant.id !== small.id)).toEqual(before.variants.filter(variant => variant.id !== small.id))
   const editedSmall = edited.variants.find(variant => variant.id === small.id)!
   expect({ ...editedSmall, prices: small.prices }).toEqual(small)
   expect(editedSmall.prices.find(price => price.currency === 'GBP')).toEqual(small.prices.find(price => price.currency === 'GBP'))
