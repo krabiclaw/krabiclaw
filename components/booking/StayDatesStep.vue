@@ -9,11 +9,29 @@
       <button v-if="checkIn && !inline" type="button" class="shrink-0 text-[11px] font-medium uppercase tracking-[0.2em] text-primary" @click="clearDates">{{ t('stay.clear_dates') }}</button>
     </div>
 
+    <!-- The dates can be typed as well as pressed: a long stay's checkout is months of paging away. -->
+    <div v-if="calendar" class="mt-3 grid shrink-0 grid-cols-2 overflow-hidden rounded-xl border border-default" :class="inline ? 'max-w-md' : undefined">
+      <label class="border-r border-default px-3 py-2">
+        <span class="block text-[10px] font-bold uppercase tracking-wider text-default">{{ t('stay.check_in') }}</span>
+        <input type="date" class="w-full bg-transparent text-sm text-default outline-none" :value="checkIn ?? ''" :min="today" :max="lastDate" @change="typeCheckIn">
+      </label>
+      <label class="px-3 py-2">
+        <span class="block text-[10px] font-bold uppercase tracking-wider text-default">{{ t('stay.check_out') }}</span>
+        <input type="date" class="w-full bg-transparent text-sm text-default outline-none disabled:opacity-50" :value="checkOut ?? ''" :min="earliestCheckOut ?? undefined" :max="lastDate" :disabled="!checkIn" @change="typeCheckOut">
+      </label>
+    </div>
+
     <div class="min-h-0 flex-1 overflow-y-auto py-4">
+      <p v-if="bookingError" role="alert" class="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">{{ bookingError }}</p>
       <div v-if="calendarPending && !calendar" class="grid grid-cols-7 gap-2">
         <div v-for="i in 35" :key="i" class="size-10 animate-pulse rounded-full bg-muted" />
       </div>
       <p v-else-if="calendarError" role="alert" class="rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">{{ calendarError }}</p>
+      <!-- Nothing on the calendar can start a stay: say so instead of a month of struck days. -->
+      <div v-else-if="calendar && !checkIn && !firstCheckIn" class="rounded-xl border border-default px-4 py-6 text-center">
+        <p class="text-sm text-default">{{ t('stay.no_dates', { count: calendar.home.min_nights }, calendar.home.min_nights) }}</p>
+        <NuxtLink :to="enquiryPath" class="mt-2 inline-block text-sm font-semibold text-default underline underline-offset-4">{{ t('stay.ask_host') }}</NuxtLink>
+      </div>
       <template v-else-if="calendar">
         <!-- On the page, Airbnb shows two months side by side; the dialog shows one. -->
         <div class="grid gap-8" :class="inline ? 'md:grid-cols-2' : undefined">
@@ -37,7 +55,7 @@
                 class="relative flex size-10 items-center justify-center text-sm transition-colors"
                 :class="[
                   day.inRange ? 'bg-muted' : '',
-                  day.edge ? 'rounded-full bg-inverted text-inverted' : day.selectable ? 'rounded-full text-default hover:border hover:border-inverted' : 'rounded-full text-muted/50 line-through',
+                  day.edge ? 'rounded-full bg-inverted text-inverted' : day.selectable ? 'rounded-full text-default hover:border hover:border-inverted' : day.taken ? 'rounded-full text-muted/50 line-through' : 'rounded-full text-muted',
                   day.selectable ? 'cursor-pointer' : 'cursor-default',
                 ]"
                 :disabled="!day.selectable"
@@ -51,7 +69,6 @@
             </div>
           </div>
         </div>
-        <p v-if="!checkOut && minNights > 1" class="mt-4 text-xs text-muted">{{ t('stay.min_nights', { count: minNights }) }}</p>
       </template>
 
       <button v-if="inline && checkIn" type="button" class="mt-4 text-sm font-semibold text-default underline underline-offset-4" @click="clearDates">{{ t('stay.clear_dates') }}</button>
@@ -88,7 +105,6 @@
         </div>
       </dl>
       </template>
-      <p v-if="bookingError" role="alert" class="mt-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">{{ bookingError }}</p>
     </div>
 
     <div v-if="!inline" class="flex shrink-0 items-center justify-between gap-4 border-t border-default px-1 py-4">
@@ -109,7 +125,7 @@ import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 const props = defineProps<{ controller: StayBookingController; /** On the page beside the listing rather than in the booking dialog: two months, no party or total. */ inline?: boolean; place?: string }>()
 defineEmits<{ next: [] }>()
 const { calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests, quote, quotePending, bookingError,
-  nightCount, breakdown, rangeLabel, guestsLabel, canCheckIn, canCheckOut, selectDay, clearDates, money, nightsLabel, dateLabel, checkout, enquiryPath } = props.controller
+  nightCount, breakdown, rangeLabel, guestsLabel, canCheckIn, canCheckOut, firstCheckIn, earliestCheckOut, night, selectDay, setCheckIn, setCheckOut, clearDates, money, nightsLabel, dateLabel, checkout, enquiryPath } = props.controller
 const { t, locale } = useI18n()
 // The nights are read once the calendar is on screen: inline on the page, and in the dialog however it opened, including a press made before hydration.
 onMounted(() => { if (!calendar.value) void props.controller.loadCalendar() })
@@ -121,12 +137,26 @@ const offsetForDate = (dateStr: string | null | undefined): number => {
   const [toYear, toMonth] = dateStr.split('-').map(Number) as [number, number]
   return Math.max(0, (toYear - fromYear) * 12 + (toMonth - fromMonth))
 }
-const monthOffset = ref(offsetForDate(checkIn.value))
-watch(calendar, () => {
-  if (checkIn.value && monthOffset.value === 0) {
-    monthOffset.value = offsetForDate(checkIn.value)
-  }
-})
+const monthOffset = ref(0)
+const visibleMonths = props.inline ? 2 : 1
+// The calendar follows the choice: the first night a stay can start, then the earliest checkout, then the chosen checkout.
+watch([calendar, checkIn, checkOut], () => {
+  const focus = checkOut.value ?? earliestCheckOut.value ?? checkIn.value ?? firstCheckIn.value
+  if (!focus) return
+  const offset = offsetForDate(focus)
+  if (offset < monthOffset.value || offset >= monthOffset.value + visibleMonths) monthOffset.value = Math.max(0, offset - visibleMonths + 1)
+}, { immediate: true })
+const lastDate = computed(() => calendar.value?.nights.at(-1)?.date)
+const typedDate = (event: Event) => (event.target as HTMLInputElement).value
+function typeCheckIn(event: Event) {
+  const date = typedDate(event)
+  if (date) setCheckIn(date)
+  else clearDates()
+}
+function typeCheckOut(event: Event) {
+  const date = typedDate(event)
+  if (date) setCheckOut(date)
+}
 const firstOfMonth = (offset: number) => {
   const [year, month] = today.value.split('-').map(Number) as [number, number]
   return new Date(Date.UTC(year, month - 1 + offset, 1)).toISOString().slice(0, 10)
@@ -148,11 +178,15 @@ function monthDays(first: string) {
     const choosingCheckOut = Boolean(checkIn.value && !checkOut.value)
     const checkout = choosingCheckOut && canCheckOut(date)
     // While checkout is being chosen, a later day is offered only if it can end this stay.
-    const selectable = date >= today.value && (choosingCheckOut && date > checkIn.value! ? checkout : canCheckIn(date))
+    const selectable = choosingCheckOut && date > checkIn.value! ? checkout : canCheckIn(date)
+    // Past and taken nights are struck through; a free night that only cannot be chosen yet is muted.
+    const taken = date < today.value || !night(date)?.available
     const edge = date === checkIn.value || date === checkOut.value
     const inRange = Boolean(checkIn.value && checkOut.value && date > checkIn.value && date < checkOut.value)
     const checkoutOnly = checkout && !canCheckIn(date)
-    days.push({ date, number: Number(date.slice(8)), selectable, edge, inRange, hint: checkoutOnly ? t('stay.checkout_only') : '', ariaLabel: `${dateLabel(date)}${checkoutOnly ? ` · ${t('stay.checkout_only')}` : ''}` })
+    const tooShort = choosingCheckOut && date > checkIn.value! && earliestCheckOut.value !== null && date < earliestCheckOut.value
+    const hint = checkoutOnly ? t('stay.checkout_only') : tooShort ? t('stay.min_nights', { count: minNights.value }) : ''
+    days.push({ date, number: Number(date.slice(8)), selectable, taken, edge, inRange, hint, ariaLabel: hint ? `${dateLabel(date)} · ${hint}` : dateLabel(date) })
   }
   return days
 }
@@ -163,7 +197,10 @@ const months = computed(() => (props.inline ? [0, 1] : [0]).map((index) => {
 
 // Airbnb's page heading names the place: "3 nights in Santa Monica".
 const heading = computed(() => checkIn.value && checkOut.value ? (props.inline && props.place ? t('stay.nights_in', { nights: nightsLabel(nightCount.value), place: props.place }) : nightsLabel(nightCount.value)) : checkIn.value ? t('stay.select_check_out') : t('stay.select_check_in'))
-const subheading = computed(() => checkIn.value && checkOut.value ? rangeLabel.value : checkIn.value ? `${t('stay.check_in')}: ${dateLabel(checkIn.value)}` : t('stay.add_dates'))
+// The minimum is said before a date is chosen, as Airbnb's "Minimum stay" is.
+const subheading = computed(() => checkIn.value && checkOut.value
+  ? rangeLabel.value
+  : [checkIn.value ? `${t('stay.check_in')}: ${dateLabel(checkIn.value)}` : minNights.value > 1 ? '' : t('stay.add_dates'), minNights.value > 1 ? t('stay.min_nights', { count: minNights.value }) : ''].filter(Boolean).join(' · '))
 
 const guestRows = computed(() => [
   { key: 'adults', label: t('stay.adults'), hint: t('stay.adults_hint'), value: adults, min: 1, max: maxGuests.value - children.value },
