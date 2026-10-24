@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:cea1f1a697cc77069ea440c884a67c94d96c33e7e020672d6a5d3bb48460b124",
-  "documentationFingerprint": "sha256:d597e931a15955668b77b9436db9cf5b096259fc511d68023d46292aab7444bb",
+  "fingerprint": "sha256:e4ed8d7d0e54e8f6ee5704be5c500e53e3911a9521b722a91187ea46116baac6",
+  "documentationFingerprint": "sha256:dbec57524952120ff3627526521bda6296cdeb4043ee70eb321b9201851cb4ac",
   "tools": [
     {
       "name": "add_organization_language",
@@ -12507,9 +12507,25 @@
                   "detail"
                 ],
                 "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "pending"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
               }
             ],
-            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
+            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
             "type": [
               "object",
               "null"
@@ -35417,9 +35433,25 @@
                   "detail"
                 ],
                 "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "pending"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
               }
             ],
-            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
+            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
             "type": [
               "object",
               "null"
@@ -61351,9 +61383,25 @@
                       "detail"
                     ],
                     "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "pending"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
                   }
                 ],
-                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
+                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
                 "type": [
                   "object",
                   "null"
@@ -61745,9 +61793,25 @@
                   "detail"
                 ],
                 "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "pending"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
               }
             ],
-            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
+            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
             "type": [
               "object",
               "null"
@@ -84361,6 +84425,22 @@
                         "detail"
                       ],
                       "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "state": {
+                          "const": "pending"
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "detail"
+                      ],
+                      "type": "object"
                     }
                   ],
                   "type": [
@@ -99269,9 +99349,25 @@
                   "detail"
                 ],
                 "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "pending"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
               }
             ],
-            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
+            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
             "type": [
               "object",
               "null"
@@ -113954,6 +114050,22 @@
                       "detail"
                     ],
                     "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "pending"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
                   }
                 ],
                 "type": [
@@ -124161,9 +124273,25 @@
                   "detail"
                 ],
                 "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "pending"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
               }
             ],
-            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
+            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error.",
             "type": [
               "object",
               "null"
@@ -124509,6 +124637,22 @@
                   "detail"
                 ],
                 "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "pending"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
               }
             ],
             "type": [
@@ -124713,11 +124857,11 @@
         "list_location_products": "sha256:c8f03bb72de1ce359c0aa574724f6475046b29e3643739feb311bf00cbae5fc2",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
         "list_organizations": "sha256:a4a05425a7b910a81efe4a7fdf2b0a7e3d458cb90495753de26a829ba0b8ce8e",
-        "reconcile_products": "sha256:8b5b7a005719da4407b2c90d622e2d4ae195ab6d079a90ed6fb7620adcbcc8b5",
+        "reconcile_products": "sha256:c8507f85777996b7658d3e595115c85a40ed4609bda3bf1053b1ae7a9da6d857",
         "reorder_collections": "sha256:a18f120ce1711ffdc7fc6c274079d0cfde771ecbc90152deb3452ba35291a800",
         "set_collection_products": "sha256:ebd552fb78c8253f565f58d96c43d78f6c74c89e144e29b4700ba20a187d5ffc",
         "update_menu": "sha256:75e154739d430569aebfd9ccb2251cc96aba483d7d44616495c29777baa5887e",
-        "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e"
+        "update_product": "sha256:e121fabe90363aab507722a5992b5438d3383f32426a800f8ac1e5b3511fd938"
       }
     },
     {
@@ -124883,7 +125027,7 @@
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "replace_product_weekly_schedule": "sha256:f2882dc99a1da0d407f05dd05e807f26501faf2697c8a270504c63c52c158c69",
         "set_product_booking_config": "sha256:e536617c2cd6082ed184e772ee67f57c790db259bba741dfaccb7d99ff64b867",
-        "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e",
+        "update_product": "sha256:e121fabe90363aab507722a5992b5438d3383f32426a800f8ac1e5b3511fd938",
         "update_reservation_policy": "sha256:1704f7adb7b780ff9ea397b791cb7a09d316e7741894a22c630e50e018b06409"
       }
     },
@@ -124903,7 +125047,7 @@
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
         "set_media": "sha256:e3d4681eb033e3f7c7f472c3e470b835724475a6e096e87168c2f0145e00a0f2",
-        "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e",
+        "update_product": "sha256:e121fabe90363aab507722a5992b5438d3383f32426a800f8ac1e5b3511fd938",
         "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
       }
     },
@@ -124926,7 +125070,7 @@
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "publish_post": "sha256:58f8905fe25459178581a8b47f51706e96ac0d93742ec099ee9fc92f576751d5",
         "reply_to_guest": "sha256:b9f12373b11252531092c1440a75528e6c71c60846fdb617ccbde9d31ecaab5a",
-        "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e"
+        "update_product": "sha256:e121fabe90363aab507722a5992b5438d3383f32426a800f8ac1e5b3511fd938"
       }
     }
   ]
