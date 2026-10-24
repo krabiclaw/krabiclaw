@@ -83,7 +83,7 @@ const pendingEmail = ref('')
 const agreed = ref(false)
 // The account is KrabiClaw's, so its policies are the platform's, whichever site serves this page.
 const platformDomain = String(useRuntimeConfig().public.platformDomain)
-const policyUrl = (slug: string) => `https://${platformDomain}/policies/${slug}`
+const policyUrl = (slug: string) => new URL(`/policies/${slug}`, platformDomain).toString()
 const resending = ref(false)
 const resendNotice = ref<string | null>(null)
 const resendError = ref<string | null>(null)
