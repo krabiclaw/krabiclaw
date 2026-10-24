@@ -139,7 +139,7 @@ function dateRanges(nights: ReadonlyArray<{ date: string; change: Record<string,
   return ranges.map(range => ({ date_from: range.date_from, date_to: range.date_to, ...range.change }))
 }
 
-/** The nights of this call a warning names by its echoed date or date range; null when it names none. */
+/** The nights of this call a warning names by its echoed date or date range; null when it echoes no date. */
 function warnedDates(warning: unknown, dates: readonly string[]): string[] | null {
   if (!warning || typeof warning !== 'object' || Array.isArray(warning)) return null
   const echo = warning as Record<string, unknown>
@@ -157,7 +157,9 @@ function refusals(result: Record<string, unknown>, kind: string, dates: readonly
   const refused = new Map<string, string>()
   for (const warning of meta.warnings) {
     const reason = `Channex rejected part of the ${kind} update: ${JSON.stringify(warning).slice(0, 500)}`
-    for (const date of warnedDates(warning, dates) ?? dates) if (!refused.has(date)) refused.set(date, reason)
+    // A warning whose dates name none of this call's nights is still a refusal of the call.
+    const named = warnedDates(warning, dates)
+    for (const date of named?.length ? named : dates) if (!refused.has(date)) refused.set(date, reason)
   }
   return refused
 }
