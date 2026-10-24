@@ -170,7 +170,7 @@ The `service` vertical is exclusively and canonically **Legal Services**. Do not
 
 **Catalog is where everything the business offers is found, as Airbnb's Your
 listings.** It navigates rather than edits: kind pills — All, Menu,
-Experiences, Products, Services, Places to stay, each only when the business
+Experiences, Services, Places to stay, each only when the business
 has one — over one grid of photo cards, full width on a phone. A menu belongs
 to a location, so the Menu is one card per location, opening that location's
 menu; every other offering is its own card, opening the one Product editor.
@@ -222,9 +222,13 @@ Services and Experiences have no grouping step. A service's overview leads
 with Assigned team member (the booking assignment concern: who guests' bookable
 consultations are with — not case ownership, and changing it never reassigns
 existing appointments), Consultation pricing, Bookings, Description, Page
-content, Locations and Website visibility. A price row opens the price it
-names: one variant's price directly, several variants' list rather than the
-first of them.
+content, Locations and Website visibility. Pricing has one entrance. Its index
+names the saved prices and any real choices; a single amount opens beside it
+on desktop, while several amounts leave the choice to the host. Named priced
+versions remain valid without choice dimensions. Adding a dimension requires
+an explicit value for each saved version and preserves its identity and prices.
+Typed facts open their own editors from the record; they do not need another
+overview card.
 
 ### Tabs, parents and exits
 
@@ -255,9 +259,9 @@ is a child of the calendar, which lights Calendar.
 | Product, its variants and prices | what is sold: kind, pricing, booking, publication, locations, collections, its page |
 | A page, article or post | its own content |
 | Location | its place, hours, photos and reservation policy |
-| Member | availability and public profile |
+| Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
-| User | personal preferences and security |
+| User | account name, avatar, personal preferences and security |
 
 Themes own nothing. A theme renders what these hold; it adds no CMS route,
 editor or writer, and it never grants or hides an authorization.
@@ -266,7 +270,7 @@ editor or writer, and it never grants or hides an authorization.
 
 | Airbnb | KrabiClaw |
 | --- | --- |
-| Listings holds homes, experiences and services behind kind pills | Catalog's pills are Menu, Experiences, Products, Services and Places to stay; each is a view of the same Products |
+| Listings holds homes, experiences and services behind kind pills | Catalog's pills are Menu, Experiences, Services and Places to stay; each is a view of the same Products |
 | Homes and experiences have different editors | One Product editor at `O/products/:productId` for every kind: kind changes wording and rows, not the route or the editor |
 | Listing editor rows preview their values and open one concern | Product, location, page, post and member records do the same |
 | Pricing and availability link to the calendar; Earnings links to payouts | Catalog links to Calendar and member availability; Earnings links to the organization's Payments |
@@ -510,7 +514,7 @@ shared reading or leaf width; a calendar or grid takes the available frame.
 of a desktop window is never the fourth.** Content that scales — a grid, a
 table, a calendar, a chart, cards — takes the frame: Today, Calendar, Catalog,
 Insights, Photos, Transactions name no column. A settings index pairs with its
-first row where there is a pane, as Account settings, Integrations, Payments,
+first row where there is a pane, as Account settings, Integrations,
 Plan and billing and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
 Only a list of records with nothing of its own to open — Notifications, Past
 activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
@@ -520,7 +524,7 @@ Beside a child every index fills its own pane. Standalone widths live in
 `dashboardColumnWidths`; a page never states one. A column's title heads it,
 as a leaf's does. Every level title is `dashboardTitleClass`.
 
-**Focused writing is bare.** A name, title, headline, slug or link renders as a
+**Focused writing is bare.** A name, title, headline or link renders as a
 borderless 22–26px field with a counter, the way Airbnb's title and custom
 link do. A description uses the native textarea's `none` variant with no inner
 padding and native autoresize, filling its pane without a fixed-height scroll
@@ -558,7 +562,7 @@ writing. It leads its level the way a photograph leads a product: the article
 first, then the rows that describe it.
 
 **The exception covers the writing and nothing around it.** Category, tags,
-excerpt, publishing time, visibility, slug, canonical URL and search appearance
+excerpt, publishing time, visibility and search appearance
 describe the post rather than being it. They are fields, and they obey leaf
 size: an index of rows, each previewing its value, each opening its own leaf.
 
@@ -703,8 +707,8 @@ A URL names a record, a concern, a keyed item, a tab or a mode, and a direct
 entry or a reload reconstructs it. A control's temporary state — a picker, a
 popover, a filter chip, a confirmation — is not in it.
 
-- **Keyed items use their ids.** An option is `options/:optionId`, a price
-  `options/prices/:variantId`, a block `sections/:blockId`; never an index, a
+- **Keyed items use their ids.** A price choice is `price/choices/:optionId`, an amount
+  `price/amounts/:variantId`, a block `sections/:blockId`; never an index, a
   name or a combination label, so reordering or renaming never changes which
   item a saved URL edits.
 - **Views keep their query.** Blog or Docs is `?collection=`, Q&A or Reviews
@@ -872,11 +876,22 @@ snapshot leaves both sections unchanged, shows the conflict and offers Use
 current items; completion reads both saved orders through the full organization
 catalog. Visible location scope never replaces that membership owner.
 
-**Preview is the saved guest surface.** The lodging listing, Restaurant dish and Experience
-View action opens the real tenant page with its authorized preview token;
+**Preview belongs to customer-facing content.** A Product or Page can show what
+its customer will see. A price, assignment, working-hours rule or other
+operational concern does not get another preview of its own. Page Preview is a
+compact eye action beside its title; Product View retains the saved-summary
+editor's floating action. Neither needs a separate action row in the body.
+
+**Preview is the saved guest surface.** The lodging listing, Restaurant dish,
+Experience, Legal Services and Page actions use `DashboardContentPreview` to
+open the real tenant page with its authorized preview token;
 Desktop and Mobile change the viewport of that same page. It is not a second
 rendering of the form draft, and opening it does not publish the record or
-change its availability.
+change its availability. The full-screen preview temporarily covers the editor;
+it is not a leaf in the right pane. Its Share action uses the saved, eligible
+public address from the canonical read, never the iframe URL or its preview
+credential. Private content says Private preview. A paused booking calendar
+does not make an otherwise published Page private.
 
 A dish preview needs an explicit active location where that dish is offered.
 Keep a location already targeted by the editor; otherwise ask the owner to
@@ -890,6 +905,32 @@ explicit physical or online scope; an unscoped preview uses that page's existing
 booking-scope chooser. The website preview token requires organization-wide
 content access; an assigned host keeps their Product editor without receiving
 a token for other unpublished pages.
+
+**Legal content keeps its real owner.** The Legal Services Product index uses
+the same saved-summary cards and focused editors. A practice area without a
+booking configuration does not imply an attorney assignment or available
+consultations. Configured consultations use the existing Product booking owner,
+attorneys or legal teams, clients and offices. Page content links to the bound
+Page editor, and Preview uses that Page's saved path; a Product slug does not
+invent a second legal page. Assigned attorneys retain their authorized Product
+work without gaining organization-wide Page editing, preview or translations.
+
+**Translations edit content in another language.** Use the compact Translations
+action on its owning record, with the language named in the editor. Added
+languages can be authored while private; saving a translation does not publish
+the language. Preserve the complete saved translation, including fields the
+current editor does not display. Dashboard and MCP use the same canonical
+translation operations and version checks.
+
+**Public addresses are assigned, not a tenant setting.** Do not dedicate a row
+or leaf to editing a slug or path. Renaming a Product, Page, Article, Post or
+Location preserves its saved address, as does editing an existing translation.
+New translations receive their source's canonical address in the chosen
+language; historical authored translation addresses remain intact. Canonical
+writes enforce this for dashboard and MCP, including reconciliation. This does
+not prohibit the existing semantic operation of changing a Product kind or an
+Article's Blog/Docs collection. Show a public address through Preview and Share
+when it is useful, rather than making routing another authoring task.
 
 **Experience details are guest decisions, not another model.** What you’ll do
 edits Product description. Where to meet, What is included, What to bring,
@@ -973,11 +1014,20 @@ because every one re-stated layout, copy and state that already existed.
 and `docs/design/airbnb-navigation-map.md`; where the evidence is missing, open
 the actual screen in the owner's logged-in browser. Read its sections, headings,
 rows, button labels and card shapes, and mirror that structure. "Inspired by" is not
-parity. Earnings is Performance card → Upcoming → Paid → Reports; the account's
-Payments is sections with *Manage payments* → *Your payments*; Payouts is *How
+parity. Earnings is Performance card → Upcoming → Paid → Reports; Airbnb's account
+Payments has *Manage payments* → *Your payments*; Payouts is *How
 you get paid* rows + *Add payout method* + *Need help?*. When Airbnb has no
 equivalent, say so in a comment and keep the screen to the smallest honest
 thing — never invent a section to fill the space.
+
+KrabiClaw's personal Payments opens its payment and refund history directly;
+there is no second concern requiring a settings index. Organization payouts
+remain in the organization's Earnings. Profile & availability opens the
+explicit organization member: public name, photo and bio can be saved before
+Hours are known. A profile save preserves availability, calendar selection and
+existing sessions. Unknown Hours say Not set; only an explicit Hours or time-off
+change recalculates the schedule. Account name and avatar remain Better Auth
+User facts, and failures stay visible in the editor that attempted the save.
 
 **One screen per concept, scoped, never copied.** A second audience gets a
 `personal-scope` (or similar) prop on the existing component and a scope on the
@@ -1039,7 +1089,8 @@ items, tabs and some modes their own URLs (`house-rules?feature=checkInOut`,
 ## Naming
 
 Use the owner's vocabulary, not the schema's. The catalog's words are fixed,
-whatever the template: Catalog; Menu, Experiences, Services; a menu's
+whatever the template: Catalog; Menu, Experiences, Places to stay, and
+Practice areas & consultations; a menu's
 **sections** and its **items**; a **variant** is a purchasable version of one
 offering, never a section. Collection is the model's name and never appears in
 the menu workflow; blog categories classify articles and are not part of the

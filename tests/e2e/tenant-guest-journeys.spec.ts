@@ -391,7 +391,7 @@ for (const target of [
         await page.getByRole('textbox', { name: label, exact: true }).press('Enter')
       }
       await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page).toHaveURL(new RegExp(`/products/${product.id}/attributes$`))
+      await expect(page).toHaveURL(new RegExp(`/products/${product.id}/photo$`))
       const locations = await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: true, published: true } })
       expect(locations.status(), await locations.text()).toBe(200)
       if (target.experience) {
@@ -438,6 +438,10 @@ for (const target of [
         await page.getByRole('button', { name: 'Save', exact: true }).click()
         const scopedPriceResponse = await scopedPrice
         expect(scopedPriceResponse.status(), await scopedPriceResponse.text()).toBe(200)
+        await expect(page).toHaveURL(`/dashboard/${target.slug}/products/${product.id}/price/amounts/${product.variants[0]!.id}?location_id=${target.location}`)
+        // The saved amount belongs to Pricing. Its index's Back returns to
+        // the Product, whose first concern is Photos, retaining location scope.
+        await page.locator('#dashboard-panel-product-pricing [data-testid="dashboard-navbar-back"]').click()
         await expect(page).toHaveURL(`/dashboard/${target.slug}/products/${product.id}/photo?location_id=${target.location}`)
         const cards = page.getByTestId('dish-editor-cards')
         await expect(cards.getByTestId('editor-card-dietary_notes')).toContainText(detail)

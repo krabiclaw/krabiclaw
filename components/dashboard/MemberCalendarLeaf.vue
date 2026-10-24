@@ -6,7 +6,10 @@
      <div class="flex items-center gap-3 pb-6"><UIcon name="i-logos-google-calendar" class="size-8" /><span class="text-base font-medium text-highlighted">Google Calendar</span><UBadge class="ml-auto" color="success" variant="subtle">Connected</UBadge></div>
      <SettingRow v-model="enabled" label="Avoid double bookings" />
     </template>
-    <UButton v-else icon="i-simple-icons-google" size="xl" block :loading="editor.saving.value || connection.linking.value" @click="connect">Connect Google Calendar</UButton>
+    <template v-else>
+     <p v-if="!editor.record.value?.timezone" class="mb-6 text-muted">Choose your timezone in Hours before connecting Google Calendar.</p>
+     <UButton icon="i-simple-icons-google" size="xl" block :disabled="!editor.record.value?.timezone" :loading="editor.saving.value || connection.linking.value" @click="connect">Connect Google Calendar</UButton>
+    </template>
     <UButton v-if="editor.record.value?.busy_error || (connection.accountId.value && editor.error.value)" class="mt-6" color="neutral" variant="outline" :loading="editor.saving.value" @click="save">Retry</UButton>
   </template>
  </DashboardLeafPanel>
@@ -20,7 +23,7 @@ const connection=useIntegrationConnection('google',MEMBER_BUSY_SCOPES)
 const enabled=ref(Boolean(editor.record.value?.calendar_ids.length))
 function revert(){enabled.value=Boolean(editor.record.value?.calendar_ids.length)}
 watch(()=>editor.record.value,revert,{immediate:true})
-async function connect(){if(!editor.record.value){editor.error.value='Choose your timezone in Hours first.';return}await connection.connect({access_type:'offline',prompt:'consent select_account'})}
+async function connect(){if(!editor.record.value?.timezone){editor.error.value='Choose your timezone in Hours first.';return}await connection.connect({access_type:'offline',prompt:'consent select_account'})}
 async function save(){await editor.calendar(enabled.value || Boolean(connection.accountId.value),connection.accountId.value??editor.record.value?.calendar_account_id??undefined);if(!editor.error.value)await connection.clear()}
 onMounted(async()=>{if(connection.accountId.value){enabled.value=true;await save()}})
 </script>

@@ -165,7 +165,10 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
     if(!membership)throw new HTTPError({statusCode:403,message:'Organization membership required'})
     await assertRoleAllows({...membership,permissions:{products:['update']}})
     if (assignedMember) await requireSchedulingAccess({ env, userId: input.actorId, organizationId: input.organizationId }, assignedMember, true)
-    if (assignedTeam && !(await queryFirst(db, `SELECT t.id FROM team t JOIN teamMember tm ON tm.teamId=t.id JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE t.id=? AND t.organizationId=? LIMIT 1`, [assignedTeam, input.organizationId]))) badRequest('Choose a team in this business with at least one member who has set working hours')
+    if (mode === 'provider' && assignedMember && !(await queryFirst(db, 'SELECT member_id FROM member_scheduling WHERE member_id=? AND organization_id=? AND timezone IS NOT NULL', [assignedMember, input.organizationId]))) badRequest('Set working hours for this member before using their hours for bookings')
+    if (assignedTeam && !(await queryFirst(db, `SELECT t.id FROM team t WHERE t.id=? AND t.organizationId=? AND (?<>'provider' OR EXISTS (
+      SELECT 1 FROM teamMember tm JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId
+        JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId AND ms.timezone IS NOT NULL WHERE tm.teamId=t.id))`, [assignedTeam, input.organizationId, mode]))) badRequest(mode === 'provider' ? 'Choose a team in this business with at least one member who has set working hours' : 'Choose a team in this business')
   }
   const now = new Date().toISOString()
   const config: ProductBookingConfigRecord = {
@@ -190,7 +193,10 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
     query: `INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN (${unchanged.query})
         AND (? IS NOT NULL OR NOT EXISTS (SELECT 1 FROM products p JOIN product_publications pub ON pub.product_id=p.id AND pub.organization_id=p.organization_id WHERE p.id=? AND p.organization_id=? AND p.kind='experience' AND NULLIF(p.order_url,'') IS NULL AND pub.published=1))
-        AND (? IS NULL OR EXISTS (SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId=t.id JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE t.id=? AND t.organizationId=?))
+        AND (? IS NULL OR EXISTS (SELECT 1 FROM team t WHERE t.id=? AND t.organizationId=? AND (?<>'provider' OR EXISTS (
+          SELECT 1 FROM teamMember tm JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId
+            JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId AND ms.timezone IS NOT NULL WHERE tm.teamId=t.id))))
+        AND (?<>'provider' OR ? IS NULL OR EXISTS (SELECT 1 FROM member_scheduling ms WHERE ms.member_id=? AND ms.organization_id=? AND ms.timezone IS NOT NULL))
         AND (?<>'provider' OR (
           NOT EXISTS (SELECT 1 FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.organization_id=? AND b.product_id=? AND b.assigned_member_id IS NULL AND b.status IN ('pending','confirmed') AND s.ends_at>?)
           AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.organization_id=? AND h.product_id=? AND h.assigned_member_id IS NULL AND h.status='active' AND h.expires_at>?)
@@ -200,7 +206,7 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
         updated_at=excluded.updated_at, updated_by=excluded.updated_by`,
     params: [input.productId, input.organizationId, config.duration_minutes, config.default_capacity,
       config.confirmation_mode, config.online_payment_required ? 1 : 0, config.held_online ? 1 : 0, config.scheduling_mode, config.assigned_member_id, config.assigned_team_id, now,
-      ...unchanged.params!, config.duration_minutes, input.productId, input.organizationId, config.assigned_team_id, config.assigned_team_id, input.organizationId, config.scheduling_mode, input.organizationId, input.productId, now, input.organizationId, input.productId, now,
+      ...unchanged.params!, config.duration_minutes, input.productId, input.organizationId, config.assigned_team_id, config.assigned_team_id, input.organizationId, config.scheduling_mode, config.scheduling_mode, config.assigned_member_id, config.assigned_member_id, input.organizationId, config.scheduling_mode, input.organizationId, input.productId, now, input.organizationId, input.productId, now,
       now, input.actorId, input.actorId],
   } }
 }
@@ -263,8 +269,9 @@ function resolvedDuration(config: ProductBookingConfigRecord): number {
 
 async function sessionProviders(db: DbClient, config: ProductBookingConfigRecord): Promise<Array<string | null>> {
   // A team's members each hold their own sessions only when their hours are the schedule.
-  if (config.scheduling_mode !== 'provider' || !config.assigned_team_id) return [null]
-  const members = await queryAll<{ id: string }>(db, `SELECT m.id FROM team t JOIN teamMember tm ON tm.teamId=t.id JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE t.id=? AND t.organizationId=? ORDER BY m.id`, [config.assigned_team_id, config.organization_id])
+  if (config.scheduling_mode !== 'provider') return [null]
+  if (config.assigned_member_id) return await queryFirst(db, 'SELECT member_id FROM member_scheduling WHERE member_id=? AND organization_id=? AND timezone IS NOT NULL', [config.assigned_member_id, config.organization_id]) ? [null] : []
+  const members = await queryAll<{ id: string }>(db, `SELECT m.id FROM team t JOIN teamMember tm ON tm.teamId=t.id JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId AND ms.timezone IS NOT NULL WHERE t.id=? AND t.organizationId=? ORDER BY m.id`, [config.assigned_team_id, config.organization_id])
   return members.map(member => member.id)
 }
 
@@ -282,7 +289,7 @@ export async function prepareProviderHoursSessions(db: DbClient, config: Product
   const providers = await queryAll<{ member_id: string; timezone: string; windows_json: string; time_off_json: string }>(db, `
     SELECT ms.member_id, ms.timezone, ms.windows_json, ms.time_off_json FROM member_scheduling ms
       JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
-     WHERE ms.organization_id=? AND (ms.member_id=? OR EXISTS (
+     WHERE ms.organization_id=? AND ms.timezone IS NOT NULL AND (ms.member_id=? OR EXISTS (
        SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId=t.id WHERE t.id=? AND t.organizationId=ms.organization_id AND tm.userId=m.userId))
      ORDER BY ms.member_id`, [config.organization_id, config.assigned_member_id, config.assigned_team_id])
   if (!providers.length) badRequest('Set working hours for whoever provides this offering before it can be booked online')
@@ -505,6 +512,7 @@ export async function materializeMemberSessions(db: DbClient, input: { organizat
   const products = await queryAll<{ product_id: string }>(db, `
     SELECT c.product_id FROM product_booking_configs c
       JOIN member m ON m.organizationId=c.organization_id AND m.userId=?
+      JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId AND ms.timezone IS NOT NULL
      WHERE c.organization_id=? AND c.scheduling_mode='provider'
        AND (c.assigned_member_id=m.id OR EXISTS (
          SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId=t.id

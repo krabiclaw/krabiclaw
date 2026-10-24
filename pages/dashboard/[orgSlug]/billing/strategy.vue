@@ -20,7 +20,7 @@
     <p class="text-base text-highlighted">{{ SERVICES.strategy.description }}</p>
     <p class="mt-4 text-base font-semibold text-highlighted">{{ formatPrice(SERVICE_PRICES.strategy.monthly) }} per month, added to your plan and billed with it.</p>
     <div v-if="on" class="mt-6 space-y-3 text-sm text-muted">
-      <p>On since {{ formatExactDateTime(services!.strategy!.since) }} · {{ formatRecurring(services!.strategy!.amount, services!.strategy!.currency, services!.strategy!.interval) }}.</p>
+      <p>On since {{ formatExactDateTime(services!.strategy!.since) }} · {{ formatRecurring(services!.strategy!.amount, services!.strategy!.currency) }}.</p>
       <p>Turning it off ends Julia's service now. Stripe credits the unused part of this period to your next invoice.</p>
     </div>
     <template v-else>

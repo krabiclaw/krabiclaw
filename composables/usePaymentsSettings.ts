@@ -10,12 +10,14 @@ import type { HomesQuote } from '~/server/utils/billing'
  * serves both and a leaf's refresh updates the row it came from.
  */
 
-export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year'; meters: string[] }; usage: { locations: number; homes: number }; scheduledPlan?: { plan: string; at: string } | null }
+export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; withoutPaymentMethod: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { locations: number; homes: number }; scheduledPlan?: { plan: string; at: string } | null }
 const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
   && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.locations) && Number.isSafeInteger(value.billing.usage.homes)
-  && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && ['month', 'year'].includes(String(value.billing.subscriptionPrice.interval))
-    && Array.isArray(value.billing.subscriptionPrice.meters) && value.billing.subscriptionPrice.meters.every(meter => typeof meter === 'string')))
+  && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && value.billing.subscriptionPrice.interval === 'month'
+    && Array.isArray(value.billing.subscriptionPrice.meters) && value.billing.subscriptionPrice.meters.every(meter => typeof meter === 'string')
+    && (value.billing.subscriptionPrice.trial === null || (isRecord(value.billing.subscriptionPrice.trial) && typeof value.billing.subscriptionPrice.trial.end === 'string'
+      && ['cancel', 'create_invoice', 'pause'].includes(String(value.billing.subscriptionPrice.trial.withoutPaymentMethod))))))
   && (value.billing.scheduledPlan === undefined || value.billing.scheduledPlan === null || (isRecord(value.billing.scheduledPlan) && isKnownBillingPlan(value.billing.scheduledPlan.plan) && typeof value.billing.scheduledPlan.at === 'string'))
 
 export async function useOrganizationBilling() {
@@ -30,14 +32,14 @@ export async function useOrganizationBilling() {
 
 const isHomesQuote = (value: unknown): value is HomesQuote =>
   isRecord(value) && isKnownBillingPlan(value.plan) && value.currency === 'USD'
-  && isRecord(value.homes) && Number.isSafeInteger(value.homes.used) && Number.isSafeInteger(value.homes.included) && Number.isSafeInteger(value.homes.additional_price_minor) && Number.isSafeInteger(value.homes.amount_minor)
+  && isRecord(value.homes) && Number.isSafeInteger(value.homes.used) && Number.isSafeInteger(value.homes.drafts) && Number.isSafeInteger(value.homes.included) && Number.isSafeInteger(value.homes.additional_price_minor) && Number.isSafeInteger(value.homes.amount_minor)
   && isRecord(value.adding) && Number.isSafeInteger(value.adding.count) && Number.isSafeInteger(value.adding.additional_homes) && Number.isSafeInteger(value.adding.amount_minor) && typeof value.adding.allowed === 'boolean'
-  && isRecord(value.billing) && (value.billing.period_end === null || typeof value.billing.period_end === 'string') && value.billing.prorated === false
+  && isRecord(value.billing) && (value.billing.period_end === null || typeof value.billing.period_end === 'string') && (value.billing.trial_end === null || typeof value.billing.trial_end === 'string') && value.billing.prorated === false
 
 /**
- * What adding homes costs on the plan, from the one quote the capacity check
- * also answers by: `adding` is how many are about to be added, 0 for the cost
- * of the homes in use now. Read only while `enabled`.
+ * What making homes live costs on the plan, from the one quote the capacity
+ * check also answers by: `adding` is how many are about to go live, 0 for the
+ * cost of the live homes now. Read only while `enabled`.
  */
 export async function useHomesQuote(organizationId: string, adding: MaybeRefOrGetter<number>, enabled: MaybeRefOrGetter<boolean> = true) {
   const dashboardApi = useDashboardApi()

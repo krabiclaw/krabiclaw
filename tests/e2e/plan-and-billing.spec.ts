@@ -111,9 +111,9 @@ test.describe('Plan and billing', () => {
         await expect(card.getByRole('link', { name: 'Choose a plan', exact: true })).toBeVisible()
         await expect(index.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
         await expect(index.getByTestId('editor-row-locations')).toContainText('in use · 2 included · Basic stops at 2')
-        // Homes are counted apart from locations, with their own allowance, read from the homes quote.
+        // Homes are counted apart from locations, live (billed) and drafts (free), with their own allowance, read from the homes quote.
         await expect(index.getByTestId('editor-row-homes')).toContainText('Homes')
-        await expect(index.getByTestId('editor-row-homes')).toContainText(/\d+ homes? · 2 included · Basic stops at 2/)
+        await expect(index.getByTestId('editor-row-homes')).toContainText(/\d+ live · \d+ drafts? · 2 included · Basic stops at 2/)
         await expect(index.getByTestId('editor-row-portal')).toHaveCount(0)
         await expect(index.getByTestId('editor-row-managed-ads')).toContainText('Off10% of monthly ad spend')
         await expect(index.getByTestId('editor-row-strategy')).toContainText('Off$2,000/mo')
@@ -178,9 +178,13 @@ test.describe('Plan and billing', () => {
         const upgrade = page.locator('#dashboard-panel-organization-upgrade')
         await expect(upgrade.getByRole('heading', { name: 'Upgrade to Business', exact: true })).toBeVisible()
         await expect(upgrade.getByText('$149/mo', { exact: true })).toBeVisible()
-        await expect(upgrade.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
+        await expect(upgrade.locator('[data-testid^="editor-row-"]')).toHaveCount(2)
         await expect(upgrade.getByText(/^\$100\/mo more than Growth\. Stripe charges the difference for the rest of this period, then \$149\/mo from \w{3} \d{1,2}, \d{4}\.$/)).toBeVisible()
         await expect(upgrade.getByTestId('editor-row-payments')).toContainText('1.4% of payment volume, plus Stripe fees')
+        await expect(upgrade.getByTestId('editor-row-payments')).toContainText('Online payments and direct stay booking')
+        await expect(upgrade.getByTestId('editor-row-google-ads')).toContainText('Google Ads campaigns')
+        await expect(upgrade.getByTestId('editor-row-ios')).toHaveCount(0)
+        await expect(upgrade.getByTestId('editor-row-messaging')).toHaveCount(0)
         await expect(upgrade.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled()
         await expect(upgrade.getByRole('radio')).toHaveCount(0)
       }

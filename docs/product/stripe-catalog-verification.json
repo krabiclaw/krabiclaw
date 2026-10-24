@@ -37,7 +37,6 @@
       }
     ],
     "metadata": {
-      "annual_price_id": "price_1TdNKdEm0pkzLQDb0h2CCpxQ",
       "badge": "Most Popular",
       "catalog_image_sha256": "e2f1ff87895f7163aa661dc50f75ff470e7d5b7973d8f1680815d8626940d67a",
       "currency": "usd",
@@ -48,21 +47,6 @@
     "imageCount": 1
   },
   "growthPrices": [
-    {
-      "id": "price_1TdNKdEm0pkzLQDb0h2CCpxQ",
-      "product": "prod_UcH8Sw98ABNwKL",
-      "unit_amount": 58800,
-      "currency": "usd",
-      "recurring": {
-        "interval": "year",
-        "interval_count": 1,
-        "meter": null,
-        "trial_period_days": null,
-        "usage_type": "licensed"
-      },
-      "lookup_key": null,
-      "active": true
-    },
     {
       "id": "price_1Td2aIEm0pkzLQDb3cjYEQgN",
       "product": "prod_UcH8Sw98ABNwKL",

@@ -77,7 +77,6 @@ const props = defineProps<{ kind: 'reservation' | 'booking' }>()
 
 const { locale, localePath, t } = useI18n()
 const route = useRoute()
-const { organization } = useTenantOrganization()
 
 const keyPrefix = computed(() => props.kind === 'booking' ? 'experience_cancel' : 'reservation_cancel')
 const copy = (key: string) => t(`site.${keyPrefix.value}.${key}`)
@@ -114,7 +113,7 @@ const { data, pending } = await useAsyncData<{ success: true; booking: GuestBook
 )
 
 const booking = computed(() => data.value?.booking ?? null)
-const presentation = computed(() => booking.value?.product_kind ? presentationForProduct(organization.vertical, { kind: booking.value.product_kind }) : null)
+const presentation = computed(() => booking.value?.product_kind ? presentationForProduct({ kind: booking.value.product_kind }) : null)
 // One instant plus its zone: the guest reads the local time of the place they
 // booked, not of the browser they happen to open the link in.
 const readableDate = computed(() => booking.value

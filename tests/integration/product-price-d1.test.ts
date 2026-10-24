@@ -396,7 +396,7 @@ test('details carry descriptive attributes, and an undefined one is refused', { 
 test('reconcile converges instead of duplicating, and deletion respects the canonical page', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   try {
-    const rows = [{ product_id: 'src-1', kind: 'item', name: 'Imported One' }, { product_id: 'src-2', kind: 'item', name: 'Imported Two' }]
+    const rows = [{ product_id: 'src-1', kind: 'dish', name: 'Imported Pad Thai' }, { product_id: 'src-2', kind: 'dish', name: 'Imported Tom Yum' }]
     await reconcileProducts(db, { organizationId: ORG, products: rows, actor: ACTOR })
     await reconcileProducts(db, { organizationId: ORG, products: rows, actor: ACTOR })
     assert.equal(await db.prepare('SELECT count(*) n FROM products').first<number>('n'), 2, 'running the same import twice converges')
@@ -663,7 +663,7 @@ test('an id from another tenant is refused, not upserted onto', { timeout: 120_0
   try {
     await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org-other', 'Other', 'other', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('actor-other', 'Other', 'other@example.test', 0, 0, 0)").run()
-    await db.prepare(`INSERT INTO products (kind, id, organization_id, name, slug, created_by, updated_by) VALUES ('item', 'prod-other','org-other','Their Product','their-product','actor-other','actor-other')`).run()
+    await db.prepare(`INSERT INTO products (kind, id, organization_id, name, slug, created_by, updated_by) VALUES ('dish', 'prod-other','org-other','Their Dish','their-dish','actor-other','actor-other')`).run()
     await db.prepare(`INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('var-other','org-other','prod-other','Their Variant','actor-other','actor-other')`).run()
 
     const mine = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'dish',

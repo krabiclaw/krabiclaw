@@ -16,7 +16,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(JSON.stringify(document), 'complete canonical pricing document').toContain('billing_features')
   const comparison = page.locator('[data-parity-section="comparison"]')
   await expect(comparison).toBeVisible()
-  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(32)
+  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(37)
   const locations = comparison.locator('tr[data-feature-id="locations.included"]')
   await expect(locations.locator('td')).toHaveText([
     '2 included',
@@ -42,6 +42,22 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   await expect(languages.locator('td .sr-only')).toHaveText(['Not included', 'Included', 'Included'])
   const payments = comparison.locator('tr[data-feature-id="payments.acceptance"]')
   await expect(payments.locator('td .sr-only')).toHaveText(['Not included', 'Not included', 'Included'])
+  for (const id of ['stays.listings', 'stays.calendar', 'stays.airbnb', 'stays.guest-messaging', 'app.ios']) {
+    await expect(comparison.locator(`tr[data-feature-id="${id}"] td .sr-only`)).toHaveText(['Included', 'Included', 'Included'])
+  }
+  await expect(comparison.locator('tr[data-feature-id="stays.guest-messaging"]')).toContainText('Arrival guides and guest messages')
+  const directBooking = comparison.locator('tr[data-feature-id="stays.direct-booking"]')
+  await expect(directBooking).toContainText('Direct stay booking with online payment')
+  await expect(directBooking.locator('td .sr-only')).toHaveText(['Not included', 'Not included', 'Included'])
+  await directBooking.locator('summary').click()
+  await expect(directBooking.locator('p')).toBeVisible()
+  await expect(directBooking.locator('p')).toHaveText('Guests book available nights and pay on your website. Requires Stripe setup; 1.4% of payment volume, plus Stripe fees, billed at the end of each month.')
+  await directBooking.locator('summary').click()
+  const companion = comparison.locator('tr[data-feature-id="app.ios"]')
+  await companion.locator('summary').click()
+  await expect(companion.locator('p')).toBeVisible()
+  await expect(companion.locator('p')).toContainText('no extra subscription')
+  await companion.locator('summary').click()
   const ads = comparison.locator('tr[data-feature-id="ads.google"]')
   await expect(ads.locator('td .sr-only')).toHaveText(['Not included', 'Not included', 'Included'])
   const explanation = payments.locator('details')
@@ -56,10 +72,13 @@ test('pricing desktop exposes provider details after one reveal and does not rep
 
   const billing = await page.request.get(`${testBaseUrl()}/api/billing/plans`)
   expect(billing.status()).toBe(200)
-  const plans = await billing.json() as Array<{ id: string; name: string; prices: Array<{ amount: number; currency: string; interval: string }> }>
+  const plans = await billing.json() as Array<{ id: string; name: string; features: string[]; prices: Array<{ amount: number; currency: string; interval: string }> }>
   expect(plans.map(plan => plan.id)).toEqual(['free', 'growth', 'business'])
   for (const [index, plan] of plans.entries()) await expect(cards.nth(index).getByRole('heading', { name: plan.name, exact: true })).toBeVisible()
   const business = plans.find(plan => plan.id === 'business')!
+  expect(plans.find(plan => plan.id === 'free')!.features).toContain('Home listings, nightly rates & stay calendars')
+  expect(plans.find(plan => plan.id === 'growth')!.features).toContain('Business websites for restaurants, experiences, law firms and lodging')
+  expect(business.features).toContain('Direct stay booking with online payment')
   expect(business.prices).toEqual([expect.objectContaining({ amount: 14900, currency: 'usd', interval: 'month' })])
   await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
   await expect(cards.nth(0).locator('[data-plan-locations]')).toHaveText('2 locations included')
@@ -80,6 +99,10 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(markdownText).toContain('- **SEO and marketing strategy**: $2,000 per month.')
   expect(markdownText).toContain('- **Price**: $149/month')
   expect(markdownText).toContain('- **Locations**: 2 included, then $49 per additional location per month')
+  expect(markdownText).toContain('- **Homes**: 2 included, then $9 per additional home per month')
+  expect(markdownText).toContain('Home listings, nightly rates & stay calendars')
+  expect(markdownText).toContain('Business websites for restaurants, experiences, law firms and lodging')
+  expect(markdownText).toContain('Direct stay booking with online payment')
   expect(markdownText).not.toMatch(/rental unit/i)
   const sharedPrimary = page.getByRole('link', { name: 'Start free', exact: true }).first()
   const primaryColors = await sharedPrimary.evaluate(element => {

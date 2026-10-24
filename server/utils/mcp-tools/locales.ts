@@ -19,7 +19,7 @@ import { PLATFORM_LOCALES } from '~/shared/platform-locales'
 import { NOT_HANDLED, mutationContextPayload, requiredString } from './execution'
 
 const localizedDocumentValues = { type: 'object', properties: {
-  title: { type: ['string', 'null'] }, summary: { type: ['string', 'null'] }, slug: { type: ['string', 'null'] }, seo_keywords: { type: ['string', 'null'] },
+  title: { type: ['string', 'null'] }, summary: { type: ['string', 'null'] }, seo_keywords: { type: ['string', 'null'] },
   metadata: { type: 'object', properties: { call_to_action: { type: 'object', properties: { label: { type: 'string', pattern: '\\S' } }, required: ['label'], additionalProperties: false } }, additionalProperties: false },
 }, additionalProperties: false } as const
 const resourceValueBranches = LOCALIZED_RESOURCE_TYPES.map(resourceType => ({
@@ -108,7 +108,7 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'put_resource_localization',
-    description: "Replace an exact translation. Existing documents require expected_updated_at. Documents require route_path; authored Q&A uses title and summary without a route or blocks. Imported Q&A remains read-only.",
+    description: "Replace an exact translation. Existing documents require expected_updated_at. Document addresses are assigned from their source and remain stable; authored Q&A uses title and summary without blocks. Imported Q&A remains read-only.",
     domain: 'locales',
     minimumRole: 'admin',
     inputSchema: {
@@ -116,7 +116,6 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
       resource_id: { type: 'string' },
       locale: { type: 'string' },
       values: { ...resourceValuesInput, properties: { ...resourceValuesInput.properties, ...localizedDocumentValues.properties } },
-      route_path: { type: ['string', 'null'], description: 'Document path including the language prefix. Resource routes are automatic.' },
       content_blocks: TENANT_PAGE_BLOCKS_SCHEMA,
       expected_updated_at: { type: ['string', 'null'] },
     },
@@ -210,7 +209,6 @@ export async function handleLocalesTools(ctx: McpExecutorContext): Promise<unkno
       resourceId: requiredString(args, 'resource_id'),
       locale: requiredString(args, 'locale'),
       values: args.values,
-      routePath: args.route_path,
       contentBlocks: args.content_blocks ?? undefined,
       expectedUpdatedAt: args.expected_updated_at ?? undefined,
       userId: organization.userId,

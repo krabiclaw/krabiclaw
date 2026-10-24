@@ -19,7 +19,7 @@ export interface PlanPrice {
   id: string
   amount: number // cents, the flat plan price
   currency: string
-  interval: 'month' | 'year'
+  interval: 'month'
 }
 
 export interface PlanLimits {
@@ -72,8 +72,12 @@ const STARTER_PLAN: Plan = {
   features: [
     'Free KrabiClaw ChatGPT app — build & edit your site by chatting',
     'Bookings, ticketed experiences & consultation requests',
+    'Home listings, nightly rates & stay calendars',
+    'Airbnb connection for listing imports, stays & availability',
+    'Arrival guides, saved replies & scheduled guest messages',
+    'iPhone companion app — no extra subscription',
     'Email notifications for reservations & bookings',
-    'Structured SEO schema for restaurants, experiences & legal practices',
+    'Structured SEO schema for restaurants, experiences, law firms & lodging',
   ],
   limits: publicPlanLimits(STARTER_PLAN_ID),
   image: '/pricing/plan-basic-photo.png',
@@ -124,7 +128,7 @@ function isPlanPrice(value: unknown): value is PlanPrice {
     && value.amount > 0
     && typeof value.currency === 'string'
     && value.currency.length > 0
-    && (value.interval === 'month' || value.interval === 'year')
+    && value.interval === 'month'
   )
 }
 

@@ -14,7 +14,6 @@ export interface BlogPost {
   published_at?: string | null
   updated_at: string
   first_published_at?: string | null
-  slug_manually_overridden?: boolean | number | null
   status?: 'draft' | 'published'
   visibility?: 'listed' | 'unlisted'
   /** The leading image block's asset, or null when the article opens with text. */
@@ -63,9 +62,6 @@ export interface BlogPostUpdateInput {
   category_id?: string
   seo_keywords?: string | null
   visibility?: 'listed' | 'unlisted'
-  slug?: string | null
-  redirect_old_slug?: boolean
-  reset_slug_override?: boolean
   content_blocks?: BlogEditorBlock[]
   expected_updated_at?: string
 }

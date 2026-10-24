@@ -1,0 +1,191 @@
+{
+ "title": "KrabiClaw Google Ads OAuth scope demonstration",
+ "segments": [
+  {
+   "kind": "card",
+   "dur": 7,
+   "html": "<h1>KrabiClaw</h1><h2>Google Ads OAuth scope demonstration</h2><div class=\"row\">OAuth client ID</div><div class=\"mono\">799728932262-ic92ljo8uh0kers721smbqf2r6mv3p5j.apps.googleusercontent.com</div><div class=\"row\">The one requested Google Ads scope</div><div class=\"mono\">https://www.googleapis.com/auth/adwords</div><div class=\"row\">Recorded on production (krabiclaw.com) in the owner&#39;s Chrome, 21 Oct 2026</div>"
+  },
+  {
+   "kind": "video",
+   "src": "b.mp4",
+   "from": 3,
+   "to": 22.0,
+   "rate": 2,
+   "tag": "connect",
+   "cap": "Integrations → Google Ads for North Carolina Legal Services: Disconnect, then Connect Google Ads"
+  },
+  {
+   "kind": "video",
+   "src": "b_chooser.mp4",
+   "from": 6.1,
+   "to": 13.3,
+   "rate": 2,
+   "tag": "connect",
+   "cap": "Google account chooser (other accounts on this browser blurred) → paulchrisluke@gmail.com"
+  },
+  {
+   "kind": "video",
+   "src": "b.mp4",
+   "from": 34,
+   "to": 44.0,
+   "rate": 2,
+   "tag": "consent",
+   "cap": "Google consent for client 799728932262-…: unverified-app notice, then \"Krabiclaw wants access\""
+  },
+  {
+   "kind": "video",
+   "src": "b.mp4",
+   "from": 44,
+   "to": 52.5,
+   "rate": 1.2,
+   "tag": "consent",
+   "cap": "The requested scope: \"See, edit, create, and delete your Google Ads accounts and data\" (adwords)"
+  },
+  {
+   "kind": "video",
+   "src": "b3.mp4",
+   "from": 204,
+   "to": 232.0,
+   "rate": 2.2,
+   "tag": "connect",
+   "cap": "Back in KrabiClaw: pick North Carolina Legal Services (649-529-3607) → Connected"
+  },
+  {
+   "kind": "video",
+   "src": "c.mp4",
+   "from": 9,
+   "to": 19.0,
+   "rate": 1.6,
+   "tag": "read: reporting",
+   "cap": "Insights → Google Ads: spend, clicks, impressions, conversions for the last 30 days"
+  },
+  {
+   "kind": "video",
+   "src": "c.mp4",
+   "from": 19,
+   "to": 43.0,
+   "rate": 3,
+   "tag": "read: reporting",
+   "cap": "Campaigns by spend, read live from the Google Ads account"
+  },
+  {
+   "kind": "video",
+   "src": "c.mp4",
+   "from": 55,
+   "to": 66.0,
+   "rate": 1.6,
+   "tag": "read: reporting",
+   "cap": "Range change to 7 days: totals and campaigns re-read from Google Ads"
+  },
+  {
+   "kind": "video",
+   "src": "d.mp4",
+   "from": 2,
+   "to": 29.0,
+   "rate": 2.5,
+   "tag": "read: reporting",
+   "cap": "Today: the account's last 7 complete days, linking to that range in Insights"
+  },
+  {
+   "kind": "video",
+   "src": "e1.mp4",
+   "from": 0,
+   "to": 12.0,
+   "rate": 2,
+   "tag": "write",
+   "cap": "Write, shown on a Business plan organization (Cedar Legal) connected to 649-529-3607; the reporting scenes use the same scope"
+  },
+  {
+   "kind": "video",
+   "src": "e1_prompt.mp4",
+   "from": 0,
+   "to": 32.0,
+   "rate": 4,
+   "tag": "write",
+   "cap": "In ChatGPT, the KrabiClaw app is asked to create a PAUSED Search campaign at $1/day"
+  },
+  {
+   "kind": "video",
+   "src": "e1.mp4",
+   "from": 57,
+   "to": 120.0,
+   "rate": 6,
+   "tag": "write",
+   "cap": "KrabiClaw creates it through the Google Ads API: PAUSED, $1.00/day, campaign 24374373282"
+  },
+  {
+   "kind": "video",
+   "src": "e1.mp4",
+   "from": 241,
+   "to": 256.0,
+   "rate": 1.5,
+   "tag": "write: reflected in Google Ads",
+   "cap": "ads.google.com, account 649-529-3607: \"KrabiClaw verification demo\" — Paused, $1.00/day",
+   "pos": "top",
+   "zoom": "transform:scale(1.7);transform-origin:28% 96%;"
+  },
+  {
+   "kind": "video",
+   "src": "e1.mp4",
+   "from": 306,
+   "to": 342.0,
+   "rate": 4,
+   "tag": "write",
+   "cap": "Change made in KrabiClaw: daily budget $1 → $2, still paused"
+  },
+  {
+   "kind": "video",
+   "src": "e1.mp4",
+   "from": 352,
+   "to": 366.0,
+   "rate": 1.5,
+   "tag": "write: reflected in Google Ads",
+   "cap": "Write: changes reflected in the Google Ads account — $2.00/day",
+   "pos": "top",
+   "zoom": "transform:scale(1.7);transform-origin:28% 96%;"
+  },
+  {
+   "kind": "video",
+   "src": "e1.mp4",
+   "from": 366,
+   "to": 448.0,
+   "rate": 6,
+   "tag": "cleanup",
+   "cap": "Demo campaign removed in Google Ads (Edit → Remove → Confirm)",
+   "pos": "top"
+  },
+  {
+   "kind": "video",
+   "src": "e1.mp4",
+   "from": 496,
+   "to": 522.0,
+   "rate": 3,
+   "tag": "cleanup",
+   "cap": "KrabiClaw lists the account's campaigns again: the existing five, unchanged; the demo campaign is gone"
+  },
+  {
+   "kind": "video",
+   "src": "e1.mp4",
+   "from": 524,
+   "to": 540.0,
+   "rate": 2,
+   "tag": "cleanup",
+   "cap": "Cedar Legal disconnected from Google Ads"
+  },
+  {
+   "kind": "video",
+   "src": "f.mp4",
+   "from": 0,
+   "to": 28.0,
+   "rate": 2.5,
+   "tag": "managed ads",
+   "cap": "Plan and billing → Managed ads: KrabiClaw staff manage campaigns in the customer's account under a recorded agreement"
+  },
+  {
+   "kind": "card",
+   "dur": 9,
+   "html": "<p>Google Ads exposes <span class=\"accent\">one</span> OAuth scope: <span class=\"mono\">https://www.googleapis.com/auth/adwords</span></p><p>Reporting and campaign management both require it.</p><p>Tokens are stored and refreshed by Better Auth.</p><p>Disconnect removes the account from KrabiClaw and stops every Google Ads call; the grant can be revoked at myaccount.google.com/permissions. North Carolina Legal Services ends connected.</p>"
+  }
+ ]
+}

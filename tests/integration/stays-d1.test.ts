@@ -275,10 +275,23 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
     assert.equal(cabin.kind, 'stay')
     assert.equal(cabin.unit_label, 'night')
-    assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2,
+    assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 4, min_nights: 2,
       property_type_group: null, property_type: null, listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null,
-      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: null, long_term_cancellation_policy: null, assigned_member_id: null, assigned_team_id: 'cleaning', photo_rooms: [],
+      bedrooms: null, beds: null, bathrooms: null, amenities: [], amenity_answers: [], cancellation_policy: null, long_term_cancellation_policy: null, assigned_member_id: null, assigned_team_id: 'cleaning', live: false, photo_rooms: [],
       accessibility: Object.keys(STAY_HOME_ACCESSIBILITY_FEATURES).map(feature => ({ feature, available: null, photo_ids: [] })) })
+    // Property classification is either one authored pair or fully unknown.
+    // A partial SQL write must refuse the whole edit before canonical readers
+    // can encounter a contradictory property classification.
+    for (const propertyType of [{ property_type_group: 'houses', property_type: 'cabin' }, { property_type_group: null, property_type: null }] as const) {
+      await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: propertyType } })
+      const classified = (await getProduct(db, ORG, cabin.id)).stay
+      assert.equal(classified?.property_type_group, propertyType.property_type_group)
+      assert.equal(classified?.property_type, propertyType.property_type)
+      for (const partial of [['houses', null], [null, 'cabin']] as const) {
+        await assert.rejects(db.prepare('UPDATE product_stay_configs SET property_type_group = ?, property_type = ? WHERE organization_id = ? AND product_id = ?').bind(...partial, ORG, cabin.id).run(), /product_stay_configs_property_type_check/)
+        assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay, classified)
+      }
+    }
     // Its one location shows it; the product's publication decides whether anyone does.
     assert.deepEqual(cabin.locations, [{ location_id: 'cabin-site', active: true, published: true }])
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { location_id: 'lake-site', max_guests: 2 } as never } }), /keeps its location/)

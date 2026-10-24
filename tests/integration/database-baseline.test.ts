@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -39,14 +39,76 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('the profile Hours migration preserves every authored member field and admits only unknown or complete Hours', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const migration = journal.entries.findIndex(entry => entry.tag === '0003_member_profile_hours')
+    assert.notEqual(migration, -1)
+    for (const entry of journal.entries.slice(0, migration)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    for (const id of ['practice', 'other']) database.prepare('INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES (?, ?, ?, ?, ?)').run(id, id, id, 'USD', 'America/New_York')
+    for (const id of ['attorney', 'closed', 'profile']) {
+      database.prepare('INSERT INTO user (id, name, email) VALUES (?, ?, ?)').run(id, id, `${id}@proof.example`)
+      database.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES (?, 'practice', ?, 'member')").run(`member-${id}`, id)
+    }
+    database.prepare("INSERT INTO account (id, accountId, providerId, userId, scope) VALUES ('linked-calendar', 'google-subject', 'google', 'attorney', 'calendar.events.freebusy')").run()
+    database.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until,
+      public_name, public_photo_url, public_bio, public_approved, calendar_account_id, calendar_ids_json, calendar_revision,
+      busy_json, busy_from, busy_until, busy_checked_at, busy_error, updated_at, updated_by)
+      VALUES ('member-attorney', 'practice', 'America/New_York', ?, ?, ?, '2028-01-01T00:00:00.000Z',
+        'Attorney Rivera', 'https://example.test/attorney.jpg', 'Authored attorney biography', 1, 'linked-calendar', ?, 'calendar-revision',
+        ?, '2027-01-01T00:00:00.000Z', '2027-04-01T00:00:00.000Z', '2027-01-01T12:00:00.000Z', 'Visible calendar failure', '2027-01-01T12:01:00.001Z', 'attorney')`)
+      .run('[ { "weekday": 1, "start": "09:00", "end": "17:00" } ]',
+        '[{"start":"2027-02-01T14:00:00.000Z","end":"2027-02-01T15:00:00.000Z"}]',
+        '[{"start":"2027-02-01T14:00:00.000Z","end":"2027-02-01T22:00:00.000Z"}]',
+        '["primary","shared@example.test"]', '[{"start":"2027-02-01T18:00:00.000Z","end":"2027-02-01T19:00:00.000Z"}]')
+    database.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until,
+      public_name, public_photo_url, public_bio, public_approved, calendar_account_id, calendar_ids_json, calendar_revision, busy_json, updated_at, updated_by)
+      VALUES ('member-closed', 'practice', 'UTC', '[]', '[]', '[]', '2028-01-01T00:00:00.000Z', NULL, NULL, '', 0, NULL, '[]', 'disconnected-revision', '[]', '2027-01-01T12:00:00.000Z', 'closed')`).run()
+    const schedules = database.prepare('SELECT * FROM member_scheduling ORDER BY member_id').all()
+    const members = database.prepare('SELECT * FROM member ORDER BY id').all()
+    const accounts = database.prepare('SELECT * FROM account ORDER BY id').all()
+
+    database.exec(readFileSync(`migrations/${journal.entries[migration]!.tag}.sql`, 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT * FROM member_scheduling ORDER BY member_id').all(), schedules, 'the leaf rebuild retains profile, Hours, approval, calendar, busy and revision bytes')
+    assert.deepEqual(database.prepare('SELECT * FROM member ORDER BY id').all(), members)
+    assert.deepEqual(database.prepare('SELECT * FROM account ORDER BY id').all(), accounts)
+    assert.equal(database.pragma('foreign_keys', { simple: true }), 1)
+    assert(database.prepare("SELECT 1 FROM sqlite_schema WHERE type='index' AND name='member_scheduling_org_idx'").get())
+    database.prepare(`INSERT INTO member_scheduling (member_id, organization_id, public_name, public_approved, calendar_revision, updated_at, updated_by)
+      VALUES ('member-profile', 'practice', 'Profile without Hours', 0, 'profile-calendar-revision', '2027-01-01T13:00:00.000Z', 'profile')`).run()
+    const hours = ['timezone', 'weekly_json', 'time_off_json', 'windows_json', 'windows_until']
+    const unknown = database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-profile'").get() as Record<string, unknown>
+    assert.deepEqual(hours.map(field => unknown[field]), [null, null, null, null, null])
+    assert.equal(unknown.public_approved, 0)
+    assert.equal(unknown.calendar_ids_json, '[]')
+    const authored = database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-attorney'").get() as Record<string, string>
+    const updateHours = database.prepare(`UPDATE member_scheduling SET ${hours.map(field => `${field}=?`).join(',')} WHERE member_id='member-profile'`)
+    for (let mask = 1; mask < 31; mask++) {
+      assert.throws(() => updateHours.run(...hours.map((field, bit) => mask & (1 << bit) ? authored[field] : null)), /member_scheduling_hours_check/, `partial Hours mask ${mask} must fail rather than pass SQL NULL`)
+    }
+    assert.deepEqual(database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-profile'").get(), unknown)
+    updateHours.run(...hours.map(field => authored[field]))
+    assert.deepEqual(database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-profile'").get(), { ...unknown, ...Object.fromEntries(hours.map(field => [field, authored[field]])) })
+    assert.throws(() => database.prepare("UPDATE member_scheduling SET organization_id='other' WHERE member_id='member-profile'").run(), /FOREIGN KEY constraint failed/)
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+    database.prepare("DELETE FROM member WHERE id='member-profile'").run()
+    assert.equal(database.prepare("SELECT * FROM member_scheduling WHERE member_id='member-profile'").get(), undefined)
+    assert.deepEqual(database.prepare('SELECT * FROM member_scheduling ORDER BY member_id').all(), schedules)
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally { database.close() }
+})
+
 test('room migrations preserve authored facts and photo memberships without deriving room facts from listing totals or amenities', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
-    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ idx: number; tag: string }> }
+    const journal = JSON.parse(readFileSync('migrations-history/v19/meta/_journal.json', 'utf8')) as { entries: Array<{ idx: number; tag: string }> }
     const roomMigration = journal.entries.findIndex(entry => entry.tag === '0014_stay_photo_rooms')
     assert.notEqual(roomMigration, -1)
-    for (const entry of journal.entries.slice(0, roomMigration + 1)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    for (const entry of journal.entries.slice(0, roomMigration + 1)) database.exec(readFileSync(`migrations-history/v19/${entry.tag}.sql`, 'utf8'))
     database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Host', 'host', 'USD', 'America/Denver')").run()
     database.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('site', 'org', 'site', 'Cabin', 'America/Denver')").run()
     for (const productId of ['authored-home', 'counts-only-home']) {
@@ -63,7 +125,7 @@ test('room migrations preserve authored facts and photo memberships without deri
     const placements = database.prepare('SELECT * FROM media_placements').all()
     const listings = database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all()
 
-    database.exec(readFileSync('migrations/0015_stay_room_details.sql', 'utf8'))
+    database.exec(readFileSync('migrations-history/v19/0015_stay_room_details.sql', 'utf8'))
 
     assert.deepEqual(database.prepare('SELECT id, organization_id, product_id, type, sort_order, created_at, created_by FROM product_stay_photo_rooms ORDER BY sort_order').all(), rooms)
     assert.deepEqual(database.prepare('SELECT id, details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms ORDER BY sort_order').all(), [
@@ -82,7 +144,7 @@ test('room migrations preserve authored facts and photo memberships without deri
     const authoredRooms = database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all()
     const authoredListings = database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all()
 
-    database.exec(readFileSync('migrations/0016_stay_room_amenities.sql', 'utf8'))
+    database.exec(readFileSync('migrations-history/v19/0016_stay_room_amenities.sql', 'utf8'))
 
     assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all(), authoredRooms)
     assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), authoredListings)
@@ -95,7 +157,7 @@ test('room migrations preserve authored facts and photo memberships without deri
 
     database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'authored-home', 'bedroom', 'tv')").run()
     const roomAmenities = database.prepare('SELECT * FROM product_stay_photo_room_amenities').all()
-    database.exec(readFileSync('migrations/0017_stay_room_accessibility.sql', 'utf8'))
+    database.exec(readFileSync('migrations-history/v19/0017_stay_room_accessibility.sql', 'utf8'))
 
     assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all(), authoredRooms)
     assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), authoredListings)
@@ -110,7 +172,7 @@ test('room migrations preserve authored facts and photo memberships without deri
     database.prepare("UPDATE product_stay_configs SET amenities = '[\"tv\",\"wireless_internet\",\"smoke_detector\"]' WHERE product_id = 'authored-home'").run()
     database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'authored-home', 'bedroom', 'smoke_detector')").run()
     const priorRoomAmenities = database.prepare('SELECT * FROM product_stay_photo_room_amenities ORDER BY amenity_code').all()
-    const amenityMigration = readFileSync('migrations/0018_stay_amenity_answers.sql', 'utf8')
+    const amenityMigration = readFileSync('migrations-history/v19/0018_stay_amenity_answers.sql', 'utf8')
     // A bad later home must abort the whole conversion, including the valid
     // earlier home, without removing unknown facts or altering authored rooms.
     for (const invalid of [[1], [null], ['invented_amenity'], ['tv', 'tv'], ['tv', {}]]) {
@@ -141,31 +203,31 @@ test('room migrations preserve authored facts and photo memberships without deri
 test('interleaved branch migration ledgers preserve location privacy and authored rooms while completing missing legal-site data migrations and refusing unknown files or schema', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-interleaved-transfer-'))
-  const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+  const journal = JSON.parse(readFileSync('migrations-history/v19/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
   const commonEnd = journal.entries.findIndex(entry => entry.tag === '0012_metronome_removed')
   assert.notEqual(commonEnd, -1)
   const common = journal.entries.slice(0, commonEnd + 1).map(entry => `${entry.tag}.sql`)
   const legalMigrations = ['0013_tenant_theme_id.sql', '0014_heading_level_column.sql']
   const lodgingMigrations = ['0013_location_stay_map_sharing.sql', '0014_stay_photo_rooms.sql', '0015_stay_room_details.sql', '0016_stay_room_amenities.sql', '0017_stay_room_accessibility.sql']
   try {
-    for (const history of ['staging-first', 'lodging-first', 'staging-pending'] as const) {
+    for (const history of ['staging-first', 'lodging-first', 'staging-pending', 'v19-complete', 'v19-check-in-pending', 'v19-draft-pending'] as const) {
       const sourcePath = join(directory, `${history}.sqlite`)
       const source = new Database(sourcePath)
       source.pragma('foreign_keys = ON')
       source.exec('CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL)')
       const recordMigration = source.prepare('INSERT INTO d1_migrations (name) VALUES (?)')
       for (const file of common) {
-        source.exec(readFileSync(`migrations/${file}`, 'utf8'))
+        source.exec(readFileSync(`migrations-history/v19/${file}`, 'utf8'))
         recordMigration.run(file)
       }
       source.prepare("INSERT INTO organization (id, name, slug, vertical, theme_id, default_currency, timezone) VALUES ('legal', 'Recorded Legal Practice', 'legal', 'service', 'blawby-theme-v1', 'USD', 'America/New_York'), ('host', 'Recorded Cabin', 'host', 'lodging', 'saya-theme-v1', 'THB', 'Asia/Bangkok')").run()
       source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('legal-en', 'legal', 'en', 1, 'published'), ('host-en', 'host', 'en', 1, 'published')").run()
       source.prepare("INSERT INTO content_documents (id, organization_id, kind, row_role, locale, title, path) VALUES ('legal-page', 'legal', 'page', 'root', 'en', 'Legal help', '/legal-help')").run()
       source.prepare("INSERT INTO content_blocks (id, document_id, type, data_json) VALUES ('legal-heading', 'legal-page', 'heading', '{\"text\":\"Recorded legal heading\",\"level\":3}')").run()
-      const branchFiles = history === 'staging-first' ? [...legalMigrations, ...lodgingMigrations]
+      const branchFiles = history === 'staging-first' || history.startsWith('v19-') ? [...legalMigrations, ...lodgingMigrations]
         : history === 'lodging-first' ? [...lodgingMigrations, ...legalMigrations] : lodgingMigrations
       for (const file of branchFiles) {
-        source.exec(readFileSync(`migrations/${file}`, 'utf8'))
+        source.exec(readFileSync(`migrations-history/v19/${file}`, 'utf8'))
         recordMigration.run(file)
       }
       source.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone, stay_map_sharing) VALUES ('cabin', 'host', 'cabin', 'Recorded Cabin', 'Asia/Bangkok', 'specific')").run()
@@ -181,17 +243,62 @@ test('interleaved branch migration ledgers preserve location privacy and authore
       source.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('host', 'home', 'bedroom', 'smoke_detector')").run()
       source.prepare("INSERT INTO product_stay_room_accessibility (organization_id, product_id, room_id, feature_code, available) VALUES ('host', 'home', 'bedroom', 'step_free_access', 1)").run()
       source.prepare("INSERT INTO product_stay_room_accessibility_photos (organization_id, product_id, room_id, feature_code, asset_id) VALUES ('host', 'home', 'bedroom', 'step_free_access', 'photo')").run()
-      const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'product_stay_photo_room_amenities', 'product_stay_room_accessibility', 'product_stay_room_accessibility_photos', 'media_placements']
-      const authored = preservedTables.map(table => source.prepare(`SELECT * FROM ${table}`).all())
+      if (history.startsWith('v19-')) {
+        for (const entry of journal.entries) {
+          const file = `${entry.tag}.sql`
+          if (common.includes(file) || branchFiles.includes(file)
+            || history === 'v19-check-in-pending' && file === '0023_stay_check_in_end_time.sql'
+            || history === 'v19-draft-pending' && ['0024_airbnb_import_draft.sql', '0025_airbnb_sync_jobs.sql'].includes(file)) continue
+          source.exec(readFileSync(`migrations-history/v19/${file}`, 'utf8'))
+          recordMigration.run(file)
+        }
+        if (history === 'v19-complete') source.prepare("UPDATE product_stay_configs SET check_in_end_time = '19:00' WHERE product_id = 'home'").run()
+        source.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('attorney', 'Attorney', 'attorney@example.test', 1, 1, 1)").run()
+        source.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('attorney-member', 'legal', 'attorney', 'owner', 1)").run()
+        source.prepare("INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, calendar_revision, updated_at, updated_by) VALUES ('attorney-member', 'legal', 'America/New_York', '[]', '[]', '[]', '2099-01-01T00:00:00.000Z', 'authored', '2026-10-01T00:00:00.000Z', 'attorney')").run()
+        source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('consultation', 'legal', 'service', 'Family law consultation', 'family-law-consultation', 'attorney', 'attorney')").run()
+        source.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('consultation-default', 'legal', 'consultation', 'Family law consultation', 'attorney', 'attorney')").run()
+        source.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, held_online, scheduling_mode, assigned_member_id, created_by, updated_by) VALUES ('consultation', 'legal', 30, 1, 1, 'provider', 'attorney-member', 'attorney', 'attorney')").run()
+        source.prepare("INSERT INTO product_sessions (id, organization_id, product_id, assigned_member_id, source_occurrence_key, timezone, starts_at, ends_at, capacity, status, created_at, updated_at, created_by, updated_by) VALUES ('recorded-consultation', 'legal', 'consultation', 'attorney-member', 'hours:attorney-member:2026-10-01T14:00:00.000Z', 'America/New_York', '2026-10-01T14:00:00.000Z', '2026-10-01T14:30:00.000Z', 1, 'scheduled', '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z', 'attorney', 'attorney')").run()
+        source.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status) VALUES ('recorded-booking', 'legal', 'consultation', 'recorded-consultation', 'consultation-default', 1, 'cancelled')").run()
+      }
+      if (history === 'v19-draft-pending') {
+        source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, unit_label, created_by, updated_by) VALUES ('later-home', 'host', 'stay', 'Recorded Later Cabin', 'recorded-later-cabin', 'night', 'owner', 'owner')").run()
+        source.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('later-night', 'host', 'later-home', 'Night', 'owner', 'owner')").run()
+        source.prepare("INSERT INTO product_publications (organization_id, product_id, created_by, updated_by) VALUES ('host', 'later-home', 'owner', 'owner')").run()
+        source.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('host', 'later-home', 'cabin', 'owner', 'owner')").run()
+        source.prepare("INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, beds, amenities, created_by, updated_by) VALUES ('host', 'later-home', 'cabin', '15:00', '11:00', 2, 1, '[]', 'owner', 'owner')").run()
+        source.prepare("INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled) VALUES ('host', 'home', 'channex', 'listing', 'channel', 'property', 'room', 'rate', 'complete', 1)").run()
+        source.prepare("INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, updated_at) VALUES ('host', 'home', 'channex', '2026-10-23', 'needs_review', 'Recorded restriction requires review', '2026-10-23T00:00:00.000Z')").run()
+        source.prepare(`INSERT INTO requests (id, kind, organization_id, location_id, conversation_state, payload_json)
+          VALUES ('guest-thread', 'stay', 'host', 'cabin', 'needs_attention', '{"guest":{"name":"Recorded guest","email":"guest@example.test","phone":null}}')`).run()
+        source.prepare("INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, request_id, external_booking_id, provider_updated_at) VALUES ('channex', 'recorded-thread', 'host', 'home', 'guest-thread', 'recorded-external-booking', '2026-10-23T00:00:00.000Z')").run()
+      }
+      const recorded = (source.prepare('SELECT name FROM d1_migrations ORDER BY id').all() as Array<{ name: string }>).map(row => row.name)
+      const unchangedTables = history.startsWith('v19-') ? ['products', 'product_variants', 'product_publications', 'product_locations', 'product_stay_configs', 'user', 'member', 'member_scheduling', 'product_booking_configs', 'product_sessions', 'bookings'] : []
+      const unchanged = unchangedTables.map(table => {
+        const columns = (source.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name)
+        return { table, columns, rows: source.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all() }
+      })
+      const preservedTables = ['product_stay_photo_rooms', 'product_stay_photo_room_memberships', 'product_stay_photo_room_amenities', 'product_stay_room_accessibility', 'product_stay_room_accessibility_photos', 'media_placements', 'product_channel_mappings', 'channel_night_pushes', 'channel_threads']
+      const authored = preservedTables.map(table => ({
+        table,
+        columns: (source.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(row => row.name),
+        rows: source.prepare(`SELECT * FROM ${table}`).all(),
+      }))
       source.close()
 
       const targetPath = join(directory, `${history}-transferred.sqlite`)
-      const manifest = await transferDatabaseExport(sourcePath, targetPath)
-      assert.deepEqual(manifest.source_migrations, [...common, ...branchFiles])
+      const payloadPath = join(directory, `${history}-payload.sql`)
+      const manifest = await transferDatabaseExport(sourcePath, targetPath, history === 'v19-draft-pending' ? { payloadPath } : {})
+      assert.deepEqual(manifest.source_migrations, recorded)
       assert.deepEqual(manifest.invariants.filter(invariant => invariant.violations > 0), [])
       const target = new Database(targetPath, { readonly: true })
       try {
-        assert.deepEqual(preservedTables.map(table => target.prepare(`SELECT * FROM ${table}`).all()), authored)
+        for (const { table, columns, rows } of authored) assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
+        for (const { table, columns, rows } of unchanged) assert.deepEqual(target.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
+        assert.equal(target.prepare("SELECT check_in_end_time FROM product_stay_configs WHERE product_id = 'home'").get()!.check_in_end_time, history === 'v19-complete' ? '19:00' : null)
+        assert.deepEqual(manifest.provider_hours_session_ids, [])
         assert.deepEqual(target.prepare("SELECT organization_id, product_id, beds, amenities FROM product_stay_configs WHERE product_id = 'home'").get(), { organization_id: 'host', product_id: 'home', beds: 2, amenities: '[{"code":"smoke_detector","available":true}]' })
         assert.deepEqual(target.prepare("SELECT organization_id, stay_map_sharing FROM business_locations WHERE id = 'cabin'").get(), { organization_id: 'host', stay_map_sharing: 'specific' })
         assert.deepEqual(target.prepare("SELECT theme_id, json_extract(settings_json, '$.config.font_preset') AS font, json_extract(settings_json, '$.config.button_casing') AS casing FROM organization WHERE id = 'legal'").get(), { theme_id: 'tenant-theme-v1', font: 'marcellus', casing: 'uppercase' })
@@ -199,16 +306,109 @@ test('interleaved branch migration ledgers preserve location privacy and authore
         assert.deepEqual(target.prepare('SELECT * FROM product_stay_accessibility').all(), [])
         assert.deepEqual(target.pragma('foreign_key_check'), [])
       } finally { target.close() }
+      if (history === 'v19-draft-pending') {
+        // Real prepared v20 artifacts had either the baseline alone or its
+        // first forward migration. Neither had the later job table or column.
+        const currentJournal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+        const currentFiles = currentJournal.entries.map(entry => `${entry.tag}.sql`)
+        assert.deepEqual(manifest.target_migrations, currentFiles)
+        const initialArtifacts: Array<{ path: string; prefix: number; bytes: Buffer; manifestBytes: Buffer }> = []
+        for (const prefix of [0, 1]) {
+          const initialPath = join(directory, `v20-initial-${prefix}.sqlite`)
+          const initial = new Database(initialPath)
+          try {
+            for (const file of currentFiles.slice(0, prefix + 1)) initial.exec(readFileSync(`migrations/${file}`, 'utf8'))
+            initial.pragma('foreign_keys = OFF')
+            initial.prepare('ATTACH DATABASE ? AS recorded').run(targetPath)
+            const tables = initial.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as Array<{ name: string }>
+            assert.equal(tables.length, 111)
+            for (const { name } of tables) {
+              const columns = (initial.prepare(`PRAGMA table_info(${name})`).all() as Array<{ name: string }>).map(row => `"${row.name}"`).join(',')
+              initial.exec(`INSERT INTO ${name} (${columns}) SELECT ${columns} FROM recorded.${name}`)
+            }
+            initial.exec('DETACH DATABASE recorded')
+            initial.pragma('foreign_keys = ON')
+            assert.equal(initial.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name = 'airbnb_sync_jobs'").get()!.n, 0)
+            assert.equal((initial.prepare('PRAGMA table_info(product_channel_mappings)').all() as Array<{ name: string }>).some(column => column.name === 'import_written'), false)
+            if (prefix === 0) assert.throws(() => initial.prepare("UPDATE product_channel_mappings SET import_stage = 'draft', enabled = 0 WHERE product_id = 'home'").run(), /product_channel_mappings_stage_check/)
+            for (const { table, columns, rows } of authored) assert.deepEqual(initial.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
+            assert.deepEqual(initial.pragma('foreign_key_check'), [])
+          } finally { initial.close() }
+          // The first artifact predates migration recording; the second names
+          // its exact root prefix. Both are immutable comparison inputs.
+          writeFileSync(`${initialPath}.manifest.json`, JSON.stringify({
+            baseline_sha256: manifest.baseline_sha256,
+            ...(prefix === 1 ? { target_migrations: currentFiles.slice(0, 2) } : {}),
+          }))
+          initialArtifacts.push({ path: initialPath, prefix, bytes: readFileSync(initialPath), manifestBytes: readFileSync(`${initialPath}.manifest.json`) })
+        }
+        const importWritten = JSON.stringify({ name: 'a'.repeat(64) })
+        let recordedMapping: unknown
+        let recordedJob: unknown
+        const changedSource = new Database(sourcePath)
+        try {
+          changedSource.pragma('foreign_keys = ON')
+          for (const file of ['0024_airbnb_import_draft.sql', '0025_airbnb_sync_jobs.sql']) {
+            changedSource.exec(readFileSync(`migrations-history/v19/${file}`, 'utf8'))
+            changedSource.prepare('INSERT INTO d1_migrations (name) VALUES (?)').run(file)
+          }
+          changedSource.prepare("INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, updated_at) VALUES ('host', 'home', 'channex', '2026-10-24', 'pending', '2026-10-23T01:00:00.000Z')").run()
+          changedSource.prepare("INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, import_written, enabled) VALUES ('host', 'later-home', 'channex', 'later-listing', 'later-channel', 'later-property', 'later-room', 'later-rate', 'complete', ?, 1)").run(importWritten)
+          changedSource.prepare("INSERT INTO airbnb_sync_jobs (id, organization_id, listing_id, product_id, action, details, state, attempts, last_error_code, last_error, next_attempt_at, created_at, updated_at) VALUES ('recorded-sync', 'host', 'later-listing', 'later-home', 'sync', '{\"title\":\"Recorded refreshed listing\"}', 'error', 2, 'RECORDED_SYNC_ERROR', 'Recorded sync error', '2026-10-23T02:00:00.000Z', '2026-10-23T01:00:00.000Z', '2026-10-23T01:30:00.000Z')").run()
+          recordedMapping = changedSource.prepare("SELECT * FROM product_channel_mappings WHERE product_id = 'later-home'").get()
+          recordedJob = changedSource.prepare("SELECT * FROM airbnb_sync_jobs WHERE id = 'recorded-sync'").get()
+        } finally { changedSource.close() }
+        for (const artifact of initialArtifacts) {
+          const replacementPath = join(directory, `v20-forward-migrated-${artifact.prefix}.sqlite`)
+          copyFileSync(artifact.path, replacementPath)
+          const replacement = new Database(replacementPath)
+          try {
+            replacement.pragma('foreign_keys = ON')
+            for (const file of currentFiles.slice(artifact.prefix + 1)) replacement.exec(readFileSync(`migrations/${file}`, 'utf8'))
+            for (const { table, columns, rows } of authored) assert.deepEqual(replacement.prepare(`SELECT ${columns.join(',')} FROM ${table}`).all(), rows)
+            assert.equal(replacement.prepare("SELECT import_written FROM product_channel_mappings WHERE product_id = 'home'").get()!.import_written, null)
+            assert.deepEqual(replacement.prepare('SELECT * FROM airbnb_sync_jobs').all(), [])
+            assert.throws(() => replacement.prepare("UPDATE product_channel_mappings SET import_stage = 'content' WHERE product_id = 'home'").run(), /product_channel_mappings_enabled_check/)
+            assert.deepEqual(replacement.pragma('foreign_key_check'), [])
+          } finally { replacement.close() }
+          const deltaPayloadPath = join(directory, `v20-final-delta-${artifact.prefix}.sql`)
+          const delta = await transferDatabaseExport(sourcePath, join(directory, `v20-final-${artifact.prefix}.sqlite`), { payloadPath: deltaPayloadPath, deltaFrom: artifact.path })
+          assert.deepEqual(delta.target_migrations, currentFiles)
+          assert.equal(delta.payload!.delta!.channel_night_pushes, 1)
+          assert.equal(delta.payload!.delta!.product_channel_mappings, 1)
+          assert.equal(delta.payload!.delta!.airbnb_sync_jobs, 1)
+          assert.equal(Object.values(delta.payload!.delta!).reduce((total, rows) => total + rows, 0), 3)
+          assert.deepEqual(delta.payload!.left_behind, {})
+          assert.deepEqual(readFileSync(artifact.path), artifact.bytes)
+          assert.deepEqual(readFileSync(`${artifact.path}.manifest.json`), artifact.manifestBytes)
+          const completed = new Database(replacementPath)
+          try {
+            completed.pragma('foreign_keys = ON')
+            completed.exec(readFileSync(deltaPayloadPath, 'utf8'))
+            assert.deepEqual(completed.prepare('SELECT date, state, detail, updated_at FROM channel_night_pushes ORDER BY date').all(), [
+              { date: '2026-10-23', state: 'needs_review', detail: 'Recorded restriction requires review', updated_at: '2026-10-23T00:00:00.000Z' },
+              { date: '2026-10-24', state: 'pending', detail: null, updated_at: '2026-10-23T01:00:00.000Z' },
+            ])
+            assert.deepEqual(completed.prepare("SELECT * FROM product_channel_mappings WHERE product_id = 'later-home'").get(), recordedMapping)
+            assert.deepEqual(completed.prepare("SELECT * FROM airbnb_sync_jobs WHERE id = 'recorded-sync'").get(), recordedJob)
+            for (const { table, columns, rows } of authored.filter(entry => entry.table === 'product_channel_mappings' || entry.table === 'channel_threads')) {
+              assert.deepEqual(completed.prepare(`SELECT ${columns.join(',')} FROM ${table}${table === 'product_channel_mappings' ? " WHERE product_id = 'home'" : ''}`).all(), rows)
+            }
+            assert.deepEqual(completed.pragma('foreign_key_check'), [])
+          } finally { completed.close() }
+        }
+      }
     }
-    for (const invalid of ['unknown-migration', 'room-schema-mismatch', 'location-schema-mismatch'] as const) {
+    for (const invalid of ['unknown-migration', 'room-schema-mismatch', 'location-schema-mismatch', 'unsupported-offering'] as const) {
       const sourcePath = join(directory, `${invalid}.sqlite`)
       copyFileSync(join(directory, 'staging-pending.sqlite'), sourcePath)
       const source = new Database(sourcePath)
       if (invalid === 'unknown-migration') source.prepare("INSERT INTO d1_migrations (name) VALUES ('9999_unrecorded_migration.sql')").run()
+      else if (invalid === 'unsupported-offering') source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('physical', 'host', 'item', 'Authored physical offering', 'physical', 'owner', 'owner')").run()
       else source.exec(`ALTER TABLE ${invalid === 'room-schema-mismatch' ? 'product_stay_photo_rooms' : 'business_locations'} ADD COLUMN unrecorded_fact TEXT`)
       source.close()
       const targetPath = join(directory, `${invalid}-refused.sqlite`)
-      await assert.rejects(() => transferDatabaseExport(sourcePath, targetPath), /Source schema differs from every recorded migration chain; no rows were copied/)
+      await assert.rejects(() => transferDatabaseExport(sourcePath, targetPath), invalid === 'unsupported-offering' ? /Unsupported offerings: host\/physical \(item\); no rows were copied/ : /Source schema differs from every recorded migration chain; no rows were copied/)
       const target = new Database(targetPath, { readonly: true })
       try { assert.deepEqual(target.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all(), []) }
       finally { target.close() }
@@ -254,6 +454,17 @@ test('a v7 export transfers into the current baseline, its connections into orga
     } finally {
       target.close()
     }
+
+    const unclassifiedPath = export7('unclassified.sqlite', {})
+    const unclassified = new Database(unclassifiedPath)
+    unclassified.prepare("UPDATE organization SET vertical = 'experience' WHERE id = 'org'").run()
+    unclassified.prepare("INSERT INTO products (id, organization_id, name, slug, created_by, updated_by) VALUES ('unclassified', 'org', 'Authored offering', 'unclassified', 'owner', 'owner')").run()
+    unclassified.close()
+    const refusedPath = join(directory, 'unclassified-refused.sqlite')
+    await assert.rejects(() => transferDatabaseExport(unclassifiedPath, refusedPath), /Product unclassified has no recognized offering kind; no rows were copied/)
+    const refused = new Database(refusedPath, { readonly: true })
+    try { assert.deepEqual(refused.prepare("SELECT name FROM sqlite_schema WHERE type = 'table'").all(), []) }
+    finally { refused.close() }
 
     // A connection that cannot be mapped stops the transfer.
     for (const [name, integrations, reason] of [

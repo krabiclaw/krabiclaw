@@ -4,7 +4,8 @@
 (free, with no Stripe product), Growth (`$49` per month) and Business (`$149`
 per month). Business includes Growth's features, online payments and managed
 Google Ads campaigns. Each plan price is one flat monthly price billed at
-quantity 1; there is no annual offer.
+quantity 1. The catalog is monthly only: there is no annual offer for any plan,
+service or Site Language.
 
 Everything else a plan bills is a metered price on a Stripe billing meter, each
 its own product with `product_family` set to the meter key (never a `plan_id`):
@@ -12,7 +13,7 @@ its own product with `product_family` set to the meter key (never a `plan_id`):
 | `product_family` | Meter event | Formula | Price | Plans |
 | --- | --- | --- | --- | --- |
 | `locations` | `krabiclaw_locations` | `last` | graduated: 2 included, then $49 per additional location per month | Growth, Business |
-| `homes` | `krabiclaw_homes` | `last` | graduated: 2 included, then $9 per additional home per month | Growth, Business |
+| `homes` | `krabiclaw_homes` | `last` | graduated: 2 live homes included, then $9 per additional home per month; drafts are free | Growth, Business |
 | `captured_volume` | `krabiclaw_captured_volume` | `sum` | 0.014 cents per cent (1.4% of payment volume) | Business |
 | `stripe_cost` | `krabiclaw_stripe_cost` | `sum` | 1 cent per cent (Stripe fees at cost) | Business |
 | `ad_spend` | `krabiclaw_ad_spend` | `sum` | 0.1 cents per cent (10% of monthly ad spend) | Business |
@@ -28,9 +29,10 @@ Growth → Business is one `subscription.upgrade` (`docs/payments/payments.md`).
 without exactly one active product per meter at its published price, so apply
 the offers before deploying an application that sells them.
 
-The graduated per-location plan prices sold before #1503 and the annual Growth
-price are retired for new sales by the full plan's `deactivate_price`
-operations. Rental units are not billed: the Additional rental unit product
+The graduated per-location plan prices sold before #1503, the annual Growth
+price and the yearly Site Language price are retired for new sales by the full
+plan's `deactivate_price` operations: any active recurring price on a canonical
+product other than its one monthly price is archived. The former Additional rental unit product
 (`product_family=rental_units`) is a retired family, so the full plan clears its
 default price, deactivates its prices and archives it. Subscriptions on any of
 them keep their items until they change plan.
@@ -179,12 +181,10 @@ safe. The journal never claims compensation or completion when a provider
 mutation may have succeeded without a durable result.
 
 The signed operation order creates or reconciles each offered plan's canonical
-product, required monthly price, any supported unambiguous existing annual price,
-and configured image first. Business does not require a product image. The full
+product, required monthly price and configured image first. Business does not require a product image. The full
 planner also reconciles the existing Site Language catalog family.
 For active retired products, it clears a signed active default price before
-deactivating prices and archiving the product. The planner creates an annual price only when the canonical offer defines its
-exact amount. The operator re-reads the provider
+deactivating prices and archiving the product. The operator re-reads the provider
 and proves that no canonical operation remains before each deactivation or
 archival mutation. Every operation re-checks its
 reviewed provider precondition, and already-applied operations are skipped only
@@ -210,11 +210,11 @@ reviewed provider snapshot. An active retired default price is cleared first;
 canonical offered products and inactive products are not cleared. There is no
 automatic first-product selection.
 
-For an existing canonical product, the canonical monthly and annual prices are
-the active prices exactly matching the definition (`desiredPriceParams`):
-currency, interval, billing scheme and tiers or unit amount. Product metadata
+For an existing canonical product, the canonical monthly price is the active
+price exactly matching the definition (`desiredPriceParams`): currency, monthly
+interval, billing scheme and tiers or unit amount. `monthly_price_id` metadata
 selects among identical candidates; more than one identical candidate without
-it fails closed. A price at any other amount or scheme is not canonical: the
+it fails closed. A price at any other amount, scheme or interval is not canonical: the
 plan creates the matching price, points the product's metadata and default
 price at it, and deactivates the old one. The configured `seat_price_id` is
 never selected or deactivated. The plan snapshot includes each price's tiers,

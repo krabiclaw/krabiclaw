@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page, type Request, type WebSocket } from '@playwright/test'
+import Ajv from 'ajv'
 import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
@@ -104,7 +105,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   })
   expect(stay.error).toBeNull()
   const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
-  expect(overlap.error).toContain('Another stay already holds one of these nights')
+  expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
 
   // Today lists the arrival and opens the stay.
   await page.goto(`/dashboard/${slug}`)
@@ -611,16 +612,16 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(availabilityPanel).not.toBeVisible()
     await page.getByRole('tab', { name: 'Arrival guide', exact: true }).click()
     const arrivalPanel = page.locator('#dashboard-panel-product-arrival-time')
-    await arrivalPanel.getByLabel(/^Check-in from/).fill('16:00')
-    await arrivalPanel.getByLabel(/^Checkout by/).fill('10:00')
+    await arrivalPanel.getByLabel(/^Start time/).fill('16:00')
+    await arrivalPanel.getByLabel(/^Time/).fill('10:00')
     const arrivalSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
     await arrivalPanel.getByRole('button', { name: 'Save', exact: true }).click()
     expect((await arrivalSaved).status()).toBe(200)
     await expect(arrivalPanel.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/arrival-time`) && url.searchParams.get('guide') === 'arrival')
     await page.reload()
-    await expect(arrivalPanel.getByLabel(/^Check-in from/)).toHaveValue('16:00')
-    await expect(arrivalPanel.getByLabel(/^Checkout by/)).toHaveValue('10:00')
+    await expect(arrivalPanel.getByLabel(/^Start time/)).toHaveValue('16:00')
+    await expect(arrivalPanel.getByLabel(/^Time/)).toHaveValue('10:00')
     await expect(arrivalPanel).toBeVisible()
     await arrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
@@ -639,10 +640,11 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
       product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
-      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
+      // A home the editor creates has a flexible check-in end until the host chooses one.
+      check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
       check_in_instructions: null, photos: [], photo_rooms: [],
       // The editor's listing choices persist through the native home projection too.
-      description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
+      description: listingDescription, published: false, live: false, airbnb_listing_id: null, airbnb_editor_url: null, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
       ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
       amenity_answers: [{ code: 'dryer', available: true }, { code: 'wireless_internet', available: true }],
       carbon_monoxide_detector_details: null, smoke_detector_details: null,
@@ -878,7 +880,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     expect(featuredResponse.status(), await featuredResponse.text()).toBe(200)
     expect(featuredResponse.request().postDataJSON().details_mode).toBe('merge')
     expect(featuredResponse.request().postDataJSON().details).toEqual({ featured: false })
-    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/attributes`)
+    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/photo`)
     const savedAttributeSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedAttributeSafety.error).toBeNull()
     expect(savedAttributeSafety.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: false })
@@ -1000,6 +1002,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const addressBefore = await call<{ location: { id: string; slug: string; updated_at: string; address: PostalAddress | null } }>('get_location', { location_id: location.id })
   expect(addressBefore.error).toBeNull()
   expect(addressBefore.data!.location.address).toEqual(authoredAddress)
+  const savedLocationSlug = addressBefore.data!.location.slug
   await page.goto(`/dashboard/${slug}/products/${productId}/location`)
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
   const productLocation = page.locator('#dashboard-panel-product-location')
@@ -1101,11 +1104,12 @@ test('a host edits the shared lodging location and protects its exact address an
   expect(editAddressVersion.error).toBeNull()
   await addressCity.fill('Nong Thale')
   const changedAddress = { ...authoredAddress, locality: 'Nong Thale' }
-  const newerLocation = await call('update_location', { location_id: location.id, title: 'Cliff Cabin Location', slug: 'cliff-cabin-location' })
+  const newerLocation = await call('update_location', { location_id: location.id, title: 'Cliff Cabin Location' })
   expect(newerLocation.error).toBeNull()
   const locationAfterRename = await call<{ location: { slug: string; title: string; updated_at: string; address: PostalAddress | null } }>('get_location', { location_id: location.id })
   expect(locationAfterRename.error).toBeNull()
-  expect(locationAfterRename.data!.location).toMatchObject({ slug: 'cliff-cabin-location', title: 'Cliff Cabin Location', address: authoredAddress })
+  expect(locationAfterRename.data!.location).toMatchObject({ slug: savedLocationSlug, title: 'Cliff Cabin Location', address: authoredAddress })
+  expect(locationAfterRename.data!.location.updated_at).not.toBe(editAddressVersion.data!.location.updated_at)
   const staleAddressSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const staleAddressResponse = await staleAddressSaved
@@ -1121,7 +1125,7 @@ test('a host edits the shared lodging location and protects its exact address an
   await expect(addressPanel.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
   const rejectedAddress = await call<{ location: { address: PostalAddress | null; slug: string } }>('get_location', { location_id: location.id })
   expect(rejectedAddress.error).toBeNull()
-  expect(rejectedAddress.data!.location).toMatchObject({ address: authoredAddress, slug: 'cliff-cabin-location' })
+  expect(rejectedAddress.data!.location).toMatchObject({ address: authoredAddress, slug: savedLocationSlug })
   const addressRetried = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const addressRetryResponse = await addressRetried
@@ -1134,6 +1138,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const savedAddress = await call<{ location: { address: PostalAddress | null; slug: string } }>('get_location', { location_id: location.id })
   expect(savedAddress.error).toBeNull()
   expect(savedAddress.data!.location.address).toEqual(changedAddress)
+  expect(savedAddress.data!.location.slug).toBe(savedLocationSlug)
   const homeAfterAddress = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(homeAfterAddress.error).toBeNull()
   expect(homeAfterAddress.data!.product.stay!.location_id).toBe(location.id)
@@ -1276,7 +1281,7 @@ test('a host edits the shared lodging location and protects its exact address an
 
   // The native Location route uses the same form, with the saved slug. An
   // address with its country removed is invalid rather than an implicit clear.
-  await page.goto(`/dashboard/${slug}/locations/${savedAddress.data!.location.slug}/address`)
+  await page.goto(`/dashboard/${slug}/locations/${savedLocationSlug}/address`)
   await expect(streetAddress).toHaveValue('12 Test Road')
   await expect(apartment).toHaveValue('Apartment 4')
   await expect(thirdAddressLine).toHaveValue('East building')
@@ -1293,23 +1298,25 @@ test('a host edits the shared lodging location and protects its exact address an
   expect(invalidAddress.data!.location.address).toEqual(changedAddress)
   await addressPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto(`/dashboard/${slug}/locations/${savedAddress.data!.location.slug}/address`)
+  await page.goto(`/dashboard/${slug}/locations/${savedLocationSlug}/address`)
   await expect(addressCity).toHaveValue('Nong Thale')
   const nativeAddressVersion = await call<{ location: { updated_at: string } }>('get_location', { location_id: location.id })
   expect(nativeAddressVersion.error).toBeNull()
   await addressPanel.getByRole('textbox', { name: 'Postal code', exact: true }).fill('81000')
   const nativeChangedAddress = { ...changedAddress, postalCode: '81000' }
-  const nativeLocationRenamed = await call('update_location', { location_id: location.id, slug: 'cliff-cabin-address' })
+  const nativeLocationRenamed = await call('update_location', { location_id: location.id, title: 'Cliff Cabin Address' })
   expect(nativeLocationRenamed.error).toBeNull()
-  const nativeRenamedVersion = await call<{ location: { updated_at: string } }>('get_location', { location_id: location.id })
+  const nativeRenamedVersion = await call<{ location: { title: string; slug: string; updated_at: string; address: PostalAddress | null } }>('get_location', { location_id: location.id })
   expect(nativeRenamedVersion.error).toBeNull()
+  expect(nativeRenamedVersion.data!.location).toMatchObject({ title: 'Cliff Cabin Address', slug: savedLocationSlug, address: changedAddress })
+  expect(nativeRenamedVersion.data!.location.updated_at).not.toBe(nativeAddressVersion.data!.location.updated_at)
   const nativeAddressConflict = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const nativeConflictResponse = await nativeAddressConflict
   expect(nativeConflictResponse.status(), await nativeConflictResponse.text()).toBe(409)
   expect(nativeConflictResponse.request().postDataJSON()).toEqual({ address: nativeChangedAddress, expected_updated_at: nativeAddressVersion.data!.location.updated_at })
   await expect(addressPanel.getByText('The location changed since it was read. Reload it and try again.', { exact: false })).toBeVisible()
-  await expect(page).toHaveURL(`/dashboard/${slug}/locations/${savedAddress.data!.location.slug}/address`)
+  await expect(page).toHaveURL(`/dashboard/${slug}/locations/${savedLocationSlug}/address`)
   await expect(streetAddress).toHaveValue('12 Test Road')
   await expect(apartment).toHaveValue('Apartment 4')
   await expect(thirdAddressLine).toHaveValue('East building')
@@ -1318,17 +1325,17 @@ test('a host edits the shared lodging location and protects its exact address an
   await expect(addressPanel.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
   const nativeAddressRejected = await call<{ location: { slug: string; address: PostalAddress | null } }>('get_location', { location_id: location.id })
   expect(nativeAddressRejected.error).toBeNull()
-  expect(nativeAddressRejected.data!.location).toMatchObject({ slug: 'cliff-cabin-address', address: changedAddress })
+  expect(nativeAddressRejected.data!.location).toMatchObject({ slug: savedLocationSlug, address: changedAddress })
   const nativeAddressRetried = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const nativeRetryResponse = await nativeAddressRetried
   expect(nativeRetryResponse.status(), await nativeRetryResponse.text()).toBe(200)
   expect(nativeRetryResponse.request().postDataJSON()).toEqual({ address: nativeChangedAddress, expected_updated_at: nativeRenamedVersion.data!.location.updated_at })
-  await expect(page).toHaveURL(`/dashboard/${slug}/locations/cliff-cabin-address/address`)
+  await expect(page).toHaveURL(`/dashboard/${slug}/locations/${savedLocationSlug}/address`)
   await expect(addressPanel.getByRole('textbox', { name: 'Postal code', exact: true })).toHaveValue('81000')
   const nativeAddressSaved = await call<{ location: { id: string; slug: string; address: PostalAddress | null } }>('get_location', { location_id: location.id })
   expect(nativeAddressSaved.error).toBeNull()
-  expect(nativeAddressSaved.data!.location).toMatchObject({ id: location.id, slug: 'cliff-cabin-address', address: nativeChangedAddress })
+  expect(nativeAddressSaved.data!.location).toMatchObject({ id: location.id, slug: savedLocationSlug, address: nativeChangedAddress })
 
 })
 
@@ -2678,12 +2685,39 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       base_price_minor: 320_000, idempotency_key: crypto.randomUUID() } })
     expect(madeHome.status(), await madeHome.text()).toBe(201)
     const assignedHome = (await madeHome.json() as { home: { product_id: string; location_id: string } }).home
-    const otherHome = await call<{ product: { id: string } }>('create_product', { kind: 'stay', name: 'Other Cabin', idempotency_key: crypto.randomUUID(), stay: {
+    const otherHomeInput = { kind: 'stay', name: 'Other Cabin', stay: {
       location_id: locations.data!.locations[0]!.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
       assigned_member_id: null, assigned_team_id: null,
-    } })
-    expect(otherHome.error).toBeNull()
-    const homes = [assignedHome, { product_id: otherHome.data!.product.id, location_id: locations.data!.locations[0]!.id }]
+    } }
+    const otherHomeRequest = { idempotency_key: crypto.randomUUID(), products: [otherHomeInput] }
+    const discovery = await mcpRequest(page.request, baseURL!, { method: 'tools/list' })
+    expect(discovery.status()).toBe(200)
+    const catalog = await discovery.json() as { result: { tools: Array<{ name: string; inputSchema: object; outputSchema: object }> } }
+    const batchTool = catalog.result.tools.find(tool => tool.name === 'batch_create_products')
+    const reconcileTool = catalog.result.tools.find(tool => tool.name === 'reconcile_products')
+    const calendarTool = catalog.result.tools.find(tool => tool.name === 'get_stay_calendar')
+    const arrivalTool = catalog.result.tools.find(tool => tool.name === 'update_stay_arrival_guide')
+    for (const definition of [batchTool, reconcileTool, calendarTool, arrivalTool]) expect(definition).toBeDefined()
+    const ajv = new Ajv({ strict: false, allErrors: true })
+    const validateBatchInput = ajv.compile(batchTool!.inputSchema)
+    const validateBatchOutput = ajv.compile(batchTool!.outputSchema)
+    const validateReconcileInput = ajv.compile(reconcileTool!.inputSchema)
+    const validateCalendar = ajv.compile(calendarTool!.outputSchema)
+    const validateArrival = ajv.compile(arrivalTool!.outputSchema)
+    const completeHomeRequest = { organization_id: organizationId, ...otherHomeRequest }
+    expect(validateBatchInput(completeHomeRequest), JSON.stringify(validateBatchInput.errors)).toBe(true)
+    expect(validateReconcileInput(completeHomeRequest), JSON.stringify(validateReconcileInput.errors)).toBe(true)
+    const otherHomes = await call<{ products: Array<{ id: string }> }>('batch_create_products', otherHomeRequest)
+    expect(otherHomes.error).toBeNull()
+    expect(validateBatchOutput(otherHomes.data), JSON.stringify(validateBatchOutput.errors)).toBe(true)
+    expect(otherHomes.data!.products).toHaveLength(1)
+    const otherHome = otherHomes.data!.products[0]!
+    const unpricedCalendar = await call<{ home: { product_id: string; base_price_minor: number | null; airbnb_listing_id: string | null; airbnb_editor_url: string | null }; nights: Array<{ price_minor: number | null }> }>('get_stay_calendar', { product_id: otherHome.id, from: localDay(0), to: localDay(2) })
+    expect(unpricedCalendar.error).toBeNull()
+    expect(validateCalendar(unpricedCalendar.data), JSON.stringify(validateCalendar.errors)).toBe(true)
+    expect(unpricedCalendar.data!.home).toMatchObject({ product_id: otherHome.id, base_price_minor: null, airbnb_listing_id: null, airbnb_editor_url: null })
+    expect(unpricedCalendar.data!.nights.map(night => night.price_minor)).toEqual([null, null])
+    const homes = [assignedHome, { product_id: otherHome.id, location_id: locations.data!.locations[0]!.id }]
     const assigned = await call('update_product', { product_id: homes[0]!.product_id, stay: { assigned_member_id: memberId } })
     expect(assigned.error).toBeNull()
     const stays: Array<{ id: string }> = []
@@ -2821,8 +2855,8 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await rulesPanel.getByRole('link', { name: /Check-in & checkout/ }).click()
       await expect(page).toHaveURL(`${productPath}/house-rules/arrival-time`)
       const rulesArrivalPanel = page.locator('#dashboard-panel-product-arrival-time')
-      await rulesArrivalPanel.getByLabel(/^Check-in from/).fill('16:00')
-      await rulesArrivalPanel.getByLabel(/^Checkout by/).fill('10:00')
+      await rulesArrivalPanel.getByLabel(/^Start time/).fill('16:00')
+      await rulesArrivalPanel.getByLabel(/^Time/).fill('10:00')
       await rulesArrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(page).toHaveURL(`${productPath}/house-rules`)
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
@@ -2834,13 +2868,18 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(cancelledRuleTimes.error).toBeNull()
       expect(cancelledRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '15:00', check_out_time: '11:00', max_guests: 4 })
       await rulesPanel.getByRole('link', { name: /Check-in & checkout/ }).click()
-      await expect(rulesArrivalPanel.getByLabel(/^Check-in from/)).toHaveValue('15:00')
-      await expect(rulesArrivalPanel.getByLabel(/^Checkout by/)).toHaveValue('11:00')
-      await rulesArrivalPanel.getByLabel(/^Check-in from/).fill('')
-      await expect(rulesArrivalPanel.getByText('Choose a check-in time.', { exact: true })).toBeVisible()
+      await expect(rulesArrivalPanel.getByLabel(/^Start time/)).toHaveValue('15:00')
+      await expect(rulesArrivalPanel.getByLabel(/^Time/)).toHaveValue('11:00')
+      await rulesArrivalPanel.getByLabel(/^Start time/).fill('')
+      await expect(rulesArrivalPanel.getByText('Choose a check-in start time.', { exact: true })).toBeVisible()
       await expect(rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-      await rulesArrivalPanel.getByLabel(/^Check-in from/).fill('16:00')
-      await rulesArrivalPanel.getByLabel(/^Checkout by/).fill('10:00')
+      await rulesArrivalPanel.getByLabel(/^Start time/).fill('16:00')
+      // Airbnb's check-in window: the end is Flexible until the host chooses an hour.
+      const checkInEnd = rulesArrivalPanel.getByRole('combobox', { name: 'End time' })
+      await expect(checkInEnd).toContainText('Flexible')
+      await checkInEnd.click()
+      await page.getByRole('option', { name: '21:00', exact: true }).click()
+      await rulesArrivalPanel.getByLabel(/^Time/).fill('10:00')
       const rulesEndpoint = `/api/editor/organizations/${organizationId}/products/${assignedHome.product_id}`
       const interceptRules = (url: URL) => url.pathname === rulesEndpoint
       await page.route(interceptRules, async route => route.request().method() === 'PATCH' ? await route.abort('failed') : await route.continue())
@@ -2848,20 +2887,21 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const failedRuleTimesRequest = await interruptedRuleTimes
       expect(failedRuleTimesRequest.failure()).toEqual({ errorText: 'net::ERR_FAILED' })
-      expect(failedRuleTimesRequest.postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_out_time: '10:00' } })
+      expect(failedRuleTimesRequest.postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00' } })
       await expect(rulesArrivalPanel.getByText('Failed to fetch', { exact: false })).toBeVisible()
-      await expect(rulesArrivalPanel.getByLabel(/^Check-in from/)).toHaveValue('16:00')
-      await expect(rulesArrivalPanel.getByLabel(/^Checkout by/)).toHaveValue('10:00')
+      await expect(rulesArrivalPanel.getByLabel(/^Start time/)).toHaveValue('16:00')
+      await expect(checkInEnd).toContainText('21:00')
+      await expect(rulesArrivalPanel.getByLabel(/^Time/)).toHaveValue('10:00')
       const failedRuleTimes = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
       expect(failedRuleTimes.error).toBeNull()
-      expect(failedRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '15:00', check_out_time: '11:00', max_guests: 4 })
+      expect(failedRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4 })
       expect(failedRuleTimes.data!.product.details).toEqual(beforeRules.data!.product.details)
       await page.unroute(interceptRules)
       const ruleTimesSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === rulesEndpoint)
       await rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const ruleTimesResponse = await ruleTimesSaved
       expect(ruleTimesResponse.status(), await ruleTimesResponse.text()).toBe(200)
-      expect(ruleTimesResponse.request().postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_out_time: '10:00' } })
+      expect(ruleTimesResponse.request().postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00' } })
       await expect(page).toHaveURL(`${productPath}/house-rules`)
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
       await expect(ruleGuests).toHaveValue('5')
@@ -2869,7 +2909,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(quietEnd).toContainText('07:00')
       const savedRuleTimes = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
       expect(savedRuleTimes.error).toBeNull()
-      expect(savedRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '16:00', check_out_time: '10:00', max_guests: 4 })
+      expect(savedRuleTimes.data!.product.stay).toMatchObject({ check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 4 })
       expect(savedRuleTimes.data!.product.details).toEqual(beforeRules.data!.product.details)
       const newerDetail = await call('update_product', { product_id: assignedHome.product_id, details_mode: 'merge', details: { guest_access: sharedGarden } })
       expect(newerDetail.error).toBeNull()
@@ -3047,7 +3087,12 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
 
       const guideRead = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
       expect(guideRead.error).toBeNull()
+      expect(validateCalendar(guideRead.data), JSON.stringify(validateCalendar.errors)).toBe(true)
       expect(guideRead.data!.home).toMatchObject(guide)
+      const guideSaved = await call<{ home: Record<string, unknown>; channel_push: unknown; airbnb_unsynced: unknown[] }>('update_stay_arrival_guide', { product_id: assignedHome.product_id, directions: guide.directions })
+      expect(guideSaved.error).toBeNull()
+      expect(validateArrival(guideSaved.data), JSON.stringify(validateArrival.errors)).toBe(true)
+      expect(guideSaved.data).toMatchObject({ home: { ...guide, product_id: assignedHome.product_id, airbnb_listing_id: null, airbnb_editor_url: null }, channel_push: null, airbnb_unsynced: [] })
       const managerGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
       expect(managerGuide.status(), await managerGuide.text()).toBe(200)
       expect(managerGuide.headers()['cache-control']).toBe('private, no-store, max-age=0')
@@ -3157,7 +3202,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const memberWrite = await cleaner.request.patch(api(`stay-homes/${assignedHome.product_id}`), { data: { wifi_password: 'A member must not replace this' } })
       expect(memberWrite.status()).toBe(403)
       expect(await memberWrite.json()).toMatchObject({ data: { code: 'STAY_ROLE_REQUIRED' } })
-      const hiddenGuide = await cleaner.request.get(api(`stay-homes/${otherHome.data!.product.id}`))
+      const hiddenGuide = await cleaner.request.get(api(`stay-homes/${otherHome.id}`))
       expect(hiddenGuide.status()).toBe(404)
       expect(await hiddenGuide.json()).toMatchObject({ data: { code: 'HOME_NOT_FOUND' } })
       const outsider = await browser.newContext({ baseURL: baseURL! })
@@ -3179,11 +3224,11 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await page.goto(`/dashboard/${slug}/calendar?product_id=missing-home`)
       await expect(page.getByText('That offering is not available in this organization.', { exact: true })).toBeVisible()
       await expect(page.getByTestId('stay-night-inspector')).toHaveCount(0)
-      await expect(page.getByRole('combobox', { name: 'Offering', exact: true })).toHaveCount(0)
+      await expect(page.getByRole('combobox', { name: 'Calendar', exact: true })).toHaveCount(0)
       await page.goto(calendarPath)
       const calendar = page.locator('#dashboard-panel-stay-night-calendar')
       const inspector = page.getByTestId('stay-night-inspector')
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText('Assigned Cabin')
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('Availability: Assigned Cabin')
       await expect(calendar.getByText(`${TIME_ZONE} · THB`, { exact: true })).toBeVisible()
       await calendar.locator(`[data-reka-calendar-cell-trigger][data-value="${localDay(0)}"]:not([data-outside-view])`).click()
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
@@ -3360,7 +3405,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(calendar).toBeVisible()
-      await expect(calendar.getByRole('combobox', { name: 'Offering', exact: true })).toContainText('Assigned Cabin')
+      await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('Availability: Assigned Cabin')
 
       const todayResponse = await cleaner.request.get(api('today'))
       expect(todayResponse.status(), await todayResponse.text()).toBe(200)

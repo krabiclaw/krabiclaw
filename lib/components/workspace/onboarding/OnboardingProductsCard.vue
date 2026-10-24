@@ -58,10 +58,11 @@ import { useOnboardingState } from '~/composables/useOnboardingFlow'
  * added without one and renders with no price element on the public site — a
  * zero or placeholder amount would be a price the owner never set.
  *
- * Professional services are not here. On a legal practice's site a practice area is
+ * Legal practices are not here. On a legal practice's site a practice area is
  * page content — NCLS has a /services page with blocks and zero product rows —
  * so that vertical skips this step rather than being asked to price a thing it
- * does not sell this way.
+ * does not sell this way. Lodging homes need their location and stay settings,
+ * which are collected by the canonical home editor after website setup.
  */
 const state = useOnboardingState()
 
@@ -86,8 +87,11 @@ const COPY = {
   },
 } as const
 
-// A restaurant lists dishes; every other vertical that sells here lists experiences.
-const copy = computed(() => state.value.vertical === 'restaurant' ? COPY.restaurant : COPY.experience)
+const copy = computed(() => {
+  const vertical = state.value.vertical
+  if (vertical !== 'restaurant' && vertical !== 'experience') throw createError({ statusCode: 400, statusMessage: 'This business type adds its offerings after website setup' })
+  return COPY[vertical]
+})
 // Intl knows the symbol and the decimal places for the owner's currency, so
 // neither is a table we keep in step with it.
 const currencyFormat = computed(() => {

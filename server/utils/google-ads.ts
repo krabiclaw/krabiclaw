@@ -208,14 +208,15 @@ interface GoogleAdsSearchRow {
   campaignBudget?: { id?: string; amountMicros?: string | number }
   metrics?: { clicks?: string | number; impressions?: string | number; costMicros?: string | number; conversions?: string | number }
   adGroup?: { id?: string; name?: string; status?: string }
-  adGroupCriterion?: { keyword?: { text?: string; matchType?: GoogleAdsKeyword['matchType'] }; status?: string }
+  adGroupCriterion?: { keyword?: { text?: string; matchType?: GoogleAdsKeyword['matchType'] }; status?: GoogleAdsKeyword['status']; negative?: boolean }
   adGroupAd?: { ad?: { responsiveSearchAd?: { headlines?: Array<{ text?: string }>; descriptions?: Array<{ text?: string }> }; finalUrls?: string[] } }
 }
 
 export interface GoogleAdsKeyword {
   text: string
   matchType: 'EXACT' | 'PHRASE' | 'BROAD'
-  status?: string
+  status?: 'ENABLED' | 'PAUSED'
+  negative?: boolean
 }
 
 export interface GoogleAdsCampaignDetail extends GoogleAdsCampaignSummary {
@@ -237,6 +238,7 @@ export async function getGoogleAdsCampaignDetail(
   customerId: string,
   campaignId: string,
 ): Promise<GoogleAdsCampaignDetail> {
+  if (!/^\d+$/u.test(campaignId)) throw new Error('campaignId must be a numeric Google Ads campaign ID')
   const cid = cleanCustomerId(customerId)
   const headers = googleAdsHeaders(accessToken, developerToken)
 
@@ -252,6 +254,9 @@ export async function getGoogleAdsCampaignDetail(
   const campData = await campResp.json() as { results?: GoogleAdsSearchRow[] }
   const cRow = campData.results?.[0]
   if (!cRow) throw new Error(`Campaign ${campaignId} not found`)
+  if (!cRow.campaign?.id || !cRow.campaign.name || !cRow.campaign.status || !cRow.campaign.advertisingChannelType) {
+    throw new Error(`Google Ads returned incomplete campaign details for ${campaignId}`)
+  }
 
   // 2. Ad groups
   const adGroupResp = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
@@ -261,37 +266,39 @@ export async function getGoogleAdsCampaignDetail(
       query: `SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group WHERE ad_group.campaign = 'customers/${cid}/campaigns/${campaignId}' AND ad_group.status != 'REMOVED'`,
     }),
   })
-  const adGroupsData = adGroupResp.ok ? (await adGroupResp.json() as { results?: GoogleAdsSearchRow[] }) : { results: [] }
-  const adGroups = (adGroupsData.results ?? []).map(r => ({
-    id: r.adGroup?.id ?? '',
-    name: r.adGroup?.name ?? '',
-    status: r.adGroup?.status ?? '',
-  }))
+  if (!adGroupResp.ok) throw await googleAdsFailure('Google Ads ad group query failed', adGroupResp)
+  const adGroupsData = await adGroupResp.json() as { results?: GoogleAdsSearchRow[] }
+  const adGroups = (adGroupsData.results ?? []).map(r => {
+    if (!r.adGroup?.id || !r.adGroup.name || !r.adGroup.status) throw new Error(`Google Ads returned an incomplete ad group for campaign ${campaignId}`)
+    return { id: r.adGroup.id, name: r.adGroup.name, status: r.adGroup.status }
+  })
 
   // 3. Keywords
   const kwResp = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      query: `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status FROM ad_group_criterion WHERE ad_group.campaign = 'customers/${cid}/campaigns/${campaignId}' AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'`,
+      query: `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status, ad_group_criterion.negative FROM ad_group_criterion WHERE ad_group.campaign = 'customers/${cid}/campaigns/${campaignId}' AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'`,
     }),
   })
-  const kwData = kwResp.ok ? (await kwResp.json() as { results?: GoogleAdsSearchRow[] }) : { results: [] }
-  const keywords: GoogleAdsKeyword[] = (kwData.results ?? []).map(r => ({
-    text: r.adGroupCriterion?.keyword?.text ?? '',
-    matchType: r.adGroupCriterion?.keyword?.matchType ?? 'PHRASE',
-    status: r.adGroupCriterion?.status,
-  }))
+  if (!kwResp.ok) throw await googleAdsFailure('Google Ads keyword query failed', kwResp)
+  const kwData = await kwResp.json() as { results?: GoogleAdsSearchRow[] }
+  const keywords: GoogleAdsKeyword[] = (kwData.results ?? []).map(r => {
+    const keyword = r.adGroupCriterion?.keyword
+    if (!keyword?.text || !keyword.matchType || !r.adGroupCriterion?.status) throw new Error(`Google Ads returned an incomplete keyword for campaign ${campaignId}`)
+    return { text: keyword.text, matchType: keyword.matchType, status: r.adGroupCriterion.status, negative: r.adGroupCriterion.negative ?? false }
+  })
 
   // 4. Responsive Search Ads
   const adResp = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
-      query: `SELECT ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.final_urls FROM ad_group_ad WHERE ad_group.campaign = 'customers/${cid}/campaigns/${campaignId}' AND ad_group_ad.status != 'REMOVED' LIMIT 5`,
+      query: `SELECT ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.final_urls FROM ad_group_ad WHERE ad_group.campaign = 'customers/${cid}/campaigns/${campaignId}' AND ad_group_ad.status != 'REMOVED'`,
     }),
   })
-  const adData = adResp.ok ? (await adResp.json() as { results?: GoogleAdsSearchRow[] }) : { results: [] }
+  if (!adResp.ok) throw await googleAdsFailure('Google Ads responsive search ad query failed', adResp)
+  const adData = await adResp.json() as { results?: GoogleAdsSearchRow[] }
   const headlines: string[] = []
   const descriptions: string[] = []
   const finalUrls: string[] = []
@@ -315,10 +322,10 @@ export async function getGoogleAdsCampaignDetail(
   }
 
   return {
-    id: cRow.campaign?.id ?? '',
-    name: cRow.campaign?.name ?? '',
-    status: cRow.campaign?.status ?? 'UNKNOWN',
-    channelType: cRow.campaign?.advertisingChannelType ?? 'SEARCH',
+    id: cRow.campaign.id,
+    name: cRow.campaign.name,
+    status: cRow.campaign.status,
+    channelType: cRow.campaign.advertisingChannelType,
     budgetAmountMicros: Number(cRow.campaignBudget?.amountMicros ?? 0),
     budgetId: cRow.campaignBudget?.id,
     clicks: Number(cRow.metrics?.clicks ?? 0),
@@ -368,13 +375,23 @@ export async function createGoogleAdsSearchCampaign(
   const tempCampaignId = '-2'
   const tempAdGroupId = '-3'
 
-  // Validate copy length according to Google Ads limits
-  const headlines = input.headlines.slice(0, 15).map(h => ({ text: h.slice(0, 30) }))
-  const descriptions = input.descriptions.slice(0, 4).map(d => ({ text: d.slice(0, 90) }))
-  if (headlines.length < 3) throw new Error('Google Responsive Search Ads require at least 3 headlines')
-  if (descriptions.length < 2) throw new Error('Google Responsive Search Ads require at least 2 descriptions')
-  if (!input.targetUrl.startsWith('http://') && !input.targetUrl.startsWith('https://')) {
+  if (!input.name.trim()) throw new Error('Campaign name is required')
+  if (!Number.isSafeInteger(input.dailyBudgetAmountMicros) || input.dailyBudgetAmountMicros < 1000000) throw new Error('dailyBudgetAmountMicros must be an integer of at least 1000000')
+  if (typeof input.containsEuPoliticalAdvertising !== 'boolean') throw new Error('The advertiser must declare whether the campaign contains EU political advertising')
+  if (input.status !== undefined && input.status !== 'ENABLED' && input.status !== 'PAUSED') throw new Error('Campaign status must be ENABLED or PAUSED')
+  if (input.headlines.length < 3 || input.headlines.length > 15 || new Set(input.headlines).size !== input.headlines.length || input.headlines.some(text => !text.trim() || text.length > 30)) {
+    throw new Error('Google Responsive Search Ads require 3 to 15 unique nonempty headlines of at most 30 characters each')
+  }
+  if (input.descriptions.length < 2 || input.descriptions.length > 4 || new Set(input.descriptions).size !== input.descriptions.length || input.descriptions.some(text => !text.trim() || text.length > 90)) {
+    throw new Error('Google Responsive Search Ads require 2 to 4 unique nonempty descriptions of at most 90 characters each')
+  }
+  const headlines = input.headlines.map(text => ({ text }))
+  const descriptions = input.descriptions.map(text => ({ text }))
+  if (!['http:', 'https:'].includes(new URL(input.targetUrl).protocol)) {
     throw new Error('targetUrl must be a valid http or https URL')
+  }
+  if (input.keywords.some(keyword => !keyword.text.trim() || (keyword.matchType !== undefined && !['EXACT', 'PHRASE', 'BROAD'].includes(keyword.matchType)))) {
+    throw new Error('Keywords require nonempty text and an EXACT, PHRASE or BROAD match type')
   }
 
   const mutateOperations: Array<Record<string, unknown>> = [
@@ -386,6 +403,7 @@ export async function createGoogleAdsSearchCampaign(
           name: `Budget: ${input.name} (${Date.now()})`,
           amountMicros: String(input.dailyBudgetAmountMicros),
           deliveryMethod: 'STANDARD',
+          explicitlyShared: false,
         },
       },
     },
@@ -425,8 +443,7 @@ export async function createGoogleAdsSearchCampaign(
   ]
 
   // 4. Keywords
-  for (const kw of input.keywords.slice(0, 50)) {
-    if (!kw.text.trim()) continue
+  for (const kw of input.keywords) {
     mutateOperations.push({
       adGroupCriterionOperation: {
         create: {
@@ -478,11 +495,12 @@ export async function createGoogleAdsSearchCampaign(
   }
 
   const responses = result.mutateOperationResponses ?? []
-  const budgetRes = responses[0]?.campaignBudgetResult?.resourceName ?? ''
-  const campRes = responses[1]?.campaignResult?.resourceName ?? ''
-  const adGroupRes = responses[2]?.adGroupResult?.resourceName ?? ''
-  const adRes = responses[responses.length - 1]?.adGroupAdResult?.resourceName ?? ''
-  const campaignId = campRes.split('/').pop() ?? ''
+  const budgetRes = responses[0]?.campaignBudgetResult?.resourceName
+  const campRes = responses[1]?.campaignResult?.resourceName
+  const adGroupRes = responses[2]?.adGroupResult?.resourceName
+  const adRes = responses[responses.length - 1]?.adGroupAdResult?.resourceName
+  if (!budgetRes || !campRes || !adGroupRes || !adRes) throw new Error('Google Ads did not return a complete campaign creation receipt; inspect the account before retrying')
+  const campaignId = campRes.split('/').pop()!
 
   return {
     campaignId,
@@ -494,124 +512,53 @@ export async function createGoogleAdsSearchCampaign(
   }
 }
 
-export interface CloneCampaignInput {
-  sourceCampaignId: string
-  newCampaignName: string
-  targetUrl: string
-  dailyBudgetAmountMicros?: number
-  headlineReplacements?: Record<string, string>
-  additionalKeywords?: string[]
-  status?: 'ENABLED' | 'PAUSED'
-  containsEuPoliticalAdvertising: boolean
-}
-
-/** Clones an existing campaign structure adapting it for a new landing page */
-export async function cloneGoogleAdsCampaign(
+/** Updates a campaign's requested status and budget in one Google Ads transaction. */
+export async function updateGoogleAdsCampaign(
   accessToken: string,
   developerToken: string | undefined,
   customerId: string,
-  input: CloneCampaignInput,
-): Promise<CreateCampaignResult> {
-  const source = await getGoogleAdsCampaignDetail(accessToken, developerToken, customerId, input.sourceCampaignId)
+  input: { campaignId: string; status?: 'ENABLED' | 'PAUSED'; budgetId?: string; dailyBudgetAmountMicros?: number },
+): Promise<void> {
+  if (!/^\d+$/u.test(input.campaignId)) throw new Error('campaignId must be a numeric Google Ads campaign ID')
+  if (input.status !== undefined && input.status !== 'ENABLED' && input.status !== 'PAUSED') throw new Error('Campaign status must be ENABLED or PAUSED')
+  if ((input.budgetId !== undefined) !== (input.dailyBudgetAmountMicros !== undefined)) throw new Error('budget_id and daily_budget_micros must be supplied together')
+  if (input.status === undefined && input.dailyBudgetAmountMicros === undefined) throw new Error('Supply a status or daily budget to update')
+  if (input.dailyBudgetAmountMicros !== undefined && (!Number.isSafeInteger(input.dailyBudgetAmountMicros) || input.dailyBudgetAmountMicros < 1000000)) throw new Error('dailyBudgetAmountMicros must be an integer of at least 1000000')
+  if (input.budgetId !== undefined && !/^\d+$/u.test(input.budgetId)) throw new Error('budgetId must be a numeric Google Ads budget ID')
 
-  // Map headlines with replacements
-  let headlines = source.headlines.slice()
-  if (input.headlineReplacements) {
-    for (const [from, to] of Object.entries(input.headlineReplacements)) {
-      headlines = headlines.map(h => h.replace(new RegExp(from, 'gi'), to))
-    }
-  }
-  if (headlines.length < 3) {
-    headlines.push(input.newCampaignName.slice(0, 30))
-  }
-
-  // Keywords
-  const keywords = source.keywords.map(k => ({ text: k.text, matchType: k.matchType }))
-  if (input.additionalKeywords) {
-    for (const kw of input.additionalKeywords) {
-      if (kw.trim() && !keywords.some(k => k.text.toLowerCase() === kw.toLowerCase())) {
-        keywords.push({ text: kw.trim(), matchType: 'PHRASE' })
-      }
-    }
-  }
-
-  return await createGoogleAdsSearchCampaign(accessToken, developerToken, customerId, {
-    name: input.newCampaignName,
-    dailyBudgetAmountMicros: input.dailyBudgetAmountMicros ?? source.budgetAmountMicros,
-    targetUrl: input.targetUrl,
-    keywords,
-    headlines,
-    descriptions: source.descriptions.length >= 2 ? source.descriptions : [
-      'Discover authentic experiences and services today. Book directly online.',
-      'Quality guaranteed with personalized service. Explore our latest offerings.',
-    ],
-    status: input.status ?? 'PAUSED',
-    containsEuPoliticalAdvertising: input.containsEuPoliticalAdvertising,
-  })
-}
-
-/** Pause or enable a campaign */
-export async function updateGoogleAdsCampaignStatus(
-  accessToken: string,
-  developerToken: string | undefined,
-  customerId: string,
-  campaignId: string,
-  status: 'ENABLED' | 'PAUSED',
-): Promise<{ campaignId: string; status: string }> {
   const cid = cleanCustomerId(customerId)
   const headers = googleAdsHeaders(accessToken, developerToken)
+  const mutateOperations: Array<Record<string, unknown>> = []
 
-  const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/campaigns:mutate`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      operations: [{
-        update: {
-          resourceName: `customers/${cid}/campaigns/${campaignId}`,
-          status,
-        },
-        updateMask: 'status',
-      }],
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error(`Google Ads status update failed: ${(await response.text()).slice(0, 300)}`)
+  if (input.budgetId !== undefined) {
+    const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ query: `SELECT campaign_budget.id FROM campaign WHERE campaign.id = ${input.campaignId} LIMIT 1` }),
+    })
+    if (!response.ok) throw await googleAdsFailure('Google Ads campaign budget query failed', response)
+    const data = await response.json() as { results?: GoogleAdsSearchRow[] }
+    if (data.results?.[0]?.campaignBudget?.id !== input.budgetId) throw new Error(`Budget ${input.budgetId} does not belong to campaign ${input.campaignId}`)
+    mutateOperations.push({ campaignBudgetOperation: {
+      update: { resourceName: `customers/${cid}/campaignBudgets/${input.budgetId}`, amountMicros: String(input.dailyBudgetAmountMicros) },
+      updateMask: 'amountMicros',
+    } })
+  }
+  if (input.status !== undefined) {
+    mutateOperations.push({ campaignOperation: {
+      update: { resourceName: `customers/${cid}/campaigns/${input.campaignId}`, status: input.status },
+      updateMask: 'status',
+    } })
   }
 
-  return { campaignId, status }
-}
-
-/** Update daily budget for a campaign */
-export async function updateGoogleAdsCampaignBudget(
-  accessToken: string,
-  developerToken: string | undefined,
-  customerId: string,
-  budgetId: string,
-  amountMicros: number,
-): Promise<{ budgetId: string; amountMicros: number }> {
-  const cid = cleanCustomerId(customerId)
-  const headers = googleAdsHeaders(accessToken, developerToken)
-
-  const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/campaignBudgets:mutate`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      operations: [{
-        update: {
-          resourceName: `customers/${cid}/campaignBudgets/${budgetId}`,
-          amountMicros: String(amountMicros),
-        },
-        updateMask: 'amountMicros',
-      }],
-    }),
+  const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:mutate`, {
+    method: 'POST', headers, body: JSON.stringify({ mutateOperations }),
   })
-
-  if (!response.ok) {
-    throw new Error(`Google Ads budget update failed: ${(await response.text()).slice(0, 300)}`)
+  if (!response.ok) throw await googleAdsFailure('Google Ads campaign update failed', response)
+  const result = await response.json() as { mutateOperationResponses?: Array<{ campaignBudgetResult?: { resourceName: string }; campaignResult?: { resourceName: string } }> }
+  const receipts = result.mutateOperationResponses ?? []
+  if (receipts.length !== mutateOperations.length || (input.budgetId !== undefined && !receipts.some(receipt => receipt.campaignBudgetResult?.resourceName === `customers/${cid}/campaignBudgets/${input.budgetId}`)) || (input.status !== undefined && !receipts.some(receipt => receipt.campaignResult?.resourceName === `customers/${cid}/campaigns/${input.campaignId}`))) {
+    throw new Error('Google Ads did not return a complete campaign update receipt; inspect the account before retrying')
   }
-
-  return { budgetId, amountMicros }
 }
 
 /** The account's currency, reporting timezone and name, independent of any reporting range. */

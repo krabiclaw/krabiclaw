@@ -760,12 +760,15 @@ function buildAuth(env: CloudflareEnv) {
         // The plugin's own /api/auth/stripe/webhook handlers own the
         // `subscription` table, and Stripe's delivery retries are the retry
         // mechanism. This hook adds analytics, the billed counts each new
-        // subscription and period starts with, and fee report ingestion; a throw
-        // here returns a non-2xx so Stripe redelivers the event.
+        // subscription and period starts with, the extras past Basic returned
+        // to drafts when a plan ends, and fee report ingestion; a throw here
+        // returns a non-2xx so Stripe redelivers the event.
         onEvent: async (event) => {
           await handleStripeGa4Event(env, db, stripeClient, event)
           const { reportBillingUsageForSubscriptionEvent } = await import('~/server/utils/billing')
           await reportBillingUsageForSubscriptionEvent(env, db, event)
+          const { returnExtrasToDraftsForPlanEnd } = await import('~/server/utils/billing-plan-end')
+          await returnExtrasToDraftsForPlanEnd(env, d1, event)
           await ingestStripeFeeReportEvent(db, stripeClient, env, event)
         },
       }),

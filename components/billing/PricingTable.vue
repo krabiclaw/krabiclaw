@@ -10,7 +10,7 @@
         :class="plan.highlighted ? 'sm:-mt-4 sm:mb-4' : ''"
         class="flex flex-col"
       >
-        <BillingPlanCard :plan="plan" :annual="false" class="h-full flex-1" />
+        <BillingPlanCard :plan="plan" class="h-full flex-1" />
       </div>
     </div>
 

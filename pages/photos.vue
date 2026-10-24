@@ -144,6 +144,7 @@ useSocialMetadata(() => ({
     location: organizationName,
     organization: organizationName,
   }),
+  socialImage: organization.social_image,
   breadcrumbs: [
     { name: t('site.subnav.photos'), url: '/photos' },
   ],

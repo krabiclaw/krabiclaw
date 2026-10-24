@@ -11,7 +11,7 @@
             </span>
           </NuxtLink>
           <p class="mt-3.5 max-w-75 text-[13px] leading-relaxed text-muted">
-            Websites for restaurants, experiences, and law firms. Manage yours with your AI assistant or the dashboard.
+            Websites for restaurants, experiences, lodging, and law firms. Manage yours with your AI assistant or the dashboard.
           </p>
         </div>
 
@@ -41,6 +41,7 @@ const COLUMNS = [
     links: [
       { label: 'Restaurants', to: '/restaurants' },
       { label: 'Experiences', to: '/experiences' },
+      { label: 'Lodging', to: '/lodging' },
       { label: 'Law firms', to: '/legal' },
     ],
   },

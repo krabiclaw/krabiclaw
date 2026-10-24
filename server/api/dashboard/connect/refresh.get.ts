@@ -15,10 +15,10 @@ export default defineHandler(async (event) => {
   // owner and admin, per utils/organization-access.ts.
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['integration'] } })
   if (!env.NUXT_PUBLIC_PLATFORM_DOMAIN) {
-    throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe Connect is not configured' })
+    throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe Connect is not configured', data: { code: 'CONNECT_NOT_CONFIGURED' } })
   }
   const account = await getStripeConnectedAccount(db, organization.id)
-  if (!account?.stripeAccountId) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe onboarding has not started' })
+  if (!account?.stripeAccountId) throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe onboarding has not started', data: { code: 'CONNECT_NOT_STARTED' } })
   const onboardingUrl = await createStripeConnectOnboardingLink(
     paymentsStripe(env, account.livemode),
     { stripeAccountId: account.stripeAccountId, ...buildStripeConnectOnboardingUrls(env.NUXT_PUBLIC_PLATFORM_DOMAIN, organization.slug) },

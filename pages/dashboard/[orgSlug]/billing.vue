@@ -87,7 +87,7 @@ const scheduledPlan = computed(() => billing.value?.scheduledPlan ?? null)
 const planName = computed(() => billing.value?.subscriptionPrice?.name ?? (billing.value ? nameOf(billing.value.plan) : ''))
 const price = computed(() => {
   const subscription = billing.value?.subscriptionPrice
-  return subscription ? formatRecurring(subscription.amount, subscription.currency, subscription.interval) : 'Free'
+  return subscription ? formatRecurring(subscription.amount, subscription.currency) : 'Free'
 })
 const card = computed(() => {
   const cards = methods.value?.payment_methods ?? []
@@ -95,16 +95,30 @@ const card = computed(() => {
   return main ? `${cardBrandLabel(main.brand)} •••• ${main.last4}` : null
 })
 // "Renews Nov 4, 2026 · Visa •••• 4242": what happens next, and the card it is billed to.
+// In a free trial, Stripe's own end behavior says what happens without a card.
 const planLine = computed(() => {
   const status = billing.value
   if (!status || onStarter.value) return ''
   const parts: string[] = []
-  if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
+  const trial = status.subscriptionPrice?.trial
+  if (trial) {
+    parts.push(`Free trial ends ${formatExactDateTime(trial.end)}`)
+    // A change already set for the period's end is what happens; only without one does the card decide.
+    if (status.cancelAtPeriodEnd) parts.push(`${planName.value} ends with the trial`)
+    else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
+    else if (!card.value) parts.push(TRIAL_WITHOUT_CARD[trial.withoutPaymentMethod](planName.value))
+  } else if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
   else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
   else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)
   if (card.value) parts.push(card.value)
   return parts.join(' · ')
 })
+const TRIAL_WITHOUT_CARD = {
+  cancel: (plan: string) => `Add a card to stay on ${plan}; without one the plan ends with the trial`,
+  pause: (plan: string) => `Add a card to stay on ${plan}; without one the plan pauses when the trial ends`,
+  create_invoice: (plan: string) => `Add a card to pay for ${plan} when the trial ends`,
+} as const
+
 // The plan's one change: up from Basic or Growth, or to Growth from Business, each its own leaf; none while a change is pending.
 const change = computed<{ label: string; to: string; outline?: boolean } | null>(() => {
   const status = billing.value
@@ -124,17 +138,18 @@ const locationsRow = computed<EditorNavigationItem | null>(() => {
   if (used === undefined) return null
   return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
 })
-// Homes from the quote the capacity check answers by: in use, included, and what
-// the ones past those cost each month. A subscription from before homes were
-// priced carries no homes price and is charged nothing for them, so the row says so.
+// Homes from the quote the capacity check answers by: live (billed), drafts
+// (free), included, and what the live ones past those cost each month. A
+// subscription from before homes were priced carries no homes price and is
+// charged nothing for them, so the row says so.
 const homesRow = computed<EditorNavigationItem | null>(() => {
   const current = homes.value
   if (!current) return null
-  const counted = `${current.homes.used} ${current.homes.used === 1 ? 'home' : 'homes'}`
+  const counted = `${current.homes.used} live · ${current.homes.drafts} ${current.homes.drafts === 1 ? 'draft' : 'drafts'}`
   const summary = onStarter.value
     ? `${counted} · ${current.homes.included} included · ${nameOf(STARTER_PLAN_ID)} stops at ${current.homes.included}`
     : current.homes.additional_price_minor
-      ? `${counted} · ${current.homes.included} included · ${formatPrice(current.homes.amount_minor)} per month`
+      ? `${counted} · ${current.homes.included} included · ${formatPrice(current.homes.amount_minor)} per month${current.billing.trial_end ? ' after your free trial' : ''}`
       : `${counted} · not billed on this subscription`
   return { id: 'homes', label: 'Homes', summary }
 })
@@ -147,7 +162,7 @@ const serviceRows = computed<EditorNavigationItem[]>(() => {
       summary: `${current.managed_ads ? `since ${formatExactDateTime(current.managed_ads.agreed_at)} · ` : ''}${SERVICES.managed_ads.price}` },
     { id: 'strategy', label: SERVICES.strategy.name, to: to('strategy'),
       summary: current.strategy
-        ? `since ${formatExactDateTime(current.strategy.since)} · ${formatRecurring(current.strategy.amount, current.strategy.currency, current.strategy.interval)}`
+        ? `since ${formatExactDateTime(current.strategy.since)} · ${formatRecurring(current.strategy.amount, current.strategy.currency)}`
         : monthly(SERVICE_PRICES.strategy.monthly) },
   ]
 })

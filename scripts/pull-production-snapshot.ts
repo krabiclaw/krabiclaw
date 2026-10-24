@@ -180,9 +180,12 @@ function copyProductionRows(path: string) {
     groups = next
   }
   const rows = sourceRows<{ table_name: string; phase: number; statement: string; total_rows: number }>(
-    `WITH ${ctes.join(', ')} SELECT *, count(*) OVER () AS total_rows FROM (${groups[0]}) ORDER BY phase, table_name`,
+    `WITH ${ctes.join(', ')} SELECT *, count(*) OVER () AS total_rows FROM (${groups[0]})`,
   )
   if (!rows.length || rows[0]!.total_rows !== rows.length) throw new Error(`Incomplete ${values.source} copy; no target data was written`)
+  // Order the complete single-snapshot read locally instead of sorting the
+  // full SQL dump inside D1.
+  rows.sort((left, right) => left.phase - right.phase || (left.table_name < right.table_name ? -1 : left.table_name > right.table_name ? 1 : 0))
   const schema = rows.filter(row => row.phase !== 1)
   if (schema.length !== schemaObjects.length || schema.some((row, index) => row.table_name !== schemaObjects[index]!.name || row.phase !== schemaObjects[index]!.phase || row.statement !== schemaObjects[index]!.sql)) {
     throw new Error(`${values.source} schema changed during column discovery; no target data was written`)

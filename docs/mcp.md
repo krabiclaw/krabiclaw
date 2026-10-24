@@ -9,10 +9,11 @@ through it with the same tools.
 - Protected resource: `/.well-known/oauth-protected-resource`
 - Server entrypoint: `server/api/mcp.ts`
 - Scope: `tenant`
-- Exposes: existing-tenant content management, menus, experiences, posts, articles
+- Exposes: existing-tenant content management, menus, experiences, lodging homes and stays, posts, articles
   (blog and, on KrabiClaw's own site, documentation), media, reviews,
   customer inquiries, Q&A, analytics, bookings, guest change proposals, member
-  availability and financial reads
+  availability, nightly prices and stay rules, arrival guides, scheduled guest
+  messages and financial reads
 - MCP can save and publish website setup and create a location using the supplied
   business facts. Location copying and deletion remain CMS-only. MCP also retains
   daily content operations, including media asset and experience deletion.
@@ -105,9 +106,10 @@ not open-world: the selected business's Stripe account, media storage and linked
 accounts remain bounded targets. Guest email, host attachment downloads and
 external social audiences cross that scope.
 
-The [metadata evaluation corpus](mcp-metadata-evaluation.md) contains direct,
-indirect and nearby negative prompts for every retained tool. Its prompts are
-prepared checks; selection outcomes require an actual refreshed ChatGPT session.
+The [metadata evaluation corpus](mcp-metadata-evaluation.md) contains prepared
+direct, indirect and nearby negative prompts for the covered operations. It is
+not a complete catalog evaluation; selection outcomes require an actual
+refreshed ChatGPT session.
 
 ### Release sequence
 
@@ -267,6 +269,55 @@ Restaurant table Reservations remain separate. `cancel_table_reservation` takes
 `request_table_reservation_change` proposes location/date/time/party changes through
 the same guest approval flow. Restaurant Reservations have no pending review
 confirmation/rejection tools. `list_reservation_inquiries` reads them.
+
+## Lodging homes, stays and nightly calendars
+
+Homes are Products of kind `stay`. Discover the intended home with product reads;
+`list_stays` and `get_stay` read its reservations, and `get_stay_calendar` reads
+nightly availability, prices and restrictions. Members read only the homes they
+are assigned to; owners and admins manage the organization's homes.
+
+`create_stay` records a stay the host took directly and holds its nights. It takes
+no payment, applies existing automatic guest-message schedules and updates
+availability on the home's connected Airbnb listing through Channex. A failed
+channel update returns `CHANNEL_PUSH_FAILED` with `committed:true`: the stay was
+saved. Read the calendar and channel state before retrying with the same
+`idempotency_key`. `update_stay` and `cancel_stay` change only
+host-owned stays under their current `expected_version`; channel-owned stays
+change on their source channel. `record_stay_payment` records external money,
+including a negative refund record, and `delete_stay_payment` removes a mistaken
+record. Neither moves money. MCP cancellation cannot execute an online refund;
+use the authenticated dashboard financial flow when one is required.
+
+`set_stay_nights` sets prices, closed nights and stay restrictions for one home
+and explicit date range. Dates are local to that home; checkout is exclusive.
+When that home has a configured Airbnb mapping, it also pushes those changes
+through Channex. A failed push returns `CHANNEL_PUSH_FAILED` with `committed:true`:
+read the calendar and its channel state before retrying. No configured mapping
+means no channel push, not universal channel synchronization.
+
+The stay tools also manage authored photo-tour rooms and accessibility answers:
+`add_stay_photo_room`, `remove_stay_photo_room`, `move_stay_photos`,
+`update_stay_photo_room` and `update_stay_accessibility`. Read the current schema
+and concurrency values before writing; a positive accessibility answer needs
+image evidence and does not imply certification.
+
+`get_guest_messaging_context` reads the home/stay behind a guest conversation.
+`update_stay_arrival_guide` saves private instructions without sending or
+publishing them. Message-template tools configure saved replies and supported
+home schedules; `list_scheduled_guest_messages` exposes pending messages and
+failures, and `cancel_scheduled_guest_message` cancels only a pending message.
+Verify actual delivery through the canonical guest conversation's receipts.
+
+These tools share the dashboard and native app's domain operations. New
+customers need Business and a ready Stripe connection for guests to book and
+pay on the website; recording a stay in MCP is not that payment flow. Plans
+include 2 live homes separately from 2 business locations. Growth and Business
+then bill $9 per additional home per month and $49 per additional location per
+month at period end. A live home is active at its active location and published
+or syncing through an enabled Channex mapping; other homes are free drafts.
+A home's location is excluded from the business-location count. See
+[billing](payments/payments.md) and the [live-home contract](shared-auth-contract.md#34-live-homes).
 
 ## Financial reads and dashboard actions
 

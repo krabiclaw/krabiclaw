@@ -438,7 +438,8 @@ export async function updateLocation(
   organizationId: string,
   locationIdOrSlug: string,
   input: UpdateLocationInput,
-  userId: string,
+  /** The member making the change, or null for KrabiClaw's own (recorded as a system event). */
+  userId: string | null,
   env: CloudflareEnv,
   writeGuard?: BatchQuery,
 ) {
@@ -447,6 +448,9 @@ export async function updateLocation(
     return { status: 404, data: { error: "Location not found.", code: 'LOCATION_NOT_FOUND', field: 'location_id' } };
   }
   const locationId = existing.id;
+  if (input.slug !== undefined && input.slug !== existing.slug) {
+    return { status: 400, data: { error: 'A location keeps its saved slug', code: 'INVALID_LOCATION_FIELD', field: 'slug' } };
+  }
   const publishHomes = async (updatedAt: unknown) => {
     const homes = await queryAll<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND location_id = ?', [organizationId, locationId]);
     if (!homes.length) return;
@@ -539,19 +543,9 @@ export async function updateLocation(
   const now = new Date().toISOString();
   const sets: string[] = ["updated_at = ?"];
   const params: Array<string | number | null> = [now];
-  let slugParamIndex: number | null = null;
-  let slugBase: string | null = null;
-
   if (input.title !== undefined) {
-    sets.push("title = ?", "slug = ?");
-    params.push(input.title.trim(), toSlug((input.slug ?? input.title).trim()));
-    slugParamIndex = params.length - 1;
-    slugBase = String(params[slugParamIndex]);
-  } else if (input.slug !== undefined && input.slug !== null) {
-    sets.push("slug = ?");
-    params.push(toSlug(input.slug.trim()));
-    slugParamIndex = params.length - 1;
-    slugBase = String(params[slugParamIndex]);
+    sets.push("title = ?");
+    params.push(input.title.trim());
   }
 
   const simpleFields = [
@@ -662,50 +656,6 @@ export async function updateLocation(
     status: 409,
     data: { error: "The location changed since it was read. Reload it and try again.", code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' },
   };
-
-  if (slugBase && slugParamIndex !== null) {
-    let updated: { location: Awaited<ReturnType<typeof loadLocation>> } | null = null;
-    for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt += 1) {
-      const slug = attempt === 0 ? slugBase : `${slugBase}-${attempt + 1}`;
-      const boundParams = [...params];
-      boundParams[slugParamIndex] = slug;
-      boundParams.push(locationId, organizationId);
-      try {
-        if (!(await runUpdate(boundParams))) return stale;
-        const location = await loadLocation(
-          db,
-          organizationId,
-          locationId,
-        );
-        if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
-        updated = { location };
-        break;
-      } catch (error) {
-        const refusal = capacityRefusalOf(error);
-        if (refusal) return refusal;
-        if (isSlugConflict(error)) continue;
-        if (isCheckConstraintError(error)) {
-          return { status: 400, data: { error: (error as Error).message, code: 'LOCATION_CONSTRAINT_VIOLATION' } };
-        }
-        throw error;
-      }
-    }
-
-    if (updated) {
-      if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
-      await purgePublicResourceCacheNow(env, organizationId);
-      await publishHomes(updated.location?.updated_at);
-      return { status: 200, data: { success: true, location: updated.location } };
-    }
-
-    return {
-      status: 409,
-      data: {
-        error: `Unable to allocate a unique location slug after ${MAX_SLUG_ATTEMPTS} attempts.`,
-        code: 'LOCATION_SLUG_CONFLICT', field: 'slug',
-      },
-    };
-  }
 
   params.push(locationId, organizationId);
   try {

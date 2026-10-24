@@ -213,14 +213,13 @@ const policySummary = computed(() => {
   const policy = handoff.value?.stay?.cancellation_policy
   return policy ? bookedPolicyTerms(policy).summary : handoff.value?.cancellation_policy ?? ''
 })
-const { organization } = useTenantOrganization()
 // The offering's own page: where its full terms are stated and what was picked can be changed.
 const offeringPath = computed(() => {
   const value = handoff.value
   if (!value?.product_slug || !value.kind || value.kind === 'reservation') return ''
   // Only an experience's and a stay's page is the site's; any other offering's is its location's.
   if (value.kind !== 'experience' && value.kind !== 'stay' && !value.location_slug) return ''
-  return localePath(presentationForProduct(organization.vertical, { kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
+  return localePath(presentationForProduct({ kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
 })
 // A stay's booked policy is always among its things to know; any other offering states its terms on its page.
 const termsPath = computed(() => !offeringPath.value ? '' : handoff.value?.stay ? `${offeringPath.value}#things-to-know` : offeringPath.value)

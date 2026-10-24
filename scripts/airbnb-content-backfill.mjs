@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 /**
- * Carries Airbnb listing content onto homes imported before the import had a
- * content stage: for each of an organization's completed imports without a
- * content report, runs the content step through the API and prints its report.
+ * Runs the Airbnb import's content step again on each of an organization's
+ * completed imports, through the API, and prints its report: homes imported
+ * before content was carried over get it, and photos stored by earlier imports
+ * at 450 px are fetched again at 2560 px into the same photos. The step is
+ * idempotent, so a home already current reports its photos as skipped.
  *
  * Usage:
  *   node scripts/airbnb-content-backfill.mjs --organization-id <id> --base-url https://app.krabiclaw.com --dry-run
  *   node scripts/airbnb-content-backfill.mjs --organization-id <id> --base-url https://app.krabiclaw.com
  *
  * Signs in with CANARY_LOGIN_EMAIL / CANARY_LOGIN_PASSWORD (an owner or admin of
- * the organization), like the other API scripts. --all also refreshes homes
- * that already have a content report.
+ * the organization), like the other API scripts.
  */
 import { parseArgs } from 'node:util'
 import { credentialSession } from './utils/e2e-auth.mjs'
@@ -20,14 +21,13 @@ const { values } = parseArgs({
     'organization-id': { type: 'string' },
     'base-url': { type: 'string' },
     'dry-run': { type: 'boolean', default: false },
-    all: { type: 'boolean', default: false },
   },
   strict: true,
 })
 const organizationId = values['organization-id']
 const baseUrl = values['base-url']
 if (!organizationId || !baseUrl) {
-  console.error('Usage: node scripts/airbnb-content-backfill.mjs --organization-id <id> --base-url <origin> [--dry-run] [--all]')
+  console.error('Usage: node scripts/airbnb-content-backfill.mjs --organization-id <id> --base-url <origin> [--dry-run]')
   process.exit(1)
 }
 try { process.loadEnvFile() } catch (error) {
@@ -45,7 +45,7 @@ const call = async (path, method = 'GET') => {
 
 const { listings } = await call('/listings')
 const imported = listings.filter(listing => listing.import.status === 'imported')
-const pending = imported.filter(listing => listing.import.stage === 'complete' && (values.all || listing.import.content === null))
+const pending = imported.filter(listing => listing.import.stage === 'complete')
 const inProgress = imported.filter(listing => listing.import.stage !== 'complete')
 console.log(`${listings.length} listing(s) on the account, ${imported.length} imported, ${pending.length} to fill, ${inProgress.length} still importing (content lands at their content stage).`)
 for (const listing of pending) {

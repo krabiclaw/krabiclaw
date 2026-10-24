@@ -136,3 +136,42 @@ export async function pushStayNights(db: DbClient, env: ChannexEnv, organization
   await mark(outcome)
   return outcome
 }
+
+/**
+ * The listing settings Airbnb takes through Channex for a mapped listing, each
+ * section sent only when it has something: booking settings (check-in window,
+ * checkout, house rules, cancellation) and availability settings (minimum
+ * stay). Title, description, photos, amenities, guest count and the arrival
+ * guide have no write path through Channex and stay Airbnb's.
+ */
+export interface AirbnbListingSettings {
+  booking: Record<string, unknown>
+  availability: Record<string, unknown>
+}
+
+/**
+ * Push a connected home's Airbnb listing settings. A home with no enabled
+ * mapping has nothing to push and returns null. A refusal, or a write Channex
+ * did not confirm, is returned as needs_review with its reason, as a night
+ * push's is; it is not retried.
+ */
+export async function pushAirbnbListingSettings(db: DbClient, env: ChannexEnv, organizationId: string, productId: string, settings: AirbnbListingSettings): Promise<ChannelPush | null> {
+  const mapping = await connectedMapping(db, env, organizationId, productId)
+  if (!mapping) return null
+  const row = await queryFirst<{ channel_id: string }>(db, "SELECT channel_id FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [organizationId, productId])
+  const path = `/channels/${encodeURIComponent(row!.channel_id)}`
+  try {
+    const channel = object((await channexRequest(env, path)).data, 'channel')
+    const ratePlans = object(channel.attributes, 'channel.attributes').rate_plans
+    const listing = Array.isArray(ratePlans) ? ratePlans.map(entry => object(entry, 'Mapping')).find(entry => entry.rate_plan_id === mapping.rate_plan_id) : undefined
+    if (!listing || typeof listing.id !== 'string') return { state: 'needs_review', detail: 'Channex has no mapping for this listing; its settings were not sent to Airbnb' }
+    const mappingId = encodeURIComponent(listing.id)
+    if (Object.keys(settings.booking).length) await channexRequest(env, `${path}/execute/update_booking_setting`, 'PUT', { channel_rate_plan_id: listing.id, data: settings.booking })
+    if (Object.keys(settings.availability).length) await channexRequest(env, `${path}/mappings/${mappingId}/availability_settings`, 'PUT', { availability_settings: settings.availability })
+    return { state: 'pushed', detail: null }
+  } catch (error) {
+    if (error instanceof ChannexDataError) return { state: 'needs_review', detail: `Channex's answer to the listing settings update was not readable; its outcome is unknown. ${error.message}` }
+    if (error instanceof ChannexError) return { state: 'needs_review', detail: error.uncertain ? `Channex did not confirm the listing settings update; its outcome is unknown. ${error.message}` : `Airbnb refused the listing settings: ${error.message}` }
+    throw error
+  }
+}

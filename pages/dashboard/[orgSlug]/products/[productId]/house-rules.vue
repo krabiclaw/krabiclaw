@@ -84,6 +84,7 @@ import { ToggleGroupItem, ToggleGroupRoot } from 'reka-ui'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { STAY_HOUSE_RULE_TOGGLES, STAY_QUIET_HOUR_TIMES, stayHouseRuleLines } from '~/shared/product-details'
+import { stayCheckInWindow } from '~/shared/stay-arrival'
 import { formatTime } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
@@ -114,7 +115,7 @@ const quietEnd = computed({
   },
 })
 const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'house-rules', items: [
-  { id: 'arrival-time', label: 'Check-in & checkout', summary: p.product.value?.stay ? `${p.product.value.stay.check_in_time} · ${p.product.value.stay.check_out_time}` : undefined, to: p.sectionPath('house-rules/arrival-time') },
+  { id: 'arrival-time', label: 'Check-in & checkout', summary: p.product.value?.stay ? `${stayCheckInWindow(p.product.value.stay.check_in_time, p.product.value.stay.check_in_end_time)} · ${p.product.value.stay.check_out_time}` : undefined, to: p.sectionPath('house-rules/arrival-time') },
   { id: 'additional-rules', label: 'Additional rules', summary: typeof p.product.value?.details.house_rules === 'string' ? p.product.value.details.house_rules : 'Add details', to: p.sectionPath('house-rules/additional-rules') },
 ] }])
 

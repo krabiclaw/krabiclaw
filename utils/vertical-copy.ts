@@ -14,7 +14,9 @@ export const ALL_VERTICALS: OrganizationVertical[] = ["restaurant", "experience"
 
 type LocaleCode = "en" | "th" | "ja" | "vi";
 
-type VerticalCopy = {
+export type VerticalCopy = {
+  assigneeLabel: string
+  assigneeNoun: string
   aboutImageAlt: string
   ctaTitle: string
   ctaRoute: string
@@ -112,6 +114,8 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
   vi: {},
   en: {
     restaurant: {
+      assigneeLabel: "Host",
+      assigneeNoun: "host",
       aboutImageAlt: "About our restaurant",
       ctaTitle: "Come dine with us.",
       ctaRoute: "/reservations",
@@ -213,6 +217,8 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       cancelLabel: (_word: string) => `Cancel ${_word}`,
     },
     experience: {
+      assigneeLabel: "Host",
+      assigneeNoun: "host",
       aboutImageAlt: "About our studio",
       ctaTitle: "Book a class.",
       ctaRoute: "/experiences",
@@ -316,6 +322,8 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
   },
   th: {
     restaurant: {
+      assigneeLabel: "ผู้จัด",
+      assigneeNoun: "ผู้จัด",
       aboutImageAlt: "เกี่ยวกับร้านอาหารของเรา",
       ctaTitle: "มากินด้วยกัน",
       ctaRoute: "/reservations",
@@ -417,6 +425,8 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       cancelLabel: (_word: string) => `ยกเลิก${_word}`,
     },
     experience: {
+      assigneeLabel: "ผู้จัด",
+      assigneeNoun: "ผู้จัด",
       aboutImageAlt: "เกี่ยวกับสตูดิโอของเรา",
       ctaTitle: "จองคลาส",
       ctaRoute: "/experiences",
@@ -522,6 +532,8 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
 
 registry.en.service = {
   ...(registry.en.experience ?? registry.en.restaurant!),
+  assigneeLabel: "Attorney or legal team",
+  assigneeNoun: "attorney",
   aboutImageAlt: "About our firm",
   ctaTitle: "Talk with our legal team.",
   ctaRoute: "",
@@ -600,6 +612,8 @@ registry.en.service = {
 
 registry.th.service = {
   ...registry.th.experience!,
+  assigneeLabel: "ทนายความหรือทีมกฎหมาย",
+  assigneeNoun: "ทนายความ",
   aboutImageAlt: "เกี่ยวกับองค์กรของเรา",
   ctaTitle: "พูดคุยกับทีมของเรา",
   ctaRoute: "",
@@ -659,6 +673,8 @@ registry.th.service = {
 // Japanese has complete copy for every supported vertical. Shared wording is
 // composed within Japanese; no English registry entry supplies Japanese text.
 registry.ja.restaurant = {
+  assigneeLabel: "ホスト",
+  assigneeNoun: "ホスト",
   aboutImageAlt: "当店について",
   ctaTitle: "お食事にいらっしゃいませんか。",
   ctaRoute: "/reservations",
@@ -787,6 +803,8 @@ registry.ja.experience = {
 
 registry.ja.service = {
   ...registry.ja.experience,
+  assigneeLabel: "弁護士または法務チーム",
+  assigneeNoun: "弁護士",
   aboutImageAlt: "私たちの組織について",
   ctaTitle: "私たちにご相談ください。",
   ctaRoute: "",
@@ -840,6 +858,8 @@ registry.ja.service = {
 // Vietnamese has complete copy for every supported vertical, composed the same
 // way as Japanese: each vertical overrides the one before it.
 registry.vi.restaurant = {
+  assigneeLabel: "Người tổ chức",
+  assigneeNoun: "người tổ chức",
   aboutImageAlt: "Về nhà hàng của chúng tôi",
   ctaTitle: "Hãy đến dùng bữa cùng chúng tôi.",
   ctaRoute: "/reservations",
@@ -971,6 +991,8 @@ registry.vi.experience = {
 
 registry.vi.service = {
   ...registry.vi.experience,
+  assigneeLabel: "Luật sư hoặc nhóm pháp lý",
+  assigneeNoun: "luật sư",
   aboutImageAlt: "Về tổ chức của chúng tôi",
   ctaTitle: "Hãy trao đổi với chúng tôi.",
   ctaRoute: "",
@@ -1187,7 +1209,7 @@ export function normalizeVertical(vertical: string | null | undefined): string {
 
 export function getVerticalLabel(vertical: string | null | undefined): string {
   const v = normalizeVertical(vertical)
-  if (v === "service") return "Professional services"
+  if (v === "service") return "Legal Services"
   if (v === "experience") return "Experience"
   if (v === "restaurant") return "Restaurant"
   if (v === "lodging") return "Vacation rental"

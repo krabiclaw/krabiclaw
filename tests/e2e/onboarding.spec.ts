@@ -1,10 +1,12 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { dismissPreviewToolbar } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { tenantHostIsAddressable, testBaseUrl } from './test-env'
 import { environmentTenantAliasSlug } from '../../server/utils/tenant-hosts'
 import { formatMinorAmount } from '../../shared/prices'
 import { starterPalette } from '../../shared/site-palette'
+import type { Product } from '../../server/types/products'
 
 /**
  * The subdomain the site is stored under, from the host this environment frames
@@ -32,21 +34,31 @@ function organizationSubdomain(origin: string): string {
 // this owner's menu section takes. A collection slug is unique within its
 // organization, so the new site gets the same slug for its own section rather
 // than failing to save it.
-// The two new-site journeys sign in as the same fixture owner, and each one
-// discards that owner's active draft before it starts. Run in parallel, one
-// discarded the draft the other was reading back, so this file runs in order.
+// The new-site journeys share one fixture owner and active draft. Keep this
+// file in order, and share its actor lock with the account organization journey.
 test.describe.configure({ mode: 'default' })
 
 const otherTenantId = 'org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX'
 let otherTenant: { owner: APIRequestContext; collectionId: string } | null = null
+let releaseWizardMutationLock: (() => Promise<void>) | undefined
+
+test.beforeEach(async ({ request: _request }, testInfo) => {
+  releaseWizardMutationLock = await acquireTenantMutationLock(testInfo, 'user-e2e-onboarding-wizard')
+})
 
 test.afterEach(async () => {
-  if (!otherTenant) return
-  const { owner, collectionId } = otherTenant
-  otherTenant = null
-  const removed = await owner.delete(`/api/editor/organizations/${otherTenantId}/collections/${collectionId}`)
-  expect(removed.status(), await removed.text()).toBe(200)
-  await owner.dispose()
+  try {
+    if (!otherTenant) return
+    const { owner, collectionId } = otherTenant
+    otherTenant = null
+    const removed = await owner.delete(`/api/editor/organizations/${otherTenantId}/collections/${collectionId}`)
+    expect(removed.status(), await removed.text()).toBe(200)
+    await owner.dispose()
+  } finally {
+    const release = releaseWizardMutationLock
+    releaseWizardMutationLock = undefined
+    await release?.()
+  }
 })
 
 test('a new owner builds a draft and creates a site through the routed flow', async ({ page, request, baseURL, browser, playwright }) => {
@@ -259,6 +271,174 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(section).toContainText(formatMinorAmount(18000, 'THB'))
   await visitor.close()
   expect(placesRequests).toEqual([])
+})
+
+test('a new experience site saves its first experience privately until booking setup is complete', async ({ page, baseURL }) => {
+  await dismissPreviewToolbar(page)
+  await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
+  const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
+  expect(discarded.status(), await discarded.text()).toBe(200)
+  const empty = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(empty.status(), await empty.text()).toBe(200)
+  expect(await empty.json()).toEqual({ success: true, draft: null })
+  try {
+    const created = await page.request.post('/api/dashboard/onboarding/drafts/active', {
+      data: { sourceType: 'manual', vertical: 'experience', name: `E2E experience ${Date.now().toString(36)}`, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', phone: '+66812345678' } },
+    })
+    expect(created.status(), await created.text()).toBe(200)
+    const { organizationId } = await created.json() as { organizationId: string }
+    await page.goto('/dashboard/onboarding/products')
+    await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
+    const products = page.locator('[data-onboarding-step="products"]')
+    await expect(products).toContainText('Booking details are required before an experience can be published.')
+    await page.getByPlaceholder('Sunset kayak tour').fill('Mangrove kayak trip')
+    await products.getByLabel('Price', { exact: true }).fill('850')
+    await page.getByRole('button', { name: 'Add experience', exact: true }).click()
+    await page.getByRole('button', { name: 'Next', exact: true }).click()
+    await expect(page.locator('[data-onboarding-step="look"]')).toBeVisible()
+
+    // Read the actual catalog independently of the onboarding draft writer.
+    const catalog = await page.request.get(`/api/editor/organizations/${organizationId}/products`)
+    expect(catalog.status(), await catalog.text()).toBe(200)
+    const saved = (await catalog.json() as { products: Product[] }).products
+    expect(saved).toHaveLength(1)
+    const experience = saved[0]!
+    expect(experience).toMatchObject({ kind: 'experience', name: 'Mangrove kayak trip', booking: null, stay: null, order_url: null })
+    expect(experience.variants).toHaveLength(1)
+    expect(experience.variants[0]!.prices).toEqual([expect.objectContaining({ unit_amount: 85000, currency: 'THB' })])
+    expect(experience.publications).toEqual([expect.objectContaining({ organization_id: organizationId, published: false })])
+    expect(experience.locations).toEqual([expect.objectContaining({ active: true, published: false })])
+    const publication = await page.request.put(`/api/editor/organizations/${organizationId}/products/${experience.id}/publication`, { data: { published: true } })
+    expect(publication.status(), await publication.text()).toBe(409)
+    const readBack = await page.request.get(`/api/editor/organizations/${organizationId}/products/${experience.id}`)
+    expect(readBack.status(), await readBack.text()).toBe(200)
+    expect((await readBack.json() as { product: Product }).product.publications).toEqual([expect.objectContaining({ published: false })])
+    await page.goto('/dashboard/onboarding/products')
+    await expect(page.locator('[data-onboarding-step="products"]')).toContainText('Mangrove kayak trip')
+  } finally {
+    const removed = await page.request.delete('/api/dashboard/onboarding/drafts/active')
+    expect(removed.status(), await removed.text()).toBe(200)
+    const discardedDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
+    expect(discardedDraft.status(), await discardedDraft.text()).toBe(200)
+    expect(await discardedDraft.json()).toEqual({ success: true, draft: null })
+  }
+})
+
+test('an owner changes their restaurant draft to lodging, restores it and opens the home editor', async ({ page, baseURL }) => {
+  await dismissPreviewToolbar(page)
+  await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
+  const previous = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(previous.status(), await previous.text()).toBe(200)
+  const previousDraft = (await previous.json() as { draft: { organizationId: string | null } | null }).draft
+  const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
+  expect(discarded.status(), await discarded.text()).toBe(200)
+  expect(await discarded.json()).toEqual({ success: true, deleted: previousDraft?.organizationId != null })
+  const cleared = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(cleared.status(), await cleared.text()).toBe(200)
+  expect(await cleared.json()).toEqual({ success: true, draft: null })
+  const name = `E2E Lodging ${Date.now().toString(36)}`
+  const step = (id: string) => page.locator(`[data-onboarding-step="${id}"]`)
+  const advance = async (label: string, next: string) => {
+    await page.getByRole('button', { name: label, exact: true }).click()
+    await expect(step(next)).toBeVisible()
+  }
+
+  await page.goto('/dashboard/onboarding/type')
+  await expect(step('type')).toBeVisible()
+  await expect(step('type').getByRole('button')).toHaveCount(4)
+  await page.getByRole('button', { name: 'Restaurant, café or bar', exact: true }).click()
+  await expect(step('language')).toBeVisible()
+  await page.getByRole('button', { name: 'English', exact: true }).click()
+  await expect(step('business')).toBeVisible()
+  await page.getByLabel('Name', { exact: true }).fill(name)
+  await advance('Next', 'location')
+  await page.getByPlaceholder('City', { exact: true }).fill('Ao Nang')
+  await step('location').getByText('Select country').click()
+  await page.getByPlaceholder('Search country...').fill('Thailand')
+  await page.getByRole('option', { name: /Thailand/ }).click()
+  await advance('Next', 'hours')
+  await expect(step('hours')).toContainText('Bangkok · GMT+7')
+  await advance('Save hours', 'currency')
+  await expect(step('currency')).toContainText('Thai Baht (THB)')
+  await advance('Next', 'contact')
+  await advance('Skip for now', 'products')
+  await page.getByPlaceholder('Grilled squid').fill('Grilled squid')
+  await page.getByRole('button', { name: 'Add dish', exact: true }).click()
+  await advance('Next', 'look')
+  const restaurant = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(restaurant.status(), await restaurant.text()).toBe(200)
+  expect((await restaurant.json() as { draft: unknown }).draft).toMatchObject({
+    vertical: 'restaurant', products: [{ name: 'Grilled squid', category: 'Menu', amountMinor: null }],
+  })
+
+  // The saved restaurant offering is restored before the owner changes type.
+  // Selecting lodging removes it from the answers, and the next save must send
+  // the new type with no generic offerings rather than fail on a hidden field.
+  await page.goto('/dashboard/onboarding/type')
+  await expect(step('type').getByRole('button', { name: 'Restaurant, café or bar', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('button', { name: 'Lodging or vacation rentals', exact: true }).click()
+  await expect(step('language')).toBeVisible()
+  await page.getByRole('button', { name: 'English', exact: true }).click()
+  await expect(step('business')).toBeVisible()
+  await advance('Next', 'location')
+  await advance('Next', 'hours')
+  await advance('Save hours', 'currency')
+  const convertedSave = page.waitForRequest(sent => sent.method() === 'POST' && new URL(sent.url()).pathname === '/api/dashboard/onboarding/drafts/active')
+  await advance('Next', 'contact')
+  expect((await convertedSave).postDataJSON()).toMatchObject({ vertical: 'lodging', products: [] })
+  await advance('Skip for now', 'look')
+  await expect(step('products')).toHaveCount(0)
+  await advance('Next', 'review')
+  await expect(step('review').getByText('Products', { exact: true })).toHaveCount(0)
+  await expect(step('review').getByText('Menu', { exact: true })).toHaveCount(0)
+
+  const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(saved.status(), await saved.text()).toBe(200)
+  const draft = (await saved.json() as { draft: { draftId: string; updatedAt: string; vertical: string; products: unknown[]; details: { name: string } } }).draft
+  expect(draft).toMatchObject({ vertical: 'lodging', products: [], details: { name } })
+  // The server refuses a generic onboarding item for a home, before changing
+  // the draft. Homes are created with their own required stay settings later.
+  const invalidProduct = await page.request.post('/api/dashboard/onboarding/drafts/active', {
+    data: { draftId: draft.draftId, expectedUpdatedAt: draft.updatedAt, products: [{ name: 'A home is not an experience', category: 'Homes', amountMinor: null }] },
+  })
+  expect(invalidProduct.status(), await invalidProduct.text()).toBe(400)
+  const unchanged = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(unchanged.status(), await unchanged.text()).toBe(200)
+  expect((await unchanged.json() as { draft: unknown }).draft).toMatchObject({ draftId: draft.draftId, updatedAt: draft.updatedAt, vertical: 'lodging', products: [] })
+
+  // A cold load reads the selected vertical from the persisted draft.
+  await page.goto('/dashboard/onboarding/type')
+  await expect(step('type').getByRole('button', { name: 'Lodging or vacation rentals', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await page.goto('/dashboard/onboarding')
+  await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Pick up where you left off', exact: true }).click()
+  await expect(step('review')).toBeVisible()
+  await page.getByRole('button', { name: 'Create my site', exact: true }).click()
+  await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
+
+  const session = await (await page.request.get('/api/auth/get-session')).json() as { session: { activeOrganizationId: string } }
+  const organizations = await (await page.request.get('/api/auth/organization/list')).json() as Array<{ id: string; name: string; slug: string }>
+  const created = organizations.find(organization => organization.id === session.session.activeOrganizationId)
+  expect(created?.name).toBe(name)
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${created!.slug}$`))
+  const context = await page.request.get('/api/dashboard/context', { params: { org: created!.slug } })
+  expect(context.status(), await context.text()).toBe(200)
+  expect((await context.json() as { organization: { id: string; vertical: string } }).organization).toMatchObject({ id: created!.id, vertical: 'lodging' })
+  const products = await page.request.get(`/api/editor/organizations/${created!.id}/products`)
+  expect(products.status(), await products.text()).toBe(200)
+  expect((await products.json() as { products: unknown[] }).products).toEqual([])
+
+  await page.goto(`/dashboard/${created!.slug}/products`)
+  await page.getByTestId('catalog-add').click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${created!.slug}/products/new/kind$`))
+  await page.locator('#dashboard-panel-product-kind').getByText('Place to stay', { exact: true }).click()
+  await expect(page.getByRole('radio', { name: 'Place to stay', exact: true })).toBeChecked()
+  await page.getByRole('button', { name: 'Next: Name', exact: true }).click()
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('My first home')
+  await page.getByRole('button', { name: 'Next: Stay settings', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Stay settings', exact: true })).toBeVisible()
+  await expect(page.getByLabel('Check-in from', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('Sleeps', { exact: true })).toBeVisible()
 })
 
 // Kikuzuki's own listing, answered by the real Places API (New) through the

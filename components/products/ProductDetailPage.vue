@@ -45,7 +45,7 @@
               <span v-if="stayPlaceName" aria-hidden="true">·</span>
             </template>
             <span v-if="stayPlaceName" class="underline">{{ stayPlaceName }}</span>
-            <ShareButton class="ml-auto" :title="displayTitle" />
+            <ShareButton v-if="!previewAuthorized" class="ml-auto" :title="displayTitle" :url="publicShareUrl" />
           </div>
         </header>
 
@@ -91,7 +91,7 @@
               </div>
             </li>
           </ul>
-          <ShareButton class="mt-5" :title="displayTitle" />
+          <ShareButton v-if="!previewAuthorized" class="mt-5" :title="displayTitle" :url="publicShareUrl" />
           <slot name="actions" />
         </header>
         </div>
@@ -120,7 +120,7 @@
             <div class="flex items-start gap-4">
               <TenantIcon name="clock" class="size-5 text-default shrink-0 mt-0.5" />
               <div>
-                <p class="font-medium text-default text-sm">{{ t('stay.check_in_after', { time: formatTime(product.stay!.check_in_time, locale) }) }}</p>
+                <p class="font-medium text-default text-sm">{{ stayCheckIn }}</p>
                 <p class="text-xs text-muted">{{ t('stay.check_out_before', { time: formatTime(product.stay!.check_out_time, locale) }) }}</p>
               </div>
             </div>
@@ -231,7 +231,7 @@
           </section>
 
           <section v-if="location" class="mt-10 border-t border-default pt-10">
-            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : product.kind === 'dish' || product.kind === 'item' ? t('site.location.find_us') : t('site.experience_detail.where_youll_meet') }}</h2>
+            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : product.kind === 'dish' ? t('site.location.find_us') : t('site.experience_detail.where_youll_meet') }}</h2>
             <div class="mt-5 overflow-hidden rounded-xl border border-default bg-elevated">
               <div class="flex items-start gap-4 p-6">
                 <TenantIcon name="map-pin" class="mt-0.5 size-5 shrink-0 text-primary" />
@@ -940,10 +940,18 @@ const stayLocationDetails = computed(() => STAY_LOCATION_DETAIL_KEYS.flatMap(key
   const text = props.product.details[key]
   return typeof text === 'string' ? [{ key, label: t(`stay.${key}`), text }] : []
 }))
+/** Airbnb's wording: a window when the check-in has an end, otherwise its start alone. */
+const stayCheckIn = computed(() => {
+  const stay = props.product.stay
+  if (!stay) return ''
+  return stay.check_in_end_time === null
+    ? t('stay.check_in_after', { time: formatTime(stay.check_in_time, locale.value) })
+    : t('stay.check_in_window', { start: formatTime(stay.check_in_time, locale.value), end: formatTime(stay.check_in_end_time, locale.value) })
+})
 const stayRules = computed(() => props.product.kind === 'stay' ? stayHouseRuleLines(props.product.details, value => formatTime(value, locale.value)) : [])
 /** Airbnb's three columns for a home: house rules with its times and party, safety and property, then its other details. */
 const stayHouseRules = computed(() => props.product.stay ? [
-  t('stay.check_in_after', { time: formatTime(props.product.stay.check_in_time, locale.value) }),
+  stayCheckIn.value,
   t('stay.check_out_before', { time: formatTime(props.product.stay.check_out_time, locale.value) }),
   t('stay.guests_maximum', props.product.stay.max_guests),
   ...stayRules.value,
@@ -987,8 +995,7 @@ function recordExternalOrderClick() {
 /**
  * What this page describes, in schema.org's vocabulary.
  *
- * A dish is a MenuItem and a shop's goods are a Product: that is what the
- * surface sells, and `presentation.structuredDataType` names it. An experience
+ * A dish is a MenuItem, as `presentation.structuredDataType` states. An experience
  * is a class that runs at a stated time, which is an Event — several of them
  * are an EventSeries. Google reads an occurrence only as its own top-level
  * Event with its own address and Offer, so the soonest occurrences are emitted
@@ -1012,6 +1019,9 @@ const structuredDataType = computed(() => {
 // request the way the breadcrumbs are, so a tenant's markup stays on the
 // tenant's own domain.
 const requestURL = useRequestURL()
+const { previewAuthorized } = useTenantOrganization()
+const publicRoute = useRoute()
+const publicShareUrl = computed(() => new URL(publicRoute.path, requestURL.origin).toString())
 // A place to stay has no external link: it is booked on this page, which is its canonical URL.
 const canonicalProductUrl = computed(() => new URL(
   props.product.order_url || localePath(props.presentation.productPath(props.location?.slug ?? '', props.product.slug)),
@@ -1111,6 +1121,7 @@ const stayStructuredData = computed(() => {
     ] } : {}),
     additionalProperty: [
       { '@type': 'PropertyValue', name: 'checkinTime', value: stay.check_in_time },
+      ...(stay.check_in_end_time !== null ? [{ '@type': 'PropertyValue' as const, name: 'checkinEndTime', value: stay.check_in_end_time }] : []),
       { '@type': 'PropertyValue', name: 'checkoutTime', value: stay.check_out_time },
       { '@type': 'PropertyValue', name: 'minimumNights', value: stay.min_nights },
       ...(stay.total_floors !== null ? [{ '@type': 'PropertyValue' as const, name: 'totalFloors', value: stay.total_floors }] : []),
