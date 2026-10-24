@@ -1277,7 +1277,7 @@ test.describe('dashboard pane hierarchy', () => {
     const menu = page.locator('#dashboard-panel-catalog-menu')
     await expect(menu).toContainText(owner.title)
     await expect(menu.getByRole('combobox', { name: 'Location', exact: true })).toHaveCount(0)
-    await menu.getByRole('link', { name: section!.name, exact: true }).click()
+    await menu.getByTestId(`collection-${section!.id}`).click()
     await expect(page).toHaveURL(`${ORG}/products/menu/${section!.id}?location_id=${encodeURIComponent(owner.id)}&kind=dish`)
     const member = products.find(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === section!.id))!
     await expect(page.getByTestId(`product-${member.id}`)).toContainText(member.name)
