@@ -43,6 +43,13 @@
       "when": 1792822740344,
       "tag": "0005_channel_reply_retry_proof",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792827231482,
+      "tag": "0006_channex_ari_outbox",
+      "breakpoints": true
     }
   ]
 }

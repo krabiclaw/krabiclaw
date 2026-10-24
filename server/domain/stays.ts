@@ -21,7 +21,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, pushAirbnbListingSettings, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import { completeChannelPush, deliverStayNights, pushAirbnbListingSettings, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
@@ -1272,23 +1272,44 @@ async function homeNights(db: DbClient, organizationId: string, home: StayHome, 
 }
 
 /**
- * Tell the home's channel, if it has one, the current state of these nights.
- * The outcome is part of the write's result; a night the channel did not take
- * reads needs_review on the calendar.
+ * Tell the home's channel, if it has one, the current state of these nights:
+ * they join its delivery outbox and go now unless Channex's rate limit or a
+ * retry wait holds them. The outcome is part of the write's result; a night
+ * the channel did not take reads needs_review on the calendar.
  */
 async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, ranges: ReadonlyArray<readonly [string, string]>): Promise<ChannelPushCompletion> {
-  let outcome: ChannelPush | null = null
   try {
-    for (const [from, to] of ranges) {
-      const { home, nights } = await readStayCalendar(db, { organizationId: access.organizationId, actorId: access.actorId, manage: true }, { productId, from, to })
-      const pushed = await pushStayNights(db, env, access.organizationId, home, nights)
-      if (pushed && (!outcome || pushed.state === 'needs_review')) outcome = pushed
-    }
-    return outcome
+    const home = await readStayHome(db, { organizationId: access.organizationId, actorId: access.actorId, manage: true }, productId)
+    const dates = ranges.flatMap(([from, to]) => Array.from({ length: days(from, to) }, (_, offset) => addDays(from, offset)))
+    return await pushStayNights(db, env, access.organizationId, home, dates, (from, to) => homeNights(db, access.organizationId, home, from, to))
   } catch (cause) {
-    const error = cause instanceof Error ? cause : new Error(String(cause))
-    return outcome?.state === 'needs_review' ? new AggregateError([new Error(outcome.detail), error], `${outcome.detail} ${error.message}`) : error
+    return cause instanceof Error ? cause : new Error(String(cause))
   }
+}
+
+/**
+ * Deliver every connected home's pending nights that are due: those waiting
+ * out a rate limit or a retry, and those whose write ended before its own
+ * delivery finished. Every home is tried; the run fails naming the ones that
+ * could not be delivered.
+ */
+export async function deliverPendingChannelNights(db: DbClient, env: StayMutationEnv): Promise<{ homes: number }> {
+  const now = new Date()
+  const homes = await queryAll<{ organization_id: string; product_id: string }>(db, `SELECT DISTINCT organization_id, product_id FROM channel_night_pushes
+    WHERE provider = 'channex' AND state = 'pending' AND (retry_at <= ? OR (retry_at IS NULL AND updated_at <= ?))`,
+  [now.toISOString(), new Date(now.getTime() - 60_000).toISOString()])
+  const failures: string[] = []
+  for (const row of homes) {
+    try {
+      const home = await readStayHome(db, { organizationId: row.organization_id, actorId: 'system', manage: true }, row.product_id)
+      await deliverStayNights(db, env, row.organization_id, home, (from, to) => homeNights(db, row.organization_id, home, from, to))
+      await publishStayInvalidation(env, { type: 'nights.changed', organizationId: row.organization_id, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: new Date().toISOString() })
+    } catch (error) {
+      failures.push(`${row.product_id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (failures.length) throw new Error(`${failures.length} home(s) could not deliver their channel nights: ${failures.join('; ')}`)
+  return { homes: homes.length }
 }
 
 /** A base price or minimum stay changes the same 500 future nights on every write surface. */
