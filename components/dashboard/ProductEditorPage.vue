@@ -384,7 +384,6 @@ const locationId = computed(() => locationScope.value === 'online' ? null : loca
 // A product created from a collection joins it; the URL that opened the walk names it.
 const createCollectionId = computed(() => typeof route.query.collection_id === 'string' && route.query.collection_id ? route.query.collection_id : null)
 const level = useRouteLevel()
-const pane = useDashboardPane()
 /** The record's own URL. It is the route level's, never rebuilt from params. */
 const itemPath = level.path
 const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products`)
@@ -393,8 +392,8 @@ const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/p
  * scope and nothing else; a product being created keeps the whole walk's query,
  * which names its kind and the collection it will join.
  */
-function sectionPath(section: string, arrival = arrivalTab.value) {
-  const query = isNew.value ? route.query : { location_id: locationScope.value ?? undefined, ...(arrival ? { guide: 'arrival' } : {}) }
+function sectionPath(section: string) {
+  const query = isNew.value ? route.query : { location_id: locationScope.value ?? undefined, ...(arrivalTab.value ? { guide: 'arrival' } : {}) }
   return router.resolve({ path: `${itemPath.value}/${section}`, query }).fullPath
 }
 
@@ -535,13 +534,9 @@ const summaryCards = computed(() => stayEditor.value || dishEditor.value || expe
 const ARRIVAL_SECTIONS = ['arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'checkout-instructions', 'arrival-guide']
 const arrivalTab = computed(() => stayEditor.value && (route.query.guide === 'arrival' || ARRIVAL_SECTIONS.includes(detailKey.value ?? '')))
 async function changeStayTab(value: string | number) {
-  if (saving.value || (value !== 'arrival' && value !== 'space') || value === (arrivalTab.value ? 'arrival' : 'space')) return
-  const arrival = value === 'arrival'
-  const section = pane.value ? firstLeafSection(arrival ? ARRIVAL_SECTIONS : STAY_ROW_ORDER) : undefined
+  if (saving.value || value === (arrivalTab.value ? 'arrival' : 'space')) return
   revert()
-  // Select the requested context and its pane together. Visiting its bare
-  // index first lets the previous context's auto-open compete with this click.
-  await navigateTo(section ? sectionPath(section, arrival) : router.resolve({ path: itemPath.value, query: { location_id: locationScope.value ?? undefined, ...(arrival ? { guide: 'arrival' } : {}) } }).fullPath)
+  await router.push(router.resolve({ path: itemPath.value, query: { location_id: locationId.value ?? undefined, ...(value === 'arrival' ? { guide: 'arrival' } : {}) } }).fullPath)
 }
 
 // The home's private arrival guide is read only inside its authenticated editor.
@@ -1356,13 +1351,7 @@ const activeNavigationItem = computed(() => {
  * Pricing — would open that level too and push this index off the screen.
  */
 const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'stay', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
-function firstLeafSection(sections: readonly string[]) {
-  return sections.find(id => LEAF_SECTIONS.includes(id) && !(stayEditor.value && id === 'description'))
-}
-const autoOpenTarget = computed(() => {
-  const section = firstLeafSection(navigationGroups.value[0]?.items.filter(item => item.to === sectionPath(item.id)).map(item => item.id) ?? [])
-  return section ? sectionPath(section) : null
-})
+const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
 const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'tagline', 'featured', 'kind', 'collections']
 function rowRank(id: string) {
