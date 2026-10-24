@@ -8,7 +8,7 @@
         color="neutral"
         variant="soft"
         square
-        :aria-label="`Add a ${locationNoun}`"
+        :aria-label="`Add ${locationNoun}`"
       />
     </template>
     <UAlert v-if="locationsError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Could not load locations" :description="getErrorMessage(locationsError, 'Locations could not be loaded')" />

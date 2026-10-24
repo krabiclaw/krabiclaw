@@ -12,7 +12,7 @@
         color="neutral"
         variant="soft"
         square
-        aria-label="Location settings"
+        :aria-label="capabilities.locationVocabulary === 'office/service area' ? 'Office settings' : 'Location settings'"
       />
     </template>
 

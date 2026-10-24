@@ -1039,7 +1039,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'cancelled' })
   })
 
-  test('An assigned Experience host edits its saved product without gaining website preview access', async ({ page, baseURL, browser }, testInfo) => {
+  test('An assigned Experience host edits its saved product without gaining website preview access', async ({ page, baseURL, browser, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Assignment and role changes require isolated local D1.')
     const organizationId = 'org-user-pottery-house'
     const org = 'org-user-pottery-house'
@@ -1048,6 +1048,7 @@ test.describe('dashboard pane hierarchy', () => {
     const bookingEndpoint = `${endpoint}/booking`
     const productPath = `/dashboard/${org}/products/${productId}`
     const release = await acquireTenantMutationLock(testInfo, organizationId)
+    let cleanupRequest: APIRequestContext | undefined
     let memberContext: BrowserContext | null = null
     let original: Product | null = null
     let actor: OrganizationMembersData['members'][number] | undefined
@@ -1058,6 +1059,7 @@ test.describe('dashboard pane hierarchy', () => {
     try {
       await page.context().clearCookies()
       await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
+      cleanupRequest = await playwright.request.newContext({ baseURL, storageState: await page.request.storageState() })
       const [productResponse, memberResponse] = await Promise.all([
         page.request.get(endpoint),
         page.request.get('/api/dashboard/members', { params: { org } }),
@@ -1144,40 +1146,43 @@ test.describe('dashboard pane hierarchy', () => {
     } finally {
       try {
         if (nameAttempted && original) {
-          const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_product', args: {
+          const restored = await mcpRequest(cleanupRequest!, baseURL!, { method: 'tools/call', toolName: 'update_product', args: {
             organization_id: organizationId, product_id: productId, name: original.name,
           } })
           expect(restored.status(), await restored.text()).toBe(200)
           expect(mcpData<{ product: Product }>(await restored.json()).product.name).toBe(original.name)
-          const restoredName = await page.request.get(endpoint)
+          const restoredName = await cleanupRequest!.get(endpoint)
           expect(restoredName.status(), await restoredName.text()).toBe(200)
           expect((await restoredName.json() as { product: Product }).product.name).toBe(original.name)
         }
       } catch (error) { failures.push(error) }
       try {
         if (bookingAttempted && original?.booking) {
-          const restored = await page.request.put(bookingEndpoint, { data: {
+          const restored = await cleanupRequest!.put(bookingEndpoint, { data: {
             scheduling_mode: original.booking.scheduling_mode, assigned_member_id: original.booking.assigned_member_id, assigned_team_id: original.booking.assigned_team_id,
           } })
           expect(restored.status(), await restored.text()).toBe(200)
-          const restoredBooking = await page.request.get(endpoint)
+          const restoredBooking = await cleanupRequest!.get(endpoint)
           expect(restoredBooking.status(), await restoredBooking.text()).toBe(200)
           expect((await restoredBooking.json() as { product: Product }).product.booking).toEqual(original.booking)
         }
       } catch (error) { failures.push(error) }
       try {
         if (roleAttempted && actor) {
-          const restored = await page.request.post('/api/auth/organization/update-member-role', {
+          const restored = await cleanupRequest!.post('/api/auth/organization/update-member-role', {
             headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: actor.role },
           })
           expect(restored.status(), await restored.text()).toBe(200)
-          const restoredRole = await page.request.get('/api/dashboard/members', { params: { org } })
+          const restoredRole = await cleanupRequest!.get('/api/dashboard/members', { params: { org } })
           expect(restoredRole.status(), await restoredRole.text()).toBe(200)
           expect((await restoredRole.json() as OrganizationMembersData).members.find(member => member.id === actor!.id)?.role).toBe(actor.role)
         }
       } catch (error) { failures.push(error) }
       try {
         await memberContext?.close()
+      } catch (error) { failures.push(error) }
+      try {
+        await cleanupRequest?.dispose()
       } catch (error) { failures.push(error) }
       try {
         await release()
