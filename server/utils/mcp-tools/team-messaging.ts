@@ -75,7 +75,7 @@ export async function handleTeamMessagingTools(ctx: McpExecutorContext): Promise
       return await sendTeamMessage(env, db, access, requiredString(args, 'thread_id'), {
         body: args.message, photos: file ? { sourceIds: [file.file_id], resolve: async () => {
           const resolved = await resolveUserUploadedMediaFile(file, MAX_IMAGE_BYTES)
-          if (resolved.kind !== 'image') throw new HTTPError({ statusCode: 422, statusMessage: 'Team messages accept photo attachments' })
+          if (resolved.kind !== 'image') throw new HTTPError({ statusCode: 422, statusMessage: 'Team messages accept only photo attachments', data: { code: 'INVALID_PHOTO', field: 'file' } })
           return [{ bytes: resolved.buffer, filename: resolved.filename }]
         } } : [],
         idempotencyKey: requiredString(args, 'idempotency_key'), senderName: sender.name,
