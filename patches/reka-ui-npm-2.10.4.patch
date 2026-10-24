@@ -1,12 +1,12 @@
 diff --git a/dist/RadioGroup/Radio.cjs b/dist/RadioGroup/Radio.cjs
-index 9754d9a96cccd4c5927ef401df03428b8151753b..101c5dca46344764763fd90ee62e801536e11d04 100644
+index cf94fba478ebc1d5a64f555e721662f5b791cf09..dcf37a21b1c8cc682e347ebcda9c911401b05a17 100644
 --- a/dist/RadioGroup/Radio.cjs
 +++ b/dist/RadioGroup/Radio.cjs
 @@ -58,7 +58,6 @@ var Radio_vue_vue_type_script_setup_true_lang_default = /* @__PURE__ */ (0, vue.
  		const { forwardRef, currentElement: triggerElement } = require_shared_useForwardExpose.useForwardExpose();
  		const isFormControl = require_shared_useFormControl.useFormControl(triggerElement);
  		const scopeIdAttrs = require_shared_useForwardScopeId.useForwardScopeId();
--		const ariaLabel = (0, vue.computed)(() => props.id && triggerElement.value ? document.querySelector(`[for="${props.id}"]`)?.innerText ?? props.value : void 0);
+-		const ariaLabel = (0, vue.computed)(() => props.id && triggerElement.value ? document.querySelector(`[for="${props.id}"]`)?.innerText : void 0);
  		function handleClick(event) {
  			if (props.disabled) return;
  			require_RadioGroup_utils.handleSelect(event, props.value, (ev) => {
@@ -27,7 +27,7 @@ index 9754d9a96cccd4c5927ef401df03428b8151753b..101c5dca46344764763fd90ee62e8015
  				"disabled",
  				"data-state",
 diff --git a/dist/RadioGroup/Radio.js b/dist/RadioGroup/Radio.js
-index db77cc1568a7897cf8d6cae8b6cea54824a74969..f744f4b5eb8df6004dfc662efc5bb9be71ae0d69 100644
+index 9def8cb2dfb1eba0ab9397528b5a90b7694f70dd..64d6e2c5c564cfc330e52a0e593a1585fe9389da 100644
 --- a/dist/RadioGroup/Radio.js
 +++ b/dist/RadioGroup/Radio.js
 @@ -4,7 +4,7 @@ import { useForwardScopeId } from "../shared/useForwardScopeId.js";
@@ -43,7 +43,7 @@ index db77cc1568a7897cf8d6cae8b6cea54824a74969..f744f4b5eb8df6004dfc662efc5bb9be
  		const { forwardRef, currentElement: triggerElement } = useForwardExpose();
  		const isFormControl = useFormControl(triggerElement);
  		const scopeIdAttrs = useForwardScopeId();
--		const ariaLabel = computed(() => props.id && triggerElement.value ? document.querySelector(`[for="${props.id}"]`)?.innerText ?? props.value : void 0);
+-		const ariaLabel = computed(() => props.id && triggerElement.value ? document.querySelector(`[for="${props.id}"]`)?.innerText : void 0);
  		function handleClick(event) {
  			if (props.disabled) return;
  			handleSelect(event, props.value, (ev) => {
@@ -64,7 +64,7 @@ index db77cc1568a7897cf8d6cae8b6cea54824a74969..f744f4b5eb8df6004dfc662efc5bb9be
  				"disabled",
  				"data-state",
 diff --git a/src/RadioGroup/Radio.vue b/src/RadioGroup/Radio.vue
-index ee2293e824c10c8d08dd53fd3f91b3ae2d474f84..7ea531938c87fa30791ba609b02b98d57be48a0c 100644
+index 9f49c39b3cc91e4c31a2dbf6ef015e37bae3e029..7ea531938c87fa30791ba609b02b98d57be48a0c 100644
 --- a/src/RadioGroup/Radio.vue
 +++ b/src/RadioGroup/Radio.vue
 @@ -20,7 +20,7 @@ export interface RadioProps extends PrimitiveProps, FormFieldProps {
@@ -80,7 +80,7 @@ index ee2293e824c10c8d08dd53fd3f91b3ae2d474f84..7ea531938c87fa30791ba609b02b98d5
  // `nested-interactive` a11y violation; forward the parent scope id for scoped styles.
  const scopeIdAttrs = useForwardScopeId()
  
--const ariaLabel = computed(() => props.id && triggerElement.value ? (document.querySelector(`[for="${props.id}"]`) as HTMLLabelElement)?.innerText ?? props.value : undefined)
+-const ariaLabel = computed(() => props.id && triggerElement.value ? (document.querySelector(`[for="${props.id}"]`) as HTMLLabelElement)?.innerText : undefined)
 -
  function handleClick(event: MouseEvent) {
    if (props.disabled)
