@@ -32,7 +32,14 @@
 
     <UAlert v-if="error" color="error" variant="soft" :description="error" class="mt-4" />
 
-    <div class="mt-6 space-y-3">
+    <!-- Agreement is its own action before either way of signing up, and starts unchecked. -->
+    <UCheckbox v-model="agreed" class="mt-6" name="terms-agreement">
+      <template #label>
+        I agree to the <NuxtLink to="/policies/terms" target="_blank" class="font-semibold text-primary">Terms of Service</NuxtLink>,
+        including that abusive content and users are not tolerated, and the <NuxtLink to="/policies/privacy" target="_blank" class="font-semibold text-primary">Privacy Policy</NuxtLink>.
+      </template>
+    </UCheckbox>
+    <div class="mt-4 space-y-3" :class="agreed ? '' : 'pointer-events-none opacity-50'" :aria-disabled="!agreed" :inert="!agreed">
       <AuthGoogleButton label="Sign up with Google" :loading="loading" @activate="googleSignup" />
       <USeparator label="or use email" />
       <AuthEmailSignUpForm :callback-url="verificationCallback" :initial-email="queryEmail" @success="emailSignupComplete" />
@@ -72,6 +79,7 @@ const verificationCallback = computed(() => {
 })
 const { loading, error, signInWithGoogle } = useAuthOperation()
 const pendingEmail = ref('')
+const agreed = ref(false)
 const resending = ref(false)
 const resendNotice = ref<string | null>(null)
 const resendError = ref<string | null>(null)
@@ -88,6 +96,7 @@ const isAuthenticated = computed(() => Boolean(session?.user?.id && !session.use
 if (isAuthenticated.value) await navigateTo(postLoginUrl.value, { external: true, redirectCode: 302 })
 
 async function googleSignup() {
+  if (!agreed.value) return
   await signInWithGoogle(postLoginUrl.value)
 }
 

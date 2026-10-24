@@ -117,6 +117,10 @@ export const requests = sqliteTable("requests", {
  // updated_at.
  archived_at: text(),
  archived_by_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
+ // A member blocked this guest: the conversation leaves Current and Past for
+ // the Blocked mailbox and stops alerting the team. Who blocked it, and why, is
+ // the content_reports row the block filed.
+ blocked_at: text(),
  payload_json: text().notNull(),
  created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
  updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -2424,6 +2428,36 @@ export const team_messages = sqliteTable("team_messages", {
 ]);
 
 
+
+// A member's report of a guest conversation or a team message (App Store
+// guideline 1.2), and what platform staff decided. `excerpt` keeps what was
+// reported, so the decision can be reviewed after the message is removed.
+export const content_reports = sqliteTable("content_reports", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	reporter_user_id: text().references(() => user.id, { onDelete: "set null" }),
+	subject: text({ enum: ["guest_thread", "team_message"] }).notNull(),
+	request_id: text().references((): AnySQLiteColumn => requests.id, { onDelete: "cascade" }),
+	team_message_id: text().references(() => team_messages.id, { onDelete: "set null" }),
+	// The KrabiClaw account that wrote the reported content, when it has one:
+	// the team message's sender, or the guest's account. Staff ban this user.
+	author_user_id: text().references(() => user.id, { onDelete: "set null" }),
+	reason: text().notNull(),
+	excerpt: text().notNull(),
+	blocked: integer({ mode: "boolean" }).notNull(),
+	status: text({ enum: ["open", "removed", "dismissed"] }).notNull(),
+	resolved_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
+	resolved_at: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	index("content_reports_status_created_idx").on(table.status, table.created_at),
+	index("content_reports_request_idx").on(table.request_id),
+	index("content_reports_team_message_idx").on(table.team_message_id),
+	check("content_reports_subject_check", sql`(subject = 'guest_thread' AND team_message_id IS NULL) OR (subject = 'team_message' AND request_id IS NULL AND blocked = 0)`),
+	check("content_reports_reason_check", sql`length(reason) BETWEEN 1 AND 1000 AND reason = trim(reason)`),
+	check("content_reports_resolution_check", sql`(status = 'open') = (resolved_at IS NULL)`),
+	check("content_reports_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (resolved_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', resolved_at, '+0 days') IS resolved_at)`),
+]);
 
 export const organization_redirects = sqliteTable("organization_redirects", {
 	id: text().primaryKey(),

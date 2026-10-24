@@ -185,14 +185,33 @@
         lens on the one you are in.
       -->
       <NuxtLink
-        v-if="data && (pastOnly || threads.length > 0)"
-        :to="{ path: listRoute, query: pastOnly ? withoutArchived : { ...route.query, archived: '' } }"
+        v-if="data && (pastOnly || blockedOnly || threads.length > 0)"
+        :to="{ path: listRoute, query: pastOnly || blockedOnly ? withoutArchived : { ...route.query, archived: '' } }"
         class="-mx-4 flex items-center justify-between gap-3 px-4 py-4 text-sm font-medium text-default transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
         :class="threads.length ? 'mt-2 border-t border-default' : ''"
       >
-        <span>{{ pastOnly ? 'Current conversations' : 'Past conversations' }}</span>
+        <span>{{ pastOnly || blockedOnly ? 'Current conversations' : 'Past conversations' }}</span>
         <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
       </NuxtLink>
+      <!-- Blocked guests are reached from Past: they are out of every list until unblocked. -->
+      <NuxtLink
+        v-if="data && pastOnly && !personalScope"
+        :to="{ path: listRoute, query: { ...withoutArchived, blocked: '' } }"
+        class="-mx-4 flex items-center justify-between gap-3 border-t border-default px-4 py-4 text-sm font-medium text-default transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
+      >
+        <span>Blocked guests</span>
+        <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
+      </NuxtLink>
+      <ReportDialog
+        :open="reporting !== null"
+        :title="reporting?.block ? 'Block this guest' : 'Report this conversation'"
+        :description="reporting?.block ? 'Their conversation moves to Blocked guests and new messages from them stop alerting your team.' : 'Tell KrabiClaw what this guest sent.'"
+        :confirm-label="reporting?.block ? 'Block and report' : 'Report'"
+        :saving="reporting !== null && mailboxSaving === reporting.thread.id"
+        :error="reportError"
+        @submit="reason => reporting && void moveThread(reporting.thread, reporting.block ? 'block' : 'report', reason)"
+        @close="reporting = null"
+      />
 
       <div v-if="data && threads.length === 0" class="py-14 text-center">
         <p class="text-base font-medium text-highlighted">{{ emptyTitle }}</p>
@@ -227,6 +246,7 @@ import { resolvePublicTemplate } from '~/utils/template-registry'
 import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
+import ReportDialog from './ReportDialog.vue'
 
 /*
   The thread list, and only the list. A thread opens as this level's detail
@@ -259,7 +279,8 @@ const openThreadId = computed(() => {
 
 // Filter and corpus live in the URL, so a filtered list is a link.
 const pastOnly = computed(() => route.query.archived !== undefined)
-const withoutArchived = computed(() => { const { archived: _archived, ...rest } = route.query; return rest })
+const blockedOnly = computed(() => !props.personalScope && route.query.blocked !== undefined)
+const withoutArchived = computed(() => { const { archived: _archived, blocked: _blocked, ...rest } = route.query; return rest })
 const activeType = computed<SubmissionType | null>(() => {
   const value = route.query.filter
   return value === 'contact' || value === 'reservation' || value === 'booking' || value === 'stay' ? value : null
@@ -343,13 +364,14 @@ const emptyTitle = computed(() => {
 const emptyDescription = computed(() => {
   if (route.query.query) return `Nothing matched “${route.query.query}”.`
   if (filtersApplied.value) return 'Try a different filter, or clear them to see everything.'
+  if (blockedOnly.value) return 'Guests you block appear here until you unblock them.'
   if (pastOnly.value) return 'Conversations move here when their reservation, experience or stay ends, or when you archive them.'
   return props.personalScope ? 'Your conversations with businesses will appear here.' : 'New guest conversations will appear here.'
 })
 
 const listQuery = computed(() => ({
   type: activeType.value ?? undefined,
-  mailbox: pastOnly.value ? 'past' as const : 'current' as const,
+  mailbox: blockedOnly.value ? 'blocked' as const : pastOnly.value ? 'past' as const : 'current' as const,
   unread: unreadOnly.value ? '1' as const : undefined,
 }))
 
@@ -358,7 +380,7 @@ const listKey = computed(() => [
   String(route.params.orgSlug ?? ''),
   organizationId.value,
   activeType.value ?? 'all',
-  pastOnly.value ? 'past' : 'current',
+  blockedOnly.value ? 'blocked' : pastOnly.value ? 'past' : 'current',
   unreadOnly.value ? 'unread' : 'any',
 ].join(':'))
 
@@ -491,14 +513,23 @@ const mailboxSaving = ref<string | null>(null)
 const mailboxError = ref<string | null>(null)
 const mailboxAttemptKeys = ref<Record<string, string>>({})
 
+const reporting = ref<{ thread: ThreadListItem, block: boolean } | null>(null)
+const reportError = ref<string | null>(null)
+
 function rowActions(thread: ThreadListItem) {
   const items: Array<{ label: string, icon: string, onSelect: () => void }> = []
   if (thread.canArchive) items.push({ label: 'Archive', icon: 'i-lucide-archive', onSelect: () => void moveThread(thread, 'archive') })
   if (thread.canUnarchive) items.push({ label: 'Move to messages', icon: 'i-lucide-inbox', onSelect: () => void moveThread(thread, 'unarchive') })
+  // A guest's own inbox reports nobody; the business reports and blocks its guests.
+  if (!props.personalScope) {
+    items.push({ label: 'Report', icon: 'i-lucide-flag', onSelect: () => { reportError.value = null; reporting.value = { thread, block: false } } })
+    if (thread.mailbox === 'blocked') items.push({ label: 'Unblock', icon: 'i-lucide-user-check', onSelect: () => void moveThread(thread, 'unblock') })
+    else items.push({ label: 'Block guest', icon: 'i-lucide-ban', onSelect: () => { reportError.value = null; reporting.value = { thread, block: true } } })
+  }
   return items
 }
 
-async function moveThread(thread: ThreadListItem, transition: 'archive' | 'unarchive') {
+async function moveThread(thread: ThreadListItem, transition: 'archive' | 'unarchive' | 'report' | 'block' | 'unblock', reason?: string) {
   if (!dashboardScope.value || !organizationId.value) return
   // One key per attempt, kept until it succeeds, so a retry after a dropped
   // response is the same request rather than a second one.
@@ -510,20 +541,23 @@ async function moveThread(thread: ThreadListItem, transition: 'archive' | 'unarc
   try {
     await dashboardApi(
       `/api/dashboard/organizations/${organizationId.value}/guest-threads/${encodeURIComponent(thread.id)}/operations/${transition}`,
-      { method: 'POST', body: { idempotencyKey }, validate: isThreadDetailResponse },
+      { method: 'POST', body: reason === undefined ? { idempotencyKey } : { idempotencyKey, reason }, validate: isThreadDetailResponse },
     )
     const { [attempt]: _completed, ...remaining } = mailboxAttemptKeys.value
     mailboxAttemptKeys.value = remaining
+    if (transition === 'report') { reporting.value = null; return }
+    reporting.value = null
     const wasOpen = openThreadId.value === thread.id
     await refresh()
     if (!wasOpen) return
     // The open conversation left this list. Archiving returns to the list so
     // the index can open the next current thread; moving one back follows it
     // into the list it now belongs to.
-    if (transition === 'archive') await router.push({ path: listRoute.value, query: route.query })
+    if (transition === 'archive' || transition === 'block') await router.push({ path: listRoute.value, query: route.query })
     else await router.push({ path: threadRoute(thread), query: withoutArchived.value })
   } catch (error) {
-    mailboxError.value = getErrorMessage(error, 'The conversation could not be moved')
+    if (reporting.value) reportError.value = getErrorMessage(error, 'The report could not be sent')
+    else mailboxError.value = getErrorMessage(error, 'The conversation could not be moved')
   } finally {
     mailboxSaving.value = null
   }

@@ -74,7 +74,7 @@ export function isThreadListResponse(value: unknown): value is ThreadListPage {
       && (thread.replyChannel === 'email' || thread.replyChannel === 'airbnb')
       && typeof thread.submissionType === 'string'
       && typeof thread.lastActivityAt === 'string'
-      && (thread.mailbox === 'current' || thread.mailbox === 'past')
+      && (thread.mailbox === 'current' || thread.mailbox === 'past' || thread.mailbox === 'blocked')
       && typeof thread.manuallyArchived === 'boolean'
       && typeof thread.canArchive === 'boolean'
       && typeof thread.canUnarchive === 'boolean',
@@ -111,10 +111,11 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
     && value.thread.entries.every(entry => isRecord(entry) && (entry.providerTimestamp === null || typeof entry.providerTimestamp === 'string')
       && (entry.kind !== 'message' || entry.actorKind === 'guest' || (typeof entry.actorLabel === 'string' && Boolean(entry.actorLabel))))
     && Array.isArray(value.thread.availableActions)
-    && (value.thread.mailbox === 'current' || value.thread.mailbox === 'past')
+    && (value.thread.mailbox === 'current' || value.thread.mailbox === 'past' || value.thread.mailbox === 'blocked')
     && typeof value.thread.manuallyArchived === 'boolean'
     && (value.thread.archivedAt === null || typeof value.thread.archivedAt === 'string')
     && (value.thread.archivedByUserId === null || typeof value.thread.archivedByUserId === 'string')
+    && (value.thread.blockedAt === null || typeof value.thread.blockedAt === 'string')
     && typeof value.thread.canArchive === 'boolean'
     && typeof value.thread.canUnarchive === 'boolean'
     && Array.isArray(value.thread.deliveryFailures)

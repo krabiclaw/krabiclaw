@@ -212,6 +212,7 @@ export interface GuestThreadDetailViewModel {
   manuallyArchived: boolean
   archivedAt: string | null
   archivedByUserId: string | null
+  blockedAt: string | null
   canArchive: boolean
   canUnarchive: boolean
   deliveryFailures: GuestThreadDeliveryFailureViewModel[]

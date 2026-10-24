@@ -52,16 +52,22 @@ const OPERATIONAL_RECORD_SQL = `
  * `resolveGuestThreadMailbox`, said to the database. Current is not archived
  * and not ended; Past is archived or ended. The occurrence's END decides, so a
  * reservation stays Current while it is being served, and a thread with no
- * occurrence is Current until someone archives it.
+ * occurrence is Current until someone archives it. A blocked guest's thread is
+ * in Blocked only, and a list with no mailbox leaves it out.
  */
-function mailboxWhere(mailbox: GuestThreadMailbox, now: string, buyerAudience=false): { sql: string; params: string[] } {
-  if (buyerAudience) return mailbox === 'current' ? {sql:' AND (op.ends_at IS NULL OR op.ends_at >= ?)',params:[now]} : {sql:' AND op.ends_at < ?',params:[now]}
+function mailboxWhere(mailbox: GuestThreadMailbox | null, now: string, buyerAudience=false): { sql: string; params: string[] } {
+  if (buyerAudience) {
+    if (mailbox === null) return { sql: '', params: [] }
+    return mailbox === 'current' ? {sql:' AND (op.ends_at IS NULL OR op.ends_at >= ?)',params:[now]} : {sql:' AND op.ends_at < ?',params:[now]}
+  }
+  if (mailbox === 'blocked') return { sql: ' AND gt.blocked_at IS NOT NULL', params: [] }
+  if (mailbox === null) return { sql: ' AND gt.blocked_at IS NULL', params: [] }
   return mailbox === 'current'
-    ? { sql: ' AND gt.archived_at IS NULL AND (op.ends_at IS NULL OR op.ends_at >= ?)', params: [now] }
-    : { sql: ' AND (gt.archived_at IS NOT NULL OR op.ends_at < ?)', params: [now] }
+    ? { sql: ' AND gt.blocked_at IS NULL AND gt.archived_at IS NULL AND (op.ends_at IS NULL OR op.ends_at >= ?)', params: [now] }
+    : { sql: ' AND gt.blocked_at IS NULL AND (gt.archived_at IS NOT NULL OR op.ends_at < ?)', params: [now] }
 }
 
-function mailboxFields(row: { archived_at: string | null; record_ends_at: string | null }, now: string, buyerAudience=false) {
+function mailboxFields(row: { archived_at: string | null; blocked_at: string | null; record_ends_at: string | null }, now: string, buyerAudience=false) {
   const state = resolveGuestThreadMailbox(row, row.record_ends_at === null ? null : { ends_at: row.record_ends_at }, now, buyerAudience?'buyer':'member')
   return {
     mailbox: state.mailbox,
@@ -161,11 +167,9 @@ export async function getGuestThreadOperationSummary(
     params.push(opts.assignedMemberId)
   }
   // The counts beside a mailbox are that mailbox's counts.
-  if (opts.mailbox) {
-    const mailbox = mailboxWhere(opts.mailbox, new Date().toISOString())
-    where += mailbox.sql
-    params.push(...mailbox.params)
-  }
+  const mailbox = mailboxWhere(opts.mailbox ?? null, new Date().toISOString())
+  where += mailbox.sql
+  params.push(...mailbox.params)
 
   const counts = await queryFirst<OperationSummary>(db, `
     SELECT
@@ -275,11 +279,9 @@ export async function listGuestThreads(
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
   const now = new Date().toISOString()
-  if (opts.mailbox) {
-    const mailbox = mailboxWhere(opts.mailbox, now, opts.buyerAudience)
-    where += mailbox.sql
-    params.push(...mailbox.params)
-  }
+  const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.buyerAudience)
+  where += mailbox.sql
+  params.push(...mailbox.params)
 
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
 
@@ -408,11 +410,9 @@ export async function listOrganizationGuestThreads(
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
   const now = new Date().toISOString()
-  if (opts.mailbox) {
-    const mailbox = mailboxWhere(opts.mailbox, now)
-    where += mailbox.sql
-    params.push(...mailbox.params)
-  }
+  const mailbox = mailboxWhere(opts.mailbox ?? null, now)
+  where += mailbox.sql
+  params.push(...mailbox.params)
 
   const limit = Math.max(1, Math.min(opts.limit ?? 100, 200))
 
