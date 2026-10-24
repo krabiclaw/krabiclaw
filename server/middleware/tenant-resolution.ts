@@ -40,6 +40,7 @@ interface TenantRow {
   instagram_username: string | null;
   privacy_policy: number;
   terms_policy: number;
+  acceptable_use_policy: number;
   font_preset: unknown;
   font_preset_type: string | null;
   palette: string | null;
@@ -67,6 +68,7 @@ const TENANT_SELECT_SQL = `SELECT o.id,
              (SELECT i.target_name FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'instagram') AS instagram_username,
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/privacy') AS privacy_policy,
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/terms') AS terms_policy,
+             EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/acceptable-use') AS acceptable_use_policy,
              o.settings_json ->> '$.config.font_preset' AS font_preset,
              json_type(o.settings_json, '$.config.font_preset') AS font_preset_type,
              o.settings_json ->> '$.config.palette' AS palette,
@@ -238,6 +240,7 @@ function setResolvedTenantContext(
     policies: [
       ...(tenant.privacy_policy ? ['privacy' as const] : []),
       ...(tenant.terms_policy ? ['terms' as const] : []),
+      ...(tenant.acceptable_use_policy ? ['acceptable-use' as const] : []),
     ],
     ...socialMedia,
   }

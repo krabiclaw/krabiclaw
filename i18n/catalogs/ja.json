@@ -638,5 +638,6 @@
   "stay.home_accessibility_features.pool_hoist.label": "プールまたはホットタブ用リフト",
   "stay.home_accessibility_features.pool_hoist.description": "専用のリフトで、プールまたはホットタブへの入水と出水を補助します。",
   "stay.home_accessibility_features.ceiling_hoist.label": "天井走行リフトまたは移動式リフト",
-  "stay.home_accessibility_features.ceiling_hoist.description": "専用の天井設置型または自立型リフトで、車いすへの乗り降りを補助します。"
+  "stay.home_accessibility_features.ceiling_hoist.description": "専用の天井設置型または自立型リフトで、車いすへの乗り降りを補助します。",
+  "legal.acceptable_use": "利用ポリシー"
 }
