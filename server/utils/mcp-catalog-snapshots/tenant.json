@@ -124071,7 +124071,7 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:0b2917dfdebeaf67144d8f312a5f9aeba159c8a3a02c3dc78346ba03ac712bf9",
+      "contentHash": "sha256:d704713996c36e522b3e306210d12e058c6a0ca5c990d0b61e975f81f0864b36",
       "toolContracts": {
         "create_location": "sha256:1f8c89cd43de7a7f52ad6e01882a94ffa5dd5c00fca8d3790be09cb3a3abdeb7",
         "create_product_session": "sha256:3b5d8f3d4f7c6a45f59219d789fefd0e8b6da31ebe3cecf5cac0394bbbaab912",
@@ -124157,7 +124157,7 @@
     },
     {
       "slug": "handle-inquiries-and-reservation-requests",
-      "contentHash": "sha256:eafab1c694431b4812a3b19b147f5950c90692c43306b80a62a06daad3108311",
+      "contentHash": "sha256:06444d1be6bab2fe0b0a6047bbfde7a05c60a6001037f849164aa5a760def4cd",
       "toolContracts": {
         "cancel_table_reservation": "sha256:d0f854a0a836ab5395ae850ad6442161533f671d0c2bf05faa17f12ad9f33d53",
         "create_table_reservation": "sha256:619a4f6bf0834a9069a33139edd867ac3ef81e856002a184589222bdfcd4c66b",
