@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer'
 import { channexCreate, channexGet, channexList, channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, integer, object, resource, string, type JsonRecord, type Resource } from './data'
 
@@ -185,13 +186,30 @@ export async function listChannexMessages(env: ChannexEnv, threadId: string): Pr
   }), 'messages')
 }
 
-export async function sendChannexMessage(env: ChannexEnv, threadId: string, text: string): Promise<ChannexMessage> {
-  if (!text.trim()) throw new ChannexError('A channel reply needs text', 400, false)
-  const row = await channexCreate(env, `/message_threads/${encodeURIComponent(threadId)}/messages`, { message: { message: text } }, 'message')
+/** Channex accepts one attachment instead of text: sending both silently discards the attachment. */
+export async function sendChannexMessage(env: ChannexEnv, threadId: string, text: string, photo?: { bytes: Uint8Array<ArrayBuffer>; filename: string; contentType: string }): Promise<ChannexMessage> {
+  if (photo ? Boolean(text.trim()) : !text.trim()) throw new ChannexError('A channel reply needs text or one photo sent separately', 400, false)
+  let attachmentId: string | undefined
+  if (photo) {
+    try {
+      const uploaded = await channexRequest(env, '/attachments', 'POST', { attachment: { file: Buffer.from(photo.bytes).toString('base64'), file_name: photo.filename, file_type: photo.contentType } })
+      const attachment = read('attachment', 'data', () => object(uploaded.data, 'data'), true)
+      if (attachment.type !== 'attachment') fail('attachment', 'type', 'Expected an attachment resource', true)
+      attachmentId = read('attachment', 'id', () => string(attachment.id, 'id'), true)
+    } catch (error) {
+      // An uploaded file is not a guest message. Whatever happened to its upload,
+      // this function has not sent the only call that could deliver the reply.
+      if (error instanceof ChannexError) throw new ChannexError(`The photo could not be prepared; no guest message was sent. ${error.message}`, error.providerStatus, false, { code: error.data.code, field: 'photos', resource: 'attachment' }, true)
+      throw error
+    }
+  }
+  const row = await channexCreate(env, `/message_threads/${encodeURIComponent(threadId)}/messages`, { message: attachmentId ? { attachment_id: attachmentId } : { message: text } }, 'message')
   const message = parseChannexMessage(row, env, true)
   if (message.threadId !== threadId) fail(`message:${message.id}`, 'relationships.message_thread', 'Reply belongs to a different thread', true)
   if (message.sender !== 'property') fail(`message:${message.id}`, 'sender', 'Reply was not returned as a property message', true)
-  if (message.text !== text) fail(`message:${message.id}`, 'message', 'Reply content does not match the submitted text', true)
+  if (photo) {
+    if (message.text?.trim() || message.attachments.length !== 1) fail(`message:${message.id}`, 'attachments', 'Reply does not contain the submitted photo without text', true)
+  } else if (message.text !== text) fail(`message:${message.id}`, 'message', 'Reply content does not match the submitted text', true)
   return message
 }
 

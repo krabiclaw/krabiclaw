@@ -45,17 +45,17 @@ export class ChannexError extends HTTPError<{ code: string; field: string; resou
  * Airbnb unavailable, not a refusal of the request. Airbnb's message, when it
  * is one.
  */
-function airbnbUnavailable(status: number, text: string): string | null {
+function airbnbUnavailable(status: number, text: string, uncertain: boolean): string | null {
   if (status !== 422) return null
   let body: unknown
   try {
     body = JSON.parse(text)
-  } catch {
-    return null
+  } catch (error) {
+    throw new ChannexError(`Channex answered 422 without JSON: ${error instanceof Error ? error.message : String(error)}`, status, uncertain, { code: 'INVALID_PROVIDER_RESPONSE', field: 'errors' })
   }
-  const errors = typeof body === 'object' && body !== null ? (body as { errors?: unknown }).errors : null
-  if (typeof errors !== 'object' || errors === null) return null
+  const errors = provided(() => object(object(body, 'Channex 422 response').errors, 'Channex 422 errors'), uncertain, { field: 'errors' })
   const { error_code: code, error_message: message } = errors as { error_code?: unknown; error_message?: unknown }
+  if (code !== undefined && (typeof code !== 'number' || !Number.isInteger(code))) throw new ChannexError('Channex returned an invalid upstream error code', status, uncertain, { code: 'INVALID_PROVIDER_RESPONSE', field: 'errors.error_code' })
   return typeof code === 'number' && code >= 500 ? (typeof message === 'string' && message.trim() ? message.trim() : `Airbnb answered ${code}`) : null
 }
 
@@ -81,20 +81,20 @@ export async function channexRequest(env: ChannexEnv, path: string, method: 'GET
     })
     const length = Number(response.headers.get('content-length'))
     if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
-      const refused = method !== 'GET' && REFUSED.has(response.status)
+      const refused = method !== 'GET' && response.status !== 422 && REFUSED.has(response.status)
       throw new ChannexError(`Channex's answer to ${label} exceeds 10 MB`, 502, method !== 'GET' && !refused, undefined, refused)
     }
     text = await response.text()
   } catch (error) {
     if (error instanceof ChannexError) throw error
-    const refused = method !== 'GET' && response !== undefined && REFUSED.has(response.status)
+    const refused = method !== 'GET' && response !== undefined && response.status !== 422 && REFUSED.has(response.status)
     if (env.requestSignal?.aborted) throw new ChannexError(`The background slice ended while waiting for ${label}`, 504, method !== 'GET' && !refused, { code: 'SYNC_SLICE_ENDED', field: 'background_slice' }, refused)
     throw new ChannexError(`Channex could not be reached for ${label}: ${error instanceof Error ? error.message : String(error)}`, 502, method !== 'GET' && !refused, undefined, refused)
   }
   if (!response.ok) {
     const refused = method !== 'GET' && REFUSED.has(response.status)
-    const airbnb = airbnbUnavailable(response.status, text)
-    if (airbnb) throw new ChannexError(`Airbnb did not answer ${label} through Channex: ${airbnb}`, response.status, method !== 'GET' && !refused, { code: 'AIRBNB_UNAVAILABLE', field: 'provider_response' }, refused)
+    const airbnb = airbnbUnavailable(response.status, text, method !== 'GET')
+    if (airbnb) throw new ChannexError(`Airbnb did not answer ${label} through Channex: ${airbnb}`, response.status, method !== 'GET', { code: 'AIRBNB_UNAVAILABLE', field: 'provider_response' })
     throw new ChannexError(`Channex answered ${response.status} to ${label}: ${text.slice(0, 500)}`, response.status, method !== 'GET' && !refused, undefined, refused)
   }
   if (text.length > MAX_RESPONSE_BYTES) throw new ChannexError(`Channex's answer to ${label} exceeds 10 MB`, 502, method !== 'GET')

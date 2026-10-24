@@ -141,6 +141,82 @@ test('a malformed accepted reply is uncertain and does not trigger a second prov
   assert.equal(sends, 1)
 })
 
+test('photo replies upload base64 once and send only the singular attachment identity to the same inquiry thread', async (t) => {
+  const photo = { filename: 'entry.jpeg', contentType: 'image/jpeg', bytes: new Uint8Array([0xff, 0xd8, 0xff]) }
+  const paths: string[] = []
+  t.mock.method(globalThis, 'fetch', async (input: string, init: RequestInit) => {
+    paths.push(input)
+    assert.equal(init.method, 'POST')
+    const body = JSON.parse(String(init.body))
+    if (input.endsWith('/attachments')) {
+      assert.deepEqual(body, { attachment: { file: '/9j/', file_name: 'entry.jpeg', file_type: 'image/jpeg' } })
+      // Unlike message resources, the documented upload response has no attributes.
+      return Response.json({ data: { id: 'uploaded-photo', type: 'attachment' } })
+    }
+    assert.equal(input, 'https://staging.channex.io/api/v1/message_threads/thread/messages')
+    assert.deepEqual(body, { message: { attachment_id: 'uploaded-photo' } })
+    return Response.json({ data: { ...message, attributes: { ...message.attributes, sender: 'property', message: null, attachments: ['attachments/uploaded-photo'] } } })
+  })
+  const sent = await sendChannexMessage(env, 'thread', '', photo)
+  assert.equal(sent.id, 'message')
+  assert.equal(sent.text, null)
+  assert.deepEqual(sent.attachments, ['https://staging.channex.io/api/v1/attachments/uploaded-photo'])
+  assert.equal(paths.length, 2)
+  await assert.rejects(sendChannexMessage(env, 'thread', 'Caption would silently discard the photo', photo), { providerStatus: 400, uncertain: false })
+  assert.equal(paths.length, 2, 'invalid mixed content performs no provider writes')
+})
+
+test('an invalid attachment upload never sends a message, and a discarded accepted photo remains uncertain', async (t) => {
+  const photo = { filename: 'photo.png', contentType: 'image/png', bytes: new Uint8Array([1]) }
+  let requests = 0
+  t.mock.method(globalThis, 'fetch', async () => {
+    requests += 1
+    return Response.json({ data: { id: 'uploaded', type: 'message' } })
+  })
+  await assert.rejects(sendChannexMessage(env, 'thread', '', photo), { providerStatus: 502, uncertain: false, writeRefused: true, data: { code: 'INVALID_PROVIDER_RESPONSE', field: 'photos', resource: 'attachment', uncertain: false, provider_status: 502 } })
+  assert.equal(requests, 1)
+  t.mock.restoreAll()
+  t.mock.method(globalThis, 'fetch', async (input: string) => {
+    requests += 1
+    return input.endsWith('/attachments')
+      ? Response.json({ data: { id: 'uploaded', type: 'attachment' } })
+      : Response.json({ data: { ...message, attributes: { ...message.attributes, sender: 'property', message: 'Attachment was omitted', attachments: [] } } })
+  })
+  await assert.rejects(sendChannexMessage(env, 'thread', '', photo), invalidField('attachments', true))
+  assert.equal(requests, 3)
+})
+
+test('Airbnb server failure behind Channex 422 is uncertain only when a guest message write was attempted', async (t) => {
+  const requests: string[] = []
+  t.mock.method(globalThis, 'fetch', async (input: string, init: RequestInit) => {
+    requests.push(`${init.method} ${input}`)
+    return Response.json({ errors: { error_code: 500, error_message: 'Airbnb could not complete the request' } }, { status: 422 })
+  })
+  await assert.rejects(getChannexThread(env, 'thread'), { providerStatus: 422, uncertain: false, writeRefused: false, data: { code: 'AIRBNB_UNAVAILABLE', field: 'provider_response', uncertain: false, provider_status: 422 } })
+  await assert.rejects(sendChannexMessage(env, 'thread', 'Hello guest'), { providerStatus: 422, uncertain: true, writeRefused: false, data: { code: 'AIRBNB_UNAVAILABLE', field: 'provider_response', uncertain: true, provider_status: 422 } })
+  await assert.rejects(sendChannexMessage(env, 'thread', '', { filename: 'photo.png', contentType: 'image/png', bytes: new Uint8Array([1]) }),
+    { providerStatus: 422, uncertain: false, writeRefused: true, data: { code: 'AIRBNB_UNAVAILABLE', field: 'photos', resource: 'attachment', uncertain: false, provider_status: 422 } })
+  assert.deepEqual(requests, ['GET https://staging.channex.io/api/v1/message_threads/thread', 'POST https://staging.channex.io/api/v1/message_threads/thread/messages', 'POST https://staging.channex.io/api/v1/attachments'])
+  t.mock.restoreAll()
+
+  for (const answer of ['unread', 'oversized', 'non-JSON', 'missing errors', 'invalid upstream code']) {
+    t.mock.method(globalThis, 'fetch', async () => {
+      if (answer === 'unread') return new Response(new ReadableStream({ start(controller) { controller.error(new Error('The response body was interrupted')) } }), { status: 422 })
+      if (answer === 'oversized') return Response.json({ errors: { error_code: 500 } }, { status: 422, headers: { 'content-length': '10000001' } })
+      if (answer === 'missing errors') return Response.json({}, { status: 422 })
+      if (answer === 'invalid upstream code') return Response.json({ errors: { error_code: '500' } }, { status: 422 })
+      return new Response('<html>Unclassified 422 response</html>', { status: 422 })
+    })
+    await assert.rejects(getChannexThread(env, 'thread'), { uncertain: false, writeRefused: false }, `${answer} read has no write outcome`)
+    await assert.rejects(sendChannexMessage(env, 'thread', 'Hello guest'), { uncertain: true, writeRefused: false }, `${answer} 422 cannot establish that Airbnb refused the write`)
+    await assert.rejects(sendChannexMessage(env, 'thread', '', { filename: 'photo.png', contentType: 'image/png', bytes: new Uint8Array([1]) }),
+      { uncertain: false, writeRefused: true }, `${answer} attachment preparation did not call the guest-message endpoint`)
+    t.mock.restoreAll()
+  }
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ errors: { code: 'not_supported', title: 'Message refused' } }, { status: 422 }))
+  await assert.rejects(sendChannexMessage(env, 'thread', 'Hello guest'), { providerStatus: 422, uncertain: false, writeRefused: true }, 'a documented ordinary refusal remains a proven non-delivery')
+})
+
 test('an already installed Messages application requires no is_active field and performs no write', async (t) => {
   const methods: string[] = []
   t.mock.method(globalThis, 'fetch', async (_input: string, init: RequestInit) => {

@@ -37,6 +37,9 @@ export interface MessagePhoto {
   filename: string
 }
 
+/** Host file identities keep a replay independent of an expiring download URL. */
+export type MessagePhotoInput = MessagePhoto[] | { sourceIds: string[]; resolve: () => Promise<MessagePhoto[]> }
+
 type Uploader = { source: 'uploaded'; userId: string } | { source: 'external'; userId: null }
 
 /** What a message says in a preview line: its words, or what it sent when it has none. */

@@ -17,6 +17,7 @@ import { ORGANIZATIONS_TOOLS, handleOrganizationsTools } from './organizations'
 import { BOOKINGS_TOOLS, handleBookingsTools } from './bookings'
 import { STAYS_TOOLS, handleStaysTools } from './stays'
 import { GUEST_MESSAGING_TOOLS, handleGuestMessagingTools } from './guest-messaging'
+import { TEAM_MESSAGING_TOOLS, handleTeamMessagingTools } from './team-messaging'
 import { SUBMISSIONS_TOOLS, handleSubmissionsTools } from './submissions'
 import { GOOGLE_ADS_TOOLS, handleGoogleAdsTools } from './google-ads'
 import { HTTPError } from 'nitro';
@@ -61,6 +62,7 @@ export const MCP_PUBLIC_TOOLS: McpToolDefinition[] = [
   ...BOOKINGS_TOOLS,
   ...STAYS_TOOLS,
   ...GUEST_MESSAGING_TOOLS,
+  ...TEAM_MESSAGING_TOOLS,
   ...GOOGLE_ADS_TOOLS,
 ].sort((a, b) => a.name.localeCompare(b.name))
 
@@ -130,6 +132,7 @@ export const DOMAIN_HANDLERS: Record<string, (_ctx: McpExecutorContext) => Promi
   bookings: handleBookingsTools,
   stays: handleStaysTools,
   guest_messaging: handleGuestMessagingTools,
+  team_messaging: handleTeamMessagingTools,
   google_ads: handleGoogleAdsTools,
 }
 

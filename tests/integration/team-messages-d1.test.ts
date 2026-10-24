@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
+import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
@@ -21,13 +22,25 @@ const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISO
 test('members talk in team conversations, see unread state and receive recorded pushes', { timeout: 120000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'team-messages-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `export class Hub {
+      constructor(state, env) { this.env = env }
+      async fetch(request) {
+        const event = await request.json()
+        if (event.type === 'team_thread.changed') {
+          const cache = this.env.ORGANIZATION_CACHE
+          await cache.put('team-publication:last', JSON.stringify(event))
+          await cache.put('team-publication:count', String(Number(await cache.get('team-publication:count') ?? '0') + 1))
+          if (await cache.get('team-publication:refuse')) return new Response(null, { status: 503 })
+        }
+        return new Response(null, { status: 204 })
+      }
+    } export default { fetch() { return new Response("ok") } }` } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'team-messages-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'team-messages-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     for (const [id, slug] of [[ORG, 'org'], [OTHER, 'other']]) {
@@ -67,8 +80,26 @@ test('members talk in team conversations, see unread state and receive recorded 
     // A conversation has another current member of this organization in it, and is reused for the same people.
     await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['outsider'] }), refused(422, 'INVALID_TEAM_MEMBERS', 'memberIds'))
     await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['cleaner'] }), refused(422, 'TEAM_THREAD_MEMBERS_REQUIRED', 'memberIds'))
+    const publicationCache = await runtime.getKVNamespace('ORGANIZATION_CACHE')
+    await publicationCache.put('team-publication:refuse', 'true')
+    await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'] }), (error: unknown) => {
+      const failure = error as { status: number; data: unknown }
+      assert.equal(failure.status, 503)
+      assert.partialDeepStrictEqual(failure.data, { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true })
+      return true
+    })
+    const firstPublication = await publicationCache.get<{ teamThreadId: string; eventId: string }>('team-publication:last', 'json')
+    assert.ok(firstPublication)
+    const committedThread = (await listTeamThreads(env, db, owner))[0]!
+    assert.equal(committedThread.id, firstPublication.teamThreadId)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_thread_members WHERE thread_id = ?').bind(committedThread.id).first('n'), 2)
+    await publicationCache.delete('team-publication:refuse')
     const direct = await createTeamThread(env, db, cleaner, { memberIds: ['owner'] })
-    assert.equal(direct.created, true)
+    assert.deepEqual(direct, { id: committedThread.id, created: false })
+    const retriedPublication = await publicationCache.get<{ teamThreadId: string; eventId: string }>('team-publication:last', 'json')
+    assert.equal(retriedPublication?.teamThreadId, committedThread.id)
+    assert.notEqual(retriedPublication?.eventId, firstPublication.eventId, 'reusing the saved thread completes the failed publication')
+    assert.equal(await publicationCache.get('team-publication:count'), '2')
     assert.deepEqual(await createTeamThread(env, db, owner, { memberIds: ['cleaner'] }), { id: direct.id, created: false })
     // Two starts of the same new conversation at once make one conversation.
     const raced = await Promise.all([createTeamThread(env, db, cleaner, { memberIds: ['cook'] }), createTeamThread(env, db, cook, { memberIds: ['cleaner'] })])
@@ -149,6 +180,58 @@ test('members talk in team conversations, see unread state and receive recorded 
     const earlier = await listTeamMessages(db, owner, direct.id, { limit: '2', before: oldest.createdAt, beforeId: oldest.id })
     assert.deepEqual({ bodies: earlier.messages.map(message => message.body), hasMore: earlier.hasMore }, { bodies: ['Towels are out'], hasMore: false })
     await assert.rejects(listTeamMessages(db, owner, direct.id, { before: oldest.createdAt }), refused(422, 'INVALID_CURSOR', 'beforeId'))
+
+    // A committed host photo can finish publication after its download URL expires.
+    const photoBytes = Uint8Array.from(await sharp({ create: { width: 12, height: 8, channels: 3, background: '#2563eb' } }).avif().toBuffer())
+    let resolutions = 0
+    const hostPhoto = { body: 'The entry photo', idempotencyKey: 'host-photo', senderName: 'cleaner', photos: {
+      sourceIds: ['host-entry-photo'], resolve: async () => { resolutions += 1; return [{ bytes: photoBytes, filename: 'entry.avif' }] },
+    } }
+    await publicationCache.put('team-publication:refuse', 'true')
+    await assert.rejects(sendTeamMessage(env, db, cleaner, direct.id, hostPhoto), (error: unknown) => {
+      const failure = error as { status: number; data: unknown }
+      assert.equal(failure.status, 503)
+      assert.partialDeepStrictEqual(failure.data, { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, thread_id: direct.id })
+      return true
+    })
+    const committedPhoto = (await listTeamMessages(db, owner, direct.id, { limit: 1 })).messages[0]!
+    assert.equal(committedPhoto.body, hostPhoto.body)
+    assert.equal(committedPhoto.attachments.length, 1)
+    const photoAsset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
+      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(committedPhoto.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
+    assert.ok(photoAsset)
+    assert.deepEqual(committedPhoto.attachments.map(photo => [photo.id, photo.url]), [[photoAsset.id, photoAsset.public_url]])
+    const storedPhoto = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(photoAsset.r2_key)
+    assert.ok(storedPhoto)
+    assert.deepEqual(new Uint8Array(await storedPhoto.arrayBuffer()), photoBytes)
+    const photoPublication = await publicationCache.get<{ eventId: string }>('team-publication:last', 'json')
+    await publicationCache.delete('team-publication:refuse')
+    const expiredPhoto = { ...hostPhoto, photos: { sourceIds: ['host-entry-photo'], resolve: async () => { throw new Error('Host download has expired') } } }
+    const photoReplay = await sendTeamMessage(env, db, cleaner, direct.id, expiredPhoto)
+    assert.deepEqual({ id: photoReplay.message.id, created: photoReplay.created, attachments: photoReplay.message.attachments }, { id: committedPhoto.id, created: false, attachments: committedPhoto.attachments })
+    assert.notEqual((await publicationCache.get<{ eventId: string }>('team-publication:last', 'json'))?.eventId, photoPublication?.eventId)
+    await assert.rejects(sendTeamMessage(env, db, cleaner, direct.id, { ...expiredPhoto, photos: { ...expiredPhoto.photos, sourceIds: ['different-host-photo'] } }), refused(409, 'IDEMPOTENCY_KEY_REUSED', 'idempotencyKey'))
+    assert.equal(resolutions, 1)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM team_messages WHERE thread_id = ? AND idempotency_key = 'host-photo'").bind(direct.id).first('n'), 1)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first('n'), 1)
+    const nativePhoto = await sendTeamMessage(env, db, cleaner, direct.id, { body: '', photos: [{ bytes: photoBytes, filename: 'native.avif' }], idempotencyKey: 'native-photo', senderName: 'cleaner' })
+    const nativeSaved = (await listTeamMessages(db, owner, direct.id, { limit: 100 })).messages.find(message => message.id === nativePhoto.message.id)
+    assert.ok(nativeSaved)
+    assert.deepEqual({ id: nativeSaved.id, threadId: nativeSaved.threadId, senderId: nativeSaved.senderId, body: nativeSaved.body, photos: nativeSaved.attachments.length }, { id: nativePhoto.message.id, threadId: direct.id, senderId: 'cleaner', body: '', photos: 1 })
+    const nativeAsset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
+      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(nativeSaved.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
+    assert.ok(nativeAsset)
+    assert.deepEqual(nativeSaved.attachments.map(photo => [photo.id, photo.url]), [[nativeAsset.id, nativeAsset.public_url]])
+    const storedNativePhoto = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(nativeAsset.r2_key)
+    assert.ok(storedNativePhoto)
+    assert.deepEqual(new Uint8Array(await storedNativePhoto.arrayBuffer()), photoBytes)
+    const nativeReplay = await sendTeamMessage(env, db, cleaner, direct.id, { body: '', photos: [{ bytes: photoBytes, filename: 'renamed.avif' }], idempotencyKey: 'native-photo', senderName: 'cleaner' })
+    assert.deepEqual({ id: nativeReplay.message.id, created: nativeReplay.created, attachments: nativeReplay.message.attachments }, { id: nativePhoto.message.id, created: false, attachments: nativePhoto.message.attachments }, 'native photo replay retains its byte identity independently of a filename')
+    assert.deepEqual((await listTeamMessages(db, owner, direct.id, { limit: 100 })).messages.filter(message => message.id === nativeSaved.id), [nativeSaved])
+    assert.deepEqual((await db.prepare("SELECT id, sender_user_id, body FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = 'native-photo'").bind(ORG, direct.id).all()).results,
+      [{ id: nativeSaved.id, sender_user_id: 'cleaner', body: '' }])
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_placements WHERE owner_type = 'team_message' AND owner_id = ? AND asset_id = ?").bind(nativeSaved.id, nativeAsset.id).first('n'), 1)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first('n'), 2)
 
     // Someone without a seat cannot read or write it, and does not see it.
     await assert.rejects(listTeamMessages(db, cook, direct.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))

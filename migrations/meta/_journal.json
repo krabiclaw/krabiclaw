@@ -36,6 +36,13 @@
       "when": 1792768205907,
       "tag": "0004_vrbo_calendar_link",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792822740344,
+      "tag": "0005_channel_reply_retry_proof",
+      "breakpoints": true
     }
   ]
 }
