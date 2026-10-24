@@ -2321,6 +2321,9 @@ test.describe('dashboard pane hierarchy', () => {
       expect(signedIn.user.role, 'the canary account is a Better Auth admin').toBe('admin')
       await open(page, `${krabiclaw}/menu`)
       await expect(menu.getByRole('link', { name: 'Platform accounts', exact: true })).toHaveAttribute('href', `${krabiclaw}/platform-accounts`)
+      await page.goto(`${krabiclaw}/platform-accounts`)
+      await expect(page.getByRole('heading', { name: 'Platform accounts', exact: true })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Impersonate', exact: true }).first()).toBeVisible()
     } finally {
       if (elevated) await setRole('user')
       await admin.dispose()
