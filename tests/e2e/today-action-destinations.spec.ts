@@ -66,6 +66,10 @@ test('an article created from a direct action prepares a Facebook draft without 
     await expect(canvasTitle).toHaveValue(title)
     await expect(canvasBody).toHaveText(body)
     await expect(saveArticle).toBeEnabled()
+    await articlePanel.getByRole('button', { name: 'Add a cover photo', exact: true }).click()
+    const pendingCover = articlePanel.locator('[data-block-index="0"]')
+    const pendingCaption = 'A caption waiting for its cover photo.'
+    await pendingCover.getByPlaceholder('Caption', { exact: true }).fill(pendingCaption)
 
     const articlePath = `${editor}/blog/${articleId}`
     const interceptArticle = (url: URL) => url.pathname === articlePath
@@ -95,11 +99,18 @@ test('an article created from a direct action prepares a Facebook draft without 
     await expect(articleSettings).toBeEnabled()
     await expect(translations).not.toHaveAttribute('aria-disabled', 'true')
     await expect(saveArticle).toBeDisabled()
+    await expect(articlePanel.getByRole('status')).toHaveText('Unsaved changes')
+    await expect(pendingCover.getByPlaceholder('Caption', { exact: true })).toHaveValue(pendingCaption)
     const savedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
     expect(savedRead.status()).toBe(200)
     const savedArticle = mcpData<{ post: { title: string; excerpt: string | null; status: string; updated_at: string; content_blocks: Array<{ type: string; data: { markdown?: string } }> } }>(await savedRead.json()).post
     expect(savedArticle).toMatchObject({ title, excerpt: null, status: 'draft' })
+    expect(savedArticle.content_blocks.map(block => block.type)).toEqual(['markdown'])
     expect(savedArticle.content_blocks.filter(block => block.type === 'markdown').map(block => block.data.markdown)).toEqual([body])
+    await pendingCover.focus()
+    await pendingCover.press('Delete')
+    await expect(articlePanel.getByRole('status')).toHaveText('Saved')
+    await expect(saveArticle).toBeDisabled()
     const categoriesRead = await page.request.get(`${editor}/blog/categories`, { params: { collection: 'blog' } })
     expect(categoriesRead.status(), await categoriesRead.text()).toBe(200)
     const kitchen = (await categoriesRead.json() as { categories: Array<{ id: string; name: string }> }).categories.filter(category => category.name === 'Kitchen')
@@ -133,6 +144,10 @@ test('an article created from a direct action prepares a Facebook draft without 
     await waitForNuxtHydration(page)
     await expect(excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true })).toHaveValue(excerpt)
     await excerptPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await articlePanel.getByRole('button', { name: 'Add a cover photo', exact: true }).click()
+    await pendingCover.getByPlaceholder('Caption', { exact: true }).fill(pendingCaption)
+    await expect(articlePanel.getByRole('status')).toHaveText('Unsaved changes')
+    await expect(saveArticle).toBeDisabled()
     await articleSettings.click()
     await page.getByRole('menuitem', { name: 'Visibility · Draft', exact: true }).click()
     await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/publishing`)
@@ -142,6 +157,9 @@ test('an article created from a direct action prepares a Facebook draft without 
     const published = await publishResponse
     expect(published.status(), await published.text()).toBe(200)
     await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}`)
+    await expect(articlePanel.getByRole('status')).toHaveText('Unsaved changes')
+    await expect(saveArticle).toBeDisabled()
+    await expect(pendingCover.getByPlaceholder('Caption', { exact: true })).toHaveValue(pendingCaption)
     // Publication refreshes the canonical preview projection in this editor;
     // opening it immediately offers the public address without another reload.
     await articlePanel.getByTestId('article-preview').click()
@@ -152,6 +170,7 @@ test('an article created from a direct action prepares a Facebook draft without 
     expect(sourceRead.status()).toBe(200)
     const source = mcpData<{ post: { title: string; excerpt: string; status: string; public_path: string; category: { id: string; name: string } | null; content_blocks: Array<{ type: string; data: { markdown?: string } }> } }>(await sourceRead.json()).post
     expect(source).toMatchObject({ title, excerpt, status: 'published' })
+    expect(source.content_blocks.map(block => block.type)).toEqual(['markdown'])
     expect(source.content_blocks.filter(block => block.type === 'markdown').map(block => block.data.markdown)).toEqual([body])
     expect(source.category).toMatchObject({ id: kitchen[0]!.id, name: 'Kitchen' })
     const contextRead = await page.request.get('/api/dashboard/context', { params: { org: orgSlug } })
@@ -161,6 +180,10 @@ test('an article created from a direct action prepares a Facebook draft without 
     await expect(articlePreview.getByTestId('content-preview-frame')).toHaveAttribute('src', articleUrl)
     await articlePreview.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(articlePreview).toHaveCount(0)
+    await pendingCover.focus()
+    await pendingCover.press('Delete')
+    await expect(articlePanel.getByRole('status')).toHaveText('Saved')
+    await expect(saveArticle).toBeDisabled()
     const postWrites: string[] = []
     page.on('request', request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith(`${editor}/posts`)) postWrites.push(new URL(request.url()).pathname)

@@ -175,7 +175,8 @@ const saveLabel = computed(() => {
   if (saveState.value === 'saving') return 'Saving…'
   if (saveState.value === 'failed') return 'Save failed'
   if (saveState.value === 'conflict') return 'Conflict — reload to reconcile'
-  return contentDirty.value ? 'Unsaved changes' : 'Saved'
+  // Pending media remains on the canvas, outside the saved document.
+  return contentDirty.value || blocks.value.some(block => !isSavable(block)) ? 'Unsaved changes' : 'Saved'
 })
 type InserterBlockType = 'image' | 'video' | 'faq' | 'how_to' | 'cta' | 'divider'
 
