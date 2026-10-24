@@ -189,7 +189,6 @@ export async function loadDashboardLocationOverview(
   event: H3Event,
   organizationId: string,
   locationId: string,
-  options: { includeProducts: boolean },
 ) {
   const { env, db, organization, location } = await getDashboardLocationContext(event, locationId)
   if (location.organization_id !== organizationId) {
@@ -198,9 +197,7 @@ export async function loadDashboardLocationOverview(
   const principal = memberAccessPrincipal(organization, { env, event })
   await assertLocationAccess(db, { ...principal, locationId })
   const [catalog, reservationConfig, counts] = await Promise.all([
-    options.includeProducts
-      ? summarizeLocationProducts(db, { organizationId: organization.id, locationId })
-      : Promise.resolve({ total: 0, experiences: 0 }),
+    summarizeLocationProducts(db, { organizationId: organization.id, locationId }),
     getLocationReservationConfig(db, { organizationId: organization.id, locationId }),
     loadLocationContentCounts(db, organizationId, locationId),
   ])

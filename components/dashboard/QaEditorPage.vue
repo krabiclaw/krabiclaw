@@ -6,7 +6,7 @@
         :organization-id="organizationId"
         resource-type="content_document"
         :resource-id="qaId"
-        resource-label="question"
+        :resource-label="record?.question || 'Question'"
         :fields="qaLocalizationFields"
         :language-settings-path="organizationLocalizationSettingsPath"
       />
@@ -148,6 +148,8 @@ const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveOpenSecti
   missing: key => blockers.value.some(section => section === key),
   noun: 'question',
   saving,
+  existingBlocked: () => !record.value || Boolean(blockers.value.length)
+    || (form.question === record.value.question && form.answer === (record.value.answer ?? '') && form.published === (record.value.status === 'published')),
   commit,
 })
 

@@ -32,7 +32,7 @@
           variant="soft"
           size="lg"
           label="Edit hours"
-          :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/settings/hours`, query: route.query }"
+          :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/settings/availability/hours`, query: route.query }"
         />
         <UButton
           v-else-if="availability.action"

@@ -1,5 +1,5 @@
 import { defineHandler, HTTPError } from 'nitro'
-import { getRouterParam, getQuery } from 'nitro/h3'
+import { getRouterParam } from 'nitro/h3'
 import { jsonResponse } from '~/server/utils/api-response'
 import { loadDashboardLocationOverview } from '~/server/utils/dashboard-editor-resources'
 
@@ -14,6 +14,5 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organizationId')
   const locationId = getRouterParam(event, 'locationId')
   if (!organizationId || !locationId) throw new HTTPError({ statusCode: 400, statusMessage: 'Organization ID and Location ID are required' })
-  const includeProducts = getQuery(event).includeProducts !== 'false'
-  return jsonResponse(await loadDashboardLocationOverview(event, organizationId, locationId, { includeProducts }))
+  return jsonResponse(await loadDashboardLocationOverview(event, organizationId, locationId))
 })

@@ -8,7 +8,7 @@
         color="neutral"
         variant="soft"
         square
-        :aria-label="`Add a ${locationNoun}`"
+        :aria-label="`Add ${locationNoun}`"
       />
     </template>
     <UAlert v-if="locationsError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Could not load locations" :description="getErrorMessage(locationsError, 'Locations could not be loaded')" />
@@ -44,7 +44,7 @@ const organization = computed(() => dashboard.organization.value)
 const orgSlug = computed(() => String(route.params.orgSlug || ''))
 const { locations, error: locationsError } = await useOrganizationLocations()
 
-// A professional services site calls these offices. The vocabulary comes from
+// A Legal Services site calls these offices. The vocabulary comes from
 // the same capabilities the rest of the dashboard reads; it depends on the
 // vertical alone, so the site summary is enough.
 const capabilities = computed(() => {
@@ -53,7 +53,7 @@ const capabilities = computed(() => {
   return resolveCmsCapabilities(normalizeVertical(vertical) as OrganizationVertical, resolvePublicTemplate({ vertical }).slug)
 })
 const usesServiceAreaVocabulary = computed(() => capabilities.value?.locationVocabulary === 'office/service area')
-const locationsLabel = computed(() => (usesServiceAreaVocabulary.value ? 'Offices / Service Areas' : 'Locations'))
+const locationsLabel = computed(() => (usesServiceAreaVocabulary.value ? 'Offices' : 'Locations'))
 const locationNoun = computed(() => (usesServiceAreaVocabulary.value ? 'office' : 'location'))
 
 /**

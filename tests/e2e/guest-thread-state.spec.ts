@@ -14,12 +14,14 @@ import type { TodayFeedPayload } from '../../shared/dashboard-today'
 interface NotificationView {
   id: string
   title: string | null
+  created_at: string
   read_at: string | null
 }
 
 interface NotificationList {
   notifications: NotificationView[]
   unread_count: number
+  next_cursor: string | null
 }
 
 interface DeliveryView {
@@ -226,6 +228,33 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(secondOwnerListBefore.threads[0]).toMatchObject({ guestName, submissionType: 'contact', unread: true })
     expect(contactNotification(ownerNotificationsBefore, guestName).read_at).toBeNull()
     expect(contactNotification(secondOwnerNotificationsBefore, guestName).read_at).toBeNull()
+
+    // Two real contacts own the endpoints of this paging proof. Parallel
+    // contacts can appear between them; no shared-history row is a premise.
+    const firstNotification = contactNotification(ownerNotificationsBefore, guestName)
+    const paginationGuestName = `Guest pagination proof ${nonce}`
+    await submitContact(owner, paginationGuestName)
+    const newerNotification = contactNotification(await loadNotifications(owner), paginationGuestName)
+    expect(newerNotification.created_at > firstNotification.created_at || newerNotification.created_at === firstNotification.created_at && newerNotification.id > firstNotification.id).toBe(true)
+    const seenNotifications = new Set([newerNotification.id])
+    let cursor = newerNotification
+    while (cursor.id !== firstNotification.id) {
+      const olderResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: cursor.id } })
+      await expectStatus(olderResponse, 200)
+      const older = await olderResponse.json() as NotificationList
+      expect(older.notifications).toHaveLength(1)
+      const row = older.notifications[0]!
+      expect(seenNotifications.has(row.id)).toBe(false)
+      expect(row.created_at < cursor.created_at || row.created_at === cursor.created_at && row.id < cursor.id).toBe(true)
+      expect(row.created_at > firstNotification.created_at || row.created_at === firstNotification.created_at && row.id >= firstNotification.id).toBe(true)
+      if (row.id !== firstNotification.id) expect(older.next_cursor).toBe(row.id)
+      seenNotifications.add(row.id)
+      cursor = row
+    }
+    expect(cursor.id).toBe(firstNotification.id)
+    // unread_count covers the whole audience and may change when concurrent
+    // contacts arrive. Per-user read state is verified exactly below.
+    await expectStatus(await foreignOwner.get('/api/dashboard/notifications', { params: { limit: 1, after: newerNotification.id } }), 404)
 
     const detail = await loadThreadDetail(owner, threadId)
     expect(detail).toMatchObject({
@@ -612,7 +641,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page.getByRole('heading', { name: /^You have \d+ things? to do$/ })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Filter bookings', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
 
   const upcomingResponse = await page.request.get('/api/dashboard/today', { params: {
     org: 'ember-slice-demo', range: 'upcoming', from: localToday.date,

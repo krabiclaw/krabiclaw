@@ -16,7 +16,7 @@
     :organization-id="organizationId"
     resource-type="organization"
     :resource-id="organizationId"
-    resource-label="brand"
+    :resource-label="loadedSettings?.name || 'Brand'"
     :fields="brandLocalizationFields"
     :language-settings-path="`${settingsPath}/localization`"
   />
@@ -177,7 +177,7 @@ const descriptionCharactersRemaining = computed(() => 500 - form.brand_descripti
 function explicitSummary(value: string | null | undefined, empty = 'Not set') { return value?.trim() || empty }
 const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Published', inactive: 'Draft', suspended: 'Suspended' }
 const domainSummary = computed(() => dashboard.organization.value?.custom_domain || dashboard.organization.value?.public_url || 'Not connected')
-const CONSULTATION_MODE_SUMMARIES = { native: 'Online service selector', external_url: 'External scheduler', native_disabled: 'Selector hidden' } as const
+const CONSULTATION_MODE_SUMMARIES = { native: 'Online consultation requests', external_url: 'External scheduler', native_disabled: 'Online requests hidden' } as const
 const brandItems = computed<EditorNavigationItem[]>(() => [
   { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), to: `${brandPath.value}/name` },
   { id: 'logo', label: 'Logo', summary: loadedSettings.value?.media?.some(item => item.slot === 'logo') ? 'Logo selected' : 'Not set', to: `${brandPath.value}/logo` },

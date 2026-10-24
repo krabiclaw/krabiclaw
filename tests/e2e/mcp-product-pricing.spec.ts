@@ -1,9 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, request as playwrightRequest, test } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+import { waitForNuxtHydration } from './helpers'
 import { loginAs } from './helpers/auth'
 import { MCP_ORGANIZATION_ID, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import type { Product } from '../../server/types/products'
+import type { Collection, Product } from '../../server/types/products'
 
 // The large-batch spec asserts the demo tenant's whole catalogue under this
 // lock, so every test that adds a Product to it takes the same lock.
@@ -45,14 +46,17 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   // An owner can begin an experience before its booking facts are known.
   // The independent editor read must show a private draft with no invented setup.
   const experienceName = `MCP Sushi Workshop Draft ${runId}`
-  const createDraft = await mcpRequest(request, baseURL!, {
-    method: 'tools/call', toolName: 'create_product',
-    args: { organization_id: organizationId, kind: 'experience', name: experienceName, idempotency_key: `pricing-experience-draft-${runId}` },
-  })
-  expect(createDraft.status()).toBe(200)
-  const draftId = mcpData<{ product: Product }>(await createDraft.json()).product.id
-  const draftPath = `${baseURL}/api/editor/organizations/${organizationId}/products/${draftId}`
+  const cleanupRequest = await playwrightRequest.newContext({ baseURL, storageState: await request.storageState() })
+  let draftId: string | undefined
   try {
+    const createDraft = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'create_product',
+      args: { organization_id: organizationId, kind: 'experience', name: experienceName, idempotency_key: `pricing-experience-draft-${runId}` },
+    })
+    expect(createDraft.status()).toBe(200)
+    const draft = mcpData<{ product: Product & { admin_edit_url: string | null } }>(await createDraft.json()).product
+    draftId = draft.id
+    const draftPath = `${baseURL}/api/editor/organizations/${organizationId}/products/${draftId}`
     const draftRead = await request.get(draftPath)
     expect(draftRead.status()).toBe(200)
     const savedDraft = await draftRead.json() as { product: Product; public_url: string | null }
@@ -61,14 +65,67 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     expect(savedDraft.product.variants).toHaveLength(1)
     expect(savedDraft.product.variants[0]!.prices).toEqual([])
     expect(savedDraft.public_url).toBeNull()
+    expect(savedDraft.product.collections).toEqual([])
+
+    // An omitted empty card must retain an entrance for the first membership.
+    // Use an existing collection and preserve its complete saved membership.
+    const collectionsRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/collections`)
+    expect(collectionsRead.status()).toBe(200)
+    const collection = (await collectionsRead.json() as { collections: Collection[] }).collections.find(collection => collection.location_id === null)
+    expect(collection).toBeDefined()
+    const catalogRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products`)
+    expect(catalogRead.status()).toBe(200)
+    const catalog = (await catalogRead.json() as { products: Product[] }).products
+    const members = catalog.flatMap(product => product.collections.filter(membership => membership.collection_id === collection!.id).map(membership => ({ id: product.id, order: membership.sort_order }))).sort((left, right) => left.order - right.order || left.id.localeCompare(right.id)).map(product => product.id)
+    expect(draft.admin_edit_url).toMatch(/^\/dashboard\//)
+    const draftContext = await browser.newContext({ storageState: await request.storageState() })
+    try {
+      const page = await draftContext.newPage()
+      await page.setViewportSize({ width: 1440, height: 900 })
+      expect((await page.goto(`${baseURL}${draft.admin_edit_url}`))?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const editor = page.locator('#dashboard-panel-product')
+      await expect(editor.getByTestId('editor-card-collections')).toHaveCount(0)
+      await editor.getByRole('button', { name: 'Add detail', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Collections', exact: true }).click()
+      const memberships = page.locator('#dashboard-panel-product-collections')
+      await expect(memberships.getByText('Not in a collection.', { exact: true })).toBeVisible()
+      await memberships.getByRole('button', { name: 'Add to collection', exact: true }).click()
+      const chooser = page.getByRole('dialog', { name: 'Add to collection', exact: true })
+      await chooser.getByText(collection!.name, { exact: true }).click()
+      const added = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/collections/${collection!.id}/products`)
+      await chooser.getByRole('button', { name: 'Add', exact: true }).click()
+      const addedResponse = await added
+      expect(addedResponse.status(), await addedResponse.text()).toBe(200)
+      expect(addedResponse.request().postDataJSON()).toEqual({ product_ids: [...members, draftId], expected_product_ids: members })
+      await expect(chooser).toBeHidden()
+      await expect(editor.getByTestId('editor-card-collections')).toContainText(collection!.name)
+      const savedMembership = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'get_product', args: { organization_id: organizationId, product_id: draftId },
+      })
+      expect(savedMembership.status()).toBe(200)
+      expect(mcpData<{ product: Product }>(await savedMembership.json()).product.collections).toEqual([{ collection_id: collection!.id, sort_order: members.length }])
+      const retainedRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products`)
+      expect(retainedRead.status()).toBe(200)
+      const retained = (await retainedRead.json() as { products: Product[] }).products
+      expect(retained.flatMap(product => product.collections.filter(membership => membership.collection_id === collection!.id).map(membership => ({ id: product.id, order: membership.sort_order }))).sort((left, right) => left.order - right.order).map(product => product.id)).toEqual([...members, draftId])
+    } finally {
+      await draftContext.close()
+    }
   } finally {
-    const deleteDraft = await mcpRequest(request, baseURL!, {
-      method: 'tools/call', toolName: 'delete_product', args: { organization_id: organizationId, product_id: draftId },
-    })
-    expect(deleteDraft.status()).toBe(200)
-    expect(mcpData<{ deleted: boolean }>(await deleteDraft.json()).deleted).toBe(true)
-    const deletedDraft = await request.get(draftPath)
-    expect(deletedDraft.status()).toBe(404)
+    try {
+      if (draftId) {
+        const deleteDraft = await mcpRequest(cleanupRequest, baseURL!, {
+          method: 'tools/call', toolName: 'delete_product', args: { organization_id: organizationId, product_id: draftId },
+        })
+        expect(deleteDraft.status()).toBe(200)
+        expect(mcpData<{ deleted: boolean }>(await deleteDraft.json()).deleted).toBe(true)
+        const deletedDraft = await cleanupRequest.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${draftId}`)
+        expect(deletedDraft.status()).toBe(404)
+      }
+    } finally {
+      await cleanupRequest.dispose()
+    }
   }
 
   const create = await mcpRequest(request, baseURL!, {
@@ -196,6 +253,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
       await bookingPage.getByRole('option', { name: selection, exact: true }).click()
     }
     await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Color')
     for (const [name, selection] of [['Six pieces', 'Red'], ['Twelve pieces', 'Blue']] as const) {
       await choice.getByRole('combobox', { name, exact: true }).click()
       await bookingPage.getByRole('option', { name: selection, exact: true }).click()
@@ -233,9 +291,11 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     // Clearing an existing dimension must retain all four saved identities.
     // Editing the remaining one cannot collapse rows onto duplicate keys.
     await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Color')
     await choice.getByRole('button', { name: 'Red', exact: true }).click()
     await choice.getByRole('button', { name: 'Blue', exact: true }).click()
     await pricing.getByTestId(`editor-row-option-${portion.id}`).click()
+    await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Portion')
     await choice.getByRole('button', { name: 'Large portion', exact: true }).click()
     await values.fill('Large portion')
     await values.press('Enter')
@@ -255,6 +315,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
       await bookingPage.getByRole('option', { name: selection, exact: true }).click()
     }
     await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Color')
     await values.fill('Red')
     await values.press('Enter')
     await values.fill('Blue')
@@ -357,6 +418,54 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args })
     expect(response.status(), await response.text()).toBe(200)
   }
+
+  // A location offering and its price have independent lifetimes. Stopping
+  // the offering retains its price, without leaving a broken scoped editor.
+  const scopedPriceWrite = await mcpRequest(request, baseURL!, {
+    method: 'tools/call', toolName: 'update_product',
+    args: { organization_id: organizationId, product_id: created.id, variants: [{ id: small.id, prices: [{ location_id: locationId, unit_amount: 625, currency: 'USD' }] }] },
+  })
+  expect(scopedPriceWrite.status()).toBe(200)
+  expect(mcpData<{ product: Product }>(await scopedPriceWrite.json()).product.id).toBe(created.id)
+  const scopedPriceRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
+  expect(scopedPriceRead.status()).toBe(200)
+  const scopedProduct = (await scopedPriceRead.json() as { product: Product }).product
+  const scopedPrice = scopedProduct.variants.find(variant => variant.id === small.id)!.prices.find(price => price.location_id === locationId)!
+  expect(scopedPrice).toMatchObject({ location_id: locationId, unit_amount: 625, currency: 'USD' })
+  const priceContext = await browser.newContext({ storageState: await request.storageState() })
+  try {
+    const pricePage = await priceContext.newPage()
+    await pricePage.setViewportSize({ width: 1440, height: 900 })
+    const productPath = `/dashboard/${encodeURIComponent(dashboardOrganization!.slug)}/products/${created.id}`
+    expect((await pricePage.goto(`${baseURL}${productPath}/price`))?.status()).toBe(200)
+    const pricing = pricePage.locator('#dashboard-panel-product-pricing')
+    await pricing.getByTestId(`editor-row-location-${locationId}`).click()
+    await expect(pricePage).toHaveURL(`${baseURL}${productPath}/price?location_id=${locationId}`)
+    await pricing.getByTestId(`editor-row-price-${small.id}`).click()
+    await expect(pricePage.locator('#dashboard-panel-product-combination-price').getByTestId('product-price')).toHaveValue('6.25')
+    const removed = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'remove_product_location',
+      args: { organization_id: organizationId, product_id: created.id, location_id: locationId },
+    })
+    expect(removed.status()).toBe(200)
+    expect(mcpData<{ product: Product }>(await removed.json()).product.locations).toEqual([])
+    const retainedRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
+    expect(retainedRead.status()).toBe(200)
+    const retained = (await retainedRead.json() as { product: Product }).product
+    expect(retained.locations).toEqual([])
+    expect({ ...retained, locations: scopedProduct.locations }).toEqual(scopedProduct)
+    const retainedMcp = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'get_product', args: { organization_id: organizationId, product_id: created.id },
+    })
+    expect(retainedMcp.status()).toBe(200)
+    expect(mcpData<{ product: Product }>(await retainedMcp.json()).product.variants.find(variant => variant.id === small.id)!.prices)
+      .toContainEqual(expect.objectContaining({ id: scopedPrice.id, location_id: locationId, unit_amount: 625, currency: 'USD' }))
+    expect((await pricePage.goto(`${baseURL}${productPath}/price`))?.status()).toBe(200)
+    await expect(pricing.locator('[data-testid^="editor-row-location-"]')).toHaveCount(0)
+    const sharedPriceRow = pricing.getByTestId(`editor-row-price-${small.id}`)
+    await expect(sharedPriceRow).toHaveAttribute('href', `${productPath}/price/amounts/${small.id}`)
+    await expect(sharedPriceRow).toContainText('5.50 USD')
+  } finally { await priceContext.close() }
 
   // A Product whose variant has no price is created, and is simply not
   // purchasable: nothing substitutes zero or a note for the amount.

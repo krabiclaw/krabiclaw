@@ -5,6 +5,7 @@
     title="Airbnb"
     :lead="integrationDefinition('airbnb').purpose"
     :error="panelError"
+    :footer="false"
   >
     <IntegrationLeaf
       integration="airbnb"
@@ -32,28 +33,30 @@
         </p>
       </div>
 
-      <div v-if="isConnected && listings.length" class="mt-6 space-y-3">
-        <h3 class="text-sm font-semibold text-highlighted">Connected listings ({{ listings.length }})</h3>
-        <ul class="divide-y divide-default rounded-xl border border-default bg-elevated">
-          <li
-            v-for="listing in listings"
-            :key="listing.id"
-            class="flex items-center justify-between p-3.5 text-sm"
-          >
-            <div class="min-w-0 flex-1">
-              <p class="font-medium text-highlighted truncate">{{ listing.title }}</p>
-              <p class="text-xs text-muted">{{ listing.city }}, {{ listing.country_code }}</p>
-            </div>
-            <UBadge
-              :color="listing.import.status === 'imported' ? 'primary' : 'neutral'"
-              variant="subtle"
-              size="sm"
+      <template #connected>
+        <div v-if="isConnected && listings.length" class="mt-6 space-y-3">
+          <h3 class="text-sm font-semibold text-highlighted">Connected listings ({{ listings.length }})</h3>
+          <ul class="divide-y divide-default rounded-xl border border-default bg-elevated">
+            <li
+              v-for="listing in listings"
+              :key="listing.id"
+              class="flex items-center justify-between p-3.5 text-sm"
             >
-              {{ listing.import.status === 'imported' ? 'Imported' : 'Not imported' }}
-            </UBadge>
-          </li>
-        </ul>
-      </div>
+              <div class="min-w-0 flex-1">
+                <p class="font-medium text-highlighted truncate">{{ listing.title }}</p>
+                <p class="text-xs text-muted">{{ listing.city }}, {{ listing.country_code }}</p>
+              </div>
+              <UBadge
+                :color="listing.import.status === 'imported' ? 'primary' : 'neutral'"
+                variant="subtle"
+                size="sm"
+              >
+                {{ listing.import.status === 'imported' ? 'Imported' : 'Not imported' }}
+              </UBadge>
+            </li>
+          </ul>
+        </div>
+      </template>
     </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>

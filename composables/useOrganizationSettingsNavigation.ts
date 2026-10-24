@@ -48,7 +48,7 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
     if (!base.value) return []
     return [
       { id: 'website', icon: 'i-lucide-panels-top-left', label: 'Website', to: `${base.value}/website` },
-      { id: 'locations', icon: 'i-lucide-map-pin', label: 'Locations', to: `${base.value}/locations` },
+      { id: 'locations', icon: 'i-lucide-map-pin', label: dashboard.organization.value?.vertical === 'service' ? 'Offices' : 'Locations', to: `${base.value}/locations` },
       ...(showTeam.value ? [{ id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` }] : []),
       { id: 'integrations', icon: 'i-lucide-plug', label: 'Integrations', to: `${base.value}/integrations` },
       // What the organization pays KrabiClaw. Owners change it and admins read it; members have no row.

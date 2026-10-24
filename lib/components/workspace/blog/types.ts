@@ -29,6 +29,8 @@ export interface BlogPost {
   created_at?: string | null
   editor_organization_name?: string | null
   public_path?: string | null
+  public_url?: string | null
+  preview_url?: string | null
 }
 
 export interface BlogEditorBlock {
@@ -80,5 +82,5 @@ export interface BlogPostRepository {
   create(_input: BlogPostCreateInput): Promise<BlogPost & { id: string }>
   update(_postId: string, _input: BlogPostUpdateInput): Promise<BlogPost>
   delete(_postId: string): Promise<void>
-  publish(_postId: string, _input: { expected_updated_at: string }): Promise<BlogLifecycleState>
+  publish(_postId: string, _input: { expected_updated_at: string }): Promise<BlogPost>
 }

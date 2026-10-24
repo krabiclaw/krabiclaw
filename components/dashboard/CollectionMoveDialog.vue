@@ -10,9 +10,9 @@
     @save="move"
   >
     <UButton v-if="error" label="Use current items" color="neutral" variant="soft" :disabled="saving || Boolean(loadError)" @click="useCurrent" />
-    <UFormField label="Choose a section">
+    <UFormField :label="`Choose a ${noun}`">
       <URadioGroup v-if="targets.length" v-model="targetId" :items="targets" variant="card" :disabled="saving || Boolean(loadError)" />
-      <p v-else-if="!loadError" class="text-sm text-muted">Add another section before moving items.</p>
+      <p v-else-if="!loadError" class="text-sm text-muted">{{ `Add another ${noun} before moving items.` }}</p>
     </UFormField>
   </DashboardListItemDialog>
 </template>
@@ -28,6 +28,8 @@ const props = defineProps<{
   selectedProductIds: string[]
   expectedProductIds: string[]
   afterSave?: () => Promise<void>
+  /** The caller is editing a menu section rather than a general collection. */
+  menu?: boolean
 }>()
 const emit = defineEmits<{ saved: []; reset: [] }>()
 const open = defineModel<boolean>('open', { default: false })
@@ -35,17 +37,18 @@ const saving = defineModel<boolean>('saving', { default: false })
 const openModel = computed({ get: () => open.value, set: value => { if (!saving.value) open.value = value } })
 const catalog = useProductCatalog(props.organizationId, ref(null))
 await catalog.load
+const noun = computed(() => props.menu ? 'section' : 'collection')
 const { locations, error: locationsError } = await useOrganizationLocations({ includeInactive: true })
 const targetId = ref('')
 const snapshots = ref<Record<string, string[]>>({})
 const error = ref<string | null>(null)
 const loadError = computed(() => {
   const cause = catalog.error.value ?? locationsError.value
-  return cause ? getErrorMessage(cause, 'The sections could not be loaded') : null
+  return cause ? getErrorMessage(cause, 'The collections could not be loaded') : null
 })
 const targets = computed(() => loadError.value ? [] : catalog.collections.value.filter(row => row.id !== props.sourceCollectionId).map(row => {
   const location = row.location_id === null ? null : locations.value.find(location => location.id === row.location_id)
-  if (row.location_id && !location) throw createError({ statusCode: 500, statusMessage: 'The section location could not be loaded' })
+    if (row.location_id && !location) throw createError({ statusCode: 500, statusMessage: 'The collection location could not be loaded' })
   return { value: row.id, label: row.name, description: location ? location.title : 'Shared by every location' }
 }))
 watch(open, value => {
@@ -61,7 +64,7 @@ function useCurrent() {
 async function move() {
   if (saving.value || loadError.value || !targetId.value || !props.selectedProductIds.length) return
   const target = snapshots.value[targetId.value]
-  if (!target) { error.value = 'Choose a section from the current list.'; return }
+  if (!target) { error.value = `Choose a ${noun.value} from the current list.`; return }
   const chosen = new Set(props.selectedProductIds)
   const remaining = props.productIds.filter(id => !chosen.has(id))
   saving.value = true
