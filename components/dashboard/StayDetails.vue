@@ -148,7 +148,7 @@ watch(realtime.event, event => {
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 
-const CHANNELS = { airbnb: 'Airbnb', vrbo: 'Vrbo', direct: 'You' } as const
+const CHANNELS = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'You' } as const
 const METHODS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }
 const methods = Object.entries(METHODS).map(([value, label]) => ({ value, label }))
 const channelName = computed(() => stay.value ? CHANNELS[stay.value.channel] : '')

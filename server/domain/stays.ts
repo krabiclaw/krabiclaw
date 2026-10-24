@@ -59,7 +59,7 @@ export async function stayAccessFor(principal: MemberAccessPrincipal): Promise<S
   return { organizationId: principal.organizationId, actorId: principal.userId, manage: false, userId: principal.userId }
 }
 
-export const STAY_CHANNELS = ['airbnb', 'vrbo', 'direct'] as const
+export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
 export const STAY_STATUSES = ['pending', 'confirmed', 'cancelled'] as const
 export const STAY_PAYMENT_METHODS = ['cash', 'bank_transfer', 'card_external', 'other'] as const
 export type StayPaymentMethod = typeof STAY_PAYMENT_METHODS[number]

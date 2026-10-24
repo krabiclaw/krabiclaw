@@ -7,7 +7,7 @@ import { ChannexDataError, integer, nullableString, object, string } from './dat
 import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 /**
- * Airbnb bookings arriving through Channex. A revision names a booking that
+ * Channel bookings arriving through Channex. A revision names a booking that
  * changed; the booking's current state is read and landed as a channel stay,
  * and only then is the revision acknowledged. Anything that stops short of
  * the acknowledgement throws, so the webhook answers non-2xx and Channex's
@@ -20,7 +20,9 @@ export type RevisionOutcome = { status: 'acknowledged'; stay_id: string; overboo
 
 interface Mapping { organization_id: string; product_id: string; enabled: number }
 
-const CHANNELS: Record<string, ChannelBooking['channel']> = { airbnb: 'airbnb', vrbo: 'vrbo' }
+// Channex's ota_name, lowercased. Its booking documentation shows Booking.com as both
+// "Booking.com" and "BookingCom".
+const CHANNELS: Record<string, ChannelBooking['channel']> = { 'airbnb': 'airbnb', 'vrbo': 'vrbo', 'booking.com': 'booking_com', 'bookingcom': 'booking_com' }
 
 async function log(db: DbClient, entry: { organizationId: string | null; productId: string | null; revisionId: string; status: 'applied' | 'ignored_disconnected' | 'failed'; detail?: string }): Promise<string> {
   const id = crypto.randomUUID()
