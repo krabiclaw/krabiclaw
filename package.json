@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=6144 nuxi build --preset=cloudflare-module && node patch.cjs && node scripts/check-generated-worker.mjs",
+    "channex:webhook": "node --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/channex-webhook.ts",
     "resend:product-news:sync": "node --env-file-if-exists=.env --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/sync-resend-product-news.ts",
     "ai-search:sync": "node --experimental-strip-types scripts/ai-search-sync.ts",
     "ai-search:sync:prod": "node --experimental-strip-types scripts/ai-search-sync.ts --base-url https://krabiclaw.com",
