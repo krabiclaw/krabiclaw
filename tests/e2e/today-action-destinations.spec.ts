@@ -111,19 +111,36 @@ test('an article created from a direct action prepares a Facebook draft without 
       content_blocks: [{ type: 'markdown', data: { markdown: body, editor_mode: 'rich' } }],
     } })
     expect(update.status(), await update.text()).toBe(200)
-    const updated = (await update.json() as { post: { updated_at: string } }).post
-    const published = await page.request.post(`${editor}/blog/${articleId}/publish`, { data: { expected_updated_at: updated.updated_at } })
+    await page.reload()
+    await waitForNuxtHydration(page)
+    await articleSettings.click()
+    await page.getByRole('menuitem', { name: 'Visibility · Draft', exact: true }).click()
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/publishing`)
+    const publishingPanel = page.locator('#dashboard-panel-organization-blog-post-publishing')
+    const publishResponse = page.waitForResponse(response => new URL(response.url()).pathname === `${articlePath}/publish` && response.request().method() === 'POST')
+    await publishingPanel.getByRole('button', { name: 'Publish', exact: true }).click()
+    const published = await publishResponse
     expect(published.status(), await published.text()).toBe(200)
-
-    const sourceRead = await page.request.get(`${editor}/blog/${articleId}`)
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}`)
+    // Publication refreshes the canonical preview projection in this editor;
+    // opening it immediately offers the public address without another reload.
+    await articlePanel.getByTestId('article-preview').click()
+    const articlePreview = page.getByRole('dialog', { name: 'Article preview', exact: true })
+    await expect(articlePreview.getByTestId('preview-share')).toBeVisible()
+    await expect(articlePreview.getByTestId('preview-private')).toHaveCount(0)
+    const sourceRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
     expect(sourceRead.status()).toBe(200)
-    const source = (await sourceRead.json() as { post: { status: string; public_path: string; category: { id: string; name: string } | null } }).post
-    expect(source.status).toBe('published')
+    const source = mcpData<{ post: { title: string; excerpt: string; status: string; public_path: string; category: { id: string; name: string } | null; content_blocks: Array<{ type: string; data: { markdown?: string } }> } }>(await sourceRead.json()).post
+    expect(source).toMatchObject({ title, excerpt, status: 'published' })
+    expect(source.content_blocks.filter(block => block.type === 'markdown').map(block => block.data.markdown)).toEqual([body])
     expect(source.category).toMatchObject({ id: kitchen[0]!.id, name: 'Kitchen' })
     const contextRead = await page.request.get('/api/dashboard/context', { params: { org: orgSlug } })
     expect(contextRead.status()).toBe(200)
     const context = await contextRead.json() as { organization: { public_url: string } }
     const articleUrl = new URL(source.public_path, context.organization.public_url).toString()
+    await expect(articlePreview.getByTestId('content-preview-frame')).toHaveAttribute('src', articleUrl)
+    await articlePreview.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(articlePreview).toHaveCount(0)
     const postWrites: string[] = []
     page.on('request', request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith(`${editor}/posts`)) postWrites.push(new URL(request.url()).pathname)

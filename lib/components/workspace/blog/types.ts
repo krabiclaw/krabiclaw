@@ -82,5 +82,5 @@ export interface BlogPostRepository {
   create(_input: BlogPostCreateInput): Promise<BlogPost & { id: string }>
   update(_postId: string, _input: BlogPostUpdateInput): Promise<BlogPost>
   delete(_postId: string): Promise<void>
-  publish(_postId: string, _input: { expected_updated_at: string }): Promise<BlogLifecycleState>
+  publish(_postId: string, _input: { expected_updated_at: string }): Promise<BlogPost>
 }

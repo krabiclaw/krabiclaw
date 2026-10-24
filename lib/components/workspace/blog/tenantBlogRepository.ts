@@ -41,13 +41,14 @@ export function tenantBlogRepository({ organizationId, orgSlug }: TenantBlogRepo
       await dashboardFetch(`${baseUrl}/${postId}`, scope, { method: 'DELETE', validate: isSuccessResponse })
     },
 
-    async publish(postId: string, input): Promise<BlogLifecycleState> {
-      const response = await dashboardFetch<{ success: true; lifecycle: BlogLifecycleState }>(
+    async publish(postId: string, input): Promise<BlogPost> {
+      await dashboardFetch<{ success: true; lifecycle: BlogLifecycleState }>(
         `/api/editor/organizations/${organizationId}/blog/${postId}/publish`,
         scope,
         { method: 'POST', body: input, validate: isBlogLifecycleResponse },
       )
-      return response.lifecycle
+      const response = await dashboardFetch<{ post: BlogPost }>(`${baseUrl}/${postId}`, scope, { validate: isBlogPostResponse })
+      return response.post
     },
 
   }

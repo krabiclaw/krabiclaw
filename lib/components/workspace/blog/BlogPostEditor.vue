@@ -98,7 +98,7 @@ import BlogArticleRenderer from '~/components/blog/BlogArticleRenderer.vue'
 import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
 import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS } from '~/utils/article-collections'
 import { youTubeVideoId } from '~/shared/youtube-video'
-import type { BlogLifecycleState, BlogPostRepository, BlogPost, BlogEditorBlock, BlogPostUpdateInput } from './types'
+import type { BlogPostRepository, BlogPost, BlogEditorBlock, BlogPostUpdateInput } from './types'
 import { cloneEditorBlocks, generatedExcerpt, initialBlogEditorBlocks } from '~/utils/blog-editor'
 import { getErrorMessage } from '~/utils/errors'
 
@@ -283,24 +283,6 @@ function lifecycleVersionInput() {
   if (!serverPostUpdatedAt) throw new Error('Blog lifecycle version is unavailable. Reload the editor.')
   return { expected_updated_at: serverPostUpdatedAt }
 }
-function applyLifecycle(lifecycle: BlogLifecycleState) {
-  if (!post.value?.content_document) throw new Error('Blog content document is missing')
-  post.value = {
-    ...post.value,
-    status: lifecycle.status,
-    published_at: lifecycle.published_at,
-    first_published_at: post.value.first_published_at ?? lifecycle.published_at,
-    updated_at: lifecycle.updated_at,
-    content_document: {
-      ...post.value.content_document,
-      document: {
-        ...post.value.content_document.document,
-        updated_at: lifecycle.updated_at,
-      },
-    },
-  }
-  serverPostUpdatedAt = lifecycle.updated_at
-}
 function recordLifecycleError(error: unknown) {
   const status = Number((error as { statusCode?: number; status?: number })?.statusCode ?? (error as { status?: number })?.status)
   saveState.value = status === 409 ? 'conflict' : 'failed'
@@ -335,8 +317,9 @@ async function publish() {
     // Publish what is on the canvas: an unsaved article is written first, so
     // the lifecycle token it hands over is the one the save produced.
     await saveArticle()
-    const lifecycle = await props.repository.publish(persistedPostId.value, lifecycleVersionInput())
-    applyLifecycle(lifecycle)
+    const published = await props.repository.publish(persistedPostId.value, lifecycleVersionInput())
+    syncServerVersion(published)
+    post.value = published
     saveState.value = 'saved'
   } catch (error: unknown) {
     recordLifecycleError(error)
