@@ -253,6 +253,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
       await bookingPage.getByRole('option', { name: selection, exact: true }).click()
     }
     await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Color')
     for (const [name, selection] of [['Six pieces', 'Red'], ['Twelve pieces', 'Blue']] as const) {
       await choice.getByRole('combobox', { name, exact: true }).click()
       await bookingPage.getByRole('option', { name: selection, exact: true }).click()
@@ -290,9 +291,11 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     // Clearing an existing dimension must retain all four saved identities.
     // Editing the remaining one cannot collapse rows onto duplicate keys.
     await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Color')
     await choice.getByRole('button', { name: 'Red', exact: true }).click()
     await choice.getByRole('button', { name: 'Blue', exact: true }).click()
     await pricing.getByTestId(`editor-row-option-${portion.id}`).click()
+    await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Portion')
     await choice.getByRole('button', { name: 'Large portion', exact: true }).click()
     await values.fill('Large portion')
     await values.press('Enter')
@@ -312,6 +315,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
       await bookingPage.getByRole('option', { name: selection, exact: true }).click()
     }
     await pricing.getByRole('link', { name: 'Color', exact: false }).click()
+    await expect(choice.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Color')
     await values.fill('Red')
     await values.press('Enter')
     await values.fill('Blue')
