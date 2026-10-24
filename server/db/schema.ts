@@ -197,6 +197,8 @@ export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	status: text().default("pending").notNull(),
 	provider_message_id: text(),
 	error: text(),
+	// Only a classified attempt can establish that retrying cannot duplicate delivery.
+	non_delivery_confirmed: integer(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [

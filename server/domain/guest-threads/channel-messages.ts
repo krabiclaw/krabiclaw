@@ -6,8 +6,11 @@ import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexM
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload, GuestThreadEntryDedupeConflictError } from './entries'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
 import { updateThreadProjectionIfLatestEntry } from './repository'
-import { assertMessagePhotos, discardMessagePhotos, messagePhotoPlacements, uploadMessagePhotos, type MessagePhoto } from './attachments'
+import { assertMessagePhotos, discardMessagePhotos, isMessagePhoto, messagePhotoPlacements, uploadMessagePhotos, type MessagePhoto } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
+import { getMediaAsset, readMediaPlacements } from '~/server/utils/media-asset-manager'
+import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
+import { downloadImageBuffer } from '~/server/utils/cloudflare-images'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import type { GuestThreadEntryRow } from './types'
@@ -153,7 +156,7 @@ export async function backfillChannexMessages(db: DbClient, env: ChannelEnv, pro
 /** Channel replies use the same canonical ledger, photo owner and delivery receipts as every inbox reply. */
 export type ChannelReplyOutcome = { ok: true } | {
   ok: false; status: 409 | 502; code: 'CHANNEL_REPLY_REVIEW_REQUIRED' | 'CHANNEL_REPLY_UNCERTAIN' | 'CHANNEL_REPLY_FAILED'; field: 'delivery.status'; message: string
-  mutation_applied: true; operation_completed: false; request_id: string; retry_with_same_idempotency_key: false
+  mutation_applied: true; operation_completed: false; request_id: string; retry_with_same_idempotency_key: boolean
   provider_error?: ChannexError['data']
 }
 
@@ -164,7 +167,7 @@ function assertReplyIntent(entry: GuestThreadEntryRow, body: string, requestHash
   if (entry.body !== body || payload.request_hash !== requestHash) fail(409, 'IDEMPOTENCY_CONFLICT', 'The reply key was already used for different content', 'idempotencyKey')
 }
 
-export async function replyThroughChannex(db: DbClient, env: ChannexEnv & UploadResolvedMediaInput['env'], input: {
+export async function replyThroughChannex(db: DbClient, env: ChannexEnv & UploadResolvedMediaInput['env'] & { MEDIA_BUCKET?: R2Bucket }, input: {
   mapping: ChannelThreadMapping; body: string; actorUserId: string | null; idempotencyKey: string; requestHash: string
   photoCount: number; resolvePhotos: () => Promise<MessagePhoto[]>
 }): Promise<ChannelReplyOutcome> {
@@ -188,7 +191,7 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
       await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id, { conversationState: 'waiting_on_guest' })
       return { ok: true }
     }
-    if (receipt.status !== 'pending') return reviewRequired()
+    if (receipt.status !== 'pending' && !(receipt.status === 'failed' && receipt.non_delivery_confirmed === 1)) return reviewRequired()
   }
   // A failed preflight records no reply that was never attempted. Proven
   // accepted replays above remain safe even after the home is disconnected.
@@ -198,10 +201,9 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
   if (!home || home.enabled !== 1) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'This home is disconnected from guest messaging', 'product_id')
   const current = await getChannexThread(env, input.mapping.external_thread_id)
   if (current.propertyId !== home.property_id || (current.channelId !== null && current.channelId !== home.channel_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation is outside its local property mapping', 'relationships.property')
-  const photos = await input.resolvePhotos()
-  if (photos.length !== input.photoCount) throw new Error('Resolved reply photos do not match their declared sources')
-  const photo = assertMessagePhotos(photos)[0]
   if (!entry) {
+    const photos = await input.resolvePhotos()
+    if (photos.length !== input.photoCount) throw new Error('Resolved reply photos do not match their declared sources')
     const id = crypto.randomUUID(), now = new Date().toISOString()
     const assetIds = input.actorUserId === null ? [] : await uploadMessagePhotos(db, env, input.mapping.organization_id, photos, { source: 'uploaded', userId: input.actorUserId })
     try {
@@ -241,18 +243,42 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
     await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id, { conversationState: 'waiting_on_guest' })
     return { ok: true }
   }
-  if (receipt.status !== 'pending') return reviewRequired()
-  const claim = await execute(db, "UPDATE guest_thread_deliveries SET status = 'sending', updated_at = ? WHERE id = ? AND status = 'pending'", [new Date().toISOString(), deliveryId])
+  if (receipt.status !== 'pending' && !(receipt.status === 'failed' && receipt.non_delivery_confirmed === 1)) return reviewRequired()
+  let photo: ReturnType<typeof assertMessagePhotos>[number] | undefined
+  if (input.photoCount) {
+    const placed = (await readMediaPlacements(db, { organizationId: input.mapping.organization_id, ownerType: 'activity_entry', ownerIds: [entry.id], slot: 'attachments' })).get(entry.id) ?? []
+    if (placed.length !== 1) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply needs its original active photo before it can be sent', 'photos')
+    const asset = await getMediaAsset(db, placed[0]!.asset_id, input.mapping.organization_id)
+    if (!asset || asset.status !== 'active' || asset.kind !== 'image' || !asset.file_name) {
+      fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo has no readable original file', 'photos')
+    }
+    let bytes: Uint8Array<ArrayBuffer>
+    if (asset.provider === 'cloudflare_r2' && asset.r2_key) {
+      if (!env.MEDIA_BUCKET) throw new Error('MEDIA_BUCKET binding not available')
+      const stored = await env.MEDIA_BUCKET.get(asset.r2_key)
+      if (!stored || stored.size !== asset.file_size || stored.size > MAX_IMAGE_BYTES) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo file is missing or invalid', 'photos')
+      bytes = new Uint8Array(await stored.arrayBuffer())
+    } else if (asset.provider === 'cloudflare_images' && asset.cloudflare_image_id) {
+      bytes = await downloadImageBuffer(env, asset.cloudflare_image_id)
+    } else fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo has no readable stored file', 'photos')
+    if (!isMessagePhoto(bytes)) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply file is not a valid message photo', 'photos')
+    photo = assertMessagePhotos([{ filename: asset.file_name, bytes }])[0]!
+    if (asset.provider === 'cloudflare_r2' && photo.contentType !== asset.mime_type) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo type differs from its recorded file', 'photos')
+  }
+  // Only a definite non-delivery may be explicitly retried under its same intent.
+  // A concurrent accepted, sending or uncertain result cannot enter this claim.
+  const claim = await execute(db, "UPDATE guest_thread_deliveries SET status = 'sending', error = NULL, non_delivery_confirmed = NULL, updated_at = ? WHERE id = ? AND (status = 'pending' OR (status = 'failed' AND non_delivery_confirmed = 1))", [new Date().toISOString(), deliveryId])
   if (claim.meta.changes !== 1) return reviewRequired()
   try {
     const message = await sendChannexMessage(env, input.mapping.external_thread_id, input.body, photo)
-    await recordDeliveryOutcome(db, { deliveryId, status: 'accepted', providerMessageId: message.id })
+    await recordDeliveryOutcome(db, { deliveryId, status: 'accepted', providerMessageId: message.id, nonDeliveryConfirmed: false })
   } catch (error) {
-    const uncertain = !(error instanceof ChannexError) || error.uncertain
-    await recordDeliveryOutcome(db, { deliveryId, status: uncertain ? 'uncertain' : 'failed', error: error instanceof Error ? error.message : String(error) })
+    const nonDeliveryConfirmed = error instanceof ChannexError && !error.uncertain && error.writeRefused
+    const uncertain = !nonDeliveryConfirmed
+    await recordDeliveryOutcome(db, { deliveryId, status: uncertain ? 'uncertain' : 'failed', error: error instanceof Error ? error.message : String(error), nonDeliveryConfirmed })
     return { ok: false, status: 502, code: uncertain ? 'CHANNEL_REPLY_UNCERTAIN' : 'CHANNEL_REPLY_FAILED', field: 'delivery.status',
-      message: uncertain ? 'Channex may have accepted the reply. Review the conversation before sending again' : 'Channex refused the reply; review its delivery receipt',
-      mutation_applied: true, operation_completed: false, request_id: input.mapping.request_id, retry_with_same_idempotency_key: false,
+      message: uncertain ? 'Channex may have accepted the reply. Review the conversation before sending again' : 'This reply was not sent. You can retry the same reply.',
+      mutation_applied: true, operation_completed: false, request_id: input.mapping.request_id, retry_with_same_idempotency_key: !uncertain,
       ...(error instanceof ChannexError ? { provider_error: error.data } : {}) }
   }
   await updateThreadProjectionIfLatestEntry(db, input.mapping.request_id, entry.id, { conversationState: 'waiting_on_guest' })

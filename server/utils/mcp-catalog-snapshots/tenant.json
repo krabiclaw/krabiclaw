@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:a0774aad7e80289ea3d31778f93ce7ea75ae2f7539e2231e125ac8d7ac85f70b",
-  "documentationFingerprint": "sha256:93ca7d6b4c00a546ec5f4210983d0ca1024d1b88bcdc9fd66e53f013ee03e870",
+  "fingerprint": "sha256:cea1f1a697cc77069ea440c884a67c94d96c33e7e020672d6a5d3bb48460b124",
+  "documentationFingerprint": "sha256:d597e931a15955668b77b9436db9cf5b096259fc511d68023d46292aab7444bb",
   "tools": [
     {
       "name": "add_organization_language",
@@ -95459,7 +95459,7 @@
     {
       "name": "reply_to_guest",
       "title": "Reply to guest",
-      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A pending or uncertain Airbnb send needs review and is never resent automatically. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.",
+      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A failed Airbnb attempt may retry only when retry_with_same_idempotency_key is true. Sending, uncertain or review-required attempts need review and are never blindly resent. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -124794,7 +124794,7 @@
         "list_team_conversations": "sha256:cbe0acafa77fed271bc22dc188776909f989e923bbd7ef268c1e37646099128b",
         "mark_team_conversation_read": "sha256:2fe1a3ea83d8bba31352c3a286b24b3ec8addecc72c30adeb5b3808aa4253644",
         "reject_product_booking": "sha256:04c98b168fd16d5f33616b268a7b41f3334f8c8b556428fd5f41c49cca6c39cc",
-        "reply_to_guest": "sha256:44056e97ba1dce44fef9ce657ced90181f98e133266a51990158c494b795c8d9",
+        "reply_to_guest": "sha256:b9f12373b11252531092c1440a75528e6c71c60846fdb617ccbde9d31ecaab5a",
         "request_product_booking_change": "sha256:e808c894e4b389ad861cc6398fb18163cea4cd153384b6f7156dba9abc08dfae",
         "request_table_reservation_change": "sha256:06cd7d6413e8e11be58effadd2274d71075f05e00c5365be2049209cba65dc09",
         "send_team_message": "sha256:28c39421247ccbd10beec93e4ce45e4ba50e1bdd095aaeee05e6b7d075c45711",
@@ -124925,7 +124925,7 @@
         "list_product_booking_sessions": "sha256:d83b2e5cca9bf0fed8d402b5e04074988598a9ed745f61c48024d3849b826b73",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "publish_post": "sha256:58f8905fe25459178581a8b47f51706e96ac0d93742ec099ee9fc92f576751d5",
-        "reply_to_guest": "sha256:44056e97ba1dce44fef9ce657ced90181f98e133266a51990158c494b795c8d9",
+        "reply_to_guest": "sha256:b9f12373b11252531092c1440a75528e6c71c60846fdb617ccbde9d31ecaab5a",
         "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e"
       }
     }

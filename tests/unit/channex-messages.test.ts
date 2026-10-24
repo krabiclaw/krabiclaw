@@ -186,6 +186,37 @@ test('an invalid attachment upload never sends a message, and a discarded accept
   assert.equal(requests, 3)
 })
 
+test('Airbnb server failure behind Channex 422 is uncertain only when a guest message write was attempted', async (t) => {
+  const requests: string[] = []
+  t.mock.method(globalThis, 'fetch', async (input: string, init: RequestInit) => {
+    requests.push(`${init.method} ${input}`)
+    return Response.json({ errors: { error_code: 500, error_message: 'Airbnb could not complete the request' } }, { status: 422 })
+  })
+  await assert.rejects(getChannexThread(env, 'thread'), { providerStatus: 422, uncertain: false, writeRefused: false, data: { code: 'AIRBNB_UNAVAILABLE', field: 'provider_response', uncertain: false, provider_status: 422 } })
+  await assert.rejects(sendChannexMessage(env, 'thread', 'Hello guest'), { providerStatus: 422, uncertain: true, writeRefused: false, data: { code: 'AIRBNB_UNAVAILABLE', field: 'provider_response', uncertain: true, provider_status: 422 } })
+  await assert.rejects(sendChannexMessage(env, 'thread', '', { filename: 'photo.png', contentType: 'image/png', bytes: new Uint8Array([1]) }),
+    { providerStatus: 422, uncertain: false, writeRefused: true, data: { code: 'AIRBNB_UNAVAILABLE', field: 'photos', resource: 'attachment', uncertain: false, provider_status: 422 } })
+  assert.deepEqual(requests, ['GET https://staging.channex.io/api/v1/message_threads/thread', 'POST https://staging.channex.io/api/v1/message_threads/thread/messages', 'POST https://staging.channex.io/api/v1/attachments'])
+  t.mock.restoreAll()
+
+  for (const answer of ['unread', 'oversized', 'non-JSON', 'missing errors', 'invalid upstream code']) {
+    t.mock.method(globalThis, 'fetch', async () => {
+      if (answer === 'unread') return new Response(new ReadableStream({ start(controller) { controller.error(new Error('The response body was interrupted')) } }), { status: 422 })
+      if (answer === 'oversized') return Response.json({ errors: { error_code: 500 } }, { status: 422, headers: { 'content-length': '10000001' } })
+      if (answer === 'missing errors') return Response.json({}, { status: 422 })
+      if (answer === 'invalid upstream code') return Response.json({ errors: { error_code: '500' } }, { status: 422 })
+      return new Response('<html>Unclassified 422 response</html>', { status: 422 })
+    })
+    await assert.rejects(getChannexThread(env, 'thread'), { uncertain: false, writeRefused: false }, `${answer} read has no write outcome`)
+    await assert.rejects(sendChannexMessage(env, 'thread', 'Hello guest'), { uncertain: true, writeRefused: false }, `${answer} 422 cannot establish that Airbnb refused the write`)
+    await assert.rejects(sendChannexMessage(env, 'thread', '', { filename: 'photo.png', contentType: 'image/png', bytes: new Uint8Array([1]) }),
+      { uncertain: false, writeRefused: true }, `${answer} attachment preparation did not call the guest-message endpoint`)
+    t.mock.restoreAll()
+  }
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ errors: { code: 'not_supported', title: 'Message refused' } }, { status: 422 }))
+  await assert.rejects(sendChannexMessage(env, 'thread', 'Hello guest'), { providerStatus: 422, uncertain: false, writeRefused: true }, 'a documented ordinary refusal remains a proven non-delivery')
+})
+
 test('an already installed Messages application requires no is_active field and performs no write', async (t) => {
   const methods: string[] = []
   t.mock.method(globalThis, 'fetch', async (_input: string, init: RequestInit) => {

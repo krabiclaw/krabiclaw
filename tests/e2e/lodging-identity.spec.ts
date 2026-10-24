@@ -250,6 +250,7 @@ test.describe('lodging identity boundary', () => {
       expect(photoRead.status, await photoRead.text()).toBe(200)
       const photo = (await photoRead.json() as { messages: TeamMessage[] }).messages[0]!
       expect(photo).toMatchObject({ body: '', senderId: fixture.id })
+      expect(photo.deliveries).toEqual([])
       expect(photo.attachments).toHaveLength(1)
       const loadedPhoto = await api.get(photo.attachments[0]!.url)
       expect(loadedPhoto.status).toBe(200)

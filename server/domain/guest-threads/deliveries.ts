@@ -187,13 +187,14 @@ export async function recordDeliveryOutcome(
     status: Exclude<GuestThreadDeliveryStatus, 'pending'>
     providerMessageId?: string | null
     error?: string | null
+    nonDeliveryConfirmed?: boolean
   },
 ): Promise<GuestThreadDeliveryRow> {
   await execute(db, `
     UPDATE guest_thread_deliveries
-    SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, updated_at = ?
+    SET status = ?, provider_message_id = COALESCE(?, provider_message_id), error = ?, non_delivery_confirmed = ?, updated_at = ?
     WHERE id = ? AND status NOT IN ('accepted', 'sent', 'delivered', 'read')
-  `, [input.status, input.providerMessageId ?? null, input.error ?? null, new Date().toISOString(), input.deliveryId])
+  `, [input.status, input.providerMessageId ?? null, input.error ?? null, input.nonDeliveryConfirmed === undefined ? null : input.nonDeliveryConfirmed ? 1 : 0, new Date().toISOString(), input.deliveryId])
   const updated = await getDeliveryById(db, input.deliveryId)
   if (!updated) throw new Error('Guest thread delivery not found')
   return updated

@@ -39,6 +39,40 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('channel retry proof preserves every historical receipt as unknown and leaves old writers unable to assert non-delivery', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    const migration = journal.entries.findIndex(entry => entry.tag === '0005_channel_reply_retry_proof')
+    assert.notEqual(migration, -1)
+    for (const entry of journal.entries.slice(0, migration)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('host', 'Host', 'host', 'USD', 'America/Denver')").run()
+    database.prepare(`INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json)
+      VALUES ('conversation', 'contact', 'host', 'waiting_on_guest', '{"guest":{"name":"Guest","email":"guest@example.test","phone":null},"message":"Hello"}')`).run()
+    database.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, dedupe_key, sequence, occurred_at)
+      VALUES ('reply', 'conversation', 'message', 'request', 'system', 'airbnb', 'Recorded reply', 'reply', 1, '2026-10-24T00:00:00.000Z')`).run()
+    for (const status of ['pending', 'failed', 'uncertain', 'accepted']) {
+      database.prepare(`INSERT INTO guest_thread_deliveries (id, entry_id, channel, provider, purpose, status, provider_message_id, error)
+        VALUES (?, 'reply', 'airbnb', 'channex', 'member_reply', ?, ?, ?)`)
+        .run(status, status, status === 'accepted' ? 'actual-provider-id' : null, status === 'failed' ? 'A historical failure does not establish refusal' : null)
+    }
+    const receipts = database.prepare('SELECT * FROM guest_thread_deliveries ORDER BY id').all()
+    const entries = database.prepare('SELECT * FROM activity_entries').all()
+
+    database.exec(readFileSync(`migrations/${journal.entries[migration]!.tag}.sql`, 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT * FROM guest_thread_deliveries ORDER BY id').all(), receipts.map(receipt => ({ ...receipt as Record<string, unknown>, non_delivery_confirmed: null })))
+    assert.deepEqual(database.prepare('SELECT * FROM activity_entries').all(), entries)
+    const proof = (database.pragma('table_info(guest_thread_deliveries)') as Array<{ name: string; notnull: number; dflt_value: unknown }>).find(column => column.name === 'non_delivery_confirmed')
+    assert.deepEqual([proof?.notnull, proof?.dflt_value], [0, null])
+    database.prepare(`INSERT INTO guest_thread_deliveries (id, entry_id, channel, provider, purpose, status, error)
+      VALUES ('old-writer', 'reply', 'airbnb', 'channex', 'member_reply', 'failed', 'Channex refused the reply')`).run()
+    assert.deepEqual(database.prepare("SELECT status, non_delivery_confirmed FROM guest_thread_deliveries WHERE id = 'old-writer'").get(), { status: 'failed', non_delivery_confirmed: null })
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally { database.close() }
+})
+
 test('the profile Hours migration preserves every authored member field and admits only unknown or complete Hours', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
@@ -930,7 +964,8 @@ test('a v18 export preserves its conversations and receipts unchanged in the cha
     const target = new Database(targetPath)
     try {
       assert.deepEqual(target.pragma('foreign_key_check'), [])
-      assert.deepEqual(['requests', 'activity_entries', 'guest_thread_deliveries'].map(table => target.prepare(`SELECT * FROM ${table}`).all()), before)
+      assert.deepEqual(['requests', 'activity_entries', 'guest_thread_deliveries'].map(table => target.prepare(`SELECT * FROM ${table}`).all()),
+        [before[0], before[1], before[2]!.map(receipt => ({ ...receipt as Record<string, unknown>, non_delivery_confirmed: null }))])
       assert.equal(target.prepare('SELECT count(*) AS n FROM channel_threads').get()!.n, 0)
       assert.deepEqual(target.prepare('SELECT category, email_enabled, whatsapp_enabled, push_enabled FROM user_notification_preferences ORDER BY category').all(),
         [{ category: 'guest_messages', email_enabled: 0, whatsapp_enabled: 1, push_enabled: 1 }, { category: 'reviews', email_enabled: 1, whatsapp_enabled: 0, push_enabled: 0 }])
