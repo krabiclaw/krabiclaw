@@ -198,7 +198,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal(committedPhoto.body, hostPhoto.body)
     assert.equal(committedPhoto.attachments.length, 1)
     const photoAsset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
-      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND ma.organization_id = ?`).bind(committedPhoto.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
+      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(committedPhoto.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
     assert.ok(photoAsset)
     assert.deepEqual(committedPhoto.attachments.map(photo => [photo.id, photo.url]), [[photoAsset.id, photoAsset.public_url]])
     const storedPhoto = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(photoAsset.r2_key)
@@ -219,7 +219,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.ok(nativeSaved)
     assert.deepEqual({ id: nativeSaved.id, threadId: nativeSaved.threadId, senderId: nativeSaved.senderId, body: nativeSaved.body, photos: nativeSaved.attachments.length }, { id: nativePhoto.message.id, threadId: direct.id, senderId: 'cleaner', body: '', photos: 1 })
     const nativeAsset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
-      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND ma.organization_id = ?`).bind(nativeSaved.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
+      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND mp.status = 'active' AND ma.organization_id = ?`).bind(nativeSaved.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
     assert.ok(nativeAsset)
     assert.deepEqual(nativeSaved.attachments.map(photo => [photo.id, photo.url]), [[nativeAsset.id, nativeAsset.public_url]])
     const storedNativePhoto = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(nativeAsset.r2_key)
