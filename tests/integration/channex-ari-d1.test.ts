@@ -685,11 +685,15 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     assert.deepEqual(changed.channel_push, { state: 'pushed', detail: null })
     const once = channex.take()
     const newToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Kiritimati', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-    assert.deepEqual(once.map(request => [request.path, request.values.length]), [['/restrictions', 500], ['/availability', once[1]!.values.length]])
+    assert.equal(once[0]!.path, '/restrictions')
+    assert.equal(once[0]!.values.length, 500)
     assert.equal(once[0]!.values[0]!.date, newToday)
     assert(once[0]!.values.every(value => value.rate === '190.00'))
-    // Availability goes only for the nights the new timezone brought within reach, which Channex never had.
-    assert(once[1]!.values.length > 0 && once[1]!.values.length < 3)
+    // Availability goes only for the nights the new timezone brought within reach, which Channex never had:
+    // as many as Kiritimati's date is ahead of the home's old one.
+    const gained = Math.round((Date.parse(`${newToday}T00:00:00Z`) - Date.parse(`${day(0)}T00:00:00Z`)) / 86_400_000)
+    assert.deepEqual(once.slice(1).map(request => [request.path, request.values.map(value => value.date)]),
+      gained ? [['/availability', Array.from({ length: gained }, (_, offset) => day(500 + offset))]] : [])
 
     const barn = await getProduct(db, ORG, local)
     const disconnected = await updateProduct(db, { env, organizationId: ORG, productId: local, actor: { actorId: OWNER }, patch: {
