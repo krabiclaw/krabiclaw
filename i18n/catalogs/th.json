@@ -638,5 +638,6 @@
   "stay.home_accessibility_features.pool_hoist.label": "อุปกรณ์ยกตัวลงสระว่ายน้ำหรืออ่างน้ำร้อน",
   "stay.home_accessibility_features.pool_hoist.description": "มีอุปกรณ์ยกตัวที่ออกแบบมาโดยเฉพาะเพื่อช่วยเคลื่อนย้ายคนเข้าและออกจากสระว่ายน้ำหรืออ่างน้ำร้อน",
   "stay.home_accessibility_features.ceiling_hoist.label": "อุปกรณ์ยกตัวติดเพดานหรือแบบเคลื่อนที่",
-  "stay.home_accessibility_features.ceiling_hoist.description": "มีอุปกรณ์ยกตัวแบบติดเพดานหรือแบบตั้งพื้นที่ออกแบบมาโดยเฉพาะเพื่อช่วยเคลื่อนย้ายคนขึ้นและลงจากรถเข็น"
+  "stay.home_accessibility_features.ceiling_hoist.description": "มีอุปกรณ์ยกตัวแบบติดเพดานหรือแบบตั้งพื้นที่ออกแบบมาโดยเฉพาะเพื่อช่วยเคลื่อนย้ายคนขึ้นและลงจากรถเข็น",
+  "legal.acceptable_use": "นโยบายการใช้งานที่ยอมรับได้"
 }

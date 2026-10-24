@@ -1,6 +1,6 @@
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
-import { canOpenPlatformAccounts } from '~/utils/platform-admin-access'
+import { canOpenPlatformAccounts, canOpenPlatformReports } from '~/utils/platform-admin-access'
 import type { organizationRoles } from '~/utils/organization-access'
 
 // The rows on Menu. Menu is a launcher: every row is a destination of its own
@@ -30,6 +30,10 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
     const loaded = dashboard.organization.value
     return Boolean(loaded && canOpenPlatformAccounts(loaded, (session.value.data?.user as { role?: string | null } | undefined)?.role))
   })
+  const showPlatformReports = computed(() => {
+    const loaded = dashboard.organization.value
+    return Boolean(loaded && canOpenPlatformReports(loaded, (session.value.data?.user as { role?: string | null } | undefined)?.role))
+  })
 
   /**
    * Plan and billing is read by owners and admins, by Better Auth's billing
@@ -56,6 +60,10 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
       // "Team" is this organization's members; this is every account there is.
       ...(showPlatformAccounts.value
         ? [{ id: 'platform-accounts', icon: 'i-lucide-shield-user', label: 'Platform accounts', to: `${base.value}/platform-accounts` }]
+        : []),
+      // Members' reports of guests and teammates, decided by KrabiClaw staff within 24 hours.
+      ...(showPlatformReports.value
+        ? [{ id: 'platform-reports', icon: 'i-lucide-flag', label: 'Platform reports', to: `${base.value}/platform-reports` }]
         : []),
       // The way to the account on a phone, where there is no header to carry an
       // avatar. Airbnb's mobile Menu lists "Account settings" in the same place,

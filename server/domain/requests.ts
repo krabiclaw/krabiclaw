@@ -48,7 +48,7 @@ const threadScope = z.object({
   id: z.string(), organization_id: z.string(),  location_id: z.string().nullable(),
   user_id: z.string().nullable(), review_id: z.string().nullable(),
   conversation_state: z.enum(['needs_attention', 'waiting_on_guest', 'resolved']), resolved_at: z.string().nullable(),
-  archived_at: z.string().nullable(), archived_by_user_id: z.string().nullable(),
+  archived_at: z.string().nullable(), archived_by_user_id: z.string().nullable(), blocked_at: z.string().nullable(),
   created_at: z.string(), updated_at: z.string(),
 })
 
@@ -221,9 +221,9 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
  * it would commit anyway and leave a conversation about a seat nobody holds.
  * Carrying the claim's existence into this insert is what ties them together.
  *
- * A new thread has not been archived by anyone, so it carries no archive state.
+ * A new thread has not been archived or blocked by anyone, so it carries neither state.
  */
-export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' | 'archived_by_user_id'>, claimedBy?: BatchQuery): BatchQuery[] {
+export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' | 'archived_by_user_id' | 'blocked_at'>, claimedBy?: BatchQuery): BatchQuery[] {
   const provenance = (request.kind === 'booking' || request.kind === 'reservation') && 'provenance' in request.payload ? request.payload.provenance : undefined
   const values = [request.id, request.kind, request.organization_id, request.location_id, request.user_id, request.review_id,
     request.conversation_state, request.resolved_at, JSON.stringify(request.payload), request.created_at, request.updated_at]

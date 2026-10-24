@@ -1668,6 +1668,10 @@ export async function notifyGuestThreadReply(
   db: DbClient,
   opts: GuestThreadReplyNotificationInput,
 ) {
+  // A blocked guest's messages are still recorded, but nobody is alerted to them.
+  const thread = await queryFirst<{ blocked_at: string | null }>(db, 'SELECT blocked_at FROM requests WHERE organization_id = ? AND id = ?', [opts.organizationId, opts.threadId])
+  if (!thread) throw new Error(`Guest thread ${opts.threadId} does not exist in organization ${opts.organizationId}`)
+  if (thread.blocked_at !== null) return
   const threadContext = { guestThreadId: opts.threadId, sourceEntryId: opts.sourceEntryId }
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, {
     organizationId: opts.organizationId,

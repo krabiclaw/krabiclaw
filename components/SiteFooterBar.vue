@@ -58,7 +58,7 @@
         :to="localePath(`/policies/${policy}`)"
         class="no-underline transition hover:opacity-70"
       >
-        {{ t(`legal.${policy}`) }}
+        {{ t(`legal.${policy.replace('-', '_')}`) }}
       </NuxtLink>
       <ZarazConsentButton />
       <a

@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
-import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, reportReason, type ContentReport, type ContentReportEnv } from '~/server/domain/content-reports'
 import { assertLocationAccess, assertRoleAllows, listAllOrganizationMembers, organizationAdapter, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
 import { publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -21,7 +22,8 @@ import {
 /**
  * Team conversations: the organization's own members talking to each other,
  * optionally about one stay. The dashboard and the native app call these
- * functions; nothing else reads or writes the team tables.
+ * functions; nothing else reads or writes the team tables. Staff removal of a
+ * reported message runs `teamMessageRemovalQueries` from here.
  *
  * Who may take part is Better Auth membership and the `team_messages`
  * permission. A seat is a member row, so leaving the organization ends a
@@ -417,6 +419,36 @@ export async function sendTeamMessage(
   await publishThreadChanged(env, access.organizationId, threadId, { message_id: row.id })
   const [message] = await readMessages(db, access.organizationId, [row])
   return { message: message!, created }
+}
+
+/**
+ * Report a message in one of the caller's conversations (App Store guideline
+ * 1.2). KrabiClaw's operators are emailed before the caller hears it worked;
+ * the same key finds the same report.
+ */
+export async function reportTeamMessage(env: ContentReportEnv, db: DbClient, access: TeamAccess, threadId: string, messageId: string, input: { reason: unknown; idempotencyKey: unknown }): Promise<ContentReport> {
+  await requireSeat(db, access, threadId)
+  const reason = reportReason(input.reason)
+  if (typeof input.idempotencyKey !== 'string' || !input.idempotencyKey.trim()) fail(400, 'MISSING_IDEMPOTENCY_KEY', 'Idempotency key is required', 'idempotencyKey')
+  const message = await queryFirst<{ sender_user_id: string | null; body: string }>(db,
+    'SELECT sender_user_id, body FROM team_messages WHERE organization_id = ? AND thread_id = ? AND id = ?', [access.organizationId, threadId, messageId])
+  if (!message) fail(404, 'TEAM_MESSAGE_NOT_FOUND', 'That message is not in this conversation', 'messageId')
+  if (message.sender_user_id === access.userId) fail(422, 'OWN_MESSAGE', 'You cannot report your own message', 'messageId')
+  const id = contentReportId(access.userId, input.idempotencyKey)
+  await executeBatch(db, [contentReportInsert({
+    id, organizationId: access.organizationId, reporterUserId: access.userId, subject: 'team_message', requestId: null,
+    teamMessageId: messageId, authorUserId: message.sender_user_id, reason, excerpt: message.body || 'Photos only', blocked: false,
+  })], { operation: 'Report a team message' })
+  await assertSameReport(db, id, { subject: 'team_message', requestId: null, teamMessageId: messageId, reason, blocked: false })
+  return await announceContentReport(env, db, id)
+}
+
+/** Staff removal of a reported message: its photo placements, then the message. */
+export function teamMessageRemovalQueries(organizationId: string, messageId: string): BatchQuery[] {
+  return [
+    { query: `DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'team_message' AND owner_id = ?`, params: [organizationId, messageId] },
+    { query: 'DELETE FROM team_messages WHERE organization_id = ? AND id = ?', params: [organizationId, messageId] },
+  ]
 }
 
 /** The caller has read the conversation up to now. */

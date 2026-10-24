@@ -28,7 +28,7 @@ export interface TenantOrganizationInfo {
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string; mime_type: string | null }>
   social_image: SocialImageSource | null
   social_profiles: Array<{ network: 'facebook' | 'instagram'; url: string }>
-  policies: Array<'privacy' | 'terms'>
+  policies: Array<'privacy' | 'terms' | 'acceptable-use'>
 }
 
 // The rendering organization is resolved once from the request host and travels

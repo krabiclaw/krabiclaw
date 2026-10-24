@@ -95,3 +95,8 @@ export function hasPlatformAdminPermission(
 export function canOpenPlatformAccounts(organization: { theme_id: string }, role: string | null | undefined): boolean {
   return isPlatformTemplate({ themeId: organization.theme_id }) && hasPlatformAdminPermission(role, { user: ['list', 'impersonate'] })
 }
+
+/** Platform reports open in the same place, to an admin who may ban the users they name. */
+export function canOpenPlatformReports(organization: { theme_id: string }, role: string | null | undefined): boolean {
+  return isPlatformTemplate({ themeId: organization.theme_id }) && hasPlatformAdminPermission(role, { platform: ['support'], user: ['ban'] })
+}
