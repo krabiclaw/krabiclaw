@@ -138,11 +138,12 @@ const offsetForDate = (dateStr: string | null | undefined): number => {
   return Math.max(0, (toYear - fromYear) * 12 + (toMonth - fromMonth))
 }
 const monthOffset = ref(0)
-const visibleMonths = props.inline ? 2 : 1
 // The calendar follows the choice: the first night a stay can start, then the earliest checkout, then the chosen checkout.
+// The page shows its second month from md up, so a phone sees one month there too.
 watch([calendar, checkIn, checkOut], () => {
   const focus = checkOut.value ?? earliestCheckOut.value ?? checkIn.value ?? firstCheckIn.value
   if (!focus) return
+  const visibleMonths = props.inline && import.meta.client && window.matchMedia('(min-width: 768px)').matches ? 2 : 1
   const offset = offsetForDate(focus)
   if (offset < monthOffset.value || offset >= monthOffset.value + visibleMonths) monthOffset.value = Math.max(0, offset - visibleMonths + 1)
 }, { immediate: true })
