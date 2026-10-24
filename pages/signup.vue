@@ -35,9 +35,9 @@
     <!-- Agreement is its own action before either way of signing up, and starts unchecked. -->
     <UCheckbox v-model="agreed" class="mt-6" name="terms-agreement">
       <template #label>
-        I agree to the <NuxtLink to="/policies/terms" target="_blank" class="font-semibold text-primary">Terms of Service</NuxtLink>
-        and the <NuxtLink to="/policies/acceptable-use" target="_blank" class="font-semibold text-primary">Acceptable Use Policy</NuxtLink>,
-        which do not tolerate abusive content or users, and the <NuxtLink to="/policies/privacy" target="_blank" class="font-semibold text-primary">Privacy Policy</NuxtLink>.
+        I agree to the <NuxtLink :to="policyUrl('terms')" external target="_blank" class="font-semibold text-primary">Terms of Service</NuxtLink>
+        and the <NuxtLink :to="policyUrl('acceptable-use')" external target="_blank" class="font-semibold text-primary">Acceptable Use Policy</NuxtLink>,
+        which do not tolerate abusive content or users, and the <NuxtLink :to="policyUrl('privacy')" external target="_blank" class="font-semibold text-primary">Privacy Policy</NuxtLink>.
       </template>
     </UCheckbox>
     <div class="mt-4 space-y-3" :class="agreed ? '' : 'pointer-events-none opacity-50'" :aria-disabled="!agreed" :inert="!agreed">
@@ -81,6 +81,9 @@ const verificationCallback = computed(() => {
 const { loading, error, signInWithGoogle } = useAuthOperation()
 const pendingEmail = ref('')
 const agreed = ref(false)
+// The account is KrabiClaw's, so its policies are the platform's, whichever site serves this page.
+const platformDomain = String(useRuntimeConfig().public.platformDomain)
+const policyUrl = (slug: string) => `https://${platformDomain}/policies/${slug}`
 const resending = ref(false)
 const resendNotice = ref<string | null>(null)
 const resendError = ref<string | null>(null)
