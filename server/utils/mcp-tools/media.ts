@@ -49,6 +49,20 @@ function mediaPlacementInputSchema(single?: boolean) {
 const mediaPlacementObject = mediaPlacementInputSchema()
 const singleMediaPlacementObject = mediaPlacementInputSchema(true)
 const orderedMediaPlacementObject = mediaPlacementInputSchema(false)
+const libraryAssetObject = {
+  ...mediaAssetObject,
+  properties: {
+    ...mediaAssetObject.properties,
+    mime_type: { type: ['string', 'null'] },
+    file_size: { type: ['integer', 'null'], description: 'Stored file size in bytes.' },
+    width: { type: ['integer', 'null'] },
+    height: { type: ['integer', 'null'] },
+    duration: { type: ['number', 'null'], description: 'Video duration in seconds.' },
+    updated_at: { type: 'string' },
+  },
+  required: [...Object.keys(mediaAssetObject.properties), 'mime_type', 'file_size', 'width', 'height', 'duration', 'updated_at'],
+  additionalProperties: false,
+}
 
 const mediaMutationOutputSchema = {
   type: 'object',
@@ -130,6 +144,7 @@ export const MEDIA_TOOLS: McpToolDefinition[] = [
               after_asset_id: { type: 'string' },
             },
             required: ['asset_id'],
+            not: { required: ['before_asset_id', 'after_asset_id'] },
           },
           description: 'Ordered list of moves to apply sequentially.',
         },
@@ -138,14 +153,14 @@ export const MEDIA_TOOLS: McpToolDefinition[] = [
       outputSchema: mediaMutationOutputSchema,
     }),
   organizationTool({
-      name: 'get_organization_media_assets',
+      name: 'list_media_assets',
       description: 'List the images, videos and Markdown files in the selected site’s media library, with the asset IDs set_media and attach_media take. A file still in the conversation is saved with save_media_attachment.',
       domain: 'media',
       minimumRole: 'admin',
       inputSchema: { kind: { type: 'string', enum: ['image', 'video', 'file'], description: 'Filter by asset type.' }, ...paginationInputSchema },
       outputSchema: {
         type: 'object',
-        properties: { assets: { type: 'array', items: mediaAssetObject }, page_info: pageInfoObject },
+        properties: { assets: { type: 'array', items: libraryAssetObject }, page_info: pageInfoObject },
         required: ['assets', 'page_info'],
       },
     }),
@@ -186,6 +201,7 @@ export const MEDIA_TOOLS: McpToolDefinition[] = [
         asset_id: { type: 'string' },
         alt_text: { type: ['string', 'null'], description: 'Omit to retain; null clears the alt text.' },
         category: { type: 'string', enum: [...WRITABLE_MEDIA_CATEGORIES] },
+        anyOf: [{ required: ['alt_text'] }, { required: ['category'] }],
       },
       required: ['asset_id'],
       outputSchema: {
@@ -287,7 +303,7 @@ export async function handleMediaTools(ctx: McpExecutorContext): Promise<unknown
         "Reordered media.",
       );
     }
-    case "get_organization_media_assets": {
+    case "list_media_assets": {
       const kind = optionalString(args, "kind") ?? undefined;
       const resource = { resource: `media-assets:${organization.organizationId}:${kind ?? ''}` };
       const window = mcpPageWindow(args, resource);
@@ -298,7 +314,25 @@ export async function handleMediaTools(ctx: McpExecutorContext): Promise<unknown
         });
       const page = assets.slice(0, window.limit);
       return {
-        assets: page.map(({ id, ...asset }) => ({ asset_id: id, ...asset })),
+        assets: page.map(asset => ({
+          asset_id: asset.id,
+          kind: asset.kind,
+          provider: asset.provider,
+          source: asset.source,
+          public_url: asset.public_url,
+          thumbnail_url: asset.thumbnail_url,
+          mime_type: asset.mime_type,
+          file_name: asset.file_name,
+          file_size: asset.file_size,
+          width: asset.width,
+          height: asset.height,
+          duration: asset.duration,
+          alt_text: asset.alt_text,
+          category: asset.category,
+          status: asset.status,
+          created_at: asset.created_at,
+          updated_at: asset.updated_at,
+        })),
         page_info: mcpPageInfo(window, page.length, assets.length > window.limit, resource),
       };
     }

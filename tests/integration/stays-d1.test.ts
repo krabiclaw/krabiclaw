@@ -123,7 +123,7 @@ test('committed stays report publication failures and idempotent retries publish
     await assert.rejects(recordStayPayment(db, env, manager, replay.id, payment), code('DASHBOARD_PUBLICATION_FAILED'))
     assert.equal((await getStay(db, manager, replay.id)).paid_minor, 10_000)
     await hub.fetch('https://inbox.test/failure', { method: 'DELETE' })
-    assert.equal((await recordStayPayment(db, env, manager, replay.id, payment)).paid_minor, 10_000)
+    assert.equal((await recordStayPayment(db, env, manager, replay.id, payment)).stay.paid_minor, 10_000)
     assert.equal(await db.prepare('SELECT count(*) FROM stay_payments WHERE stay_id = ?').bind(replay.id).first('count(*)'), 1)
 
     // A saved versioned edit reports its real version; its stale retry never writes again.
@@ -871,11 +871,14 @@ test('authored photo rooms move photos atomically and follow the listing placeme
       await assert.rejects(moveStayPhotos(db, env, manager, cabin.id, { ...destination, photos: [{ photo_id: 'room-a', expected_room_id: roomA.id }, { photo_id: 'room-b', expected_room_id: null }] }), { status: 409, data: { code: 'PHOTOS_CHANGED', field: 'photos' } })
       assert.deepEqual((await getProduct(db, ORG, cabin.id)).stay?.photo_rooms, assigned)
     }
-    await moveStayPhotos(db, env, manager, cabin.id, { new_room_type: 'living_room', photos: [{ photo_id: 'room-b', expected_room_id: roomA.id }, { photo_id: 'room-c', expected_room_id: null }] })
+    const createdDestination = await moveStayPhotos(db, env, manager, cabin.id, { new_room_type: 'living_room', photos: [{ photo_id: 'room-b', expected_room_id: roomA.id }, { photo_id: 'room-c', expected_room_id: null }] })
     const createdRooms = (await getProduct(db, ORG, cabin.id)).stay!.photo_rooms
     assert.equal(createdRooms.length, 3)
     const roomC = createdRooms[2]!
     assert.equal(roomC.type, 'living_room')
+    assert.equal(createdDestination.destination_room_id, roomC.id)
+    assert.equal(createdDestination.created_room_id, roomC.id)
+    assert.deepEqual(createdDestination.moved_photo_ids, ['room-b', 'room-c'])
     assert.deepEqual(createdRooms, [{ ...roomA, photo_ids: ['room-a'] }, roomB, { ...roomC, photo_ids: ['room-b', 'room-c'] }])
     await updateStayPhotoRoom(db, env, manager, cabin.id, roomC.id, { expected_details_version: roomC.details_version, amenities: ['ac'] })
     roomC.amenities = ['ac']
@@ -890,6 +893,12 @@ test('authored photo rooms move photos atomically and follow the listing placeme
     assert.equal((refused.reason as { status: number }).status, 409)
     assert.equal((refused.reason as { data: { code: string } }).data.code, 'PHOTOS_CHANGED')
     const winner = race[0]!.status === 'fulfilled' ? roomB.id : null
+    const completed = race.find(result => result.status === 'fulfilled')
+    assert(completed?.status === 'fulfilled')
+    assert.equal(completed.value.destination_room_id, winner)
+    assert.equal(completed.value.created_room_id, null)
+    assert.deepEqual(completed.value.moved_photo_ids, ['room-a'])
+    assert.equal(await db.prepare('SELECT room_id FROM product_stay_photo_room_memberships WHERE organization_id = ? AND product_id = ? AND asset_id = ?').bind(ORG, cabin.id, 'room-a').first('room_id'), winner)
     const afterRace = (await getProduct(db, ORG, cabin.id)).stay!.photo_rooms
     assert.deepEqual(afterRace, [roomA, { ...roomB, photo_ids: winner ? ['room-a'] : [] }, { ...roomC, photo_ids: ['room-b', 'room-c'] }])
     await moveStayPhotos(db, env, manager, cabin.id, { room_id: roomC.id, photos: [{ photo_id: 'room-a', expected_room_id: winner }] })
@@ -953,6 +962,11 @@ test('a stay holds its nights, and a held night refuses another stay even when t
     assert.equal(first.payment_status, 'unpaid')
     // The same key replays the same stay; a different stay under it is refused.
     assert.equal((await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })).id, first.id)
+    const persistedBeforeRetries = await getStay(db, manager, first.id)
+    for (const patch of [{ adults: 1 }, { children: 1 }, { infants: 1 }, { arrival_time: '18:30' }, { guest_surname: 'Changed' }, { guest_email: 'changed@example.test' }, { guest_phone: '+61491570154' }, { notes: 'Different arrival note' }]) {
+      await assert.rejects(createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, ...patch }), code('IDEMPOTENCY_CONFLICT'))
+      assert.deepEqual(await getStay(db, manager, first.id), persistedBeforeRetries)
+    }
     await assert.rejects(createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-02', check_out_date: '2026-11-04', ...guest }), code('IDEMPOTENCY_CONFLICT'))
     await assert.rejects(createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'k2', check_in_date: '2026-11-03', check_out_date: '2026-11-06', ...guest }), code('STAY_OVERLAP'))
     // Checkout morning is the next guest's check-in.
@@ -976,6 +990,11 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'a', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'b', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest })
+    const beforeEmptyEdit = await getStay(db, manager, stay.id)
+    for (const patch of [{}, { guest_name: stay.guest_name }]) {
+      await assert.rejects(updateStay(db, env, manager, stay.id, { expected_version: 1, ...patch }), code('INVALID_STAY_FIELD'))
+      assert.deepEqual(await getStay(db, manager, stay.id), beforeEmptyEdit)
+    }
     await assert.rejects(updateStay(db, env, manager, stay.id, { expected_version: 99, check_out_date: '2026-11-04' }), code('STAY_VERSION_CONFLICT'))
     await assert.rejects(updateStay(db, env, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-09', check_out_date: '2026-11-11' }), code('STAY_OVERLAP'))
     // A refused move leaves the stay and its nights where they were.
@@ -1030,16 +1049,23 @@ test('a channel stay is read-only here and is paid through its channel; an app s
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 0, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'pay-2' }), code('INVALID_AMOUNT'))
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 100, method: 'crypto', paid_on: '2026-11-01', idempotency_key: 'pay-3' }), code('INVALID_STAY_FIELD'))
     const partial = await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', reference: 'deposit', idempotency_key: 'pay-4' })
-    assert.deepEqual([partial.paid_minor, partial.payment_status, partial.payments.length], [20_000, 'partial', 1])
+    assert.deepEqual([partial.stay.paid_minor, partial.stay.payment_status, partial.stay.payments.length], [20_000, 'partial', 1])
+    const storedPayment = await db.prepare('SELECT id, amount_minor, reference, note FROM stay_payments WHERE organization_id = ? AND stay_id = ? AND idempotency_key = ?').bind(ORG, stay.id, 'pay-4').first<{ id: string; amount_minor: number; reference: string | null; note: string | null }>()
+    assert.deepEqual(storedPayment, { id: partial.payment.id, amount_minor: 20_000, reference: 'deposit', note: null })
     // A retried record is the same payment; the same key for another payment is refused.
     const retried = await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', reference: 'deposit', idempotency_key: 'pay-4' })
-    assert.equal(retried.payments.length, 1)
+    assert.equal(retried.stay.payments.length, 1)
+    assert.deepEqual(retried.payment, partial.payment)
+    for (const patch of [{ reference: 'Changed reference' }, { note: 'Changed note' }]) {
+      await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', reference: 'deposit', idempotency_key: 'pay-4', ...patch }), code('IDEMPOTENCY_CONFLICT'))
+      assert.deepEqual((await getStay(db, manager, stay.id)).payments, partial.stay.payments)
+    }
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 1, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'pay-4' }), code('IDEMPOTENCY_CONFLICT'))
     const paid = await recordStayPayment(db, env, manager, stay.id, { amount_minor: 25_000, method: 'bank_transfer', paid_on: '2026-11-02', idempotency_key: 'pay-5' })
-    assert.deepEqual([paid.paid_minor, paid.payment_status], [45_000, 'paid'])
+    assert.deepEqual([paid.stay.paid_minor, paid.stay.payment_status], [45_000, 'paid'])
     const refunded = await recordStayPayment(db, env, manager, stay.id, { amount_minor: -5_000, method: 'cash', paid_on: '2026-11-03', note: 'Early checkout', idempotency_key: 'pay-6' })
-    assert.equal(refunded.payment_status, 'partial')
-    const removed = await deleteStayPayment(db, env, manager, stay.id, refunded.payments.find(payment => payment.amount_minor === -5_000)!.id)
+    assert.equal(refunded.stay.payment_status, 'partial')
+    const removed = await deleteStayPayment(db, env, manager, stay.id, refunded.payment.id)
     assert.deepEqual([removed.paid_minor, removed.payment_status], [45_000, 'paid'])
     await assert.rejects(deleteStayPayment(db, env, manager, stay.id, 'missing'), code('PAYMENT_NOT_FOUND'))
 
@@ -1048,6 +1074,10 @@ test('a channel stay is read-only here and is paid through its channel; an app s
     const prepaid = await createStay(db, env, manager, withPayment)
     assert.deepEqual([prepaid.paid_minor, prepaid.payment_status, prepaid.payments.length, prepaid.payments[0]!.method, prepaid.payments[0]!.reference], [45_000, 'paid', 1, 'cash', 'cash at the door'])
     assert.equal((await createStay(db, env, manager, withPayment)).payments.length, 1)
+    for (const payment of [null, { ...withPayment.payment, reference: 'Changed initial reference' }, { ...withPayment.payment, note: 'Changed initial note' }, { ...withPayment.payment, amount_minor: 44_000 }]) {
+      await assert.rejects(createStay(db, env, manager, { ...withPayment, payment }), code('IDEMPOTENCY_CONFLICT'))
+      assert.deepEqual((await getStay(db, manager, prepaid.id)).payments, prepaid.payments)
+    }
     assert.equal(await db.prepare('SELECT count(*) FROM stay_payments WHERE stay_id = ?').bind(prepaid.id).first('count(*)'), 1)
     // A bad payment stops the whole create: no stay, no nights.
     await assert.rejects(createStay(db, env, manager, { ...withPayment, idempotency_key: 'bad-payment', check_in_date: '2026-12-20', check_out_date: '2026-12-22', payment: { amount_minor: -100, method: 'cash', paid_on: '2026-12-01' } }), { status: 422, data: { code: 'INVALID_AMOUNT', field: 'payment.amount_minor' } })
@@ -1062,7 +1092,11 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
-    await assert.rejects(setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-04' }), /at least one night setting/)
+    const beforeRefusedSettings = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-04' })
+    for (const patch of [{}, { reset: false }, { reset: true, closed: true }, { reset: true, price_minor: null }]) {
+      await assert.rejects(setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-04', ...patch }), code('INVALID_STAY_FIELD'))
+      assert.deepEqual(await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-04' }), beforeRefusedSettings)
+    }
     const closed = await setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-03', closed: true })
     assert.deepEqual(closed.nights.map(night => [night.available, night.source]), [[false, 'host'], [false, 'host']])
     const priced = await setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-02', to: '2026-11-04', price_minor: 20_000, min_stay_arrival: 3 })

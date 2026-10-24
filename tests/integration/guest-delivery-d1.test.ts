@@ -121,7 +121,23 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       return { threadId: 'change-proof', requestId, token: createHmac('sha256', env.EMAIL_REPLY_SECRET).update(`booking-change:v1:change-proof:${requestId}`).digest('hex'), decision: 'accept' as const }
     }
     const proposal = await propose('first-change', 2)
-    assert.equal((await respondToBookingChange(db, env, proposal)).status, 'accepted')
+    const proposalThread = await getGuestRequest(db, 'change-proof')
+    assert(proposalThread)
+    const proposalRevision = await db.prepare("SELECT json_extract(payload_json, '$.updatedAt') AS revision FROM activity_entries WHERE id = ?").bind(proposal.requestId).first<string>('revision')
+    assert(proposalRevision)
+    const replayProposal = () => requestBookingChange(db, env, proposalThread, 'user-proof', {
+      kind: 'reservation', bookingDate: '2099-01-05', bookingTime: '16:00', partySize: 2, locationId: 'booking-location', expectedUpdatedAt: proposalRevision,
+    }, 'first-change')
+    // The original request may finish while the guest answers it. A late
+    // proposal projection must not reopen the completed conversation.
+    const [accepted] = await Promise.all([respondToBookingChange(db, env, proposal), replayProposal()])
+    assert.equal(accepted.status, 'accepted')
+    const acceptedThread = await getGuestRequest(db, 'change-proof')
+    assert.equal(acceptedThread?.conversation_state, 'resolved')
+    const acceptedDeliveries = (await db.prepare('SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ? ORDER BY d.id').bind('change-proof').all()).results
+    assert.deepEqual(await replayProposal(), { changeStatus: 'accepted' })
+    assert.deepEqual(await getGuestRequest(db, 'change-proof'), acceptedThread)
+    assert.deepEqual((await db.prepare('SELECT d.* FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ? ORDER BY d.id').bind('change-proof').all()).results, acceptedDeliveries)
     assert.equal((await respondToBookingChange(db, env, proposal)).status, 'accepted')
     assert.equal(await db.prepare("SELECT party_size FROM reservations WHERE request_id='change-proof'").first('party_size'), 2)
     assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE request_id='change-proof' AND event_name='booking_change.accepted'").first('count'), 1)

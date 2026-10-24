@@ -231,12 +231,19 @@ async function main() {
       timezone: 'America/New_York',
       weekly: WEEKDAY_HOURS,
       time_off: [],
-      public_name: attorney.public_name,
-      public_bio: attorney.public_bio,
-      public_photo_url: current?.public_photo_url ?? null,
-      public_approved: true,
     })
     expectSuccess(`set_member_scheduling ${attorney.public_name} succeeds`, schedulingRes)
+    const profileRes = await mcp(headers, 'get_member_public_profile', { member_id: attorney.member_id })
+    const profile = expectSuccess(`get_member_public_profile ${attorney.public_name} succeeds`, profileRes)?.profile
+    const profileWrite = await mcp(headers, 'update_member_public_profile', {
+      member_id: attorney.member_id,
+      expected_updated_at: profile.updated_at,
+      public_name: attorney.public_name,
+      public_bio: attorney.public_bio,
+      public_photo_url: profile?.public_photo_url ?? null,
+      public_approved: true,
+    })
+    expectSuccess(`update_member_public_profile ${attorney.public_name} succeeds`, profileWrite)
   }
 
   // 5 Canonical Practice Areas — each a paid 30-minute consultation, held

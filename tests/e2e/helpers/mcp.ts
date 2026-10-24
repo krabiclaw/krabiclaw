@@ -155,6 +155,9 @@ type MemberSchedulingRecord = {
   timezone: string | null
   weekly: Array<{ weekday: number; start: string; end: string }> | null
   time_off: Array<{ start: string; end: string }> | null
+  updated_at: string
+}
+type MemberPublicProfile = {
   public_name: string | null
   public_photo_url: string | null
   public_bio: string | null
@@ -165,7 +168,7 @@ type MemberSchedulingRecord = {
 /**
  * A bookable offering or a stay is published only with a host whose profile
  * guests can see. This publishes the signed-in member's own profile through
- * set_member_scheduling, keeping their hours, and returns that member with the
+ * update_member_public_profile, keeping their hours, and returns that member with the
  * restore of the profile it replaced. Unknown Hours remain unknown.
  */
 export async function publishOwnHostProfile(request: APIRequestContext, baseURL: string, organizationId: string, publicName: string) {
@@ -178,18 +181,21 @@ export async function publishOwnHostProfile(request: APIRequestContext, baseURL:
   const self = members.find(member => member.self)
   expect(self, 'the signed-in user is a member of the organization').toBeTruthy()
   const memberId = self!.id
-  const previous = self!.scheduling
-  const published = await call<{ scheduling: MemberSchedulingRecord }>('set_member_scheduling', {
+  const previousScheduling = self!.scheduling
+  const { profile: previous } = await call<{ profile: MemberPublicProfile | null }>('get_member_public_profile', { member_id: memberId })
+  const published = await call<{ profile: MemberPublicProfile }>('update_member_public_profile', {
     member_id: memberId, expected_updated_at: previous?.updated_at ?? null,
     public_name: publicName, public_photo_url: previous?.public_photo_url ?? null, public_bio: previous?.public_bio ?? null, public_approved: true,
   })
-  expect(published.scheduling).toMatchObject({ public_name: publicName, public_approved: 1 })
+  expect(published.profile).toMatchObject({ public_name: publicName, public_approved: 1 })
   const restore = async () => {
     const profile = { public_name: previous?.public_name ?? null, public_photo_url: previous?.public_photo_url ?? null, public_bio: previous?.public_bio ?? null }
-    const { scheduling: current } = await call<{ scheduling: MemberSchedulingRecord }>('get_member_scheduling', { member_id: memberId })
-    await call('set_member_scheduling', { member_id: memberId, expected_updated_at: current.updated_at, ...profile, public_approved: Boolean(previous?.public_approved) })
-    const { scheduling: restored } = await call<{ scheduling: MemberSchedulingRecord }>('get_member_scheduling', { member_id: memberId })
-    expect(restored).toMatchObject({ timezone: previous?.timezone ?? null, weekly: previous?.weekly ?? null, time_off: previous?.time_off ?? null, ...profile, public_approved: previous?.public_approved ?? 0 })
+    const { profile: current } = await call<{ profile: MemberPublicProfile }>('get_member_public_profile', { member_id: memberId })
+    await call('update_member_public_profile', { member_id: memberId, expected_updated_at: current.updated_at, ...profile, public_approved: Boolean(previous?.public_approved) })
+    const { profile: restored } = await call<{ profile: MemberPublicProfile }>('get_member_public_profile', { member_id: memberId })
+    expect(restored).toMatchObject({ ...profile, public_approved: previous?.public_approved ?? 0 })
+    const { scheduling } = await call<{ scheduling: MemberSchedulingRecord }>('get_member_scheduling', { member_id: memberId })
+    expect(scheduling).toMatchObject(previousScheduling ? Object.fromEntries(Object.entries(previousScheduling).filter(([key]) => key !== 'updated_at')) : { timezone: null, weekly: null, time_off: null })
   }
   return { memberId, restore }
 }

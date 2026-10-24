@@ -742,8 +742,10 @@ export const organizationListItemObject = {
 // ---
 
 export const organizationIdSchema = {
-  organization_id: { type: 'string', description: 'Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.' },
+  organization_id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.' },
 }
+
+export const MCP_TOOL_RESULT_DESCRIPTION = 'Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.'
 
 export function organizationTool(definition: Omit<RawMcpToolDefinition, 'inputSchema' | 'outputSchema'> & {
   inputSchema?: Record<string, unknown>
@@ -827,6 +829,8 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   get_member_scheduling: R,
   set_member_scheduling: { ...D, openWorldHint: true },
   set_member_busy_calendars: D,
+  get_member_public_profile: R,
+  update_member_public_profile: { ...D, openWorldHint: true },
   reassign_product_booking: { ...D, openWorldHint: true, idempotentHint: true },
   get_payment_summary: R,
   list_payments: R,
@@ -853,11 +857,11 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   list_stays: R,
   get_stay: R,
   get_stay_calendar: R,
-  add_stay_photo_room: { ...W, openWorldHint: true },
-  update_stay_photo_room: { ...D, openWorldHint: true },
-  update_stay_accessibility: { ...D, openWorldHint: true },
-  remove_stay_photo_room: { ...D, openWorldHint: true },
-  move_stay_photos: { ...D, openWorldHint: true },
+  create_home_room: { ...W, openWorldHint: true },
+  update_home_room: { ...D, openWorldHint: true },
+  update_home_accessibility: { ...D, openWorldHint: true },
+  delete_home_room: { ...D, openWorldHint: true },
+  assign_home_photos_to_room: { ...D, openWorldHint: true },
   create_stay: { ...W, openWorldHint: true, idempotentHint: true },
   update_stay: { ...D, openWorldHint: true },
   cancel_stay: { ...D, openWorldHint: true },
@@ -901,12 +905,12 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   get_location: R,
   get_post: R,
   get_product: R,
-  list_reservation_inquiries: R,
+  list_table_reservations: R,
   get_resource_localization: R,
   get_organization: R,
   get_organization_analytics: R,
   query_organization_analytics: R,
-  get_organization_media_assets: R,
+  list_media_assets: R,
   get_organization_settings: R,
   get_site_page: R,
   get_workspace_context: R,
@@ -1030,6 +1034,10 @@ export function withToolAnnotations(definition: RawMcpToolDefinition): McpToolDe
     ...definition,
     title: definition.title?.trim() || action.charAt(0).toUpperCase() + action.slice(1),
     inputSchema: { ...definition.inputSchema, additionalProperties: false },
+    outputSchema: {
+      ...definition.outputSchema,
+      description: [definition.outputSchema.description, MCP_TOOL_RESULT_DESCRIPTION].filter(Boolean).join(' '),
+    },
     securitySchemes: MCP_TOOL_SECURITY_SCHEMES,
     annotations,
   }

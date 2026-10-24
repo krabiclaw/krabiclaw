@@ -617,7 +617,10 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   await dialog.getByRole('button', { name: dayLabel(checkIn.date), exact: true }).click()
   await expect(dialog).toContainText('Select checkout date')
   // A checkout short of the minimum is not offered.
-  if (minimum > 1) await expect(dialog.getByRole('button', { name: dayLabel(stayed[1]!.date), exact: true })).toBeDisabled()
+  if (minimum > 1) {
+    const arrivalHint = checkIn.min_stay_arrival > 1 ? ` · ${checkIn.min_stay_arrival}-night minimum` : ''
+    await expect(dialog.getByRole('button', { name: `${dayLabel(stayed[1]!.date)}${arrivalHint}`, exact: true })).toBeDisabled()
+  }
   await dialog.getByRole('button', { name: new RegExp(`^${dayLabel(checkOut)}`) }).click()
   const total = money(stayed.reduce((sum, night) => sum + night.price_minor!, 0))
   const totalRow = dialog.locator('dl > div').last()
