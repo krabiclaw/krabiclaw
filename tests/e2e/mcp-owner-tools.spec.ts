@@ -9,6 +9,7 @@ import { addLocalDays, localDateAt, localDateTimeToInstant, localNow } from '../
 import type { Product } from '../../server/types/products'
 import type { SessionAvailability } from '../../server/utils/availability'
 import type { readMemberScheduling } from '../../server/domain/member-scheduling'
+import type { OrganizationMembersData } from '../../utils/organization-members'
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
@@ -1588,24 +1589,30 @@ test.describe('stateless MCP server', () => {
       try {
         const name = `Hosts ${crypto.randomUUID()}`
         teamId = (await call<{team:{id:string}}>('create_team',{name})).team.id
+        const dashboardBefore = await request.get(`${baseURL}/api/dashboard/members`,{params:{org:'ember-slice-demo'}})
+        expect(dashboardBefore.status(),await dashboardBefore.text()).toBe(200)
+        const teamBefore = (await dashboardBefore.json() as OrganizationMembersData).teams.find(team=>team.id===teamId)
+        expect(teamBefore).toMatchObject({id:teamId,name,organizationId})
+        expect(teamBefore!.members.map(member=>member.userId)).not.toContain(person!.userId)
         const membership = await call<{team_id:string;user_id:string;included:boolean}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:true})
         expect(membership).toEqual({team_id:teamId,user_id:person!.userId,included:true})
-        const nativeMembership = await request.get(`${baseURL}/api/auth/organization/list-team-members`,{params:{teamId}})
-        expect(nativeMembership.status(),await nativeMembership.text()).toBe(200)
-        expect((await nativeMembership.json()).map((member:{userId:string})=>member.userId)).toContain(person!.userId)
+        const dashboardIncluded = await request.get(`${baseURL}/api/dashboard/members`,{params:{org:'ember-slice-demo'}})
+        expect(dashboardIncluded.status(),await dashboardIncluded.text()).toBe(200)
+        const includedTeam = (await dashboardIncluded.json() as OrganizationMembersData).teams.find(team=>team.id===teamId)
+        expect(includedTeam).toMatchObject({id:teamId,name,organizationId})
+        expect(includedTeam!.members).toHaveLength(teamBefore!.members.length+1)
+        expect(includedTeam!.members).toEqual(expect.arrayContaining(teamBefore!.members))
+        expect(includedTeam!.members.find(member=>member.userId===person!.userId)).toMatchObject({teamId,userId:person!.userId})
         const nativeTeams = await request.get(`${baseURL}/api/auth/organization/list-teams`,{params:{organizationId}})
         expect(nativeTeams.status(),await nativeTeams.text()).toBe(200)
         expect(await nativeTeams.json()).toContainEqual(expect.objectContaining({id:teamId,name,organizationId}))
         const removed = await call<{team_id:string;user_id:string;included:boolean}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:false})
         expect(removed).toEqual({team_id:teamId,user_id:person!.userId,included:false})
-        const nativeRemoved = await request.get(`${baseURL}/api/auth/organization/list-team-members`,{params:{teamId}})
-        expect(nativeRemoved.status()).toBe(400)
-        expect(await nativeRemoved.json()).toMatchObject({code:'USER_IS_NOT_A_MEMBER_OF_THE_TEAM'})
         const dashboardMembers = await request.get(`${baseURL}/api/dashboard/members`,{params:{org:'ember-slice-demo'}})
         expect(dashboardMembers.status(),await dashboardMembers.text()).toBe(200)
-        const dashboardTeam = (await dashboardMembers.json()).teams.find((team:{id:string})=>team.id===teamId)
-        expect(dashboardTeam).toBeDefined()
-        expect(dashboardTeam.members.map((member:{userId:string})=>member.userId)).not.toContain(person!.userId)
+        const dashboardTeam = (await dashboardMembers.json() as OrganizationMembersData).teams.find(team=>team.id===teamId)
+        expect(dashboardTeam).toMatchObject({id:teamId,name,organizationId})
+        expect(dashboardTeam!.members).toEqual(teamBefore!.members)
         const email = `invite-${crypto.randomUUID()}@playwright.example`
         const invited = await call<{invitation:{id:string;status:string;delivery:{status:string}}}>('invite_organization_member',{email,role:'member'})
         invitationId = invited.invitation.id
