@@ -63,7 +63,7 @@ class FakeChannex {
     this.sent.push({ path, values: (JSON.parse(init.body as string) as { values: Value[] }).values })
     await this.during?.()
     const answer = this.answer[path]
-    return answer ? answer() : new Response(JSON.stringify({ data: [{ id: 'task-1', type: 'task' }], meta: { message: 'Success', warnings: [] } }), { status: 200 })
+    return answer ? answer() : new Response(JSON.stringify({ data: [{ id: `task-${this.sent.length}`, type: 'task' }], meta: { message: 'Success', warnings: [] } }), { status: 200 })
   }
 
   take() {
@@ -129,7 +129,7 @@ test('lapsed hold failures retain their claims and report every failure after in
       BEGIN SELECT RAISE(ABORT, 'Hold release deletion refused'); END`).run()
     let firstRestriction = true
     channex.answer['/restrictions'] = () => {
-      if (!firstRestriction) return new Response(JSON.stringify({ data: [], meta: { message: 'Success', warnings: [] } }), { status: 200 })
+      if (!firstRestriction) return new Response(JSON.stringify({ data: [{ id: 'task-release', type: 'task' }], meta: { message: 'Success', warnings: [] } }), { status: 200 })
       firstRestriction = false
       return new Response(JSON.stringify({ data: [], meta: { message: 'Success', warnings: [{ warning: 'Release refused' }] } }), { status: 200 })
     }
@@ -170,7 +170,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
   globalThis.fetch = channex.fetch as typeof fetch
   try {
     const states = async (productId: string, from: string, to: string) => (await readStayCalendar(db, manager, { productId, from, to })).nights.map(night => night.channel)
-    const log = async () => (await db.prepare("SELECT kind, external_id, status, detail FROM channel_sync_log WHERE direction = 'outbound' ORDER BY created_at, rowid").all()).results
+    const log = async () => (await db.prepare("SELECT kind, external_id, status, detail, task_id FROM channel_sync_log WHERE direction = 'outbound' ORDER BY created_at, rowid").all()).results
 
     // Yesterday through two days ahead: closed and priced; yesterday is not sent.
     const closed = await setStayNights(db, env, manager, { product_id: connected, from: day(-1), to: day(3), closed: true, price_minor: 175_50, min_stay_arrival: 3 })
@@ -181,7 +181,8 @@ test('night changes on a connected home reach Channex, and what it took is on ea
       { path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(0), date_to: day(2), availability: 0 }] },
     ])
     assert.deepEqual(await states(connected, day(-1), day(3)), [null, ...Array(3).fill({ state: 'pushed', detail: null })])
-    assert.deepEqual((await log()).map(row => (row as { status: string }).status), ['pushed', 'pushed'])
+    // Each call keeps the task Channex created for it, which Channex's certification asks for.
+    assert.deepEqual((await log()).map(row => [(row as { status: string }).status, (row as { task_id: string | null }).task_id]), [['pushed', 'task-1'], ['pushed', 'task-2']])
 
     // A host stay holds its nights; cancelling it releases them. The home's own minimum applies where no night sets one.
     const stay = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'k1', check_in_date: day(10), check_out_date: day(12), adults: 2, guest_name: 'Ana', total_minor: 300_00 })
@@ -247,7 +248,9 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.match(String(unconfirmed.channel_push?.detail), /did not confirm the availability update for .*Attempt 1; sending again at \d\d:\d\d UTC/)
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
     assert.deepEqual((await states(connected, day(30), day(31)))[0], unconfirmed.channel_push)
-    assert.deepEqual((await log()).slice(-4).map(row => [(row as { kind: string }).kind, (row as { status: string }).status]), [['restrictions', 'needs_review'], ['availability', 'pushed'], ['restrictions', 'pushed'], ['availability', 'failed']])
+    // A rejection that created no task, and a call Channex never confirmed, keep none.
+    assert.deepEqual((await log()).slice(-4).map(row => [(row as { kind: string }).kind, (row as { status: string }).status, (row as { task_id: string | null }).task_id !== null]),
+      [['restrictions', 'needs_review', false], ['availability', 'pushed', true], ['restrictions', 'pushed', true], ['availability', 'failed', false]])
     // Not due yet: the task leaves it.
     channex.answer['/availability'] = undefined
     assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 0 })

@@ -1679,6 +1679,9 @@ export const channel_sync_log = sqliteTable("channel_sync_log", {
 	external_id: text().notNull(),
 	status: text().$type<'applied' | 'acknowledged' | 'ignored_disconnected' | 'failed' | 'needs_review' | 'pushed'>().notNull(),
 	detail: text(),
+	// The task Channex created for an outbound ARI call (its answer's data[].id); null for a
+	// booking revision and for a call Channex rejected without creating one.
+	task_id: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	index("channel_sync_log_external_idx").on(table.provider, table.kind, table.external_id),
