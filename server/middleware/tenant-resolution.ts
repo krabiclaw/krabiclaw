@@ -22,6 +22,7 @@ import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette, resolveSitePalette } from '~/shared/site-palette'
 import { parseSiteRecipe } from '~/shared/site-recipe'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation, type SiteLogo } from '~/shared/media-placement-contract'
+import { publicTenantPageSql } from '~/server/utils/content/pages'
 import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
 
 interface TenantRow {
@@ -66,9 +67,9 @@ const TENANT_SELECT_SQL = `SELECT o.id,
              o.name, o.brand_description, ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.vertical,
              (SELECT i.target_id FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'facebook') AS facebook_page_id,
              (SELECT i.target_name FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'instagram') AS instagram_username,
-             EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/privacy') AS privacy_policy,
-             EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/terms') AS terms_policy,
-             EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/acceptable-use') AS acceptable_use_policy,
+             EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/privacy' AND ${publicTenantPageSql('d')}) AS privacy_policy,
+             EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/terms' AND ${publicTenantPageSql('d')}) AS terms_policy,
+             EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/acceptable-use' AND ${publicTenantPageSql('d')}) AS acceptable_use_policy,
              o.settings_json ->> '$.config.font_preset' AS font_preset,
              json_type(o.settings_json, '$.config.font_preset') AS font_preset_type,
              o.settings_json ->> '$.config.palette' AS palette,

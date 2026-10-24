@@ -35,8 +35,9 @@
     <!-- Agreement is its own action before either way of signing up, and starts unchecked. -->
     <UCheckbox v-model="agreed" class="mt-6" name="terms-agreement">
       <template #label>
-        I agree to the <NuxtLink to="/policies/terms" target="_blank" class="font-semibold text-primary">Terms of Service</NuxtLink>,
-        including that abusive content and users are not tolerated, and the <NuxtLink to="/policies/privacy" target="_blank" class="font-semibold text-primary">Privacy Policy</NuxtLink>.
+        I agree to the <NuxtLink to="/policies/terms" target="_blank" class="font-semibold text-primary">Terms of Service</NuxtLink>
+        and the <NuxtLink to="/policies/acceptable-use" target="_blank" class="font-semibold text-primary">Acceptable Use Policy</NuxtLink>,
+        which do not tolerate abusive content or users, and the <NuxtLink to="/policies/privacy" target="_blank" class="font-semibold text-primary">Privacy Policy</NuxtLink>.
       </template>
     </UCheckbox>
     <div class="mt-4 space-y-3" :class="agreed ? '' : 'pointer-events-none opacity-50'" :aria-disabled="!agreed" :inert="!agreed">

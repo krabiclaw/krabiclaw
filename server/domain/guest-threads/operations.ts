@@ -23,7 +23,7 @@ import { formatTimestamp } from '~/utils/timezone'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { getChannelThreadMapping, replyThroughChannex } from './channel-messages'
 import type { ChannexEnv, ChannexError } from '~/server/integrations/channex/client'
-import { announceContentReport, contentReportId, contentReportInsert, guestThreadExcerpt, reportReason, type ContentReportEnv } from '~/server/domain/content-reports'
+import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, guestThreadExcerpt, reportReason, type ContentReportEnv } from '~/server/domain/content-reports'
 import type {
   GuestThreadDeliveryProvider,
   GuestThreadDeliveryRow,
@@ -742,11 +742,14 @@ async function executeReport(db: DbClient, context: ThreadContext, input: Execut
       requestId: context.thread.id, teamMessageId: null, authorUserId: context.thread.user_id, reason,
       excerpt: await guestThreadExcerpt(db, context.thread.id), blocked: block,
     }),
+    // Only the request that filed the report blocks: a retry of an earlier
+    // block must not undo an unblock made since.
     ...(block ? [{
-      query: 'UPDATE requests SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ?',
+      query: 'UPDATE requests SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ? AND changes() = 1',
       params: [new Date().toISOString(), context.thread.organization_id, context.thread.id],
     }] : []),
   ], { operation: block ? 'Block and report a guest' : 'Report a guest conversation' })
+  await assertSameReport(db, id, { subject: 'guest_thread', requestId: context.thread.id, teamMessageId: null, reason, blocked: block })
   await announceContentReport(input.env, db, id)
   return await successfulOutcome(db, context)
 }

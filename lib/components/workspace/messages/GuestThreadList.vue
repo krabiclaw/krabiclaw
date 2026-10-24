@@ -185,7 +185,7 @@
         lens on the one you are in.
       -->
       <NuxtLink
-        v-if="data && (pastOnly || blockedOnly || threads.length > 0)"
+        v-if="data && (pastOnly || blockedOnly || threads.length > 0 || !personalScope)"
         :to="{ path: listRoute, query: pastOnly || blockedOnly ? withoutArchived : { ...route.query, archived: '' } }"
         class="-mx-4 flex items-center justify-between gap-3 px-4 py-4 text-sm font-medium text-default transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
         :class="threads.length ? 'mt-2 border-t border-default' : ''"

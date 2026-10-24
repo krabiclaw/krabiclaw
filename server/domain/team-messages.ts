@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { announceContentReport, contentReportId, contentReportInsert, reportReason, type ContentReport, type ContentReportEnv } from '~/server/domain/content-reports'
+import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, reportReason, type ContentReport, type ContentReportEnv } from '~/server/domain/content-reports'
 import { assertLocationAccess, assertRoleAllows, listAllOrganizationMembers, organizationAdapter, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
 import { publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -439,6 +439,7 @@ export async function reportTeamMessage(env: ContentReportEnv, db: DbClient, acc
     id, organizationId: access.organizationId, reporterUserId: access.userId, subject: 'team_message', requestId: null,
     teamMessageId: messageId, authorUserId: message.sender_user_id, reason, excerpt: message.body || 'Photos only', blocked: false,
   })], { operation: 'Report a team message' })
+  await assertSameReport(db, id, { subject: 'team_message', requestId: null, teamMessageId: messageId, reason, blocked: false })
   return await announceContentReport(env, db, id)
 }
 

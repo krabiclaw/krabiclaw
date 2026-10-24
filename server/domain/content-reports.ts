@@ -76,6 +76,23 @@ export function contentReportInsert(report: {
 }
 
 /**
+ * A key names one report. A retry with the same key and request finds it; the
+ * same key sent about different content, or with a different reason, is refused
+ * rather than answered with the report it first filed.
+ */
+export async function assertSameReport(db: DbClient, id: string, expected: {
+  subject: ContentReportSubject; requestId: string | null; teamMessageId: string | null; reason: string; blocked: boolean
+}): Promise<void> {
+  const filed = await queryFirst<{ subject: string; request_id: string | null; team_message_id: string | null; reason: string; blocked: number }>(db,
+    'SELECT subject, request_id, team_message_id, reason, blocked FROM content_reports WHERE id = ?', [id])
+  if (!filed) fail(500, 'CONTENT_REPORT_NOT_WRITTEN', 'The report was not saved', 'reportId')
+  if (filed.subject !== expected.subject || filed.request_id !== expected.requestId || filed.team_message_id !== expected.teamMessageId
+    || filed.reason !== expected.reason || (filed.blocked === 1) !== expected.blocked) {
+    fail(409, 'IDEMPOTENCY_KEY_REUSED', 'This key already filed a different report. Send a new key.', 'idempotencyKey')
+  }
+}
+
+/**
  * The guest's latest words in a conversation: what a report of it is about. A
  * contact request's first words are the request itself, not a message entry.
  */
@@ -190,21 +207,15 @@ export async function resolveContentReport(env: CloudflareEnv & GuestInboxPublic
   const report = await readReport(db, input.reportId)
   if (report.status !== 'open') fail(409, 'CONTENT_REPORT_RESOLVED', 'This report has already been decided', 'reportId')
   const now = new Date().toISOString()
-  const resolve: BatchQuery = {
+  // The decision is claimed first, so a concurrent decision by other staff wins
+  // or loses here, before anything is removed or anyone banned.
+  const [claimed] = await executeBatch(db, [{
     query: `UPDATE content_reports SET status = ?, resolved_by_user_id = ?, resolved_at = ? WHERE id = ? AND status = 'open'`,
     params: [input.decision === 'remove' ? 'removed' : 'dismissed', input.staffUserId, now, report.id],
-  }
-  if (input.decision === 'dismiss') {
-    await executeBatch(db, [resolve], { operation: 'Dismiss a content report' })
-    return await readReport(db, report.id)
-  }
+  }], { operation: 'Decide a content report' })
+  if ((claimed?.meta?.changes ?? 0) !== 1) fail(409, 'CONTENT_REPORT_RESOLVED', 'This report has already been decided', 'reportId')
+  if (input.decision === 'dismiss') return await readReport(db, report.id)
 
-  if (report.author && !report.author.banned) {
-    await createAuth(env).api.banUser({
-      body: { userId: report.author.id, banReason: `Reported content removed (report ${report.id})` },
-      headers: input.headers,
-    })
-  }
   const message = report.teamMessageId
     ? await queryFirst<{ thread_id: string }>(db, 'SELECT thread_id FROM team_messages WHERE organization_id = ? AND id = ?', [report.organizationId, report.teamMessageId])
     : null
@@ -216,7 +227,23 @@ export async function resolveContentReport(env: CloudflareEnv & GuestInboxPublic
       ? teamMessageRemovalQueries(report.organizationId, report.teamMessageId)
       : []
     : [{ query: 'UPDATE requests SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ?', params: [now, report.organizationId, report.requestId] }]
-  await executeBatch(db, [...removal, resolve], { operation: 'Remove reported content' })
+  try {
+    // Removal is idempotent and the ban is skipped once it holds, so reopening
+    // the report lets staff retry the whole decision.
+    if (removal.length) await executeBatch(db, removal, { operation: 'Remove reported content' })
+    if (report.author && !report.author.banned) {
+      await createAuth(env).api.banUser({
+        body: { userId: report.author.id, banReason: `Reported content removed (report ${report.id})` },
+        headers: input.headers,
+      })
+    }
+  } catch (cause) {
+    await executeBatch(db, [{
+      query: `UPDATE content_reports SET status = 'open', resolved_by_user_id = NULL, resolved_at = NULL WHERE id = ? AND status = 'removed'`,
+      params: [report.id],
+    }], { operation: 'Reopen a content report whose removal failed' })
+    throw cause
+  }
   // Open inboxes drop the removed message or the blocked conversation now.
   const occurredAt = new Date().toISOString()
   if (message) {
