@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e4ed8d7d0e54e8f6ee5704be5c500e53e3911a9521b722a91187ea46116baac6",
-  "documentationFingerprint": "sha256:dbec57524952120ff3627526521bda6296cdeb4043ee70eb321b9201851cb4ac",
+  "fingerprint": "sha256:4a72b69207ce60010b4c3e926c716ef4f94861b8c78f9c943c6e0ead8d559dbf",
+  "documentationFingerprint": "sha256:d1d30b638d72c32e8df1f111a328886b20304d1ceb6d1c7192533942bd2973d0",
   "tools": [
     {
       "name": "add_organization_language",
@@ -61354,6 +61354,7 @@
                 "enum": [
                   "airbnb",
                   "vrbo",
+                  "booking_com",
                   "direct"
                 ],
                 "type": "string"
@@ -62067,6 +62068,7 @@
                   "enum": [
                     "airbnb",
                     "vrbo",
+                    "booking_com",
                     "direct"
                   ],
                   "type": "string"
@@ -67525,6 +67527,7 @@
                   "enum": [
                     "airbnb",
                     "vrbo",
+                    "booking_com",
                     "direct"
                   ],
                   "type": "string"
@@ -99623,6 +99626,7 @@
                   "enum": [
                     "airbnb",
                     "vrbo",
+                    "booking_com",
                     "direct"
                   ],
                   "type": "string"
