@@ -18,7 +18,7 @@ const channexEnv = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_AP
 
 // A booking keeps its creation time across modifications and cancellation;
 // only its revisions carry later times.
-interface Booking { id: string; property_id: string; status: string; arrival: string; departure: string; amount: string; revision: string }
+interface Booking { id: string; property_id: string; status: string; arrival: string; departure: string; amount: string; revision: string; code?: string }
 const CREATED = '2026-10-14T00:00:00Z'
 
 class FakeChannex {
@@ -46,7 +46,7 @@ class FakeChannex {
       if (this.failBooking) return new Response('upstream', { status: 503 })
       const booking = this.bookings.get(match[1]!)!
       return json({ data: { id: booking.id, type: 'booking', attributes: {
-        property_id: booking.property_id, status: booking.status, ota_name: 'AirBNB', ota_reservation_code: `HM${booking.id}`, revision_id: booking.revision,
+        property_id: booking.property_id, status: booking.status, ota_name: 'AirBNB', ota_reservation_code: booking.code ?? `HM${booking.id}`, revision_id: booking.revision,
         inserted_at: CREATED, arrival_date: booking.arrival, departure_date: booking.departure, amount: booking.amount, currency: 'USD',
         customer: { name: 'Lee', surname: 'Park', mail: 'lee@example.test', phone: null }, occupancy: { adults: 2, children: 1, infants: 0 },
       } } })
@@ -99,6 +99,51 @@ async function boot() {
 
 const nights = async (db: D1Database, stayId: string) => (await db.prepare('SELECT date FROM stay_nights WHERE stay_id = ? ORDER BY date').bind(stayId).all<{ date: string }>()).results.map(row => row.date)
 const logged = async (db: D1Database) => (await db.prepare('SELECT external_id, status FROM channel_sync_log ORDER BY created_at, rowid').all<{ external_id: string; status: string }>()).results
+
+test('a reservation re-imported under a new Channex booking id updates its stay instead of becoming a second one', { timeout: 120_000 }, async () => {
+  const { runtime, db, env, productId } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const before: Booking = { id: 'bk-staging', property_id: 'prop-1', status: 'new', arrival: '2027-02-10', departure: '2027-02-13', amount: '300.00', revision: '', code: 'HMREIMPORT' }
+    channex.revise('rev-staging', before, '2026-10-15T01:00:00Z')
+    const original = await applyBookingRevision(db, env, 'rev-staging') as { stay_id: string }
+    // After the cutover the new Channex account holds the same Airbnb reservation under its own booking id.
+    const after: Booking = { ...before, id: 'bk-production', departure: '2027-02-14', amount: '400.00' }
+    channex.revise('rev-production', after, '2026-10-20T01:00:00Z')
+    const reimported = await applyBookingRevision(db, env, 'rev-production')
+    assert.deepEqual(reimported, { status: 'acknowledged', stay_id: original.stay_id, overbooked: false })
+    assert.deepEqual((await db.prepare("SELECT id, external_booking_id, channel_booking_id, check_out_date, total_minor, overbooked, version, revision_id FROM stays WHERE owner = 'channel'").all()).results, [
+      { id: original.stay_id, external_booking_id: 'bk-production', channel_booking_id: 'HMREIMPORT', check_out_date: '2027-02-14', total_minor: 40_000, overbooked: 0, version: 2, revision_id: 'rev-production' },
+    ])
+    assert.deepEqual(await nights(db, original.stay_id), ['2027-02-10', '2027-02-11', '2027-02-12', '2027-02-13'])
+    // A revision of the old booking delivered late does not take the stay back.
+    channex.superseded('rev-staging-late', before, '2026-10-16T01:00:00Z')
+    await applyBookingRevision(db, env, 'rev-staging-late')
+    assert.deepEqual(await db.prepare('SELECT external_booking_id, version FROM stays WHERE id = ?').bind(original.stay_id).first(), { external_booking_id: 'bk-production', version: 2 })
+    // Nor does an older revision of a new booking id move a newer stay onto it.
+    channex.revise('rev-stale', { ...before, id: 'bk-stale' }, '2026-10-19T01:00:00Z')
+    assert.deepEqual(await applyBookingRevision(db, env, 'rev-stale'), { status: 'acknowledged', stay_id: original.stay_id, overbooked: false })
+    assert.deepEqual((await db.prepare("SELECT id, external_booking_id, version FROM stays WHERE owner = 'channel'").all()).results, [{ id: original.stay_id, external_booking_id: 'bk-production', version: 2 }])
+    // Later revisions arrive under the new id and keep updating the same stay.
+    channex.revise('rev-production-cancel', { ...after, status: 'cancelled' }, '2026-10-21T01:00:00Z')
+    await applyBookingRevision(db, env, 'rev-production-cancel')
+    assert.deepEqual(await db.prepare('SELECT status, external_booking_id FROM stays WHERE id = ?').bind(original.stay_id).first(), { status: 'cancelled', external_booking_id: 'bk-production' })
+    assert.deepEqual(await nights(db, original.stay_id), [])
+    // Another reservation on the same nights is its own stay.
+    channex.revise('rev-other', { ...before, id: 'bk-other', code: 'HMOTHER' }, '2026-10-21T02:00:00Z')
+    const other = await applyBookingRevision(db, env, 'rev-other') as { stay_id: string }
+    assert.notEqual(other.stay_id, original.stay_id)
+    // The database holds one stay per channel reservation, whatever writes it.
+    await assert.rejects(db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, total_minor, currency, provider, external_booking_id, channel_booking_id)
+      VALUES ('duplicate', ?, ?, 'airbnb', 'channel', 'confirmed', '2027-03-01', '2027-03-02', 1, 100, 'USD', 'channex', 'bk-duplicate', 'HMREIMPORT')`).bind(ORG, productId).run(), /UNIQUE constraint failed: stays\.organization_id, stays\.channel, stays\.channel_booking_id/)
+    assert.deepEqual(channex.acked, ['rev-staging', 'rev-production', 'rev-staging-late', 'rev-stale', 'rev-production-cancel', 'rev-other'])
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
 
 test('a channel booking lands, repeats and stale deliveries change nothing, an overlap is overbooked, a cancel frees its nights', { timeout: 120_000 }, async () => {
   const { runtime, db, env, productId } = await boot()

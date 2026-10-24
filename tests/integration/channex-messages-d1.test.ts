@@ -27,6 +27,7 @@ const RAW = '2026-10-15T23:12:00.123456'
 const code = (expected: string) => (error: unknown) => (error as { data?: { code?: string } }).data?.code === expected
 
 class Provider {
+  threadId = 'thread'
   bookingId: string | null = null
   propertyId = 'property'
   empty = false
@@ -45,13 +46,13 @@ class Provider {
   messages = [this.message('first', 'guest', 'Hello'), this.message('second', 'system', null, ['/attachment/file'])]
 
   thread() {
-    return { id: 'thread', type: 'message_thread', attributes: { title: 'Conversation supplied by Airbnb', provider: 'AirBNB', is_closed: false, message_count: this.messages.length, inserted_at: RAW, updated_at: RAW },
+    return { id: this.threadId, type: 'message_thread', attributes: { title: 'Conversation supplied by Airbnb', provider: 'AirBNB', is_closed: false, message_count: this.messages.length, inserted_at: RAW, updated_at: RAW },
       relationships: { property: { data: { type: 'property', id: this.propertyId } }, channel: { data: { type: 'channel', id: 'channel' } }, booking: { data: this.bookingId === null ? null : { type: 'booking', id: this.bookingId } } } }
   }
 
   message(id: string, sender: string, text: string | null, attachments: string[] = []) {
     return { id, type: 'message', attributes: { sender, message: text, attachments, inserted_at: RAW, updated_at: RAW, meta: sender === 'system' ? { inquiry: true } : null },
-      relationships: { message_thread: { data: { type: 'message_thread', id: 'thread' } } } }
+      relationships: { message_thread: { data: { type: 'message_thread', id: this.threadId } } } }
   }
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}) => {
@@ -76,8 +77,11 @@ class Provider {
       }
     }
     if (method === 'GET' && url.pathname === '/api/v1/message_threads') return json({ data: this.empty ? [] : [this.thread()], meta: { total: this.empty ? 0 : 1 } })
-    if (method === 'GET' && url.pathname === '/api/v1/message_threads/thread') return json({ data: this.thread() })
-    if (method === 'GET' && url.pathname === '/api/v1/message_threads/thread/messages') {
+    if (method === 'GET' && url.pathname === `/api/v1/message_threads/${this.threadId}`) return json({ data: this.thread() })
+    // Every booking here is the one Airbnb reservation the stay fixtures name.
+    const booked = url.pathname.match(/^\/api\/v1\/bookings\/([^/]+)$/)
+    if (method === 'GET' && booked) return json({ data: { id: booked[1], type: 'booking', attributes: { property_id: this.propertyId, ota_reservation_code: 'Airbnb-booking' } } })
+    if (method === 'GET' && url.pathname === `/api/v1/message_threads/${this.threadId}/messages`) {
       assert.equal(url.searchParams.get('order[inserted_at]'), 'asc')
       return json({ data: this.messages, meta: { total: this.messages.length } })
     }
@@ -88,7 +92,7 @@ class Provider {
       if (this.attachmentNetworkFailure) throw new TypeError('The attachment upload connection ended without an answer')
       return json({ data: { id: `photo-${this.uploads.length}`, type: 'attachment' } })
     }
-    if (method === 'POST' && url.pathname === '/api/v1/message_threads/thread/messages') {
+    if (method === 'POST' && url.pathname === `/api/v1/message_threads/${this.threadId}/messages`) {
       this.sends += 1
       if (this.refuseMessage) return Response.json({ errors: { code: 'not_supported', title: 'Message refused' } }, { status: 422 })
       const body = JSON.parse(String(init.body)) as { message: { message?: string; attachment_id?: string } }
@@ -238,6 +242,41 @@ test('booking assignment before or after booking arrival adopts one request and 
       assert.equal((await getGuestThreadDetail(db, requestId, ORG))!.guestName, null)
       assert.equal(await db.prepare('SELECT count(*) FROM stay_nights').first('count(*)'), 0)
       assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 3)
+    } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+  }
+})
+
+test('a reservation moved to a new Channex account keeps its conversation in either arrival order, and its re-delivered history is not recorded twice', async () => {
+  for (const first of ['booking', 'conversation'] as const) {
+    const { runtime, db, env, productId } = await boot()
+    const provider = new Provider(), realFetch = globalThis.fetch
+    globalThis.fetch = provider.fetch as typeof fetch
+    try {
+      provider.bookingId = 'booking'
+      const stay = await applyChannelBooking(db, env, ORG, productId, booking())
+      await mirrorChannexThread(db, env, 'thread', 'property')
+      const requestId = (await db.prepare('SELECT request_id FROM channel_threads').first<string>('request_id'))!
+      const entries = async () => (await db.prepare("SELECT body, actor_kind FROM activity_entries WHERE request_id = ? AND event_name = 'channel.message_mirrored' ORDER BY sequence").bind(requestId).all()).results
+      assert.deepEqual(await entries(), [{ body: 'Hello', actor_kind: 'guest' }, { body: null, actor_kind: 'system' }])
+
+      // The new account has the same reservation, thread and Airbnb history under its own ids, and one message since.
+      provider.threadId = 'thread-production'
+      provider.bookingId = 'booking-production'
+      provider.messages = [provider.message('production-first', 'guest', 'Hello'), provider.message('production-second', 'system', null, ['/attachment/file']), provider.message('production-third', 'guest', 'Arriving late')]
+      const moved = { ...booking('booking-production'), revision_id: 'revision-production', provider_updated_at: '2026-10-20T00:00:00Z' }
+      if (first === 'booking') await applyChannelBooking(db, env, ORG, productId, moved)
+      await mirrorChannexThread(db, env, 'thread-production', 'property')
+      if (first === 'conversation') await applyChannelBooking(db, env, ORG, productId, moved)
+
+      assert.deepEqual((await db.prepare('SELECT external_thread_id, external_booking_id, moved_from_thread_id, request_id FROM channel_threads').all()).results,
+        [{ external_thread_id: 'thread-production', external_booking_id: 'booking-production', moved_from_thread_id: 'thread', request_id: requestId }], first)
+      assert.deepEqual((await db.prepare('SELECT id, external_booking_id, request_id FROM stays').all()).results, [{ id: stay.id, external_booking_id: 'booking-production', request_id: requestId }], first)
+      assert.equal(await db.prepare('SELECT count(*) FROM requests').first('count(*)'), 1, first)
+      assert.deepEqual(await entries(), [{ body: 'Hello', actor_kind: 'guest' }, { body: null, actor_kind: 'system' }, { body: 'Arriving late', actor_kind: 'guest' }], first)
+      // A message whose text differs at the same Airbnb time is its own message.
+      provider.messages.push(provider.message('production-fourth', 'guest', 'Hello again'))
+      await mirrorChannexThread(db, env, 'thread-production', 'property')
+      assert.equal((await entries()).length, 4, first)
     } finally { globalThis.fetch = realFetch; await runtime.dispose() }
   }
 })

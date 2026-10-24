@@ -925,7 +925,10 @@ test('a v20 export transfers into the v21 baseline unchanged, which admits Booki
 
     const targetPath = join(directory, 'v21.sqlite')
     const manifest = await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
-    assert.deepEqual(manifest.target_migrations, ['0000_baseline.sql'])
+    // The target takes v21's whole chain: its baseline and every forward migration since.
+    const v21 = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+    assert.equal(v21[0], '0000_baseline.sql')
+    assert.deepEqual(manifest.target_migrations, v21)
     const target = new Database(targetPath)
     try {
       target.pragma('foreign_keys = ON')
