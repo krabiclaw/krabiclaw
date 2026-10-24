@@ -22,6 +22,7 @@ test('an article created from a direct action prepares a Facebook draft without 
   const createdTitle = `E2E Today article ${Date.now()}`
   const title = `${createdTitle} revised`
   const excerpt = 'An article prepared for a deliberate Facebook review.'
+  const body = 'An authored article body for the Today action journey.'
   try {
     expect((await page.goto(blogCreatePath(orgSlug)))?.status()).toBe(200)
     await waitForNuxtHydration(page)
@@ -52,6 +53,19 @@ test('an article created from a direct action prepares a Facebook draft without 
     await canvasTitle.fill(createdTitle)
     await expect(saveArticle).toBeDisabled()
     await canvasTitle.fill(title)
+    const canvasBody = articlePanel.locator('.blog-article [contenteditable="true"]')
+    await expect(canvasBody).toHaveCount(1)
+    await canvasBody.fill(body)
+    await articleSettings.click()
+    await page.getByRole('menuitem', { name: 'Excerpt', exact: true }).click()
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/excerpt`)
+    const excerptPanel = page.locator('#dashboard-panel-organization-blog-post-excerpt')
+    await excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true }).fill('Discard this excerpt edit')
+    await excerptPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}`)
+    await expect(canvasTitle).toHaveValue(title)
+    await expect(canvasBody).toHaveText(body)
+    await expect(saveArticle).toBeEnabled()
 
     const articlePath = `${editor}/blog/${articleId}`
     const interceptArticle = (url: URL) => url.pathname === articlePath
@@ -83,8 +97,9 @@ test('an article created from a direct action prepares a Facebook draft without 
     await expect(saveArticle).toBeDisabled()
     const savedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
     expect(savedRead.status()).toBe(200)
-    const savedArticle = mcpData<{ post: { title: string; status: string; updated_at: string } }>(await savedRead.json()).post
-    expect(savedArticle).toMatchObject({ title, status: 'draft' })
+    const savedArticle = mcpData<{ post: { title: string; excerpt: string | null; status: string; updated_at: string; content_blocks: Array<{ type: string; data: { markdown?: string } }> } }>(await savedRead.json()).post
+    expect(savedArticle).toMatchObject({ title, excerpt: null, status: 'draft' })
+    expect(savedArticle.content_blocks.filter(block => block.type === 'markdown').map(block => block.data.markdown)).toEqual([body])
     const categoriesRead = await page.request.get(`${editor}/blog/categories`, { params: { collection: 'blog' } })
     expect(categoriesRead.status(), await categoriesRead.text()).toBe(200)
     const kitchen = (await categoriesRead.json() as { categories: Array<{ id: string; name: string }> }).categories.filter(category => category.name === 'Kitchen')
@@ -93,7 +108,7 @@ test('an article created from a direct action prepares a Facebook draft without 
     // write its body, and publish explicitly before preparing a social post.
     const update = await page.request.patch(`${editor}/blog/${articleId}`, { data: {
       excerpt, category_id: kitchen[0]!.id, expected_updated_at: savedArticle.updated_at,
-      content_blocks: [{ type: 'markdown', data: { markdown: 'An authored article body for the Today action journey.', editor_mode: 'rich' } }],
+      content_blocks: [{ type: 'markdown', data: { markdown: body, editor_mode: 'rich' } }],
     } })
     expect(update.status(), await update.text()).toBe(200)
     const updated = (await update.json() as { post: { updated_at: string } }).post

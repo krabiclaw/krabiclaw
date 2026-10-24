@@ -164,8 +164,8 @@ const settingsActions = computed(() => [
   { label: `Visibility · ${post.value?.status === 'published' ? form.visibility === 'listed' ? 'Published' : 'Unlisted' : 'Draft'}`, icon: 'i-lucide-eye', to: `${postPath.value}/publishing` },
 ])
 const dashboard = useDashboardOrganization()
-const publicUrl = computed(() => post.value?.status === 'published' && post.value.public_path && dashboard.organization.value?.public_url
-  ? new URL(post.value.public_path, dashboard.organization.value.public_url).toString() : null)
+const publicUrl = computed(() => post.value?.public_url && dashboard.organization.value?.public_url
+  ? new URL(post.value.public_url, dashboard.organization.value.public_url).toString() : null)
 const previewUrl = computed(() => publicUrl.value || (post.value?.preview_url && dashboard.organization.value?.public_url
   ? new URL(post.value.preview_url, dashboard.organization.value.public_url).toString() : null))
 const { previewButton, previewPath, previewOpen, previewViewport, previewFailure, changePreviewViewport, restorePreviewFocus } = useDashboardContentPreview(
@@ -450,8 +450,14 @@ provide(blogEditorKey, {
   categories,
   categoriesError,
   resolvedExcerpt,
-  // A cancelled leaf puts the loaded post back before it closes.
-  revert: () => { if (post.value) applyLoadedPost(post.value) },
+  // Cancel discards this metadata concern, leaving the pending article intact.
+  revert: () => {
+    const saved = post.value
+    if (!saved) return
+    if (section.value === 'category') Object.assign(form, { collection: saved.collection ?? 'blog', category_id: saved.category?.id ?? '' })
+    else if (section.value === 'excerpt') form.excerpt = saved.excerpt || ''
+    else if (section.value === 'publishing') form.visibility = saved.visibility || 'listed'
+  },
   save: saveSection,
 })
 </script>

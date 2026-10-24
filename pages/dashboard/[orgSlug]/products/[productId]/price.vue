@@ -47,7 +47,7 @@ const nightlyPrice = computed(() => p.product.value?.kind === 'stay' && p.form.v
 watchEffect(() => {
   if (nightlyPrice.value && level.child.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
-const priceLocations = computed(() => p.locationId.value || nightlyPrice.value ? [] : p.allOrganizationLocations.value.filter(location => p.product.value?.locations.some(entry => entry.location_id === location.id) || p.product.value?.variants.some(variant => variant.prices.some(price => price.location_id === location.id))))
+const priceLocations = computed(() => p.locationId.value || nightlyPrice.value ? [] : p.allOrganizationLocations.value.filter(location => p.product.value?.locations.some(entry => entry.location_id === location.id)))
 const firstAmount = computed(() => !priceLocations.value.length && p.product.value?.variants.length === 1 ? p.sectionPath(`price/amounts/${encodeURIComponent(p.product.value.variants[0]!.id)}`) : null)
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'prices',
