@@ -588,6 +588,14 @@ together immediately before promotion. Take each final delta from the v20
 source right after its deployment, review changed and deleted keys, and verify
 schema, foreign keys and guest journeys before retiring either v20 database.
 
+`krabiclaw-staging-v21` (`1a8c3656-d005-46e0-a1cf-d33579c3c21a`) was created
+with `--location wnam` on 2026-10-24, and Cloudflare reported WNAM before the
+baseline was applied. It was loaded from `krabiclaw-staging-v20` while unbound:
+113 tables, 99,128 rows, `foreign_key_check` empty, the native
+`0000_baseline.sql` ledger, no transforms. The staging binding uses v21; the
+production, development and E2E bindings stay on `krabiclaw-production-v20`
+until production v21 is loaded.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;
