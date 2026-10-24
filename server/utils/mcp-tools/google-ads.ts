@@ -10,6 +10,7 @@ import {
   getGoogleAdsCampaignDetail,
   createGoogleAdsSearchCampaign,
   updateGoogleAdsCampaign,
+  getGoogleAdsCustomer,
 } from '~/server/utils/google-ads'
 
 async function resolveGoogleAdsCredentials(ctx: McpExecutorContext) {
@@ -46,6 +47,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         customer_id: { type: 'string' },
+        currency: { type: 'string', description: 'Connected account currency; budget and spend micros are millionths of this currency.' },
         campaigns: {
           type: 'array',
           items: {
@@ -66,7 +68,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
           },
         },
       },
-      required: ['customer_id', 'campaigns'],
+      required: ['customer_id', 'currency', 'campaigns'],
     },
   }),
   organizationTool({
@@ -87,6 +89,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         id: { type: 'string' },
+        currency: { type: 'string', description: 'Connected account currency; budget and spend micros are millionths of this currency.' },
         name: { type: 'string' },
         status: { type: 'string' },
         channelType: { type: 'string' },
@@ -125,12 +128,12 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
         descriptions: { type: 'array', items: { type: 'string' } },
         finalUrls: { type: 'array', items: { type: 'string' } },
       },
-      required: ['id', 'name', 'status', 'channelType', 'budgetAmountMicros', 'clicks', 'impressions', 'costMicros', 'conversions', 'adGroups', 'keywords', 'headlines', 'descriptions', 'finalUrls'],
+      required: ['id', 'currency', 'name', 'status', 'channelType', 'budgetAmountMicros', 'clicks', 'impressions', 'costMicros', 'conversions', 'adGroups', 'keywords', 'headlines', 'descriptions', 'finalUrls'],
     },
   }),
   organizationTool({
     name: 'create_google_ads_search_campaign',
-    description: 'Create a Google Ads Search campaign from supplied keywords, ad copy, destination URL and daily budget. Creates one ad group and responsive search ad. Starts PAUSED unless ENABLED is explicitly requested; enabled campaigns can spend the connected account’s advertising budget.',
+    description: 'Create a Google Ads Search campaign from supplied keywords, ad copy, destination URL and daily budget in the account currency returned by list_google_ads_campaigns. Creates one ad group and responsive search ad. Starts PAUSED unless ENABLED is explicitly requested; enabled campaigns can spend the connected account’s advertising budget. Each create call makes a new campaign; inspect the account before retrying an uncertain result.',
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
@@ -193,18 +196,14 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         campaign_id: { type: 'string' },
-        resource_name: { type: 'string' },
-        budget_resource_name: { type: 'string' },
-        ad_group_resource_name: { type: 'string' },
-        ad_resource_name: { type: 'string' },
         status: { type: 'string' },
       },
-      required: ['campaign_id', 'resource_name', 'budget_resource_name', 'ad_group_resource_name', 'ad_resource_name', 'status'],
+      required: ['campaign_id', 'status'],
     },
   }),
   organizationTool({
     name: 'update_google_ads_campaign',
-    description: 'Pause, enable or change the daily budget of a selected campaign in the connected Google Ads account. Supply status, or both budget_id and daily_budget_micros. Enabling or raising a budget can increase advertising spend; changing a shared budget affects every campaign using it.',
+    description: 'Pause, enable or change the daily budget of a selected campaign in the connected Google Ads account. Supply status, the budget_id/daily_budget_micros pair, or both. Read get_google_ads_campaign or list_google_ads_campaigns for the current budget ID and account currency first. Enabling or raising a budget can increase advertising spend; changing a shared budget affects every campaign using it.',
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
@@ -254,9 +253,10 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
   if (toolName === 'list_google_ads_campaigns') {
     const { accessToken, developerToken, customerId } = await resolveGoogleAdsCredentials(ctx)
     const status = (optionalString(args, 'status') ?? undefined) as 'ENABLED' | 'PAUSED' | 'ALL' | undefined
-    const campaigns = await listGoogleAdsCampaigns(accessToken, developerToken, customerId, status)
+    const [campaigns, account] = await Promise.all([listGoogleAdsCampaigns(accessToken, developerToken, customerId, status), getGoogleAdsCustomer(accessToken, developerToken, customerId)])
     return {
       customer_id: customerId,
+      currency: account.currencyCode,
       campaigns,
     }
   }
@@ -264,7 +264,8 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
   if (toolName === 'get_google_ads_campaign') {
     const { accessToken, developerToken, customerId } = await resolveGoogleAdsCredentials(ctx)
     const campaignId = requiredString(args, 'campaign_id')
-    return await getGoogleAdsCampaignDetail(accessToken, developerToken, customerId, campaignId)
+    const [campaign, account] = await Promise.all([getGoogleAdsCampaignDetail(accessToken, developerToken, customerId, campaignId), getGoogleAdsCustomer(accessToken, developerToken, customerId)])
+    return { ...campaign, currency: account.currencyCode }
   }
 
   if (toolName === 'create_google_ads_search_campaign') {
@@ -294,10 +295,6 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
 
     return {
       campaign_id: result.campaignId,
-      resource_name: result.resourceName,
-      budget_resource_name: result.budgetResourceName,
-      ad_group_resource_name: result.adGroupResourceName,
-      ad_resource_name: result.adResourceName,
       status: result.status,
     }
   }

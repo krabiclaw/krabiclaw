@@ -43,24 +43,28 @@ const ANNOUNCEMENT_SCHEMA = {
   type: ['object', 'null'],
   description: 'The universal announcement banner or modal shown to visitors on the public website, available to every theme. An image, when set, is a separate organization media placement (slot "announcement"), not a field here.',
   properties: {
-    headline: { type: 'string', description: 'Required in every write, even an empty string when disabling without discarding it.' },
-    description: { type: ['string', 'null'] },
+    headline: { type: 'string', maxLength: 120, description: 'Required in every write, even an empty string when disabling without discarding it.' },
+    description: { type: ['string', 'null'], maxLength: 500 },
     cta_label: { type: ['string', 'null'], description: 'Button label. Requires cta_url and vice versa.' },
     cta_url: { type: ['string', 'null'], description: 'Button destination, http or https. Requires cta_label and vice versa.' },
     dismissible: { type: 'boolean', description: 'Whether a visitor who closes it will not be shown it again on that device.' },
     enabled: { type: 'boolean', description: 'Whether the announcement is currently shown. false keeps the saved content without showing it.' },
     format: { type: 'string', enum: ['modal', 'banner'], description: 'Display style: modal popup dialog or top banner bar (default modal).' },
   },
+  required: ['headline'],
 } as const
+const ANNOUNCEMENT_READ_SCHEMA = { type: ['object', 'null'], properties: {
+  headline: { type: 'string' }, description: { type: ['string', 'null'] }, cta_label: { type: ['string', 'null'] }, cta_url: { type: ['string', 'null'] },
+  dismissible: { type: 'boolean' }, enabled: { type: 'boolean' }, format: { type: 'string', enum: ['modal', 'banner'] },
+} } as const
 
 const memberObject = { type: 'object', properties: {
   id: { type: 'string' }, organizationId: { type: 'string' }, userId: { type: 'string' }, role: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' },
 }, required: ['id', 'organizationId', 'userId', 'role', 'createdAt'] } as const
 const invitationObject = { type: 'object', properties: {
-  id: { type: 'string' }, organizationId: { type: 'string' }, email: { type: 'string' }, role: { type: 'string' }, status: { type: 'string' }, inviterId: { type: 'string' },
-  createdAt: { type: 'string', format: 'date-time' }, expiresAt: { type: 'string', format: 'date-time' },
-  delivery: { type: ['object','null'], properties: {status:{type:'string'},provider:{type:'string'},provider_message_id:{type:['string','null']},error:{type:['string','null']}}, required:['status','provider','provider_message_id','error'] },
-}, required: ['id', 'organizationId', 'email', 'role', 'status', 'inviterId', 'createdAt', 'expiresAt','delivery'] } as const
+  id: { type: 'string' }, email: { type: 'string' }, role: { type: 'string' }, status: { type: 'string' }, expiresAt: { type: 'string', format: 'date-time' },
+  delivery: { type: ['object','null'], properties: {status:{type:'string'},error:{type:['string','null']}}, required:['status','error'] },
+}, required: ['id', 'email', 'role', 'status', 'expiresAt','delivery'], additionalProperties: false } as const
 const roleField = { type: 'string', enum: Object.keys(organizationRoles) }
 const teamObject = { type: 'object', properties: {
   id: { type: 'string' }, name: { type: 'string' }, organizationId: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
@@ -68,7 +72,7 @@ const teamObject = { type: 'object', properties: {
     id: { type: 'string' }, teamId: { type: 'string' }, userId: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' },
   }, required: ['id', 'teamId', 'userId', 'createdAt'] } },
 }, required: ['id', 'name', 'organizationId', 'createdAt', 'members'] } as const
-const teamOutput = { type: 'object', properties: { team: teamObject }, required: ['team'] }
+const teamOutput = { type: 'object', properties: { team: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } }, required: ['id', 'name'], additionalProperties: false } }, required: ['team'] }
 
 const websiteDraftLocationSchema = {
   type: 'object', properties: {
@@ -136,7 +140,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'set_team_member', description: 'Add an existing business teammate to a team, or remove them from it. Existing bookings keep their saved provider.',
-    domain: 'organizations', minimumRole: 'admin', inputSchema: { team_id: { type: 'string' }, user_id: { type: 'string' }, included: { type: 'boolean' } }, required: ['team_id', 'user_id', 'included'], outputSchema: teamOutput,
+    domain: 'organizations', minimumRole: 'admin', inputSchema: { team_id: { type: 'string' }, user_id: { type: 'string' }, included: { type: 'boolean' } }, required: ['team_id', 'user_id', 'included'], outputSchema: { type: 'object', properties: { team_id: { type: 'string' }, user_id: { type: 'string' }, included: { type: 'boolean' } }, required: ['team_id', 'user_id', 'included'], additionalProperties: false },
   }),
   organizationTool({
     name: 'delete_team', description: 'Delete a team from this business. Existing bookings keep their saved provider. Offerings assigned to this team require a new schedule assignment.',
@@ -240,7 +244,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
               ...Object.fromEntries(SITE_RECIPE_KEYS.map(key => [key, { type: 'string', enum: [...SITE_RECIPE_OPTIONS[key]], description: `${SITE_RECIPE_DESCRIPTIONS[key]} Absent when the site uses the Default.` }])),
               palette: { type: ['object', 'null'], description: 'The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw\'s own site.', properties: { light: PALETTE_COLORS_SCHEMA, dark: PALETTE_COLORS_SCHEMA } },
               palette_source: { type: ['string', 'null'], enum: ['custom', 'default', null] },
-              announcement: ANNOUNCEMENT_SCHEMA,
+              announcement: ANNOUNCEMENT_READ_SCHEMA,
               media: { type: 'array', items: ORGANIZATION_MEDIA_ITEM_SCHEMA },
               contact_email: { type: ['string', 'null'] },
               address_visibility: { type: 'string', enum: ['visible', 'hidden'] },
@@ -301,17 +305,18 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
           entity: { type: 'string', enum: ['organization_settings'] },
           id: { type: 'string' },
           changed_fields: { type: 'array', items: { type: 'string' } },
+          saved_fields: { type: 'object', description: 'Persisted values of only the supplied settings, keyed by changed_fields.' },
           address_visibility: { type: 'string', enum: ['visible', 'hidden'] },
           contrast_warnings: { type: 'array', items: { type: 'object', properties: { mode: { type: 'string' }, pair: { type: 'string' }, ratio: { type: 'number' }, minimum: { type: 'number' } }, required: ['mode', 'pair', 'ratio', 'minimum'] } },
           updated_at: { type: 'string' },
           context: { type: 'object' },
         },
-        required: ['ok', 'entity', 'id'],
+        required: ['ok', 'entity', 'id', 'changed_fields', 'saved_fields'],
       },
     }),
   organizationTool({
       name: 'set_consultation_mode',
-      description: 'Choose native bookings, an external scheduler, or Contact on the Schedule page. Supply external_url to connect a scheduler.',
+      description: 'Choose native legal consultation bookings, an external scheduler, or Contact on the Schedule page. Supply external_url to connect a scheduler; omission retains the saved URL. Null clears the URL only when not using the external scheduler.',
       domain: 'organizations', minimumRole: 'admin', inputSchema: { mode: { type: 'string', enum: ['native', 'external_url', 'native_disabled'] }, external_url: { type: ['string', 'null'] } },
       required: ['mode'],
       outputSchema: { type: 'object', properties: { settings: { type: 'object', properties: { mode: { type: 'string', enum: ['native', 'external_url', 'native_disabled'] }, external_url: { type: ['string', 'null'] } }, required: ['mode', 'external_url'] } }, required: ['settings'] },
@@ -356,7 +361,12 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
         return { deleted: true, team_id: teamId }
       }
       if (!team) throw new Error('The saved team could not be read back')
-      return { team }
+      if (toolName === 'set_team_member') {
+        const included = team.members.some(member => member.userId === args.user_id)
+        if (included !== args.included) throw new Error('The saved team membership does not match the requested change')
+        return { team_id: team.id, user_id: requiredString(args, 'user_id'), included }
+      }
+      return { team: { id: team.id, name: team.name } }
     }
     case 'list_organization_members': {
       await assertRoleAllows({ ...organization.membership, permissions: { members: ['read'], invitations: ['read'] } })
@@ -366,14 +376,17 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
         adapter.listInvitations({ organizationId: organization.organizationId }),
       ])
       const deliveries = await getInvitationDeliveries(organization.db, organization.organizationId, invitations)
-      return { ...result, invitations: invitations.map(invitation => ({...invitation,delivery:deliveries.get(invitation.id) ?? null})) }
+      return { ...result, invitations: invitations.map(invitation => {
+        const delivery = deliveries.get(invitation.id)
+        return { id: invitation.id, email: invitation.email, role: invitation.role, status: invitation.status, expiresAt: invitation.expiresAt, delivery: delivery ? { status: delivery.status, error: delivery.error } : null }
+      }) }
     }
     case 'invite_organization_member': {
       const { api, headers } = await requireMcpOrganizationApi(ctx.event, organization)
       const invitation = await api.createInvitation({ headers, body: { organizationId: organization.organizationId, email: requiredString(args, 'email'), role: requiredString(args, 'role') as keyof typeof organizationRoles, resend: args.resend === true } })
       const delivery = (await getInvitationDeliveries(organization.db, organization.organizationId, [invitation])).get(invitation.id) ?? null
       if (!delivery || ['failed','pending'].includes(delivery.status)) throw new HTTPError({statusCode:502,statusMessage:delivery?.error ?? 'Invitation was saved, but its email delivery is unconfirmed',data:{invitation_id: typeof invitation.id === 'string' && invitation.id.trim() ? invitation.id : undefined}})
-      return { invitation: {...invitation,delivery} }
+      return { invitation: { id: invitation.id, email: invitation.email, role: invitation.role, status: invitation.status, expiresAt: invitation.expiresAt, delivery: { status: delivery.status, error: delivery.error } } }
     }
     case 'update_organization_member_role': {
       const { api, headers } = await requireMcpOrganizationApi(ctx.event, organization)
@@ -392,7 +405,8 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
       if (!invitations.some(invitation => invitation.id === invitationId)) throw new HTTPError({ statusCode: 404, statusMessage: 'Invitation not found in this business' })
       const invitation = await api.cancelInvitation({ headers, body: { invitationId } })
       if (!invitation) throw new Error('Better Auth did not return the cancelled invitation')
-      return { invitation: {...invitation,delivery:(await getInvitationDeliveries(organization.db, organization.organizationId, [invitation])).get(invitation.id) ?? null} }
+      const delivery = (await getInvitationDeliveries(organization.db, organization.organizationId, [invitation])).get(invitation.id)
+      return { invitation: { id: invitation.id, email: invitation.email, role: invitation.role, status: invitation.status, expiresAt: invitation.expiresAt, delivery: delivery ? { status: delivery.status, error: delivery.error } : null } }
     }
     case "get_organization":
       {
@@ -449,17 +463,19 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
           entity: "organization_settings",
           id: organization.organizationId,
           changed_fields: Object.keys(updates),
+          saved_fields: Object.fromEntries(Object.keys(updates).map(key => [key, settingsResult[key as keyof typeof settingsResult]])),
           ...(settingsResult.address_visibility !== undefined ? { address_visibility: settingsResult.address_visibility } : {}),
           contrast_warnings: settingsResult.palette ? paletteContrast(settingsResult.palette).filter(check => check.ratio < check.minimum) : [],
           updated_at: settingsResult.updated_at,
           context: updateSettingsContext,
         },
         "Updated organization settings.",
-        { settings: settingsResult },
       );
     }
-    case "set_consultation_mode":
-      return { settings: await setPublicConsultationMode(organization.db, organization.organizationId, requiredString(args, 'mode') as 'native' | 'external_url' | 'native_disabled', args.external_url) }
+    case "set_consultation_mode": {
+      const saved = await setPublicConsultationMode(organization.db, organization.organizationId, requiredString(args, 'mode') as 'native' | 'external_url' | 'native_disabled', args.external_url)
+      return { settings: { mode: saved.mode, external_url: saved.external_url } }
+    }
     default:
       return NOT_HANDLED
   }

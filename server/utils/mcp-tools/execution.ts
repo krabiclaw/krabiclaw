@@ -44,7 +44,7 @@ export async function requireActiveVideoAsset(
   if (!asset || asset.status !== "active" || asset.kind !== "video") {
     throw mcpProtocolError(
       MCP_ERROR.invalidParams,
-      `${fieldName} must reference an active video asset from this organization. Upload the video via the dashboard media library first, then call get_organization_media_assets to find its asset id.`,
+      `${fieldName} must reference an active video asset from this organization. Upload the video via the dashboard media library first, then call list_media_assets to find its asset id.`,
     );
   }
   return asset;
@@ -502,8 +502,9 @@ export async function normalizeWorkspaceArguments(
       : {};
   for (const key of ['organization_id', 'location_id']) {
     if (!(key in properties) || !Object.hasOwn(args, key)) continue
-    const type = (properties[key] as { type?: unknown }).type
-    if (args[key] === null && Array.isArray(type) && type.includes('null')) continue
+    // Null is an explicit value, including schemas that express it with
+    // anyOf/oneOf. The SDK validates whether this tool accepts it.
+    if (args[key] === null) continue
     if (typeof args[key] !== 'string' || !args[key].trim()) {
       throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`, { status: 400, invalid_fields: [key] })
     }
@@ -513,10 +514,7 @@ export async function normalizeWorkspaceArguments(
   if (["get_workspace_context", "set_workspace_context", "list_organizations"].includes(toolName)) return args;
   const supportsOrganization = "organization_id" in properties;
   const supportsLocation = "location_id" in properties;
-  const locationSchema = properties.location_id as { type?: unknown } | undefined;
-  const explicitNeutralLocation = args.location_id === null
-    && Array.isArray(locationSchema?.type) && locationSchema.type.includes("null");
-  const needsLocation = toolRequiresArgument(schema, "location_id") && !explicitNeutralLocation;
+  const needsLocation = toolRequiresArgument(schema, "location_id") && args.location_id !== null;
   const hasOrganization = typeof args.organization_id === "string" && args.organization_id.trim();
   const hasLocation = typeof args.location_id === "string" && args.location_id.trim();
 
@@ -546,10 +544,10 @@ export async function normalizeWorkspaceArguments(
     rethrowWorkspaceError(error);
   }
 
-  if (!hasOrganization && supportsOrganization && workspace.organization) {
+  if (!Object.hasOwn(args, 'organization_id') && supportsOrganization && workspace.organization) {
     args.organization_id = workspace.organization.id;
   }
-  if (!hasLocation && supportsLocation && workspace.location && needsLocation) {
+  if (!Object.hasOwn(args, 'location_id') && supportsLocation && workspace.location && needsLocation) {
     args.location_id = workspace.location.id;
   }
 

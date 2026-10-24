@@ -108,7 +108,7 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'put_resource_localization',
-    description: "Replace an exact translation. Existing documents require expected_updated_at. Document addresses are assigned from their source and remain stable; authored Q&A uses title and summary without blocks. Imported Q&A remains read-only.",
+    description: "Replace an exact translation with fields allowed for its resource_type. For content_document, an existing translation requires its current expected_updated_at from get_resource_localization; a new article or page translation requires content_blocks. Omit blocks to retain an existing body. Document addresses come from the source and remain stable. Authored Q&A translations use title and summary without blocks; imported Q&A remains read-only.",
     domain: 'locales',
     minimumRole: 'admin',
     inputSchema: {
@@ -117,7 +117,11 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
       locale: { type: 'string' },
       values: { ...resourceValuesInput, properties: { ...resourceValuesInput.properties, ...localizedDocumentValues.properties } },
       content_blocks: TENANT_PAGE_BLOCKS_SCHEMA,
-      expected_updated_at: { type: ['string', 'null'] },
+      expected_updated_at: { type: ['string', 'null'], description: 'content_document only: required current translation updated_at when replacing an existing document. Omit or use null when creating a translation.' },
+      oneOf: [
+        ...resourceValueBranches.map(branch => ({ ...branch, not: { anyOf: [{ required: ['content_blocks'] }, { required: ['expected_updated_at'] }] } })),
+        { properties: { resource_type: { const: 'content_document' }, values: localizedDocumentValues } },
+      ],
     },
     required: ['resource_type', 'resource_id', 'locale', 'values'],
     outputSchema: { type: 'object', properties: { localization: localizationObject, context: { type: 'object' } }, required: ['localization'], additionalProperties: false },
@@ -172,6 +176,12 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
           additionalProperties: false,
         },
       },
+      oneOf: LOCALIZED_RESOURCE_TYPES.map(resourceType => ({
+        properties: {
+          resource_type: { const: resourceType },
+          items: { type: 'array', items: { properties: { values: localizedResourceValuesSchema(resourceType) } } },
+        },
+      })),
     },
     required: ['resource_type', 'locale', 'items'],
     outputSchema: { type: 'object', properties: { locale: { type: 'string' }, resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES] }, updated_resource_ids: { type: 'array', items: { type: 'string' } }, context: { type: 'object' } }, required: ['locale', 'resource_type', 'updated_resource_ids'], additionalProperties: false },

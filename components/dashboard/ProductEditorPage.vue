@@ -592,7 +592,7 @@ const arrivalTab = computed(() => stayEditor.value && (route.query.guide === 'ar
 async function changeStayTab(value: string | number) {
   if (saving.value || value === (arrivalTab.value ? 'arrival' : 'space')) return
   revert()
-  await navigateTo(router.resolve({ path: itemPath.value, query: { location_id: locationId.value ?? undefined, ...(value === 'arrival' ? { guide: 'arrival' } : {}) } }).fullPath)
+  await router.push(router.resolve({ path: itemPath.value, query: { location_id: locationId.value ?? undefined, ...(value === 'arrival' ? { guide: 'arrival' } : {}) } }).fullPath)
 }
 
 // The home's private arrival guide is read only inside its authenticated editor.

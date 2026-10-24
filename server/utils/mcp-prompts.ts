@@ -144,7 +144,7 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
     case "improve_my_homepage": {
       return {
         description: "Review the homepage",
-        text: "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and get_organization_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result.",
+        text: "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and list_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result.",
       };
     }
     case "add_photos_to_organization": {
@@ -168,7 +168,7 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
     case "make_my_organization_look_better": {
       return {
         description: "Review the website",
-        text: "Use get_workspace_context, list_site_pages, get_site_page, get_organization_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result.",
+        text: "Use get_workspace_context, list_site_pages, get_site_page, list_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result.",
       };
     }
     case "grow_my_bookings": {

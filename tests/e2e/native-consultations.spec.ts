@@ -152,9 +152,9 @@ test('native online review uses canonical Products, holds capacity, and releases
   const mcpScheduling = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: org, member_id: self.id } })
   expect(mcpScheduling.status(), await mcpScheduling.text()).toBe(200)
   const missingScheduling = (await mcpScheduling.json()).result
-  expect(missingScheduling.isError).toBe(true)
-  expect(missingScheduling.structuredContent).toBeUndefined()
-  expect(JSON.parse(missingScheduling.content[0].text)).toEqual({ status: 404, message: 'Member scheduling not found', code: 'MEMBER_SCHEDULING_NOT_FOUND' })
+  expect(missingScheduling.isError).toBe(false)
+  expect(missingScheduling.structuredContent).toEqual({ scheduling: null })
+  expect(JSON.parse(missingScheduling.content[0].text)).toEqual({ scheduling: null })
   const mcpMembers = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: org } })
   expect(mcpMembers.status(), await mcpMembers.text()).toBe(200)
   expect(mcpData<{ members: Array<Record<string, unknown>> }>(await mcpMembers.json()).members).toContainEqual({ id: self.id, name: self.name, image: self.image, self: true, scheduling: self.scheduling })

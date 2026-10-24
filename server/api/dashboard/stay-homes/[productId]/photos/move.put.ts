@@ -8,7 +8,7 @@ import { airbnbUnsynced, moveStayPhotos, stayAccessFor } from '~/server/domain/s
 export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardMemberContext(event, {})
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
-  const home = await moveStayPhotos(db, env, access, getRouterParam(event, 'productId') ?? '', await readRequiredBody<unknown>(event))
+  const { home } = await moveStayPhotos(db, env, access, getRouterParam(event, 'productId') ?? '', await readRequiredBody<unknown>(event))
   // Photos are Airbnb's to hold: a home syncing with Airbnb names where to change them there too.
   return jsonResponse({ home, airbnb_unsynced: airbnbUnsynced(home, ['photos']) })
 })

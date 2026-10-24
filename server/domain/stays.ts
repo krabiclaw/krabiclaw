@@ -1108,7 +1108,7 @@ export async function removeStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
 }
 
 /** Move explicit photos together, refusing a changed source or a photo removed in the meantime. */
-export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, body: unknown): Promise<StayHome> {
+export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, body: unknown): Promise<{ home: StayHome; destination_room_id: string | null; created_room_id: string | null; moved_photo_ids: string[] }> {
   const home = await managedHome(db, access, productId)
   if (!isRecord(body)) fail(422, 'INVALID_PHOTO_MOVE', 'Choose photos and their destination', 'photos')
   const unknown = Object.keys(body).find(key => !['room_id', 'new_room_type', 'photos'].includes(key))
@@ -1172,7 +1172,7 @@ export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInb
     }
     throw error
   }
-  return await changedStayPhotoRooms(db, env, access, home)
+  return { home: await changedStayPhotoRooms(db, env, access, home), destination_room_id: roomId, created_room_id: creating ? roomId : null, moved_photo_ids: photos.map(photo => photo.photo_id) }
 }
 
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */
@@ -1493,11 +1493,17 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
   const payment = input.payment === undefined || input.payment === null ? null : stayPaymentFields(input.payment, 'payment.', false)
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const replay = async () => {
-    const existing = await queryFirst<{ id: string; product_id: string; check_in_date: string; check_out_date: string; guest_name: string; total_minor: number }>(db,
-      'SELECT id, product_id, check_in_date, check_out_date, guest_name, total_minor FROM stays WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
+    const existing = await queryFirst<StayFields & { id: string; product_id: string }>(db,
+      `SELECT id, product_id, ${Object.keys(fields).join(', ')} FROM stays WHERE organization_id = ? AND idempotency_key = ?`, [access.organizationId, key])
     if (!existing) return null
-    if (existing.product_id !== home.product_id || existing.check_in_date !== fields.check_in_date || existing.check_out_date !== fields.check_out_date
-      || existing.guest_name !== fields.guest_name || existing.total_minor !== fields.total_minor) fail(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency_key was already used for a different stay', 'idempotency_key')
+    if (existing.product_id !== home.product_id || Object.entries(fields).some(([field, value]) => existing[field as keyof StayFields] !== value)) {
+      fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with different saved details. Reload the stay before another change; a create retry does not edit an existing stay.', 'idempotency_key')
+    }
+    const initialPayment = await queryFirst<StayPaymentFields>(db,
+      'SELECT amount_minor, method, paid_on, reference, note FROM stay_payments WHERE organization_id = ? AND stay_id = ? AND idempotency_key = ?', [access.organizationId, existing.id, `${key}:payment`]) ?? null
+    if ((payment === null) !== (initialPayment === null) || (payment && initialPayment && Object.entries(payment).some(([field, value]) => initialPayment[field as keyof StayPaymentFields] !== value))) {
+      fail(409, 'IDEMPOTENCY_CONFLICT', 'This key belongs to a stay with a different saved initial payment', 'idempotency_key')
+    }
     return getStay(db, access, existing.id)
   }
   // A replay pushes again, so retrying a create whose push did not land repairs it.
@@ -1556,6 +1562,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const home = await readStayHome(db, access, current.product_id)
   const fields = stayFields({ ...current, ...input }, home)
+  if (!Object.entries(fields).some(([field, value]) => value !== current[field as keyof StayFields])) fail(422, 'INVALID_STAY_FIELD', 'Provide at least one changed stay field', 'stay')
   if (current.request_id !== null && fields.guest_email === null && fields.guest_phone === null) {
     throw new HTTPError({ statusCode: 422, statusMessage: 'An existing guest conversation requires a guest email or phone', data: { code: 'STAY_THREAD_CONTACT_REQUIRED', fields: ['guest_email', 'guest_phone'] } })
   }
@@ -1790,23 +1797,25 @@ function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: str
   ]
 }
 
-export async function recordStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<StayDetail> {
+export async function recordStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<{ stay: StayDetail; payment: StayPayment }> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
   if (stay.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay is paid through its channel')
   const payment = stayPaymentFields(input, '', true)
-  const amountMinor = payment.amount_minor
-  const paidOn = payment.paid_on
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
-  // A retry of a payment that was recorded returns the stay as it is; the same key for a different payment is refused.
+  // Read the exact recorded row by its durable key, never by its position in
+  // payment history. A retry also finishes a failed dashboard publication.
   const replay = async () => {
-    const existing = await queryFirst<{ stay_id: string; amount_minor: number; method: string; paid_on: string }>(db,
-      'SELECT stay_id, amount_minor, method, paid_on FROM stay_payments WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
+    const existing = await queryFirst<StayPaymentFields & { id: string; stay_id: string }>(db,
+      'SELECT id, stay_id, amount_minor, method, paid_on, reference, note FROM stay_payments WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
     if (!existing) return null
-    if (existing.stay_id !== stayId || existing.amount_minor !== amountMinor || existing.method !== input.method || existing.paid_on !== paidOn) fail(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency_key was already used for a different payment', 'idempotency_key')
+    if (existing.stay_id !== stayId || Object.entries(payment).some(([field, value]) => existing[field as keyof StayPaymentFields] !== value)) fail(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency_key was already used for a different payment', 'idempotency_key')
     await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, locationId: stay.location_id, productId: stay.product_id, stayId }, { version: stay.version })
-    return getStay(db, access, stayId)
+    const updated = await getStay(db, access, stayId)
+    const recorded = updated.payments.find(entry => entry.id === existing.id)
+    if (!recorded) fail(409, 'PAYMENT_CHANGED', 'The payment was recorded but removed before readback. Reload the stay before another change.', 'payment_id', { committed: true, stay_id: stayId })
+    return { stay: updated, payment: recorded }
   }
   const earlier = await replay()
   if (earlier) return earlier
@@ -1819,8 +1828,9 @@ export async function recordStayPayment(db: DbClient, env: GuestInboxPublication
     }
     throw error
   }
-  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, locationId: stay.location_id, productId: stay.product_id, stayId }, { version: stay.version })
-  return getStay(db, access, stayId)
+  const recorded = await replay()
+  if (!recorded) fail(409, 'PAYMENT_CHANGED', 'The payment was recorded but removed before readback. Reload the stay before another change.', 'payment_id', { committed: true, stay_id: stayId })
+  return recorded
 }
 
 export async function deleteStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, paymentId: string): Promise<StayDetail> {
