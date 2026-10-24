@@ -44,10 +44,11 @@ Screen Recording permission for the terminal that runs it.
    points: `ffmpeg -i hf/assets/x.mp4 -vf
    "fps=1/2,scale=320:-1,drawtext=text='%{pts\:hms}':x=3:y=3:fontsize=22:fontcolor=red:box=1,tile=10x12"
    -frames:v 1 sheet.png`.
-4. **Redact.** Blur other people's accounts, personal greetings and anything
-   private in a separate clip: `ffmpeg -ss <start> -t <len> -i x.mp4
-   -filter_complex "[0]split=2[a][b];[b]crop=W:H:X:Y,boxblur=18[c];[a][c]overlay=X:Y"
-   x_blur.mp4`. Check a frame of the output before using it.
+4. **Clean account.** Before recording a consent screen, remove any earlier
+   Krabiclaw grant from the Google account (myaccount.google.com/connections)
+   so the screen lists only the scopes under review; Google treats every scope
+   it shows as requested. Don't blur or redact: record from the owner's own
+   accounts.
 5. **Cut.** Write `cut.json` (format in `build.py`), then `python3 build.py
    cut.json hf/`, `npx hyperframes lint`, `npx hyperframes snapshot --at
    <times> --no-end`, and look at the frames: captions must not cover what the
@@ -56,8 +57,8 @@ Screen Recording permission for the terminal that runs it.
    --video-frame-format png`.
 6. **Approve, then upload.** The owner reviews the MP4 before anything is
    published. Then `python3 youtube_upload.py out.mp4 "<title>" desc.txt
-   <channel-id>`. The description lists what each timestamp shows and says
-   the recording is trimmed and sped up; nothing in it is simulated.
+   <channel-id>`. The description lists what each timestamp shows, and
+   nothing more: no notes about editing or speed.
 
 ## What made the last one work
 
