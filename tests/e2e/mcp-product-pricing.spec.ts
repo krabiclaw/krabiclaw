@@ -358,6 +358,54 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     expect(response.status(), await response.text()).toBe(200)
   }
 
+  // A location offering and its price have independent lifetimes. Stopping
+  // the offering retains its price, without leaving a broken scoped editor.
+  const scopedPriceWrite = await mcpRequest(request, baseURL!, {
+    method: 'tools/call', toolName: 'update_product',
+    args: { organization_id: organizationId, product_id: created.id, variants: [{ id: small.id, prices: [{ location_id: locationId, unit_amount: 625, currency: 'USD' }] }] },
+  })
+  expect(scopedPriceWrite.status()).toBe(200)
+  expect(mcpData<{ product: Product }>(await scopedPriceWrite.json()).product.id).toBe(created.id)
+  const scopedPriceRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
+  expect(scopedPriceRead.status()).toBe(200)
+  const scopedProduct = (await scopedPriceRead.json() as { product: Product }).product
+  const scopedPrice = scopedProduct.variants.find(variant => variant.id === small.id)!.prices.find(price => price.location_id === locationId)!
+  expect(scopedPrice).toMatchObject({ location_id: locationId, unit_amount: 625, currency: 'USD' })
+  const priceContext = await browser.newContext({ storageState: await request.storageState() })
+  try {
+    const pricePage = await priceContext.newPage()
+    await pricePage.setViewportSize({ width: 1440, height: 900 })
+    const productPath = `/dashboard/${encodeURIComponent(dashboardOrganization!.slug)}/products/${created.id}`
+    expect((await pricePage.goto(`${baseURL}${productPath}/price`))?.status()).toBe(200)
+    const pricing = pricePage.locator('#dashboard-panel-product-pricing')
+    await pricing.getByTestId(`editor-row-location-${locationId}`).click()
+    await expect(pricePage).toHaveURL(`${baseURL}${productPath}/price?location_id=${locationId}`)
+    await pricing.getByTestId(`editor-row-price-${small.id}`).click()
+    await expect(pricePage.locator('#dashboard-panel-product-combination-price').getByTestId('product-price')).toHaveValue('6.25')
+    const removed = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'remove_product_location',
+      args: { organization_id: organizationId, product_id: created.id, location_id: locationId },
+    })
+    expect(removed.status()).toBe(200)
+    expect(mcpData<{ product: Product }>(await removed.json()).product.locations).toEqual([])
+    const retainedRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
+    expect(retainedRead.status()).toBe(200)
+    const retained = (await retainedRead.json() as { product: Product }).product
+    expect(retained.locations).toEqual([])
+    expect({ ...retained, locations: scopedProduct.locations }).toEqual(scopedProduct)
+    const retainedMcp = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'get_product', args: { organization_id: organizationId, product_id: created.id },
+    })
+    expect(retainedMcp.status()).toBe(200)
+    expect(mcpData<{ product: Product }>(await retainedMcp.json()).product.variants.find(variant => variant.id === small.id)!.prices)
+      .toContainEqual(expect.objectContaining({ id: scopedPrice.id, location_id: locationId, unit_amount: 625, currency: 'USD' }))
+    expect((await pricePage.goto(`${baseURL}${productPath}/price`))?.status()).toBe(200)
+    await expect(pricing.locator('[data-testid^="editor-row-location-"]')).toHaveCount(0)
+    const sharedPriceRow = pricing.getByTestId(`editor-row-price-${small.id}`)
+    await expect(sharedPriceRow).toHaveAttribute('href', `${productPath}/price/amounts/${small.id}`)
+    await expect(sharedPriceRow).toContainText('5.50 USD')
+  } finally { await priceContext.close() }
+
   // A Product whose variant has no price is created, and is simply not
   // purchasable: nothing substitutes zero or a note for the amount.
   const unpriced = await mcpRequest(request, baseURL!, {
