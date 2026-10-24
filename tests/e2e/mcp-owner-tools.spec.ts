@@ -741,7 +741,7 @@ test.describe('stateless MCP server', () => {
         await page.getByTestId('localize-language').click()
         const [loadedTranslation] = await Promise.all([
           page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === localizationPath),
-          page.getByRole('option', { name: /ไทย \(th\)/ }).click(),
+          page.getByRole('option', { name: 'ไทย · Not published', exact: true }).click(),
         ])
         expect(loadedTranslation.status()).toBe(index === 0 ? 404 : 200)
         if (index === 1) expect((await loadedTranslation.json()).localization).toMatchObject({ kind: 'qa', title: 'คำถามภาษาไทยเกี่ยวกับราคา', summary: 'คำตอบภาษาไทยสำหรับหน้าราคา', seo_keywords: null })
