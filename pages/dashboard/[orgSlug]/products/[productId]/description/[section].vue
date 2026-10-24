@@ -51,7 +51,7 @@ const listingDescription = computed(() => section.value === 'listing-description
 const validSection = computed(() => p.product.value?.kind === 'stay' && (listingDescription.value || Boolean(definition.value)))
 const title = computed(() => listingDescription.value ? 'Listing description' : definition.value?.name ?? '')
 const descriptionTextarea = useTemplateRef('descriptionTextarea')
-const introduction = p.definitions.value.find(field => field.key === 'tagline')!
+const introduction = computed(() => p.definitions.value.find(field => field.key === 'tagline'))
 const value = computed({
   get: () => listingDescription.value ? p.form.description : definition.value ? p.textValue(definition.value) : '',
   set: (text: string) => {

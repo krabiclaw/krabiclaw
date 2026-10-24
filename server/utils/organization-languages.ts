@@ -119,14 +119,19 @@ export async function getOrganizationLanguageSettings(
 ) {
   // The plan and the site's languages are independent reads; running them in
   // series made the slowest endpoint in production wait for both in turn.
-  const [projection, languages, source] = await Promise.all([
+  const [projection, languageRows, source] = await Promise.all([
     getOrganizationBillingStatus(env, db, input.organizationId),
-    queryAll(db, `
-      SELECT locale, label, is_source, status FROM organization_locales
+    queryAll<{ locale: string; is_source: number; status: 'published' | 'disabled' }>(db, `
+      SELECT locale, is_source, status FROM organization_locales
        WHERE organization_id = ? 
     `, [input.organizationId]),
     getPersistedSourceLocale(db, input.organizationId),
   ])
+  const languages = languageRows.map(language => {
+    const catalog = platformLocale(language.locale)
+    if (!catalog) localizationError(500, 'PLATFORM_LOCALE_UNAVAILABLE', 'The saved organization language has no platform catalog', { locale: language.locale })
+    return { ...language, label: catalog.label }
+  })
   const availableCatalogs = PLATFORM_LOCALES.filter(catalog => catalog.locale !== source.locale)
     .map(({ locale, label, direction }) => ({ locale, label, direction }))
   return { effective_plan: projection.plan, languages, available_catalogs: availableCatalogs }

@@ -863,8 +863,8 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`) && !url.searchParams.has('guide'))
 
-    // One generic attribute owns only its own detail key. A newer safety answer
-    // must survive when this leaf saves the older Product it originally read.
+    // Product detail leaves carry their read version. A concurrent safety
+    // answer refuses the stale draft until the host reviews current facts.
     await page.goto(`/dashboard/${slug}/products/${productId}/attributes/featured`)
     const featuredEditor = page.locator('#dashboard-panel-product-attribute')
     const featuredSwitch = featuredEditor.getByRole('switch', { name: 'Featured', exact: true })
@@ -876,9 +876,25 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const featuredSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await featuredEditor.getByRole('button', { name: 'Save', exact: true }).click()
     const featuredResponse = await featuredSaved
-    expect(featuredResponse.status(), await featuredResponse.text()).toBe(200)
+    expect(featuredResponse.status(), await featuredResponse.text()).toBe(409)
+    expect(featuredResponse.request().postDataJSON().expected_updated_at).toBe(savedSafety.data!.product.updated_at)
     expect(featuredResponse.request().postDataJSON().details_mode).toBe('merge')
     expect(featuredResponse.request().postDataJSON().details).toEqual({ featured: false })
+    expect(await featuredResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: productId } })
+    await expect(featuredEditor).toContainText('The product changed while you were editing.')
+    await expect(featuredSwitch).not.toBeChecked()
+    const refusedAttribute = await call<{ product: Product }>('get_product', { product_id: productId })
+    expect(refusedAttribute.error).toBeNull()
+    expect(refusedAttribute.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: true })
+    await featuredEditor.getByRole('button', { name: 'Use saved details', exact: true }).click()
+    await expect(featuredSwitch).toBeChecked()
+    await expect(featuredEditor.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await featuredSwitch.click()
+    const reviewedAttributeSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+    await featuredEditor.getByRole('button', { name: 'Save', exact: true }).click()
+    const reviewedAttributeResponse = await reviewedAttributeSaved
+    expect(reviewedAttributeResponse.status(), await reviewedAttributeResponse.text()).toBe(200)
+    expect(reviewedAttributeResponse.request().postDataJSON().expected_updated_at).toBe(refusedAttribute.data!.product.updated_at)
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/photo`)
     const savedAttributeSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedAttributeSafety.error).toBeNull()

@@ -249,10 +249,26 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     // The dish's plural membership editor uses the same section operation;
     // removing one membership retains its other section and location offering.
     await page.setViewportSize({ width: 1440, height: 900 })
-    expect((await page.goto(`${catalog}/${located.id}/collections`))?.status()).toBe(200)
-    await waitForNuxtHydration(page)
+    await panel.getByTestId(`product-${located.id}`).click()
+    const membershipCard = page.locator('#dashboard-panel-product').getByTestId('editor-card-collections')
+    await expect(membershipCard).toHaveAttribute('href', `${catalog}/${located.id}/collections?location_id=loc-demo&kind=dish`)
+    await membershipCard.click()
     const memberships = page.locator('#dashboard-panel-product-collections')
     await expect(memberships.getByRole('link', { name: target.name })).toHaveAttribute('href', `${catalog}/menu/${target.id}?location_id=loc-demo&kind=dish`)
+
+    // Entering the same dish without Menu context must not narrow the target
+    // collection's chooser to dishes solely because this member is a dish.
+    expect((await page.goto(`${catalog}/${located.id}/collections`))?.status()).toBe(200)
+    await waitForNuxtHydration(page)
+    await expect(memberships.getByRole('link', { name: target.name })).toHaveAttribute('href', `${catalog}/menu/${target.id}?location_id=loc-demo`)
+    await memberships.getByRole('link', { name: target.name }).click()
+    await expect(page).toHaveURL(`${catalog}/menu/${target.id}?location_id=loc-demo`)
+    await panel.getByRole('button', { name: 'Add item', exact: true }).click()
+    const generalChooser = page.getByRole('dialog', { name: 'Add items', exact: true })
+    await expect(generalChooser.getByRole('textbox', { name: 'Search items', exact: true })).toBeVisible()
+    await generalChooser.getByRole('button', { name: 'Close Add items', exact: true }).click()
+    expect((await page.goto(`${catalog}/${located.id}/collections`))?.status()).toBe(200)
+    await waitForNuxtHydration(page)
     await memberships.getByRole('button', { name: 'Add to section', exact: true }).click()
     const addMembership = page.getByRole('dialog', { name: 'Add to section', exact: true })
     await addMembership.getByText(sharedTarget.name, { exact: true }).click()

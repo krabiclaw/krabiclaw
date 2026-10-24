@@ -5,7 +5,7 @@
     lead="English is the permanent source language. Growth includes every available language at no extra cost."
   >
     <template #right>
-      <UDropdownMenu v-if="enableableCatalogOptions.length" :items="addLanguageItems">
+      <UDropdownMenu v-if="enableableCatalogOptions.length && !loadError" :items="addLanguageItems">
         <UButton label="Add language" icon="i-lucide-plus" color="neutral" variant="ghost" :disabled="busy || Boolean(validationMessage)" />
       </UDropdownMenu>
     </template>
@@ -16,19 +16,19 @@
       <ul>
         <li v-for="language in settings.languages" :key="language.locale" class="flex flex-wrap items-center justify-between gap-4 border-b border-default py-6 last:border-b-0">
           <div class="min-w-0">
-            <p class="text-base text-highlighted">{{ languageName(language.locale) }}</p>
+            <p class="text-base text-highlighted">{{ language.label }}</p>
             <p class="mt-1 text-sm text-muted">{{ languageSummary(language) }}</p>
           </div>
           <div v-if="!language.is_source" class="flex gap-2">
             <UButton v-if="language.status === 'disabled'" :loading="busy" @click="publishLanguage(language.locale)">Publish</UButton>
             <UButton v-if="language.status === 'published'" color="neutral" variant="outline" :loading="busy" @click="disableLanguage(language.locale)">Disable</UButton>
-            <UButton v-if="language.status === 'disabled'" color="error" variant="outline" :loading="busy" @click="deleteLanguage(language.locale)">Delete content</UButton>
+            <UButton v-if="language.status === 'disabled'" color="error" variant="outline" :loading="busy" @click="deleteLanguage(language)">Delete content</UButton>
           </div>
         </li>
       </ul>
       <!-- What is left to translate, as rows that open the field's own editor. -->
       <section v-for="progress in progressRows ?? []" :key="progress.locale" class="mt-8">
-        <h2 class="text-sm font-semibold text-muted">{{ languageName(progress.locale) }} translations</h2>
+        <h2 class="text-sm font-semibold text-muted">{{ progress.label }} translations</h2>
         <p class="mt-1 text-sm text-muted">{{ progress.completed }} of {{ progress.total }} fields translated.</p>
         <ul v-if="progress.opportunities.length">
           <li v-for="item in progress.opportunities" :key="item.id" class="border-b border-default last:border-b-0">
@@ -54,12 +54,19 @@ import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialo
 definePageMeta({ layout: 'dashboard' })
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
-interface Language { locale: string; label: string | null; is_source: number | boolean; status: string }
+interface Language { locale: string; label: string; is_source: number | boolean; status: 'published' | 'disabled' }
 interface LocalizationSettings { effective_plan: string; languages: Language[]; available_catalogs: Array<{ locale: string; label: string; direction: string }> }
 interface LocalizationProgress { locale: string; completed: number; total: number; opportunities: Array<{ id: string; label: string; completed: number; total: number; path: string }> }
 
 const isLocalizationSettings = (value: unknown): value is LocalizationSettings =>
-  isRecord(value) && typeof value.effective_plan === 'string' && Array.isArray(value.languages) && Array.isArray(value.available_catalogs)
+  isRecord(value) && typeof value.effective_plan === 'string' && Array.isArray(value.languages)
+  && value.languages.every(language => isRecord(language) && typeof language.locale === 'string' && Boolean(language.locale.trim())
+    && typeof language.label === 'string' && Boolean(language.label.trim())
+    && (typeof language.is_source === 'boolean' || language.is_source === 0 || language.is_source === 1)
+    && (language.status === 'published' || language.status === 'disabled'))
+  && Array.isArray(value.available_catalogs) && value.available_catalogs.every(catalog => isRecord(catalog)
+    && typeof catalog.locale === 'string' && Boolean(catalog.locale.trim())
+    && typeof catalog.label === 'string' && Boolean(catalog.label.trim()) && (catalog.direction === 'ltr' || catalog.direction === 'rtl'))
 const isLocalizationProgress = (value: unknown): value is LocalizationProgress =>
   isRecord(value) && typeof value.locale === 'string' && typeof value.completed === 'number' && typeof value.total === 'number'
   && Array.isArray(value.opportunities) && value.opportunities.every(item => isRecord(item)
@@ -82,7 +89,11 @@ const { data: progressRows, error: progressFailure, refresh: refreshProgress } =
   `organization-localization-progress:${organizationId}`,
   () => Promise.all((settings.value?.languages ?? [])
     .filter(language => !language.is_source)
-    .map(language => dashboardApi<LocalizationProgress>(`${localesPath}/${encodeURIComponent(language.locale)}/opportunities`, { validate: isLocalizationProgress }))),
+    .map(async (language) => {
+      const progress = await dashboardApi<LocalizationProgress>(`${localesPath}/${encodeURIComponent(language.locale)}/opportunities`, { validate: isLocalizationProgress })
+      if (progress.locale !== language.locale) throw new Error('The translation progress belongs to a different language.')
+      return { ...progress, label: language.label }
+    })),
 )
 const loadError = computed(() => settingsError.value ? getErrorMessage(settingsError.value, 'Failed to load localization settings') : null)
 const progressError = computed(() => progressFailure.value ? getErrorMessage(progressFailure.value, 'Translation progress could not be loaded') : null)
@@ -97,13 +108,6 @@ const addLanguageItems = computed(() => enableableCatalogOptions.value.map(optio
   label: option.label,
   onSelect: () => enableLanguage(option.value),
 })))
-
-function languageName(locale: string): string {
-  const language = settings.value?.languages.find(language => language.locale === locale)
-    ?? settings.value?.available_catalogs.find(language => language.locale === locale)
-  if (!language?.label) throw new Error('The language is missing its display name.')
-  return language.label
-}
 
 function languageSummary(language: Language): string {
   if (language.is_source) return 'Source language · Published'
@@ -135,8 +139,7 @@ async function enableLanguage(locale: string) {
 }
 async function publishLanguage(locale: string) { await mutate(`${localesPath}/${encodeURIComponent(locale)}/publish`, 'POST') }
 async function disableLanguage(locale: string) { await mutate(`${localesPath}/${encodeURIComponent(locale)}/disable`, 'POST') }
-async function deleteLanguage(locale: string) {
-  const label = languageName(locale)
-  if (await confirmDialog.open({ title: `Delete ${label} content`, description: `Every ${label} translation on this site is deleted permanently.`, confirmLabel: 'Delete content', cancelLabel: 'Keep content' })) await mutate(`${localesPath}/${encodeURIComponent(locale)}`, 'DELETE')
+async function deleteLanguage(language: Language) {
+  if (await confirmDialog.open({ title: `Delete ${language.label} content`, description: `Every ${language.label} translation on this site is deleted permanently.`, confirmLabel: 'Delete content', cancelLabel: 'Keep content' })) await mutate(`${localesPath}/${encodeURIComponent(language.locale)}`, 'DELETE')
 }
 </script>

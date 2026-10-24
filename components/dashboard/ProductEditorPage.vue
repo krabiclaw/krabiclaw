@@ -449,7 +449,7 @@ const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/p
  * which names its kind and the collection it will join.
  */
 function sectionPath(section: string) {
-  const query = isNew.value ? route.query : { location_id: locationScope.value ?? undefined, ...(arrivalTab.value ? { guide: 'arrival' } : {}) }
+  const query = isNew.value ? route.query : { location_id: locationScope.value ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}), ...(arrivalTab.value ? { guide: 'arrival' } : {}) }
   return router.resolve({ path: `${itemPath.value}/${section}`, query }).fullPath
 }
 
@@ -1491,7 +1491,7 @@ function isSafetyConcern(concern: unknown): concern is StaySafetySection {
 function payload(concern?: ProductConcern) {
   if (!isNew.value) {
     if (!editVersion.value) throw new Error('Read the saved product before editing it.')
-    const version = stayEditor.value ? {} : { expected_updated_at: editVersion.value }
+    const version = { expected_updated_at: editVersion.value }
     if (editorKey.value === 'description') {
       const field = stayEditor.value ? STAY_DESCRIPTION_DETAIL_KEYS.find(key => key === route.params.section) : undefined
       return field ? { ...version, details_mode: 'merge', details: { [field]: form.details[field] ?? null } }
@@ -1767,7 +1767,7 @@ async function commit(concern?: ProductConcern) {
       // The record it became, not the `new` form it was, so Back from a saved
       // product goes to Catalog and never to an empty Add screen.
       clearNuxtState([draftKey, createKeyName])
-      await navigateTo(router.resolve({ path: `${catalogPath.value}/${created.product.id}`, query: { location_id: id ?? undefined } }).fullPath, { replace: true })
+      await navigateTo(router.resolve({ path: `${catalogPath.value}/${created.product.id}`, query: { location_id: id ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) } }).fullPath, { replace: true })
       return
     }
     if (concern === 'publication-visibility') {

@@ -20,6 +20,7 @@ interface NotificationView {
 interface NotificationList {
   notifications: NotificationView[]
   unread_count: number
+  next_cursor: string | null
 }
 
 interface DeliveryView {
@@ -226,6 +227,21 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(secondOwnerListBefore.threads[0]).toMatchObject({ guestName, submissionType: 'contact', unread: true })
     expect(contactNotification(ownerNotificationsBefore, guestName).read_at).toBeNull()
     expect(contactNotification(secondOwnerNotificationsBefore, guestName).read_at).toBeNull()
+
+    // The same scoped reader reaches older notifications without repeating
+    // the newest row or accepting another organization's cursor.
+    expect(ownerNotificationsBefore.notifications.length).toBeGreaterThan(1)
+    const newestResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1 } })
+    await expectStatus(newestResponse, 200)
+    const newest = await newestResponse.json() as NotificationList
+    expect(newest.notifications.map(row => row.id)).toEqual([ownerNotificationsBefore.notifications[0]!.id])
+    expect(newest.next_cursor).toBe(newest.notifications[0]!.id)
+    const olderResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: newest.next_cursor! } })
+    await expectStatus(olderResponse, 200)
+    const older = await olderResponse.json() as NotificationList
+    expect(older.notifications.map(row => row.id)).toEqual([ownerNotificationsBefore.notifications[1]!.id])
+    expect(older.unread_count).toBe(newest.unread_count)
+    await expectStatus(await foreignOwner.get('/api/dashboard/notifications', { params: { limit: 1, after: newest.next_cursor! } }), 404)
 
     const detail = await loadThreadDetail(owner, threadId)
     expect(detail).toMatchObject({
