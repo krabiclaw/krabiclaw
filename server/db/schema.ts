@@ -1395,6 +1395,8 @@ export const stays = sqliteTable("stays", {
 	currency: text().notNull(),
 	notes: text(),
 	provider: text().$type<'channex'>(),
+	// The provider's booking id, which a new Channex account replaces; the
+	// channel's own reservation code (Airbnb's), which identifies the stay across them.
 	external_booking_id: text(),
 	channel_booking_id: text(),
 	revision_id: text(),
@@ -1418,6 +1420,8 @@ export const stays = sqliteTable("stays", {
 	unique("stays_org_id_unique").on(table.organization_id, table.id),
 	uniqueIndex("stays_idempotency_unique").on(table.organization_id, table.idempotency_key).where(sql`idempotency_key IS NOT NULL`),
 	uniqueIndex("stays_provider_booking_unique").on(table.provider, table.external_booking_id).where(sql`external_booking_id IS NOT NULL`),
+	// One stay per channel reservation: a reservation re-imported under a new provider booking id updates its stay.
+	uniqueIndex("stays_channel_reservation_unique").on(table.organization_id, table.channel, table.channel_booking_id).where(sql`channel_booking_id IS NOT NULL`),
 	uniqueIndex("stays_request_unique").on(table.request_id).where(sql`request_id IS NOT NULL`),
 	index("stays_product_dates_idx").on(table.product_id, table.check_in_date, table.check_out_date),
 	index("stays_org_dates_idx").on(table.organization_id, table.check_in_date, table.status),
@@ -1598,6 +1602,10 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	// so a host's own edit is never overwritten. Null until the stage ran.
 	import_written: text(),
 	enabled: integer({ mode: "boolean" }).default(false).notNull(),
+	// The one nightly calendar delivery to this Channex property running now,
+	// and when its hold lapses (server/integrations/channex/ari.ts); both null when none runs.
+	delivery_lease: text(),
+	delivery_lease_until: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [

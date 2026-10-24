@@ -1289,15 +1289,13 @@ async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, pro
 
 /**
  * Deliver every connected home's pending nights that are due: those waiting
- * out a rate limit or a retry, and those whose write ended before its own
- * delivery finished. Every home is tried; the run fails naming the ones that
- * could not be delivered.
+ * out a rate limit or a retry, and those another delivery of the home or a
+ * write that ended early left. Every home is tried; the run fails naming the
+ * ones that could not be delivered.
  */
 export async function deliverPendingChannelNights(db: DbClient, env: StayMutationEnv): Promise<{ homes: number }> {
-  const now = new Date()
   const homes = await queryAll<{ organization_id: string; product_id: string }>(db, `SELECT DISTINCT organization_id, product_id FROM channel_night_pushes
-    WHERE provider = 'channex' AND state = 'pending' AND (retry_at <= ? OR (retry_at IS NULL AND updated_at <= ?))`,
-  [now.toISOString(), new Date(now.getTime() - 60_000).toISOString()])
+    WHERE provider = 'channex' AND state = 'pending' AND (retry_at IS NULL OR retry_at <= ?)`, [new Date().toISOString()])
   const failures: string[] = []
   for (const row of homes) {
     try {
@@ -1988,6 +1986,13 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
   const currentChannelStay = () => queryFirst<{ id: string; provider_updated_at: string | null; revision_id: string | null }>(db,
     'SELECT id, provider_updated_at, revision_id FROM stays WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+  if (booking.channel_booking_id !== null) {
+    // The same reservation under a new provider booking id (a re-import after
+    // a new Channex account) is the stay it already is: it takes the new id.
+    await execute(db, `UPDATE stays SET external_booking_id = ?, version = version + 1, updated_at = ?, updated_by = 'channex'
+      WHERE organization_id = ? AND channel = ? AND channel_booking_id = ? AND provider = ? AND external_booking_id <> ?`,
+    [booking.external_booking_id, new Date().toISOString(), organizationId, booking.channel, booking.channel_booking_id, booking.provider, booking.external_booking_id])
+  }
   const existing = await currentChannelStay()
   const conversation = await queryFirst<{ organization_id: string; product_id: string; request_id: string }>(db,
     'SELECT organization_id, product_id, request_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
