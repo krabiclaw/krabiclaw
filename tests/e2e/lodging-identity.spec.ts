@@ -56,7 +56,7 @@ test.describe('lodging identity boundary', () => {
     const api = {
       get: (path: string, init?: { headers?: Record<string, string> }) => call('GET', path, init),
       post: (path: string, init?: { headers?: Record<string, string>; data?: unknown }) => call('POST', path, init),
-      delete: (path: string, init?: { headers?: Record<string, string> }) => call('DELETE', path, init),
+      delete: (path: string, init?: { headers?: Record<string, string>; data?: unknown }) => call('DELETE', path, init),
     }
     const signInBearer = async (email: string) => {
       const signIn = await api.post('/api/auth/sign-in/email', {
@@ -207,21 +207,41 @@ test.describe('lodging identity boundary', () => {
       await expect(page.getByText('Conversation needs attention', { exact: true })).toBeVisible()
       await expect(composer).toHaveValue(cmsBody)
       await page.unroute('**/api/dashboard/team/threads/*/messages?*')
-      const cmsSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/messages`)
-      await page.getByRole('button', { name: 'Send message', exact: true }).click()
-      const cmsSentResponse = await cmsSent
-      expect(cmsSentResponse.status()).toBe(201)
-      expect((cmsSentResponse.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey).toBe(attemptedKey)
-      await expect(composer).toHaveValue('')
-      const cmsNativeRead = await api.get(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer })
-      expect(cmsNativeRead.status, await cmsNativeRead.text()).toBe(200)
-      const cmsMatches = (await cmsNativeRead.json() as { messages: TeamMessage[] }).messages.filter(message => message.body === cmsBody)
-      expect(cmsMatches).toHaveLength(1)
-      expect(cmsMatches[0]).toMatchObject({ senderId: fixture.id })
-      await expect(page.locator(`[data-team-message="${cmsMatches[0]!.id}"]`)).toContainText(cmsBody)
+      // The local Worker has no APNs signing key. Register through the native
+      // boundary so its actual failed push receipt must be visible in the CMS.
+      const deviceToken = crypto.randomUUID().replaceAll('-', '')
+      const registered = await api.post('/api/dashboard/devices', { headers: inviteeBearer, data: { deviceToken, environment: 'sandbox' } })
+      expect(registered.status, await registered.text()).toBe(200)
+      expect(await registered.json()).toEqual({ status: 'registered' })
+      try {
+        const cmsSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/messages`)
+        await page.getByRole('button', { name: 'Send message', exact: true }).click()
+        const cmsSentResponse = await cmsSent
+        expect(cmsSentResponse.status()).toBe(201)
+        expect((cmsSentResponse.request().postDataJSON() as { idempotencyKey: string }).idempotencyKey).toBe(attemptedKey)
+        await expect(composer).toHaveValue('')
+        const cmsNativeRead = await api.get(`${teamPath}/messages?org=${slug}`, { headers: inviteeBearer })
+        expect(cmsNativeRead.status, await cmsNativeRead.text()).toBe(200)
+        const cmsMatches = (await cmsNativeRead.json() as { messages: TeamMessage[] }).messages.filter(message => message.body === cmsBody)
+        expect(cmsMatches).toHaveLength(1)
+        const saved = cmsMatches[0]!
+        expect(saved).toMatchObject({ senderId: fixture.id, deliveries: [expect.objectContaining({ channel: 'push', status: 'failed', error: expect.stringMatching(/^APNS_CONFIG_REQUIRED: /) })] })
+        const savedRow = page.locator(`[data-team-message="${saved.id}"]`)
+        await expect(savedRow).toContainText(cmsBody)
+        await expect(savedRow).toContainText('Message saved. A push notification failed.')
+        await savedRow.getByRole('button', { name: 'Push error details', exact: true }).click()
+        await expect(savedRow).toContainText(saved.deliveries[0]!.error!)
+        const cmsMcpRead = await teamCall<{ messages: TeamMessage[]; hasMore: boolean }>('get_team_conversation', { thread_id: threadId, limit: 1 }, memberMcp)
+        expect(cmsMcpRead).toEqual({ messages: [saved], hasMore: true })
+      } finally {
+        const unregistered = await api.delete('/api/dashboard/devices', { headers: inviteeBearer, data: { deviceToken } })
+        expect(unregistered.status, await unregistered.text()).toBe(200)
+        expect(await unregistered.json()).toEqual({ status: 'unregistered' })
+      }
 
       await page.setViewportSize({ width: 390, height: 844 })
       await expect(composer).toBeVisible()
+      await expect(page.locator('[data-team-push-failure]')).toContainText('Message saved. A push notification failed.')
       await page.locator('input[type="file"]').setInputFiles({ name: 'team-message-proof.avif', mimeType: 'image/avif', buffer: await sharp('public/platform/apple-touch-icon.png').avif().toBuffer() })
       const photoSent = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/messages`)
       await page.getByRole('button', { name: 'Send message', exact: true }).click()

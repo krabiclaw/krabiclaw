@@ -23,6 +23,15 @@
                   <button v-for="(photo, at) in message.attachments" :key="photo.id" type="button" :aria-label="`Open photo ${at + 1} from ${senderName(message)}`" class="overflow-hidden rounded-2xl bg-elevated focus-visible:ring-2 focus-visible:ring-primary" @click="viewer = { photos: message.attachments, at }"><img :src="photo.url" :width="photo.width ?? undefined" :height="photo.height ?? undefined" alt="" class="size-full max-h-80 object-cover" :class="message.attachments.length > 1 ? 'aspect-square' : undefined" loading="lazy"></button>
                 </div>
                 <p v-if="message.body" class="whitespace-pre-wrap break-words rounded-2xl bg-elevated px-4 py-3 text-base leading-normal">{{ message.body }}</p>
+                <div v-if="failedPushes(message).length" class="mt-1 text-xs text-error" data-team-push-failure>
+                  <p>Message saved. {{ failedPushes(message).length === 1 ? 'A push notification failed.' : `${failedPushes(message).length} push notifications failed.` }}</p>
+                  <UCollapsible v-if="failedPushes(message).some(delivery => delivery.error)">
+                    <UButton color="error" variant="link" size="xs" class="p-0" label="Push error details" trailing-icon="i-lucide-chevron-down" />
+                    <template #content>
+                      <p v-for="delivery in failedPushes(message).filter(delivery => delivery.error)" :key="delivery.id" class="mt-1 whitespace-pre-wrap break-words">{{ delivery.error }}</p>
+                    </template>
+                  </UCollapsible>
+                </div>
               </template>
             </UChatMessage>
           </template>
@@ -81,6 +90,7 @@ const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[] } |
 const scroller = useTemplateRef<HTMLElement>('scroller')
 function author(message: TeamMessage) { return props.thread?.participants.find(member => member.id === message.senderId) }
 function senderName(message: TeamMessage) { return message.senderId === userId.value ? 'You' : author(message)?.name ?? (message.senderId === null ? 'Deleted account' : 'Former team member') }
+function failedPushes(message: TeamMessage) { return message.deliveries.filter(delivery => delivery.channel === 'push' && delivery.status === 'failed') }
 function day(at: string) { return new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date(at)) }
 function formatClockTime(at: string) { return new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }).format(new Date(at)) }
 function startsRun(message: TeamMessage, index: number) { const before = messages.value[index - 1]; return !before || before.senderId !== message.senderId || day(before.createdAt) !== day(message.createdAt) }
