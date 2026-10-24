@@ -476,7 +476,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
       args: { organization_id: organizationId, product_id: created.id, location_id: locationId },
     })
     expect(removed.status()).toBe(200)
-    expect(mcpData<{ product: Product }>(await removed.json()).product.locations).toEqual([])
+    expect(mcpData(await removed.json())).toEqual({ product_id: created.id, location_id: locationId, removed: true })
     const retainedRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
     expect(retainedRead.status()).toBe(200)
     const retained = (await retainedRead.json() as { product: Product }).product
