@@ -226,7 +226,8 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
   })
   const values: Record<string, unknown> = structuredClone(state.values)
   for (const key of ['title', 'summary']) {
-    values[key] = Object.hasOwn(submitted, key) ? submitted[key] : null
+    const value = submitted[key]
+    values[key] = typeof value === 'string' && value.trim() ? value : null
   }
   const response = await dashboardApi<BlogTranslationResponse>(
     `/api/editor/organizations/${organizationId}/localization/content_document/${postId}/${encodeURIComponent(locale)}`,

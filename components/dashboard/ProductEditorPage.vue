@@ -2236,7 +2236,8 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
     const detail = field.key.startsWith('detail:')
     const key = detail ? field.key.slice('detail:'.length) : field.key
     const target = detail ? details : values
-    if (Object.hasOwn(submitted, field.key)) target[key] = submitted[field.key]
+    const value = submitted[field.key]
+    if (typeof value === 'string' && value.trim() || Array.isArray(value) && value.length) target[key] = value
     else {
       const prior = target[key]
       if (typeof prior === 'string' && prior.trim() || Array.isArray(prior) && prior.length) Reflect.deleteProperty(target, key)

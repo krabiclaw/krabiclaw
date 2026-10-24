@@ -19,14 +19,15 @@ test('an article created from a direct action prepares a Facebook draft without 
   await page.setViewportSize({ width: 900, height: 900 })
   let articleId: string | null = null
   let postId: string | null = null
-  const title = `E2E Today article ${Date.now()}`
+  const createdTitle = `E2E Today article ${Date.now()}`
+  const title = `${createdTitle} revised`
   const excerpt = 'An article prepared for a deliberate Facebook review.'
   try {
     expect((await page.goto(blogCreatePath(orgSlug)))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     const headline = page.locator('#dashboard-panel-organization-blog-new-headline')
     await expect(headline.getByRole('button', { name: 'Create article', exact: true })).toBeDisabled()
-    await headline.getByRole('textbox', { name: 'Headline*', exact: true }).fill(title)
+    await headline.getByRole('textbox', { name: 'Headline*', exact: true }).fill(createdTitle)
     const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/blog/posts` && response.request().method() === 'POST')
     await headline.getByRole('button', { name: 'Create article', exact: true }).click()
     const createResponse = await created
@@ -37,7 +38,53 @@ test('an article created from a direct action prepares a Facebook draft without 
     const draftRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
     expect(draftRead.status()).toBe(200)
     const article = mcpData<{ post: { title: string; status: string; updated_at: string } }>(await draftRead.json()).post
-    expect(article).toMatchObject({ title, status: 'draft' })
+    expect(article).toMatchObject({ title: createdTitle, status: 'draft' })
+
+    const articlePanel = page.locator('#dashboard-panel-organization-blog-post')
+    const canvasTitle = articlePanel.getByRole('textbox', { name: 'Post title', exact: true })
+    const saveArticle = articlePanel.getByRole('button', { name: 'Save', exact: true })
+    const articleSettings = articlePanel.getByRole('button', { name: 'Article settings', exact: true })
+    const translations = articlePanel.getByTestId('localize-resource')
+    await expect(canvasTitle).toHaveValue(createdTitle)
+    await expect(saveArticle).toBeDisabled()
+    await canvasTitle.fill(title)
+    await expect(saveArticle).toBeEnabled()
+    await canvasTitle.fill(createdTitle)
+    await expect(saveArticle).toBeDisabled()
+    await canvasTitle.fill(title)
+
+    const articlePath = `${editor}/blog/${articleId}`
+    const interceptArticle = (url: URL) => url.pathname === articlePath
+    let releaseWrite: (() => void) | undefined
+    const writeReleased = new Promise<void>((resolve) => { releaseWrite = resolve })
+    await page.route(interceptArticle, async route => {
+      if (route.request().method() === 'PATCH') await writeReleased
+      await route.continue()
+    })
+    const saveRequested = page.waitForRequest(request => new URL(request.url()).pathname === articlePath && request.method() === 'PATCH')
+    const saveResponse = page.waitForResponse(response => new URL(response.url()).pathname === articlePath && response.request().method() === 'PATCH')
+    let requestStarted = false
+    try {
+      await saveArticle.click()
+      await saveRequested
+      requestStarted = true
+      await expect(saveArticle).toBeDisabled()
+      await expect(articleSettings).toBeDisabled()
+      await expect(translations).toHaveAttribute('aria-disabled', 'true')
+    } finally {
+      releaseWrite?.()
+      if (requestStarted) await saveResponse
+      await page.unroute(interceptArticle)
+    }
+    const saved = await saveResponse
+    expect(saved.status(), await saved.text()).toBe(200)
+    await expect(articleSettings).toBeEnabled()
+    await expect(translations).not.toHaveAttribute('aria-disabled', 'true')
+    await expect(saveArticle).toBeDisabled()
+    const savedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
+    expect(savedRead.status()).toBe(200)
+    const savedArticle = mcpData<{ post: { title: string; status: string; updated_at: string } }>(await savedRead.json()).post
+    expect(savedArticle).toMatchObject({ title, status: 'draft' })
     const categoriesRead = await page.request.get(`${editor}/blog/categories`, { params: { collection: 'blog' } })
     expect(categoriesRead.status(), await categoriesRead.text()).toBe(200)
     const kitchen = (await categoriesRead.json() as { categories: Array<{ id: string; name: string }> }).categories.filter(category => category.name === 'Kitchen')
@@ -45,7 +92,7 @@ test('an article created from a direct action prepares a Facebook draft without 
     // Continue the author's real workflow: choose the blog's real category,
     // write its body, and publish explicitly before preparing a social post.
     const update = await page.request.patch(`${editor}/blog/${articleId}`, { data: {
-      excerpt, category_id: kitchen[0]!.id, expected_updated_at: article.updated_at,
+      excerpt, category_id: kitchen[0]!.id, expected_updated_at: savedArticle.updated_at,
       content_blocks: [{ type: 'markdown', data: { markdown: 'An authored article body for the Today action journey.', editor_mode: 'rich' } }],
     } })
     expect(update.status(), await update.text()).toBe(200)
