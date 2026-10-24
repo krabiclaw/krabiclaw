@@ -259,7 +259,9 @@ export async function replyThroughChannex(db: DbClient, env: ChannexEnv & Upload
       if (!stored || stored.size !== asset.file_size || stored.size > MAX_IMAGE_BYTES) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo file is missing or invalid', 'photos')
       bytes = new Uint8Array(await stored.arrayBuffer())
     } else if (asset.provider === 'cloudflare_images' && asset.cloudflare_image_id) {
-      bytes = await downloadImageBuffer(env, asset.cloudflare_image_id)
+      const stored = await downloadImageBuffer(env, asset.cloudflare_image_id)
+      if (!stored) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo file is missing or invalid', 'photos')
+      bytes = stored
     } else fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply photo has no readable stored file', 'photos')
     if (!isMessagePhoto(bytes)) fail(409, 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', 'The saved reply file is not a valid message photo', 'photos')
     photo = assertMessagePhotos([{ filename: asset.file_name, bytes }])[0]!

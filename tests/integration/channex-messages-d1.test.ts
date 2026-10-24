@@ -563,7 +563,9 @@ test('photo replies retain their canonical media, replay without expired source 
     const expiredImage = { ...imageInput, photos: { sourceIds: ['host-png-id'], resolve: async () => { throw new Error('Host PNG download has expired') } } }
     provider.refuseAttachment = false
     provider.refuseImageRead = true
-    await assert.rejects(executeGuestThreadOperation(db, expiredImage), /CF Images download error 404/)
+    const beforeMissingImage = await db.prepare('SELECT * FROM guest_thread_deliveries WHERE entry_id = ?').bind(imageAsset.entry_id).first()
+    await assert.rejects(executeGuestThreadOperation(db, expiredImage), { status: 409, data: { code: 'CHANNEL_REPLY_PHOTO_UNAVAILABLE', field: 'photos' } })
+    assert.deepEqual(await db.prepare('SELECT * FROM guest_thread_deliveries WHERE entry_id = ?').bind(imageAsset.entry_id).first(), beforeMissingImage, 'a missing stored image neither claims nor changes the recorded attempt')
     assert.deepEqual([provider.sends, provider.uploads.length], [5, 8], 'a missing stored Images blob is visible before guest dispatch')
     provider.refuseImageRead = false
     assert.equal((await executeGuestThreadOperation(db, expiredImage)).ok, true)
