@@ -512,6 +512,8 @@
   "stay.sleeps": "พักได้ {count} คน",
   "stay.max_guests": "ที่พักนี้รองรับผู้เข้าพักได้สูงสุด {count} คน ไม่รวมทารก",
   "stay.min_nights": "พักขั้นต่ำ {count} คืน",
+  "stay.no_dates": "ไม่มีวันว่างในปฏิทินนี้ | วันว่างในปฏิทินนี้ไม่พอสำหรับการเข้าพัก {count} คืน",
+  "stay.ask_host": "สอบถามโฮสต์เกี่ยวกับวันอื่น",
   "stay.check_in_after": "เช็กอินหลัง {time}",
   "stay.check_in_window": "เช็กอิน {start} – {end}",
   "stay.check_out_before": "เช็กเอาต์ก่อน {time}",
