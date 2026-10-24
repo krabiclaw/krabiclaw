@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test'
-import { marked } from 'marked'
 import {
   blawbyBaseURL, blawbyExtraHeaders,
   openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
@@ -325,46 +324,6 @@ test('KrabiClaw pricing retains its billing plans after hydration', async ({ pag
     const menuHeading = article.locator('h3').filter({ hasText: / — update_menu$/ })
     await menuHeading.evaluate(element => element.scrollIntoView({ block: 'start' }))
   })
-
-  for (const { slug } of mcpCatalog.publicDocumentation) {
-    test(`KrabiClaw workflow ${slug} renders its guidance and media at ${width}px`, async ({ page }) => {
-      await page.setViewportSize({ width, height: 900 })
-      const source = await page.request.get(`${testBaseUrl()}/api/public/blog/${slug}?collection=docs`)
-      expect(source.status()).toBe(200)
-      const { post } = await source.json() as { post: { title: string; content_blocks: Array<{ type: string; data: Record<string, unknown>; media: Array<{ alt_text: string; public_url: string }> }> } }
-      const markdown = post.content_blocks.filter(block => block.type === 'markdown').map(block => String(block.data.markdown)).join('\n\n')
-      const authored = await page.evaluate(html => {
-        const document = new DOMParser().parseFromString(html, 'text/html')
-        return {
-          intro: document.querySelector('p')?.textContent ?? '',
-          images: [...document.querySelectorAll('img')].map(image => ({
-            alt: image.alt,
-            caption: image.parentElement?.nextElementSibling?.tagName === 'P' ? image.parentElement.nextElementSibling.textContent ?? '' : '',
-          })),
-        }
-      }, marked.parse(markdown, { async: false }))
-      const images = [...authored.images, ...post.content_blocks.filter(block => block.type === 'image').map(block => ({
-        alt: block.media[0]!.alt_text, caption: String(block.data.caption ?? ''),
-      }))]
-      expect(authored.intro.length, 'A workflow needs substantive opening guidance').toBeGreaterThan(60)
-      const response = await openTenantPage(page, `${testBaseUrl()}/docs/${slug}`, {})
-      expect(response?.status()).toBe(200)
-      await waitForNuxtHydration(page)
-      const article = page.locator('article.blog-article')
-      await expect(article.getByRole('heading', { name: post.title, exact: true, level: 1 })).toBeVisible()
-      await expect(article.locator('.prose').first()).toContainText(authored.intro)
-      await expect(article.locator('a[href^="/docs/mcp-tool-reference"]').first()).toBeVisible()
-      await expect(article.locator('figure img, .prose img')).toHaveCount(images.length)
-      for (const image of images) {
-        expect(image.alt.trim()).not.toBe('')
-        const picture = article.getByRole('img', { name: image.alt, exact: true })
-        await expect(picture).toBeVisible()
-        await expect.poll(() => picture.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-        if (image.caption) await expect(article.getByText(image.caption, { exact: true })).toBeVisible()
-      }
-      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    })
-  }
 
   test(`KrabiClaw policies render their own headers and body at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })

@@ -134,32 +134,19 @@ refreshed ChatGPT session.
 
 1. Update the canonical definition and executor together.
 2. Update the owning invariant test and the affected runtime prompts in
-   `server/utils/mcp-prompts.ts`. Review the public workflow guides against the
-   changed behavior, including permissions, external effects and entitlements.
-3. Update the affected published guides through the existing CMS/MCP article
-   operations. Review their actual public Markdown, then run
-   `yarn mcp:catalog --review-docs --base-url https://staging.krabiclaw.com` to
-   record that explicit review. Use the production base URL when that is the
-   canonical CMS being edited. Review the resulting content and dependency hash
-   diff.
-4. Run `yarn mcp:catalog:write`, review the generated tool and runtime prompt
+   `server/utils/mcp-prompts.ts`. Update any help article whose workflow the
+   change affects through the existing CMS/MCP article operations.
+3. Run `yarn mcp:catalog:write`, review the generated tool and runtime prompt
    snapshot diff, then run `yarn mcp:catalog` and the affected MCP integration
-   tests. Ordinary regeneration does not update public workflow reviews.
-5. Run the local Worker and verify `tools/list`, the changed tool call, and
+   tests.
+4. Run the local Worker and verify `tools/list`, the changed tool call, and
    `_meta["krabiclaw/catalogFingerprint"]` through the real client.
-6. Refresh and publish the ChatGPT app action catalog when its schema changed
+5. Refresh and publish the ChatGPT app action catalog when its schema changed
    (`yarn chatgpt:submission:write`).
-7. Verify the deployed staging MCP app and run
-   `yarn mcp:catalog --check-live-docs --base-url https://staging.krabiclaw.com`
-   before promoting to production. Verify production documentation with the same
-   command and `--base-url https://krabiclaw.com`.
+6. Verify the deployed staging MCP app before promoting to production.
 
-On the initial rollout, the resolver must be deployed before publishing the
-directive article at `/docs/mcp-tool-reference` through the canonical CMS. A
-missing reference fails deployment verification with the publication instruction.
-Publish the article and rerun the full verification job; the rollout is incomplete
-until it passes. The same sequence applies when first creating the reference on
-staging. Subsequent releases require verification to pass directly.
+Help articles are CMS content: deploys do not check their prose, and editing one
+never blocks a release.
 
 Do not use `serverInfo.version` as a catalog boundary. The endpoint, live
 `tools/list` response, and reviewed snapshot define the contract.
@@ -167,27 +154,15 @@ Do not use `serverInfo.version` as a catalog boundary. The endpoint, live
 ### Catalog enforcement
 
 The public catalog is snapshotted in `server/utils/mcp-catalog-snapshots/`.
-`yarn mcp:catalog` requires every public tool to be dispatchable and rejects
-snapshot drift, unknown tool names in rendered runtime prompts, and public
-workflow reviews whose dependent tool contracts changed. The snapshot includes
-the generated tool contract and runtime prose; public guide prose stays in the
-canonical CMS and is represented here only by its content hash and dependency
-contract hashes.
+`yarn mcp:catalog` runs offline in CI. It requires every public tool to be
+dispatchable and rejects snapshot drift and unknown tool names in rendered
+runtime prompts. The snapshot holds the generated tool contracts and runtime
+prompt prose.
 
 The public tool reference at `/docs/mcp-tool-reference` is generated from the
 deployed registry. Its documentation fingerprint includes schemas, descriptions,
 titles, annotations, scopes, minimum roles, entitlements and file metadata. Guides
-identify their dependencies with exact tool names or links to reference anchors,
-such as `/docs/mcp-tool-reference#update_menu`.
-
-Ordinary `--write` preserves public guide reviews and refuses to bless stale
-dependencies. `--review-docs` is an explicit assertion that the operator reviewed
-the current published guides against the proposed registry; it fetches their
-public Markdown and records reviewed hashes. `--check-live-docs` is read-only:
-it verifies the deployed guide prose, tool dependencies and generated reference
-fingerprint. Guide hashes exclude generated front matter and Markdown image
-delivery URLs, retaining image alt text, titles, captions, ordinary links and all
-workflow prose. The default catalog check stays offline and runs in CI.
+can link a tool's reference anchor, such as `/docs/mcp-tool-reference#update_menu`.
 
 A dependency fingerprint detects a changed contract, not whether prose correctly
 explains it. Executor-only behavior changes still require the owning invariant
