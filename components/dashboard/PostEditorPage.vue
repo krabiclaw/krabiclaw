@@ -2,11 +2,14 @@
   <!-- A post: its rows are the things it holds, each a leaf below this level. -->
   <DashboardIndexPanel id="post" :title="isNew ? newTitle : editor.form.title || 'Post'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null" :create="firstStep">
     <template v-if="post" #right>
+      <UTooltip text="Preview">
+        <UButton ref="previewButton" color="neutral" variant="ghost" icon="i-lucide-eye" aria-label="Preview" :to="previewPath" :disabled="editor.saving.value || !viewUrl" class="size-10 rounded-full" data-testid="post-preview" />
+      </UTooltip>
       <DashboardResourceLocalization
         :organization-id="organizationId"
         resource-type="content_document"
         :resource-id="postId"
-        resource-label="post"
+        :resource-label="String(post.title || 'Post')"
         :fields="postLocalizationFields"
         :language-settings-path="organizationLocalizationSettingsPath"
       />
@@ -14,16 +17,10 @@
 
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Post could not be loaded" :description="loadError" />
     <template v-else>
-      <!-- The post as a visitor will see it, before and after it is live. -->
-      <div v-if="post" class="mb-6 flex flex-wrap items-center gap-2">
-        <UBadge :color="post.status === 'published' ? 'success' : 'neutral'" variant="soft">{{ post.status === 'published' ? 'Live on the website' : 'Draft' }}</UBadge>
-        <UButton v-if="viewUrl" :to="viewUrl" target="_blank" size="sm" color="neutral" variant="soft" icon="i-lucide-external-link">
-          {{ post.status === 'published' ? 'View post' : 'Preview' }}
-        </UButton>
-      </div>
       <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
     </template>
   </DashboardIndexPanel>
+  <DashboardContentPreview v-model:open="previewOpen" title="Post preview" :content-title="String(post?.title ?? '')" :src="viewUrl" :public-url="publicUrl" :viewport="previewViewport" :error="previewFailure" @update:viewport="changePreviewViewport" @after:leave="restorePreviewFocus" />
 </template>
 
 <script lang="ts">
@@ -55,6 +52,7 @@ export const postEditorKey = Symbol('post-editor') as InjectionKey<PostEditor>
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
+import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
 import { usePostEditor, type PostMediaFormItem } from '~/composables/usePostEditor'
 import type { PostCallToAction } from '~/shared/posts'
 import { isBlogPostResponse } from '~/lib/components/workspace/blog/blog-response-contracts'
@@ -224,7 +222,7 @@ const { title: newTitle, firstStep, saveLabel, saveDisabled: walkSaveDisabled, s
   missing: () => false,
   noun: 'post',
   saving: editor.saving,
-  existingBlocked: () => !sectionValid.value,
+  existingBlocked: () => !sectionValid.value || !editor.isDirty.value,
   commit,
 })
 
@@ -256,8 +254,13 @@ const viewUrl = computed(() => {
   const record = post.value
   if (!record) return null
   // Both are absolute on the site's own domain; the dashboard is another host.
-  return record.status === 'published' ? record.canonical_url : record.preview_url
+  const url = record.status === 'published' ? record.canonical_url : record.preview_url
+  return typeof url === 'string' && url ? url : null
 })
+const publicUrl = computed(() => post.value?.status === 'published' ? viewUrl.value : null)
+const { previewButton, previewPath, previewOpen, previewViewport, previewFailure, changePreviewViewport, restorePreviewFocus } = useDashboardContentPreview(
+  computed(() => loadError.value || (!viewUrl.value ? 'The saved post could not be loaded for preview.' : '')),
+)
 
 const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
 const postLocalizationFields = computed(() => [

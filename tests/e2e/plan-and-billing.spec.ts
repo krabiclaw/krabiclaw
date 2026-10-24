@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import type { HomesQuote } from '../../server/utils/billing'
 
 // Plan and billing (#1504): its own Menu destination at O/billing. The Basic
 // review organization is a real snapshot tenant with no subscription, so it is
@@ -68,6 +69,20 @@ test.describe('Plan and billing', () => {
       expect(billing.plan).toBe('free')
       expect(billing.stripeSubscriptionId).toBeUndefined()
       expect(billing.stripeCustomerId).toBeUndefined()
+      // This Legal practice has no live or draft homes. Its allowance remains
+      // canonical billing state; the irrelevant Homes row is not navigation.
+      const [contextResponse, homesResponse] = await Promise.all([
+        page.request.get('/api/dashboard/context', { params: { org: 'krabiclaw-review-legal' } }),
+        page.request.get(`/api/organizations/${BASIC_ID}/billing/homes`, { params: { adding: '0' } }),
+      ])
+      for (const response of [contextResponse, homesResponse]) expect(response.status(), await response.text()).toBe(200)
+      expect((await contextResponse.json() as { organization: { id: string; vertical: string } }).organization).toMatchObject({ id: BASIC_ID, vertical: 'service' })
+      expect(await homesResponse.json() as HomesQuote).toMatchObject({
+        plan: 'free', currency: 'USD',
+        homes: { used: 0, drafts: 0, included: 2, amount_minor: 0 },
+        adding: { count: 0, additional_homes: 0, amount_minor: 0, allowed: true },
+        billing: { period_end: null, trial_end: null, prorated: false },
+      })
       // Managed ads' requirements, as the agreement checks them: none met on Starter with no Google Ads.
       const requirements = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal&requirements=managed_ads')
       expect(requirements.status(), await requirements.text()).toBe(200)
@@ -101,7 +116,7 @@ test.describe('Plan and billing', () => {
         await page.setViewportSize({ width, height: 1200 })
         const wide = width >= 1024
 
-        // The index: the plan as its one card, then the locations and homes it bills and the two services. No portal without a Stripe customer.
+        // The index: the plan as its one card, the firm's Offices and the two services. No portal without a Stripe customer.
         await open(page, `${BASIC}/billing`)
         const index = page.locator('#dashboard-panel-organization-billing')
         await expect(index.getByRole('heading', { name: 'Plan and billing', exact: true })).toBeVisible()
@@ -109,11 +124,10 @@ test.describe('Plan and billing', () => {
         await expect(card).toContainText('Basic')
         await expect(card).toContainText('Free')
         await expect(card.getByRole('link', { name: 'Choose a plan', exact: true })).toBeVisible()
-        await expect(index.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
+        await expect(index.locator('[data-testid^="editor-row-"]')).toHaveCount(3)
+        await expect(index.getByTestId('editor-row-locations')).toContainText('Offices')
         await expect(index.getByTestId('editor-row-locations')).toContainText('in use · 2 included · Basic stops at 2')
-        // Homes are counted apart from locations, live (billed) and drafts (free), with their own allowance, read from the homes quote.
-        await expect(index.getByTestId('editor-row-homes')).toContainText('Homes')
-        await expect(index.getByTestId('editor-row-homes')).toContainText(/\d+ live · \d+ drafts? · 2 included · Basic stops at 2/)
+        await expect(index.getByTestId('editor-row-homes')).toHaveCount(0)
         await expect(index.getByTestId('editor-row-portal')).toHaveCount(0)
         await expect(index.getByTestId('editor-row-managed-ads')).toContainText('Off10% of monthly ad spend')
         await expect(index.getByTestId('editor-row-strategy')).toContainText('Off$2,000/mo')

@@ -157,7 +157,7 @@ test.describe('stateless MCP server', () => {
       await page.goto(`${baseURL}/dashboard/ember-slice-demo/website/pages/${home!.id}?editMode=translations&locale=${locale}`)
       await waitForNuxtHydration(page)
       await expect(page.getByTestId(`localize-field-content:${sourceHero.id}:secondary_label`)).toHaveValue('')
-      await page.getByRole('dialog', { name: 'page translations', exact: true }).getByRole('button', { name: 'Cancel', exact: true }).click()
+      await page.getByRole('dialog', { name: `Translate ${originalSource.page.title}`, exact: true }).getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(page).not.toHaveURL(/[?&]editMode=translations(?:&|$)/)
       const translation = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'create_site_page', args: translationArgs,
@@ -242,12 +242,13 @@ test.describe('stateless MCP server', () => {
       await page.goto(dashboardPath)
       await waitForNuxtHydration(page)
       const languagePicker = page.getByTestId('localize-language')
-      await expect(languagePicker).toContainText(`${configuredLanguages.find(saved => saved.locale === locale)!.label} (${locale})`)
+      await expect(languagePicker).toContainText(configuredLanguages.find(saved => saved.locale === locale)!.label)
       await languagePicker.click()
-      await expect(page.getByRole('option', { name: new RegExp(`\\(${source!.locale}\\)$`) })).toHaveCount(0)
+      await expect(page.getByRole('option', { name: source!.label, exact: true })).toHaveCount(0)
       await page.keyboard.press('Escape')
-      await expect(page.getByTestId('localize-save')).toBeEnabled()
+      await expect(page.getByTestId('localize-save')).toBeDisabled()
       await page.getByTestId('localize-field-title').fill(dashboardTitle)
+      await expect(page.getByTestId('localize-save')).toBeEnabled()
       for (const field of await page.getByTestId(/^localize-field-content:/).all()) await field.fill(translatedText)
       const dashboardCreate = page.waitForResponse(response => {
         const url = new URL(response.url())

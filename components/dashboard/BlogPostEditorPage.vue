@@ -10,7 +10,7 @@
     color="error"
     variant="soft"
     icon="i-lucide-triangle-alert"
-    title="Post could not be loaded"
+    title="Article could not be loaded"
     :description="loadError"
   />
 
@@ -19,21 +19,20 @@
     :repository="repository"
     :initial-post="postResource.post"
     :organization-id="organizationId"
-    :back-url="blogPath"
-    back-label="Blog"
     panel-id="organization-blog-post"
     :media-picker-component="MediaPicker"
   >
-    <template #actions>
+    <template #actions="{ post: savedPost, saving }">
       <DashboardResourceLocalization
         :organization-id="organizationId"
         resource-type="content_document"
         :resource-id="postId"
-        resource-label="post"
-        :fields="blogLocalizationFields"
-        :load-values="loadBlogLocalization"
-        :save-values="saveBlogLocalization"
+        :resource-label="savedPost.title"
+        :fields="blogLocalizationFields(savedPost)"
+        :load-values="locale => loadBlogLocalization(locale, savedPost)"
+        :save-values="(locale, values) => saveBlogLocalization(locale, values, savedPost)"
         :language-settings-path="organizationLocalizationSettingsPath"
+        :disabled="saving"
       />
     </template>
   </BlogPostEditor>
@@ -76,7 +75,6 @@ const organizationId = await useDashboardOrganizationId()
 const postId = String(route.params.postId || '')
 if (!postId) throw createError({ statusCode: 400, statusMessage: 'Post ID is required' })
 
-const blogPath = `/dashboard/${orgSlug}/website/blog`
 const organizationLocalizationSettingsPath = `/dashboard/${orgSlug}/website/localization`
 const level = useRouteLevel()
 const isNew = postId === 'new'
@@ -95,7 +93,7 @@ const createGroups = computed(() => [{ id: 'new-article', items: [{
 const { title: newTitle, firstStep, saveLabel, saveDisabled, save } = useCreateWalk({
   recordPath: level.path, isNew: computed(() => isNew), openKey: computed(() => 'headline' as const),
   labels: { headline: 'Headline' }, order: ['headline'], missing: () => !draft.value.title.trim(),
-  noun: 'post', saving: creating, commit: createPost,
+  noun: 'article', saving: creating, commit: createPost,
 })
 async function createPost() {
   creating.value = true
@@ -106,7 +104,7 @@ async function createPost() {
     if (isNavigationFailure(navigation)) throw navigation
     clearNuxtState(draftKey)
   } catch (cause) {
-    createFailure.value = getErrorMessage(cause, 'Failed to create the post.')
+    createFailure.value = getErrorMessage(cause, 'Failed to create the article.')
   } finally {
     creating.value = false
   }
@@ -132,11 +130,11 @@ const { data: postResource, error: postError } = await useAsyncData(
 // surface shows, because the post may well still exist.
 watchEffect(() => {
   if (postError.value && isNotFoundError(postError.value)) {
-    showError(createError({ statusCode: 404, statusMessage: 'Post not found' }))
+    showError(createError({ statusCode: 404, statusMessage: 'Article not found' }))
   }
 })
 const loadError = computed(() => (postError.value && !isNotFoundError(postError.value)
-  ? getErrorMessage(postError.value, 'Failed to load this post')
+  ? getErrorMessage(postError.value, 'Failed to load this article')
   : null))
 
 const dashboardApi = useDashboardApi()
@@ -159,14 +157,12 @@ function blogBlockFieldKey(blockIndex: number, path: BlogLocalizedFieldPath): st
   return `content:${blockIndex}:${path.join('.')}`
 }
 
-const sourceBlogBlocks = computed(() => (postResource.value?.post.content_document?.blocks ?? []) as BlogEditorBlock[])
-const blogLocalizationFields = computed(() => {
-  const post = postResource.value?.post
+function blogLocalizationFields(post: BlogPost) {
   const fields: Array<{ key: string; label: string; source: string | null | undefined; multiline?: boolean; rows?: number }> = [
-    { key: 'title', label: 'Title', source: post?.title },
-    { key: 'summary', label: 'Excerpt', source: post?.excerpt, multiline: true, rows: 4 },
+    { key: 'title', label: 'Title', source: post.title },
+    { key: 'summary', label: 'Excerpt', source: post.excerpt, multiline: true, rows: 4 },
   ]
-  sourceBlogBlocks.value.forEach((block, blockIndex) => {
+  post.content_document?.blocks.forEach((block, blockIndex) => {
     blogLocalizedTextFields(block).forEach((field) => {
       fields.push({
         key: blogBlockFieldKey(blockIndex, field.path),
@@ -178,15 +174,16 @@ const blogLocalizationFields = computed(() => {
     })
   })
   return fields
-})
-
-function blankTranslationBlocks(): BlogEditorBlock[] {
-  return sourceBlogBlocks.value.map(blankBlogLocalizedText)
 }
 
-async function loadBlogLocalization(locale: string): Promise<Record<string, unknown>> {
+function blankTranslationBlocks(post: BlogPost): BlogEditorBlock[] {
+  if (!post.content_document) throw new Error('Blog content document is missing')
+  return post.content_document.blocks.map(blankBlogLocalizedText)
+}
+
+async function loadBlogLocalization(locale: string, sourcePost: BlogPost): Promise<Record<string, unknown>> {
   const generation = ++blogLocalizationLoadGeneration
-  let blocks = blankTranslationBlocks()
+  let blocks = blankTranslationBlocks(sourcePost)
   let documentUpdatedAt: string | null = null
   let values: Record<string, unknown> = {}
   try {
@@ -211,11 +208,12 @@ async function loadBlogLocalization(locale: string): Promise<Record<string, unkn
   return values
 }
 
-async function saveBlogLocalization(locale: string, submitted: Record<string, unknown>): Promise<void> {
+async function saveBlogLocalization(locale: string, submitted: Record<string, unknown>, sourcePost: BlogPost): Promise<void> {
   const state = blogLocalizationState
   if (!state || state.locale !== locale) throw new Error('Choose the language again before saving.')
   const blocks = structuredClone(state.blocks)
-  sourceBlogBlocks.value.forEach((source, blockIndex) => {
+  if (!sourcePost.content_document) throw new Error('Blog content document is missing')
+  sourcePost.content_document.blocks.forEach((source, blockIndex) => {
     const translated = blocks[blockIndex]
     if (!translated) throw new Error('The translated article structure is incomplete.')
     blogLocalizedTextFields(source).forEach((field) => {
@@ -228,7 +226,8 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
   })
   const values: Record<string, unknown> = structuredClone(state.values)
   for (const key of ['title', 'summary']) {
-    values[key] = Object.hasOwn(submitted, key) ? submitted[key] : null
+    const value = submitted[key]
+    values[key] = typeof value === 'string' && value.trim() ? value : null
   }
   const response = await dashboardApi<BlogTranslationResponse>(
     `/api/editor/organizations/${organizationId}/localization/content_document/${postId}/${encodeURIComponent(locale)}`,
@@ -250,5 +249,5 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
   }
 }
 
-useSeoMeta({ title: () => `${isNew ? newTitle.value : postResource.value?.post.title || 'Post'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew ? newTitle.value : postResource.value?.post.title || 'Article'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 </script>

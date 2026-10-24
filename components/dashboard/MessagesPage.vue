@@ -1,5 +1,5 @@
 <template>
-  <!-- Airbnb's Messages: the title, then the list with its own All / Unread pills. Updates is a choice in All. -->
+  <!-- Airbnb's Messages: the title, then the list with its own All / Unread pills. -->
   <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="pastOnly ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
     <GuestThreadList :personal-scope="personalScope" @first="firstThread = $event" />
   </DashboardIndexPanel>
@@ -10,7 +10,7 @@ import type { RouteLocationRaw } from 'vue-router'
 import GuestThreadList from '~/lib/components/workspace/messages/GuestThreadList.vue'
 defineProps<{ personalScope?: boolean }>()
 const route = useRoute()
-const pastOnly = computed(() => route.query.archived !== undefined && route.query.view !== 'updates')
+const pastOnly = computed(() => route.query.archived !== undefined)
 const firstThread = ref<RouteLocationRaw | null>(null)
 useSeoMeta({ title: 'Messages | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

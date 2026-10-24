@@ -124,12 +124,16 @@ const isAccountResponse = (value: unknown): value is AccountResponse =>
 export async function useConnectAccount() {
   const route = useRoute()
   const dashboardApi = useDashboardApi()
-  const { data, error } = await useAsyncData(`dashboard-connect:${String(route.params.orgSlug)}`, () => dashboardApi<AccountResponse>('/api/dashboard/connect', { validate: isAccountResponse }))
+  const { data, error, status, refresh } = await useAsyncData(`dashboard-connect:${String(route.params.orgSlug)}`, () => dashboardApi<AccountResponse>('/api/dashboard/connect', { validate: isAccountResponse }), { server: false, lazy: true })
+  const pending = computed(() => status.value === 'idle' || status.value === 'pending')
   const account = computed(() => data.value?.account ?? null)
   const payout = computed(() => data.value?.payout ?? null)
   /** Keeps the payout row and replaces the account Stripe just reported. */
-  const setAccount = (next: ConnectedAccount) => { data.value = { success: true, account: next, payout: payout.value, countries: data.value?.countries ?? [] } }
-  return { connect: data, connectError: error, account, payout, setAccount }
+  const setAccount = (next: ConnectedAccount) => {
+    if (!data.value) throw new Error('Load payment settings before updating the account.')
+    data.value = { ...data.value, account: next }
+  }
+  return { connect: data, connectError: error, connectPending: pending, refreshConnect: refresh, account, payout, setAccount }
 }
 
 /** Stripe's status, in the words the payout rows use. */

@@ -207,10 +207,10 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.getByRole('option', { name: 'Online', exact: true }).click()
     await expect(page).toHaveURL(url => url.searchParams.get('product_id') === products[1]!.id && url.searchParams.get('locationId') === 'online')
     await onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true }).click()
-    await page.getByRole('option', { name: 'All bookings', exact: true }).click()
+    await page.getByRole('option', { name: 'All activity', exact: true }).click()
     await expect(page).toHaveURL(url => url.pathname === '/dashboard/north-carolina-legal-services/calendar' && !url.searchParams.has('locationId') && !url.searchParams.has('product_id'))
-    await expect(onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('All bookings')
-    await expect(page.getByRole('button', { name: 'Filter bookings', exact: true })).toBeVisible()
+    await expect(onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('All activity')
+    await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
     await page.goto(`/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`)
     const bookingPath = `/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`
     const bookingPanel = page.locator('#dashboard-panel-product-booking')

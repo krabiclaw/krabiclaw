@@ -404,13 +404,11 @@
         </template>
       </div>
 
-      <ActivityFeed v-else-if="tab === 'activity'" />
     </div>
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
-import ActivityFeed from '~/components/dashboard/ActivityFeed.vue'
 import AnalyticsTrendChart from '~/components/dashboard/AnalyticsTrendChart.vue'
 const dashboardApi = useDashboardApi()
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
@@ -428,7 +426,7 @@ const scope = useDashboardRouteScope()
 // Reviews reads what we actually hold. There is no Superhost
 // equivalent, and a review carries one overall rating rather than per-category
 // scores, so neither is invented here.
-const TAB_VALUES = ['views', 'instagram', 'ads', 'reviews', 'activity'] as const
+const TAB_VALUES = ['views', 'instagram', 'ads', 'reviews'] as const
 type InsightsTab = typeof TAB_VALUES[number]
 const isTab = (value: unknown): value is InsightsTab => TAB_VALUES.some(candidate => candidate === value)
 const tab = ref<InsightsTab>(isTab(route.query.tab) ? route.query.tab : 'views')
@@ -446,10 +444,7 @@ const tabItems = [
   { label: 'Instagram', value: 'instagram' as const },
   { label: 'Google Ads', value: 'ads' as const },
   { label: 'Reviews', value: 'reviews' as const },
-  // Activity is a report like the others, not a screen of its own: it reads
-  // what happened and edits nothing, so it belongs beside Views and Reviews
-  // rather than on an orphan route nothing linked to.
-  { label: 'Activity', value: 'activity' as const },
+
 ]
 
 // The report's dates are URL state: a Today card, reload and Back all reopen

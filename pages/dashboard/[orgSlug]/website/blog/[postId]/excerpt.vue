@@ -3,14 +3,12 @@
     id="organization-blog-post-excerpt"
     title="Excerpt"
     :saving="editor.saving.value"
+    :disabled="editor.saveDisabled.value"
     :error="editor.actionError.value || editor.loadError.value"
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <UFormField v-if="editor.post.value" label="Excerpt">
-      <UTextarea v-model="editor.form.excerpt" :rows="5" autofocus :placeholder="editor.resolvedExcerpt.value" class="w-full" />
-      <p class="mt-1 text-xs text-dimmed">{{ editor.form.excerpt ? 'Custom' : `Auto: ${editor.resolvedExcerpt.value}` }}</p>
-    </UFormField>
+    <UTextarea v-if="editor.post.value" v-model="editor.form.excerpt" aria-label="Excerpt" variant="none" :rows="1" autoresize autofocus :placeholder="editor.resolvedExcerpt.value" :disabled="editor.saving.value" class="w-full" />
   </DashboardLeafPanel>
 </template>
 

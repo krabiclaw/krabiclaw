@@ -2,7 +2,6 @@
   <DashboardLeafPanel
     id="post-body"
     :title="post.sectionLabels.value.body"
-    lead="Plain text, as you want it read. Dates, offers and codes belong here."
     :saving="post.editor.saving.value"
     :disabled="post.saveDisabled.value"
     :save-label="post.saveLabel.value"
@@ -14,9 +13,10 @@
     <UTextarea
       v-model="post.editor.form.body"
       aria-label="Caption"
-      :rows="10"
+      variant="none"
+      :rows="1"
+      autoresize
       autofocus
-      placeholder="What's new? Write it the way you'd say it to a guest."
       :maxlength="5000"
       class="w-full"
     />

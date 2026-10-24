@@ -214,13 +214,17 @@ test('Kikuzuki translations preserve published addresses and save an added langu
       await cms.getByRole('link', { name: /^Languages/ }).click()
       await expect(cms).toHaveURL(`${baseURL}${settingsPath}?editMode=translations`)
       await cms.getByTestId('localize-language').click()
-      await cms.getByRole('option', { name: /ไทย \(th\)/ }).click()
+      await cms.getByRole('option', { name: 'ไทย', exact: true }).click()
       await expect(cms).toHaveURL(`${baseURL}${settingsPath}?editMode=translations&locale=th`)
       // A reload reconstructs the same record, mode and language from the URL.
       await cms.reload()
-      await expect(cms.getByTestId('localize-language')).toContainText('ไทย (th)')
+      await expect(cms.getByTestId('localize-language')).toContainText('ไทย')
       await expect(cms.getByTestId('localize-field-address.addressLines')).toHaveValue('325')
       await expect(cms.getByTestId('localize-field-address.sublocality')).toHaveValue('ตำบลอ่าวนาง')
+      const originalTitle = await cms.getByTestId('localize-field-title').inputValue()
+      await expect(cms.getByTestId('localize-save')).toBeDisabled()
+      const revisedTitle = `${originalTitle} revised`
+      await cms.getByTestId('localize-field-title').fill(revisedTitle)
       const saveResponse = await Promise.all([
         cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/localization/business_location/loc-kikuzuki/th')),
         cms.getByTestId('localize-save').click(),
@@ -230,10 +234,23 @@ test('Kikuzuki translations preserve published addresses and save an added langu
       expect(payload.values.address).toEqual({ addressLines: ['325'], sublocality: 'ตำบลอ่าวนาง', locality: 'กระบี่' })
       const savedThai = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: 'loc-kikuzuki', locale: 'th' } })
       expect(savedThai.status()).toBe(200)
-      expect((await savedThai.json()).result.structuredContent.localization.values.address).toEqual({ addressLines: ['325'], sublocality: 'ตำบลอ่าวนาง', locality: 'กระบี่' })
+      expect((await savedThai.json()).result.structuredContent.localization.values).toMatchObject({ title: revisedTitle, address: { addressLines: ['325'], sublocality: 'ตำบลอ่าวนาง', locality: 'กระบี่' } })
       // Saving leaves the mode, so the URL no longer reopens it.
       await expect(cms).not.toHaveURL(/editMode=/)
       await expect(cms.getByTestId('localize-language')).toHaveCount(0)
+      // Restore the real authored title through the same editor after the
+      // independent MCP read proved that the title changed without losing address fields.
+      await cms.goto(`${baseURL}${settingsPath}?editMode=translations&locale=th`)
+      await expect(cms.getByTestId('localize-field-title')).toHaveValue(revisedTitle)
+      await cms.getByTestId('localize-field-title').fill(originalTitle)
+      const restored = await Promise.all([
+        cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/localization/business_location/loc-kikuzuki/th')),
+        cms.getByTestId('localize-save').click(),
+      ]).then(([response]) => response)
+      expect(restored.status()).toBe(200)
+      const restoredThai = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: 'loc-kikuzuki', locale: 'th' } })
+      expect(restoredThai.status()).toBe(200)
+      expect((await restoredThai.json()).result.structuredContent.localization.values).toMatchObject({ title: originalTitle, address: payload.values.address })
 
       const languagesResponse = await owner.get(`/api/editor/organizations/${organizationId}/locales`)
       await expectStatus(languagesResponse, 200)
@@ -251,8 +268,8 @@ test('Kikuzuki translations preserve published addresses and save an added langu
         await cms.goto(`${baseURL}${settingsPath}?editMode=translations`)
         await waitForNuxtHydration(cms)
         await cms.getByTestId('localize-language').click()
-        await expect(cms.getByRole('option', { name: /English \(en\)/ })).toHaveCount(0)
-        await cms.getByRole('option', { name: `${privateLanguage!.label} (${privateLocale}) · Not published`, exact: true }).click()
+        await expect(cms.getByRole('option', { name: 'English', exact: true })).toHaveCount(0)
+        await cms.getByRole('option', { name: `${privateLanguage!.label} · Not published`, exact: true }).click()
         await expect(cms.getByTestId('translation-publication-state')).toContainText('Not published')
         await cms.getByTestId('localize-field-title').fill('Private Kikuzuki translation')
         await cms.getByTestId('localize-field-address.addressLines').fill('325 private translation')

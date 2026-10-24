@@ -699,6 +699,7 @@ test.describe('stateless MCP server', () => {
     const answer = 'This published answer belongs only to the pricing page.'
     const publicPage = await browser.newPage()
     const release = await acquireTenantMutationLock(testInfo, qaOrganizationId)
+    let cleanupRequest: APIRequestContext | undefined
     let createdId: string | undefined
     const localeUrl = `${baseURL}/api/editor/organizations/${qaOrganizationId}/locales`
     const translationLocale = 'th'
@@ -710,6 +711,7 @@ test.describe('stateless MCP server', () => {
       expect(before?.headers()['x-edge-cache']).toBeUndefined()
       await expect(publicPage.getByText(question, { exact: true })).toHaveCount(0)
       await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
+      cleanupRequest = await playwrightRequest.newContext({ baseURL, storageState: await page.request.storageState() })
       const organizationRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_organization', args: { organization_id: qaOrganizationId } })
       expect(organizationRead.status()).toBe(200)
       const slug = mcpData<{ context: { organization_slug: string } }>(await organizationRead.json()).context.organization_slug
@@ -823,7 +825,7 @@ test.describe('stateless MCP server', () => {
         await page.getByTestId('localize-language').click()
         const [loadedTranslation] = await Promise.all([
           page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === localizationPath),
-          page.getByRole('option', { name: /ไทย \(th\)/ }).click(),
+          page.getByRole('option', { name: 'ไทย · Not published', exact: true }).click(),
         ])
         expect(loadedTranslation.status()).toBe(index === 0 ? 404 : 200)
         if (index === 1) expect((await loadedTranslation.json()).localization).toMatchObject({ kind: 'qa', title: 'คำถามภาษาไทยเกี่ยวกับราคา', summary: 'คำตอบภาษาไทยสำหรับหน้าราคา', seo_keywords: null })
@@ -842,30 +844,30 @@ test.describe('stateless MCP server', () => {
     } finally {
       try {
         if (createdId) {
-          const readback = await page.request.get(qaUrl, { params: { id: createdId } })
+          const readback = await cleanupRequest!.get(qaUrl, { params: { id: createdId } })
           expect(readback.status()).toBe(200)
           const row = (await readback.json()).qa[0] as { page_path: string | null }
-          const deleted = await page.request.delete(`${qaUrl}/${createdId}`, { params: row.page_path === null ? undefined : { page_path: row.page_path } })
+          const deleted = await cleanupRequest!.delete(`${qaUrl}/${createdId}`, { params: row.page_path === null ? undefined : { page_path: row.page_path } })
           expect(deleted.status(), await deleted.text()).toBe(200)
-          const after = await page.request.get(qaUrl, { params: { id: createdId } })
+          const after = await cleanupRequest!.get(qaUrl, { params: { id: createdId } })
           expect(after.status()).toBe(200)
           expect((await after.json()).qa).toEqual([])
         }
       } finally {
         try {
           if (originalLanguages && !originalLanguages.some(language => language.locale === translationLocale)) {
-            const languages = await page.request.get(localeUrl)
+            const languages = await cleanupRequest!.get(localeUrl)
             expect(languages.status()).toBe(200)
             if ((await languages.json()).languages.some((language: { locale: string }) => language.locale === translationLocale)) {
-              const removedLanguage = await page.request.delete(`${localeUrl}/${translationLocale}`)
+              const removedLanguage = await cleanupRequest!.delete(`${localeUrl}/${translationLocale}`)
               expect(removedLanguage.status(), await removedLanguage.text()).toBe(200)
             }
-            const restoredLanguages = await page.request.get(localeUrl)
+            const restoredLanguages = await cleanupRequest!.get(localeUrl)
             expect(restoredLanguages.status()).toBe(200)
             expect((await restoredLanguages.json()).languages).toEqual(originalLanguages)
           }
         } finally {
-          await Promise.all([publicPage.close(), release()])
+          await Promise.all([publicPage.close(), cleanupRequest?.dispose(), release()])
         }
       }
     }

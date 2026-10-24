@@ -3,7 +3,6 @@
   <DashboardLeafPanel
     id="product-attribute"
     :title="definition?.name ?? ''"
-    :lead="definition?.description ?? undefined"
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
     :save-label="p.saveLabel.value"
@@ -30,7 +29,7 @@
         class="w-full"
         @update:model-value="p.setDetail(definition, $event as string[])"
       />
-      <UTextarea v-else-if="definition.value_type === 'multi_line_text'" :model-value="p.textValue(definition)" :rows="4" :aria-label="definition.name" autofocus class="w-full" @update:model-value="p.setDetail(definition, $event)" />
+      <UTextarea v-else-if="definition.value_type === 'multi_line_text'" ref="narrative" :model-value="p.textValue(definition)" variant="none" :rows="1" autoresize :aria-label="definition.name" :ui="{ base: 'resize-none' }" autofocus class="w-full" @update:model-value="p.setDetail(definition, $event)" />
       <UInput v-else :model-value="p.textValue(definition)" :aria-label="definition.name" autofocus class="w-full" @update:model-value="p.setDetail(definition, $event)" />
     </template>
   </DashboardLeafPanel>
@@ -39,13 +38,16 @@
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { isStayFocusedDetail } from '~/shared/product-details'
+import { useResizeObserver } from '@vueuse/core'
 
 definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
 const route = useRoute()
 const level = useRouteLevel()
-const definition = computed(() => p.definitions.value.find(entry => entry.id === String(route.params.definitionId) && !isStayFocusedDetail(entry.key)) ?? null)
+const definition = computed(() => p.definitions.value.find(entry => entry.id === String(route.params.definitionId) && entry.key !== 'tagline' && !isStayFocusedDetail(entry.key)) ?? null)
+const narrative = useTemplateRef('narrative')
+useResizeObserver(() => narrative.value?.textareaRef, () => narrative.value?.autoResize())
 
 // An attribute this catalog does not define is not a page (DESIGN.md).
 watchEffect(() => {

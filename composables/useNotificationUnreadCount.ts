@@ -1,27 +1,21 @@
 export function useNotificationUnreadCount() {
-  const route = useRoute()
-  const dashboardApi = useDashboardApi()
+  const { organization } = useDashboardMenu()
+  const orgSlug = computed(() => organization.value?.slug ?? null)
+  const dashboardApi = useDashboardApi(computed(() => orgSlug.value ? { orgSlug: orgSlug.value } : null))
   const realtime = useDashboardInvalidations()
   const unreadCount = ref(0)
   const error = shallowRef<unknown>(null)
   let latestRequestId = 0
-
-  const orgSlug = computed(() => typeof route.params.orgSlug === 'string' ? route.params.orgSlug : null)
 
   const isUnreadCountResponse = (value: unknown): value is { unread_count: number } =>
     isRecord(value) && typeof value.unread_count === 'number'
 
   async function refresh() {
     const requestId = ++latestRequestId
-    if (!orgSlug.value) {
-      unreadCount.value = 0
-      error.value = null
-      return
-    }
     try {
-      const response = await dashboardApi('/api/dashboard/notifications/unread-count', {
-        validate: isUnreadCountResponse,
-      })
+      const response = orgSlug.value
+        ? await dashboardApi('/api/dashboard/notifications/unread-count', { validate: isUnreadCountResponse })
+        : await applicationFetch('/api/dashboard/notifications/unread-count', { query: { scope: 'personal' }, validate: isUnreadCountResponse })
       if (requestId === latestRequestId) {
         unreadCount.value = response.unread_count
         error.value = null
@@ -44,6 +38,6 @@ export function useNotificationUnreadCount() {
     if (epoch > 0) void refresh()
   })
 
-  const unavailable = computed(() => Boolean(error.value) || realtime.status.value === 'failed')
+  const unavailable = computed(() => Boolean(error.value) || Boolean(orgSlug.value && realtime.status.value === 'failed'))
   return { unreadCount, refresh, error, unavailable }
 }

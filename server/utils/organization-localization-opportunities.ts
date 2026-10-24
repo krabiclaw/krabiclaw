@@ -97,7 +97,7 @@ export async function getOrganizationLocalizationProgress(
   if (input.locale === source.locale) throw new Error('Localization progress requires an additional language')
   const params = [input.locale, input.organizationId]
   const [organization, locations, catalog, collections, posts, blog, categories, qa, links, pages] = await Promise.all([
-    queryAll<LocalizableRow>(db, `SELECT s.id, s.name, s.brand_description, rl.values_json
+    queryAll<LocalizableRow>(db, `SELECT s.id, s.name, s.vertical, s.brand_description, rl.values_json
       FROM organization s LEFT JOIN resource_localizations rl ON rl.resource_type = 'organization' AND rl.resource_id = s.id AND rl.locale = ?
         AND rl.organization_id = s.id
       WHERE s.id = ?`, params),
@@ -177,7 +177,7 @@ export async function getOrganizationLocalizationProgress(
   const slug = input.organizationSlug
   const groups = [
     { id: 'brand', label: 'Brand', result: progress(organization, ['name', 'brand_description']), path: () => brandEditorPath(slug) },
-    { id: 'locations', label: 'Locations', result: progress(locations, ['title', 'address', 'description', 'short_description']), path: (row: LocalizableRow) => {
+    { id: 'locations', label: organization[0]?.vertical === 'service' ? 'Offices' : 'Locations', result: progress(locations, ['title', 'address', 'description', 'short_description']), path: (row: LocalizableRow) => {
       if (!row.location_slug) throw new Error(`Location ${row.id} has no slug`)
       return `${locationEditorPath(slug, row.location_slug)}/settings`
     } },
@@ -186,7 +186,7 @@ export async function getOrganizationLocalizationProgress(
     // declared — not a list maintained here.
     { id: 'catalog', label: 'Catalog', result: progress(catalog, ['name', 'description', 'marketing_features', 'unit_label', 'details']), path: (row: LocalizableRow) => productEditorPath(slug, row.id) },
     // A collection translates on its Name, which is where its words are edited.
-    { id: 'collections', label: 'Menu sections', result: progress(collections, ['name', 'description']), path: (row: LocalizableRow) => `${collectionEditorPath(slug, row.id)}/name` },
+    { id: 'collections', label: 'Collections', result: progress(collections, ['name', 'description']), path: (row: LocalizableRow) => `${collectionEditorPath(slug, row.id)}/name` },
     { id: 'pages', label: 'Pages', result: progress(pages, ['title', 'summary', 'content']), path: (row: LocalizableRow) => pageEditorPath(slug, { id: row.id }) },
     { id: 'posts', label: 'Posts', result: progress(posts, ['summary', 'metadata.event.title', 'metadata.offer.terms_conditions']), path: (row: LocalizableRow) => postEditorPath(slug, row.id) },
     { id: 'blog', label: 'Blog', result: progress(blog, ['title', 'summary']), path: (row: LocalizableRow) => blogEditorPath(slug, row.id) },

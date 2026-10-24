@@ -113,7 +113,7 @@ const isMenuSection = (row: CollectionRow) => !row.products.length || row.produc
 const sections = computed(() => collections.value.filter(isMenuSection))
 
 // A section opens in its own scope. Shared membership has no location filter.
-const listItems = computed(() => sections.value.map(row => ({ id: row.id, title: row.name, to: router.resolve({ path: `${menuPath.value}/${row.id}`, query: { location_id: row.location_id ?? undefined } }).fullPath, row })))
+const listItems = computed(() => sections.value.map(row => ({ id: row.id, title: row.name, to: router.resolve({ path: `${menuPath.value}/${row.id}`, query: { location_id: row.location_id ?? undefined, kind: 'dish' } }).fullPath, row })))
 const loadError = computed(() => (catalog.error.value ? getErrorMessage(catalog.error.value, 'Failed to load sections') : null))
 
 const load = catalog.refresh
@@ -122,7 +122,7 @@ const load = catalog.refresh
 // A collection is a record with its own level: adding opens `new` in this
 // list's scope, and the row opens the record, whose Name leaf is one of its rows.
 function openNew() {
-  void navigateTo(router.resolve({ path: `${menuPath.value}/new`, query: { location_id: props.scope ?? undefined } }).fullPath)
+  void navigateTo(router.resolve({ path: `${menuPath.value}/new`, query: { location_id: props.scope ?? undefined, kind: 'dish' } }).fullPath)
 }
 
 

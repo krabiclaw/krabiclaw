@@ -25,8 +25,8 @@ export function formatVariantPrice(variant: ProductVariant, selection: PriceSele
 }
 
 /** Card prices use the same offer selection as the chosen variant at checkout. */
-export function summarizeProductPrices(variants: readonly ProductVariant[], selections: readonly PriceSelection[]) {
-  const offers = [...new Map(selections.flatMap(selection => variants.filter(variant => variant.active)
+export function summarizeProductPrices(variants: readonly ProductVariant[], selections: readonly PriceSelection[], includeInactive = false) {
+  const offers = [...new Map(selections.flatMap(selection => variants.filter(variant => includeInactive || variant.active)
     .flatMap(variant => selectPrice(variant.prices, selection) ?? [])).map(offer => [offer.id, offer])).values()]
   if (!offers.length) return { lowest: null, highest: null, count: 0 }
   if (new Set(offers.map(offer => offer.currency)).size !== 1) throw new Error('A price range requires one currency')

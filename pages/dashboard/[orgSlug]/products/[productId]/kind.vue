@@ -11,7 +11,7 @@ definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
 // A place to stay keeps its kind, and nothing else becomes one: its location and
 // stays are held by the kind, so the choice is made once, when it is created.
-const items = computed(() => PRODUCT_KINDS.map(value => ({ value, label: PRODUCT_KIND_LABELS[value], icon: PRODUCT_KIND_ICONS[value] })).filter(item => p.isNew.value || (item.value === 'stay') === (p.product.value?.kind === 'stay')))
+const items = computed(() => PRODUCT_KINDS.filter(value => p.isNew.value || value !== 'stay').map(value => ({ value, label: PRODUCT_KIND_LABELS[value], icon: PRODUCT_KIND_ICONS[value] })))
 const selectedKind = computed({
   get: () => p.form.kind || undefined,
   set: val => { p.form.kind = val ?? '' },

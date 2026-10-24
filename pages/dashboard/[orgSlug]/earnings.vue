@@ -2,7 +2,7 @@
   <!--
     Airbnb's Earnings page: a Performance card with this month's total, the
     year's bars, Paid and Upcoming and a way into the details; then Upcoming
-    and Paid payouts as cards, and monthly Reports. The cog opens Payments
+    and Paid payouts as cards, and paid payouts. The cog opens Payments
     (payouts) and Plan and billing. A card on Menu, so Back returns there. Beside a pane
     it opens on Performance, the details its own card leads to.
   -->
@@ -57,25 +57,7 @@
         <UButton class="mt-4" color="neutral" variant="soft" label="View all paid" :to="`${level.path.value}/payouts`" />
       </section>
 
-      <section>
-        <h2 class="text-xl font-semibold text-highlighted">Reports</h2>
-        <div class="mt-4 grid grid-cols-3 gap-4">
-          <UCard
-            v-for="report in reports"
-            :key="report.month"
-            :as="NuxtLink"
-            :to="{ path: `${level.path.value}/performance`, query: { month: report.month } }"
-            variant="subtle"
-            class="transition-colors hover:bg-elevated"
-            :ui="{ body: 'flex flex-col items-center text-center' }"
-          >
-            <span class="text-base font-semibold text-highlighted">{{ report.name }}</span>
-            <span class="text-base font-semibold text-highlighted">{{ report.year }}</span>
-            <span class="mt-6 text-sm text-muted">{{ report.figure }}</span>
-          </UCard>
-        </div>
-        <UButton class="mt-4" color="neutral" variant="soft" label="View all reports" :to="`${level.path.value}/performance`" />
-      </section>
+
       </template>
       <PaymentsHelp />
     </div>
@@ -83,7 +65,6 @@
 </template>
 
 <script setup lang="ts">
-import { NuxtLink } from '#components'
 import { getLocalTimeZone, today } from '@internationalized/date'
 import PayoutCard from '~/components/dashboard/PayoutCard.vue'
 import PaymentsHelp from '~/components/dashboard/PaymentsHelp.vue'
@@ -128,14 +109,6 @@ const upcoming = computed(() => money(upcomingAmount.value))
 // Two bars share one scale; an empty month still draws a short stub, as Airbnb's does.
 const barHeight = (amount: number) => Math.max(12, Math.round((amount / Math.max(1, paidAmount.value, upcomingAmount.value)) * 100))
 const paidPayouts = computed(() => (payouts.value?.payouts ?? []).filter(row => row.status === 'paid').slice(0, 3))
-
-// Reports: the three months before this one.
-const reports = computed(() => [1, 2, 3].map((offset) => {
-  const first = thisMonth.subtract({ months: offset })
-  const month = `${first.year}-${String(first.month).padStart(2, '0')}`
-  const row = monthRow(month)
-  return { month, name: formatCalendarDate(first.toString(), 'en', { month: 'long' }), year: String(first.year), figure: money(row ? row.paid - row.refunded : 0) }
-}))
 
 // Airbnb's cog: "Settings and documents" — how payouts arrive, and the plan's own destination.
 const settingsItems = computed(() => [[

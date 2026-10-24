@@ -1,15 +1,15 @@
 <template>
   <DashboardLeafPanel
     id="organization-website-booking"
-    title="Schedule page"
-    lead="Show the online service selector on Schedule. Each service keeps its own booking settings."
+    title="Consultation requests"
+    lead="Let clients choose a practice area and request a consultation. Each consultation keeps its own availability."
     :saving="editor.saving.value"
     :disabled="editor.saveDisabled.value"
     :error="editor.editorError.value ?? ''"
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <SettingRow v-model="editor.form.native_consultations" label="Show online services" />
+    <SettingRow v-model="editor.form.native_consultations" label="Accept consultation requests online" />
   </DashboardLeafPanel>
 </template>
 
