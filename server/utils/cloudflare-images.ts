@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 
 interface CloudflareImagesEnv {
   CF_ACCOUNT_ID?: string
@@ -104,6 +105,18 @@ export async function uploadImageBuffer(
     publicUrl: buildImageUrl(env, imageId, 'public'),
     thumbnailUrl: buildImageUrl(env, imageId, 'thumbnail'),
   }
+}
+
+/** Read the stored base image through the authenticated provider API, never a public variant. */
+export async function downloadImageBuffer(env: CloudflareImagesEnv, imageId: string): Promise<Uint8Array<ArrayBuffer> | null> {
+  assertCloudflareImagesConfigured(env)
+  const res = await fetch(`${apiBase(env)}/v1/${encodeURIComponent(imageId)}/blob`, { headers: authHeader(env), redirect: 'error' })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`CF Images download error ${res.status}: ${await res.text()}`)
+  if (Number(res.headers.get('content-length')) > MAX_IMAGE_BYTES) throw new Error(`CF Images download ${imageId} exceeds the message photo limit`)
+  const bytes = new Uint8Array(await res.arrayBuffer())
+  if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error(`CF Images download ${imageId} exceeds the message photo limit`)
+  return bytes
 }
 
 /** Delete an image from Cloudflare Images. */

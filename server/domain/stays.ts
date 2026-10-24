@@ -21,7 +21,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, pushAirbnbListingSettings, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import { completeChannelPush, deliverStayNights, pushAirbnbListingSettings, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
@@ -59,7 +59,7 @@ export async function stayAccessFor(principal: MemberAccessPrincipal): Promise<S
   return { organizationId: principal.organizationId, actorId: principal.userId, manage: false, userId: principal.userId }
 }
 
-export const STAY_CHANNELS = ['airbnb', 'vrbo', 'direct'] as const
+export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
 export const STAY_STATUSES = ['pending', 'confirmed', 'cancelled'] as const
 export const STAY_PAYMENT_METHODS = ['cash', 'bank_transfer', 'card_external', 'other'] as const
 export type StayPaymentMethod = typeof STAY_PAYMENT_METHODS[number]
@@ -1272,23 +1272,42 @@ async function homeNights(db: DbClient, organizationId: string, home: StayHome, 
 }
 
 /**
- * Tell the home's channel, if it has one, the current state of these nights.
- * The outcome is part of the write's result; a night the channel did not take
- * reads needs_review on the calendar.
+ * Tell the home's channel, if it has one, the current state of these nights:
+ * they join its delivery outbox and go now unless Channex's rate limit or a
+ * retry wait holds them. The outcome is part of the write's result; a night
+ * the channel did not take reads needs_review on the calendar.
  */
 async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, ranges: ReadonlyArray<readonly [string, string]>): Promise<ChannelPushCompletion> {
-  let outcome: ChannelPush | null = null
   try {
-    for (const [from, to] of ranges) {
-      const { home, nights } = await readStayCalendar(db, { organizationId: access.organizationId, actorId: access.actorId, manage: true }, { productId, from, to })
-      const pushed = await pushStayNights(db, env, access.organizationId, home, nights)
-      if (pushed && (!outcome || pushed.state === 'needs_review')) outcome = pushed
-    }
-    return outcome
+    const home = await readStayHome(db, { organizationId: access.organizationId, actorId: access.actorId, manage: true }, productId)
+    const dates = ranges.flatMap(([from, to]) => Array.from({ length: days(from, to) }, (_, offset) => addDays(from, offset)))
+    return await pushStayNights(db, env, access.organizationId, home, dates, (from, to) => homeNights(db, access.organizationId, home, from, to))
   } catch (cause) {
-    const error = cause instanceof Error ? cause : new Error(String(cause))
-    return outcome?.state === 'needs_review' ? new AggregateError([new Error(outcome.detail), error], `${outcome.detail} ${error.message}`) : error
+    return cause instanceof Error ? cause : new Error(String(cause))
   }
+}
+
+/**
+ * Deliver every connected home's pending nights that are due: those waiting
+ * out a rate limit or a retry, and those another delivery of the home or a
+ * write that ended early left. Every home is tried; the run fails naming the
+ * ones that could not be delivered.
+ */
+export async function deliverPendingChannelNights(db: DbClient, env: StayMutationEnv): Promise<{ homes: number }> {
+  const homes = await queryAll<{ organization_id: string; product_id: string }>(db, `SELECT DISTINCT organization_id, product_id FROM channel_night_pushes
+    WHERE provider = 'channex' AND state = 'pending' AND (retry_at IS NULL OR retry_at <= ?)`, [new Date().toISOString()])
+  const failures: string[] = []
+  for (const row of homes) {
+    try {
+      const home = await readStayHome(db, { organizationId: row.organization_id, actorId: 'system', manage: true }, row.product_id)
+      await deliverStayNights(db, env, row.organization_id, home, (from, to) => homeNights(db, row.organization_id, home, from, to))
+      await publishStayInvalidation(env, { type: 'nights.changed', organizationId: row.organization_id, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: new Date().toISOString() })
+    } catch (error) {
+      failures.push(`${row.product_id}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  if (failures.length) throw new Error(`${failures.length} home(s) could not deliver their channel nights: ${failures.join('; ')}`)
+  return { homes: homes.length }
 }
 
 /** A base price or minimum stay changes the same 500 future nights on every write surface. */
@@ -1965,9 +1984,16 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
   if (booking.adults < 1) throw new Error(`Channel booking ${booking.external_booking_id} has no adult guest`)
   if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
-  const currentChannelStay = () => queryFirst<{ id: string; provider_updated_at: string | null; revision_id: string | null }>(db,
-    'SELECT id, provider_updated_at, revision_id FROM stays WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
-  const existing = await currentChannelStay()
+  type ChannelStayRow = { id: string; provider_updated_at: string | null; revision_id: string | null; external_booking_id: string }
+  const currentChannelStay = () => queryFirst<ChannelStayRow>(db,
+    'SELECT id, provider_updated_at, revision_id, external_booking_id FROM stays WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+  // The same reservation under a new provider booking id (a re-import after a
+  // new Channex account) is the stay it already is: the revision's write moves
+  // it onto the new id, when that revision is newer than the stay.
+  const existing = await currentChannelStay() ?? (booking.channel_booking_id === null ? null : await queryFirst<ChannelStayRow>(db,
+    `SELECT id, provider_updated_at, revision_id, external_booking_id FROM stays WHERE organization_id = ? AND channel = ? AND channel_booking_id = ? AND provider = ? AND external_booking_id <> ?`,
+    [organizationId, booking.channel, booking.channel_booking_id, booking.provider, booking.external_booking_id]))
+  const reimported = existing && existing.external_booking_id !== booking.external_booking_id ? existing.external_booking_id : null
   const conversation = await queryFirst<{ organization_id: string; product_id: string; request_id: string }>(db,
     'SELECT organization_id, product_id, request_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
   if (conversation && (conversation.organization_id !== organizationId || conversation.product_id !== productId)) {
@@ -2023,7 +2049,11 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   const home = await queryFirst<{ location_id: string }>(db, 'SELECT location_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, productId])
   if (!home) fail(404, 'STAY_HOME_NOT_FOUND', 'The channel booking home was not found', 'product_id')
   const now = new Date().toISOString()
-  const write = (overbooked: 0 | 1): BatchQuery[] => [{
+  const write = (overbooked: 0 | 1): BatchQuery[] => [...(reimported === null ? [] : [{
+    query: `UPDATE stays SET external_booking_id = ? WHERE organization_id = ? AND id = ? AND provider = ? AND external_booking_id = ?
+      AND (provider_updated_at IS NULL OR provider_updated_at < ?)`,
+    params: [booking.external_booking_id, organizationId, existing?.id ?? null, booking.provider, reimported, booking.provider_updated_at],
+  }]), {
     // The claims' composite FK names the stay's home. Release a real move's
     // old claims before changing that home, under the same upsert guard. The
     // entire batch rolls back if its new claims or any later write fails.
@@ -2074,7 +2104,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
     // Rule 1: another stay holds one of these nights. The channel stay still lands, flagged and holding none.
     writes = await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
   }
-  const changed = writes[1]?.meta.changes
+  const changed = writes[reimported === null ? 1 : 2]?.meta.changes
   if (changed !== 0 && changed !== 1) fail(500, 'CHANNEL_REVISION_WRITE_RESULT_REQUIRED', 'The channel revision write did not report its affected row count', 'changes')
   const current = await currentChannelStay()
   if (!current) fail(500, 'CHANNEL_STAY_NOT_READABLE', 'The saved channel booking could not be read', 'external_booking_id')

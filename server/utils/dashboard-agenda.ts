@@ -6,8 +6,9 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { postEditorPath } from '~/server/utils/dashboard-links'
+import type { Stay } from '~/server/domain/stays'
 
-const STAY_CHANNEL_NAMES = { airbnb: 'Airbnb', vrbo: 'Vrbo' } as const
+const STAY_CHANNEL_NAMES = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com' } as const
 
 export const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const
 export type AgendaKind = typeof AGENDA_KINDS[number]
@@ -263,7 +264,7 @@ export async function listAgenda(
   // both in the location's zone. Members see the homes they look after.
   const stayRows = requestedKinds.has('stay') && scope.organizationId ? queryAll<{
     id: string; organization_id: string; product_id: string; product_name: string; status: string; overbooked: number; check_in_date: string; check_out_date: string
-    owner: 'app' | 'channel'; channel: 'airbnb' | 'vrbo' | 'direct'; guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string; check_out_time: string
+    owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string; check_out_time: string
   }>(db, `SELECT st.id, st.organization_id, st.product_id, p.name AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, st.guest_surname,
         st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time
       FROM stays st
@@ -324,7 +325,7 @@ export async function listAgenda(
     // Only a channel may withhold the guest's name (stays_app_guest_check).
     const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ')
     if (!named && (stay.owner !== 'channel' || stay.channel === 'direct')) throw new HTTPError({ statusCode: 500, message: `Stay ${stay.id} has no guest name`, data: { code: 'INVALID_STAY', field: 'guest_name', stay_id: stay.id } })
-    const guest = named || `Name not provided by ${STAY_CHANNEL_NAMES[stay.channel as 'airbnb' | 'vrbo']}`
+    const guest = named || `Name not provided by ${STAY_CHANNEL_NAMES[stay.channel as Exclude<typeof stay.channel, 'direct'>]}`
     // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and departure do.
     const title = Number(stay.overbooked) === 1 ? `Overbooked · ${guest}` : guest
     for (const [moment, day, time] of [['arrival', stay.check_in_date, stay.check_in_time], ['departure', stay.check_out_date, stay.check_out_time]] as const) {

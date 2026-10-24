@@ -76,7 +76,7 @@ theme:
 | Today | `O` | the day's agenda |
 | Calendar | `O/calendar` | bookings and availability by day |
 | Catalog | `O/products` | what the organization offers |
-| Messages | `O/messages` | guest conversations |
+| Messages | `O/messages` | guest and internal member conversations; Team settings owns membership and access |
 | Menu | `O/menu` | a launcher |
 
 **Menu is a launcher, not a parent.** It lists the Earnings and Insights cards,

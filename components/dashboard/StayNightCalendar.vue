@@ -43,7 +43,10 @@
               :data-testid="`stay-night-${day.toString()}`"
               :title="nightTitle(day)"
             >
-              <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
+              <span class="flex items-center justify-between gap-1">
+                <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
+                <span v-if="channelState(day)" class="size-2 shrink-0 rounded-full" :class="channelState(day) === 'pending' ? 'bg-warning' : 'bg-error'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
+              </span>
               <span v-if="night(day)?.stay_id || night(day)?.held_until" class="hidden truncate text-xs sm:block">{{ night(day)?.stay_id ? 'Reserved' : 'Checkout hold' }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
@@ -178,9 +181,17 @@ const selectedNights = computed(() => selectedRange.value ? (data.value?.nights 
 const selected = (day: DateValue) => Boolean(selectedRange.value && day.toString() >= selectedRange.value.from && day.toString() < selectedRange.value.to)
 const money = (value: number) => data.value ? formatMinorAmount(value, data.value.home.currency) : ''
 const compactMoney = (value: number) => data.value ? minorAmountToMajor(value, data.value.home.currency).replace(/\.0+$/, '') : ''
+/** A night the channel has not confirmed: still queued for it, or refused and needing review. */
+const channelState = (day: DateValue) => {
+  const state = night(day)?.channel?.state
+  return state === 'pending' || state === 'needs_review' ? state : null
+}
+const channelNote = (value: StayNight) => value.channel?.state === 'needs_review' ? value.channel.detail
+  : value.channel?.state === 'pending' ? `Not on the channel yet. ${value.channel.detail ?? 'Waiting to be sent.'}` : null
 function nightTitle(day: DateValue) {
   const value = night(day)
-  return value ? `${day.toString()} · ${value.stay_id ? 'Reserved' : value.held_until ? 'Checkout hold' : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${value.channel?.state === 'needs_review' ? ` · ${value.channel.detail}` : ''}` : day.toString()
+  const note = value ? channelNote(value) : null
+  return value ? `${day.toString()} · ${value.stay_id ? 'Reserved' : value.held_until ? 'Checkout hold' : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
 }
 const dateLabel = computed(() => {
   const range = selectedRange.value
@@ -199,7 +210,7 @@ const dateDraft = reactive({ start: '', end: '' })
 const dateError = ref('')
 const draft = reactive<NightDraft>({ price_minor: '', min_stay_arrival: '', min_stay_through: '', max_stay: '', closed_to_arrival: 'keep', closed_to_departure: 'keep' })
 const dirtyFields = ref<NightEditField[]>([])
-const inspectorProps = computed(() => ({ orgSlug: String(route.params.orgSlug), home: data.value!.home, nights: selectedNights.value, dateLabel: dateLabel.value, manage: props.manage, busy: busy.value || status.value === 'pending', error: writeError.value, notice: [...new Set(selectedNights.value.flatMap(night => night.channel?.state === 'needs_review' && night.channel.detail ? [night.channel.detail] : []))].join(' '), concern: concern.value, draft, dirty: dirtyFields.value.length > 0 }))
+const inspectorProps = computed(() => ({ orgSlug: String(route.params.orgSlug), home: data.value!.home, nights: selectedNights.value, dateLabel: dateLabel.value, manage: props.manage, busy: busy.value || status.value === 'pending', error: writeError.value, notice: [...new Set(selectedNights.value.flatMap(night => channelNote(night) ?? []))].join(' '), concern: concern.value, draft, dirty: dirtyFields.value.length > 0 }))
 const overviewGroups = computed(() => [{ id: 'home', items: [
   { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/price` },
   { id: 'availability', label: 'Availability', summary: `${data.value?.home.min_nights} night minimum`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/availability` },

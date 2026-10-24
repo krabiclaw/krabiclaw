@@ -197,6 +197,8 @@ export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	status: text().default("pending").notNull(),
 	provider_message_id: text(),
 	error: text(),
+	// Only a classified attempt can establish that retrying cannot duplicate delivery.
+	non_delivery_confirmed: integer(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
@@ -1369,7 +1371,7 @@ export const stays = sqliteTable("stays", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
-	channel: text().$type<'airbnb' | 'vrbo' | 'direct'>().notNull(),
+	channel: text().$type<'airbnb' | 'vrbo' | 'booking_com' | 'direct'>().notNull(),
 	owner: text().$type<'app' | 'channel'>().notNull(),
 	status: text().$type<'pending' | 'confirmed' | 'cancelled'>().notNull(),
 	overbooked: integer({ mode: "boolean" }).default(false).notNull(),
@@ -1393,6 +1395,8 @@ export const stays = sqliteTable("stays", {
 	currency: text().notNull(),
 	notes: text(),
 	provider: text().$type<'channex'>(),
+	// The provider's booking id, which a new Channex account replaces; the
+	// channel's own reservation code (Airbnb's), which identifies the stay across them.
 	external_booking_id: text(),
 	channel_booking_id: text(),
 	revision_id: text(),
@@ -1416,13 +1420,15 @@ export const stays = sqliteTable("stays", {
 	unique("stays_org_id_unique").on(table.organization_id, table.id),
 	uniqueIndex("stays_idempotency_unique").on(table.organization_id, table.idempotency_key).where(sql`idempotency_key IS NOT NULL`),
 	uniqueIndex("stays_provider_booking_unique").on(table.provider, table.external_booking_id).where(sql`external_booking_id IS NOT NULL`),
+	// One stay per channel reservation: a reservation re-imported under a new provider booking id updates its stay.
+	uniqueIndex("stays_channel_reservation_unique").on(table.organization_id, table.channel, table.channel_booking_id).where(sql`channel_booking_id IS NOT NULL`),
 	uniqueIndex("stays_request_unique").on(table.request_id).where(sql`request_id IS NOT NULL`),
 	index("stays_product_dates_idx").on(table.product_id, table.check_in_date, table.check_out_date),
 	index("stays_org_dates_idx").on(table.organization_id, table.check_in_date, table.status),
 	check("stays_dates_check", sql`date(check_in_date, '+0 days') IS check_in_date AND date(check_out_date, '+0 days') IS check_out_date AND check_out_date > check_in_date`),
 	check("stays_arrival_time_check", sql`arrival_time IS NULL OR (arrival_time GLOB '[0-2][0-9]:[0-5][0-9]' AND arrival_time < '24:00')`),
 	check("stays_party_check", sql`adults >= 1 AND children >= 0 AND infants >= 0`),
-	check("stays_channel_check", sql`channel IN ('airbnb', 'vrbo', 'direct')`),
+	check("stays_channel_check", sql`channel IN ('airbnb', 'vrbo', 'booking_com', 'direct')`),
 	check("stays_owner_check", sql`owner IN ('app', 'channel') AND (owner = 'channel') = (provider IS NOT NULL AND external_booking_id IS NOT NULL)`),
 	check("stays_status_check", sql`status IN ('pending', 'confirmed', 'cancelled') AND (status = 'cancelled') = (cancelled_at IS NOT NULL)`),
 	check("stays_overbooked_check", sql`overbooked IN (0, 1) AND (overbooked = 0 OR owner = 'channel')`),
@@ -1596,6 +1602,10 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	// so a host's own edit is never overwritten. Null until the stage ran.
 	import_written: text(),
 	enabled: integer({ mode: "boolean" }).default(false).notNull(),
+	// The one nightly calendar delivery to this Channex property running now,
+	// and when its hold lapses (server/integrations/channex/ari.ts); both null when none runs.
+	delivery_lease: text(),
+	delivery_lease_until: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
@@ -1682,10 +1692,12 @@ export const channel_sync_log = sqliteTable("channel_sync_log", {
 	check("channel_sync_log_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
-// What a channel was last told about one night of one connected home. A push
-// marks its nights pending, then pushed or needs_review with the reason; a
-// pending night whose request never returned stays pending. The calendar
-// shows it, so a night the channel did not take is never silently out of date.
+// The delivery outbox for one night of one connected home. A change marks the
+// night pending; delivery sends only what differs from sent_json, the values
+// the channel last confirmed, and marks it pushed, or needs_review with the
+// reason. A pending night waiting out a rate limit or a failed attempt carries
+// its reason and retry_at. The calendar shows each state, so a night the
+// channel did not take is never silently out of date.
 export const channel_night_pushes = sqliteTable("channel_night_pushes", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
@@ -1693,16 +1705,22 @@ export const channel_night_pushes = sqliteTable("channel_night_pushes", {
 	date: text().notNull(),
 	state: text().$type<'pending' | 'pushed' | 'needs_review'>().notNull(),
 	detail: text(),
+	sent_json: text(),
+	attempts: integer().default(0).notNull(),
+	retry_at: text(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	primaryKey({ columns: [table.product_id, table.provider, table.date], name: "channel_night_pushes_pk" }),
 	foreignKey({ columns: [table.product_id, table.provider], foreignColumns: [product_channel_mappings.product_id, product_channel_mappings.provider], name: "channel_night_pushes_mapping_fk" }).onDelete("cascade"),
 	index("channel_night_pushes_state_idx").on(table.organization_id, table.state),
+	index("channel_night_pushes_due_idx").on(table.state, table.retry_at),
 	check("channel_night_pushes_provider_check", sql`provider = 'channex'`),
 	check("channel_night_pushes_state_check", sql`state IN ('pending', 'pushed', 'needs_review')`),
 	check("channel_night_pushes_detail_check", sql`state <> 'needs_review' OR detail IS NOT NULL`),
 	check("channel_night_pushes_date_check", sql`date(date) IS date`),
 	check("channel_night_pushes_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+	check("channel_night_pushes_attempts_check", sql`attempts >= 0`),
+	check("channel_night_pushes_retry_check", sql`retry_at IS NULL OR (state = 'pending' AND strftime('%Y-%m-%dT%H:%M:%fZ', retry_at, '+0 days') IS retry_at)`),
 ]);
 
 // ---------------------------------------------------------------------------
@@ -1938,6 +1956,10 @@ export const channel_threads = sqliteTable("channel_threads", {
 	request_id: text().notNull(),
 	external_booking_id: text(),
 	provider_updated_at: text().notNull(),
+	// The thread this conversation was addressed by in a retired Channex
+	// account, when its reservation was re-imported; its re-delivered Airbnb
+	// history is matched to the messages already recorded.
+	moved_from_thread_id: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, table => [

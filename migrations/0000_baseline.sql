@@ -56,6 +56,35 @@ CREATE INDEX `activity_entries_context_organization_created_idx` ON `activity_en
 CREATE INDEX `activity_entries_kind_org_created_idx` ON `activity_entries` (`kind`,`created_at`);--> statement-breakpoint
 CREATE INDEX `activity_entries_org_created_idx` ON `activity_entries` (`kind`,`organization_id`,`created_at`);--> statement-breakpoint
 CREATE INDEX `activity_entries_target_created_idx` ON `activity_entries` (`kind`,`target_user_id`,`created_at`);--> statement-breakpoint
+CREATE TABLE `airbnb_sync_jobs` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`listing_id` text NOT NULL,
+	`product_id` text,
+	`action` text NOT NULL,
+	`details` text,
+	`state` text DEFAULT 'pending' NOT NULL,
+	`requested_by` text,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`last_error_code` text,
+	`last_error` text,
+	`next_attempt_at` text,
+	`lease_token` text,
+	`lease_until` text,
+	`completed_at` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`requested_by`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "airbnb_sync_jobs_action_check" CHECK(action IN ('sync', 'stop')),
+	CONSTRAINT "airbnb_sync_jobs_state_check" CHECK(state IN ('pending', 'error', 'done', 'failed')),
+	CONSTRAINT "airbnb_sync_jobs_error_check" CHECK(state NOT IN ('error', 'failed') OR (last_error_code IS NOT NULL AND last_error IS NOT NULL)),
+	CONSTRAINT "airbnb_sync_jobs_lease_check" CHECK((lease_token IS NULL) = (lease_until IS NULL)),
+	CONSTRAINT "airbnb_sync_jobs_details_check" CHECK(details IS NULL OR (action = 'sync' AND json_valid(details) AND json_type(details) = 'object'))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `airbnb_sync_jobs_listing_unique` ON `airbnb_sync_jobs` (`organization_id`,`listing_id`);--> statement-breakpoint
+CREATE INDEX `airbnb_sync_jobs_due_idx` ON `airbnb_sync_jobs` (`state`,`next_attempt_at`);--> statement-breakpoint
 CREATE TABLE `analytics_events` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
@@ -262,6 +291,9 @@ CREATE TABLE `channel_night_pushes` (
 	`date` text NOT NULL,
 	`state` text NOT NULL,
 	`detail` text,
+	`sent_json` text,
+	`attempts` integer DEFAULT 0 NOT NULL,
+	`retry_at` text,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	PRIMARY KEY(`product_id`, `provider`, `date`),
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -270,10 +302,13 @@ CREATE TABLE `channel_night_pushes` (
 	CONSTRAINT "channel_night_pushes_state_check" CHECK(state IN ('pending', 'pushed', 'needs_review')),
 	CONSTRAINT "channel_night_pushes_detail_check" CHECK(state <> 'needs_review' OR detail IS NOT NULL),
 	CONSTRAINT "channel_night_pushes_date_check" CHECK(date(date) IS date),
-	CONSTRAINT "channel_night_pushes_updated_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)
+	CONSTRAINT "channel_night_pushes_updated_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at),
+	CONSTRAINT "channel_night_pushes_attempts_check" CHECK(attempts >= 0),
+	CONSTRAINT "channel_night_pushes_retry_check" CHECK(retry_at IS NULL OR (state = 'pending' AND strftime('%Y-%m-%dT%H:%M:%fZ', retry_at, '+0 days') IS retry_at))
 );
 --> statement-breakpoint
 CREATE INDEX `channel_night_pushes_state_idx` ON `channel_night_pushes` (`organization_id`,`state`);--> statement-breakpoint
+CREATE INDEX `channel_night_pushes_due_idx` ON `channel_night_pushes` (`state`,`retry_at`);--> statement-breakpoint
 CREATE TABLE `channel_sync_log` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text,
@@ -553,6 +588,7 @@ CREATE TABLE `guest_thread_deliveries` (
 	`status` text DEFAULT 'pending' NOT NULL,
 	`provider_message_id` text,
 	`error` text,
+	`non_delivery_confirmed` integer,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`entry_id`) REFERENCES `activity_entries`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -785,11 +821,11 @@ CREATE UNIQUE INDEX `member_id_organizationId_unique` ON `member` (`id`,`organiz
 CREATE TABLE `member_scheduling` (
 	`member_id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
-	`timezone` text NOT NULL,
-	`weekly_json` text NOT NULL,
-	`time_off_json` text NOT NULL,
-	`windows_json` text NOT NULL,
-	`windows_until` text NOT NULL,
+	`timezone` text,
+	`weekly_json` text,
+	`time_off_json` text,
+	`windows_json` text,
+	`windows_until` text,
 	`public_name` text,
 	`public_photo_url` text,
 	`public_bio` text,
@@ -804,7 +840,8 @@ CREATE TABLE `member_scheduling` (
 	`busy_error` text,
 	`updated_at` text NOT NULL,
 	`updated_by` text NOT NULL,
-	FOREIGN KEY (`member_id`,`organization_id`) REFERENCES `member`(`id`,`organizationId`) ON UPDATE no action ON DELETE cascade
+	FOREIGN KEY (`member_id`,`organization_id`) REFERENCES `member`(`id`,`organizationId`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "member_scheduling_hours_check" CHECK(("member_scheduling"."timezone" IS NULL AND "member_scheduling"."weekly_json" IS NULL AND "member_scheduling"."time_off_json" IS NULL AND "member_scheduling"."windows_json" IS NULL AND "member_scheduling"."windows_until" IS NULL) OR ("member_scheduling"."timezone" IS NOT NULL AND "member_scheduling"."weekly_json" IS NOT NULL AND "member_scheduling"."time_off_json" IS NOT NULL AND "member_scheduling"."windows_json" IS NOT NULL AND "member_scheduling"."windows_until" IS NOT NULL))
 );
 --> statement-breakpoint
 CREATE INDEX `member_scheduling_org_idx` ON `member_scheduling` (`organization_id`);--> statement-breakpoint
@@ -1565,6 +1602,7 @@ CREATE TABLE `product_channel_mappings` (
 	`import_property` text,
 	`import_calendar` text,
 	`import_content` text,
+	`import_written` text,
 	`enabled` integer DEFAULT 0 NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
@@ -1572,12 +1610,12 @@ CREATE TABLE `product_channel_mappings` (
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "product_channel_mappings_provider_check" CHECK(provider = 'channex'),
-	CONSTRAINT "product_channel_mappings_stage_check" CHECK(import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'content', 'messages', 'complete')),
+	CONSTRAINT "product_channel_mappings_stage_check" CHECK(import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete')),
 	CONSTRAINT "product_channel_mappings_ids_check" CHECK((import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)),
 	CONSTRAINT "product_channel_mappings_calendar_check" CHECK(import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')),
 	CONSTRAINT "product_channel_mappings_property_json_check" CHECK(import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')),
 	CONSTRAINT "product_channel_mappings_content_json_check" CHECK(import_content IS NULL OR (json_valid(import_content) AND json_type(import_content) = 'object')),
-	CONSTRAINT "product_channel_mappings_enabled_check" CHECK(enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'content', 'messages', 'complete'))),
+	CONSTRAINT "product_channel_mappings_enabled_check" CHECK(enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))),
 	CONSTRAINT "product_channel_mappings_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)
 );
 --> statement-breakpoint
@@ -2215,22 +2253,50 @@ CREATE TABLE `session` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `session_token_unique` ON `session` (`token`);--> statement-breakpoint
 CREATE INDEX `session_userId_idx` ON `session` (`userId`);--> statement-breakpoint
+CREATE TABLE `stay_calendar_links` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`channel` text NOT NULL,
+	`import_url` text NOT NULL,
+	`export_token` text NOT NULL,
+	`blocked_json` text DEFAULT '[]' NOT NULL,
+	`synced_at` text,
+	`sync_error` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`created_by` text NOT NULL,
+	`updated_by` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "stay_calendar_links_channel_check" CHECK(channel = 'vrbo'),
+	CONSTRAINT "stay_calendar_links_import_url_check" CHECK(import_url LIKE 'https://%'),
+	CONSTRAINT "stay_calendar_links_blocked_check" CHECK(json_valid(blocked_json) AND json_type(blocked_json) = 'array'),
+	CONSTRAINT "stay_calendar_links_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (synced_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', synced_at, '+0 days') IS synced_at))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `stay_calendar_links_home_channel_unique` ON `stay_calendar_links` (`product_id`,`channel`);--> statement-breakpoint
+CREATE UNIQUE INDEX `stay_calendar_links_export_token_unique` ON `stay_calendar_links` (`export_token`);--> statement-breakpoint
+CREATE UNIQUE INDEX `stay_calendar_links_org_product_id_unique` ON `stay_calendar_links` (`organization_id`,`product_id`,`id`);--> statement-breakpoint
 CREATE TABLE `stay_nights` (
 	`organization_id` text NOT NULL,
 	`product_id` text NOT NULL,
 	`date` text NOT NULL,
 	`stay_id` text,
 	`hold_id` text,
+	`calendar_link_id` text,
 	PRIMARY KEY(`product_id`, `date`),
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`hold_id`) REFERENCES `payment_checkout_holds`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`organization_id`,`product_id`,`stay_id`) REFERENCES `stays`(`organization_id`,`product_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`product_id`,`calendar_link_id`) REFERENCES `stay_calendar_links`(`organization_id`,`product_id`,`id`) ON UPDATE no action ON DELETE cascade,
 	CONSTRAINT "stay_nights_date_check" CHECK(date(date, '+0 days') IS date),
-	CONSTRAINT "stay_nights_claimant_check" CHECK((stay_id IS NULL) <> (hold_id IS NULL))
+	CONSTRAINT "stay_nights_claimant_check" CHECK((stay_id IS NOT NULL) + (hold_id IS NOT NULL) + (calendar_link_id IS NOT NULL) = 1)
 );
 --> statement-breakpoint
 CREATE INDEX `stay_nights_stay_idx` ON `stay_nights` (`stay_id`);--> statement-breakpoint
 CREATE INDEX `stay_nights_hold_idx` ON `stay_nights` (`hold_id`);--> statement-breakpoint
+CREATE INDEX `stay_nights_calendar_link_idx` ON `stay_nights` (`calendar_link_id`);--> statement-breakpoint
 CREATE TABLE `stay_payments` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -2299,7 +2365,7 @@ CREATE TABLE `stays` (
 	CONSTRAINT "stays_dates_check" CHECK(date(check_in_date, '+0 days') IS check_in_date AND date(check_out_date, '+0 days') IS check_out_date AND check_out_date > check_in_date),
 	CONSTRAINT "stays_arrival_time_check" CHECK(arrival_time IS NULL OR (arrival_time GLOB '[0-2][0-9]:[0-5][0-9]' AND arrival_time < '24:00')),
 	CONSTRAINT "stays_party_check" CHECK(adults >= 1 AND children >= 0 AND infants >= 0),
-	CONSTRAINT "stays_channel_check" CHECK(channel IN ('airbnb', 'vrbo', 'direct')),
+	CONSTRAINT "stays_channel_check" CHECK(channel IN ('airbnb', 'vrbo', 'booking_com', 'direct')),
 	CONSTRAINT "stays_owner_check" CHECK(owner IN ('app', 'channel') AND (owner = 'channel') = (provider IS NOT NULL AND external_booking_id IS NOT NULL)),
 	CONSTRAINT "stays_status_check" CHECK(status IN ('pending', 'confirmed', 'cancelled') AND (status = 'cancelled') = (cancelled_at IS NOT NULL)),
 	CONSTRAINT "stays_overbooked_check" CHECK(overbooked IN (0, 1) AND (overbooked = 0 OR owner = 'channel')),

@@ -567,6 +567,44 @@ source edits without overwriting replacement writes, and verify deployed schema,
 foreign keys and guest journeys before retiring either v19 database. Production,
 development and E2E bindings move together.
 
+The v20-to-v21 replacement widens `stays_channel_check` to admit `booking_com`,
+so Booking.com reservations arriving through Channex land as stays. `stays` is
+referenced by `stay_nights`, `stay_payments`, `scheduled_guest_messages` and
+`team_threads`, so the CHECK cannot change in place. The full v20 chain,
+including `0006_channex_ari_outbox.sql`, is archived unchanged in
+`migrations-history/v20/`; `migrations/0000_baseline.sql` is generated from the
+current schema and differs from the complete v20 chain only in that CHECK.
+Every v20 row fits the v21 baseline unchanged; no transform applies. A v20
+source completes its missing archived forward migrations before the copy, and
+older epochs reach v20 through its baseline and forward chain.
+
+Create `krabiclaw-staging-v21` and `krabiclaw-production-v21` with `--location
+wnam`, confirm Cloudflare reports WNAM, and apply the baseline with `wrangler d1
+migrations apply` before loading either. Load each from its own v20 database
+with `--source krabiclaw-staging-v20` or `--source krabiclaw-production-v20`
+while it is unbound, keeping the initial artifact for the final delta. The
+staging binding moves first; production, development and E2E bindings move
+together immediately before promotion. Take each final delta from the v20
+source right after its deployment, review changed and deleted keys, and verify
+schema, foreign keys and guest journeys before retiring either v20 database.
+
+`krabiclaw-staging-v21` (`1a8c3656-d005-46e0-a1cf-d33579c3c21a`) was created
+with `--location wnam` on 2026-10-24, and Cloudflare reported WNAM before the
+baseline was applied. It was loaded from `krabiclaw-staging-v20` while unbound:
+113 tables, 99,128 rows, `foreign_key_check` empty, the native
+`0000_baseline.sql` ledger, no transforms. The staging binding uses v21; its
+final delta from v20 carried three rows and left three OAuth rows whose only
+change was `updatedAt`.
+
+`krabiclaw-production-v21` (`f18a888c-e52e-4c76-b5d6-9a8c11acb165`) was created
+with `--location wnam` on 2026-10-24, and Cloudflare reported WNAM before the
+baseline was applied. It was loaded from `krabiclaw-production-v20` while
+unbound: 113 tables, 121,149 rows, `foreign_key_check` empty, the native
+`0000_baseline.sql` ledger, no transforms. The top-level production,
+development and E2E bindings move to it together, immediately before
+promotion; take the production final delta from v20 right after the
+production deployment.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;
