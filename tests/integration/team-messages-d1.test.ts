@@ -215,8 +215,23 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM team_messages WHERE thread_id = ? AND idempotency_key = 'host-photo'").bind(direct.id).first('n'), 1)
     assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first('n'), 1)
     const nativePhoto = await sendTeamMessage(env, db, cleaner, direct.id, { body: '', photos: [{ bytes: photoBytes, filename: 'native.avif' }], idempotencyKey: 'native-photo', senderName: 'cleaner' })
+    const nativeSaved = (await listTeamMessages(db, owner, direct.id, { limit: 100 })).messages.find(message => message.id === nativePhoto.message.id)
+    assert.ok(nativeSaved)
+    assert.deepEqual({ id: nativeSaved.id, threadId: nativeSaved.threadId, senderId: nativeSaved.senderId, body: nativeSaved.body, photos: nativeSaved.attachments.length }, { id: nativePhoto.message.id, threadId: direct.id, senderId: 'cleaner', body: '', photos: 1 })
+    const nativeAsset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
+      WHERE mp.owner_type = 'team_message' AND mp.owner_id = ? AND ma.organization_id = ?`).bind(nativeSaved.id, ORG).first<{ id: string; r2_key: string; public_url: string }>()
+    assert.ok(nativeAsset)
+    assert.deepEqual(nativeSaved.attachments.map(photo => [photo.id, photo.url]), [[nativeAsset.id, nativeAsset.public_url]])
+    const storedNativePhoto = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(nativeAsset.r2_key)
+    assert.ok(storedNativePhoto)
+    assert.deepEqual(new Uint8Array(await storedNativePhoto.arrayBuffer()), photoBytes)
     const nativeReplay = await sendTeamMessage(env, db, cleaner, direct.id, { body: '', photos: [{ bytes: photoBytes, filename: 'renamed.avif' }], idempotencyKey: 'native-photo', senderName: 'cleaner' })
     assert.deepEqual({ id: nativeReplay.message.id, created: nativeReplay.created, attachments: nativeReplay.message.attachments }, { id: nativePhoto.message.id, created: false, attachments: nativePhoto.message.attachments }, 'native photo replay retains its byte identity independently of a filename')
+    assert.deepEqual((await listTeamMessages(db, owner, direct.id, { limit: 100 })).messages.filter(message => message.id === nativeSaved.id), [nativeSaved])
+    assert.deepEqual((await db.prepare("SELECT id, sender_user_id, body FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = 'native-photo'").bind(ORG, direct.id).all()).results,
+      [{ id: nativeSaved.id, sender_user_id: 'cleaner', body: '' }])
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_placements WHERE owner_type = 'team_message' AND owner_id = ? AND asset_id = ?").bind(nativeSaved.id, nativeAsset.id).first('n'), 1)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ? AND status = 'active'").bind(ORG).first('n'), 2)
 
     // Someone without a seat cannot read or write it, and does not see it.
     await assert.rejects(listTeamMessages(db, cook, direct.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))

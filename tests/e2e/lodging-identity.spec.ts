@@ -320,6 +320,8 @@ test.describe('lodging identity boundary', () => {
       expect(JSON.parse(lostResult.content[0].text)).toMatchObject({ status: 404 })
       const lostNativeSeat = await api.get(`/api/dashboard/team/threads/${threadId}/messages?org=${slug}`, { headers: inviteeBearer })
       expect(lostNativeSeat.status).toBe(404)
+      // Membership resolution refuses the organization before the thread's seat check.
+      expect(await lostNativeSeat.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
 
       // Deleting the only owner would orphan the organization.
       const refused = await api.post('/api/auth/delete-user', { headers: bearer, data: {} })
