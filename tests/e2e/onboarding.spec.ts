@@ -133,7 +133,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 
   // The first save needs both answers and creates the organization through
   // Better Auth and its pending site before the pane has anything to frame.
-  await step('currency').getByRole('button', { name: 'Show popup', exact: true }).click()
+  await step('currency').getByRole('button', { name: 'Currency*', exact: true }).click()
   await page.getByRole('option', { name: 'Thai Baht (THB)', exact: true }).click()
   await expect(step('contact')).toBeVisible()
 
