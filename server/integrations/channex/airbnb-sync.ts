@@ -63,7 +63,7 @@ const MAX_ATTEMPTS = 8
  * and fails the job until a new request names the listing.
  */
 function transient(error: unknown): boolean {
-  if (error instanceof ChannexError) return !error.uncertain && (error.status === 429 || error.status >= 500)
+  if (error instanceof ChannexError) return !error.uncertain && (error.providerStatus === 429 || error.providerStatus >= 500 || error.data.code === 'AIRBNB_UNAVAILABLE')
   if (error instanceof Stripe.errors.StripeError) return error instanceof Stripe.errors.StripeConnectionError || error.statusCode === 429 || (error.statusCode !== undefined && error.statusCode >= 500)
   if (error instanceof HTTPError) return (error.status === 429 || error.status >= 500) && (error.data as { code?: unknown } | undefined)?.code !== 'PROVIDER_VERIFICATION_FAILED'
   return error instanceof TypeError

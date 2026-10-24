@@ -166,7 +166,7 @@ test('an unknown home is logged and acknowledged; a failed read is not acknowled
 
     channex.revise('rev-y', { id: 'bk-y', property_id: 'prop-1', status: 'new', arrival: '2027-03-05', departure: '2027-03-07', amount: '300', revision: '' }, '2026-10-15T01:00:00Z')
     channex.failBooking = true
-    await assert.rejects(applyBookingRevision(db, env, 'rev-y'), (error: unknown) => (error as { status?: number }).status === 503)
+    await assert.rejects(applyBookingRevision(db, env, 'rev-y'), (error: unknown) => (error as { providerStatus?: number; status?: number }).providerStatus === 503 && (error as { status?: number }).status === 502)
     assert.deepEqual(channex.acked, ['rev-x'])
     await assert.rejects(runRevisionFeed(db, env), /1 Channex booking revision\(s\) did not land: rev-y/)
 

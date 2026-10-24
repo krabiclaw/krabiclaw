@@ -39,12 +39,8 @@ export interface ChannexMessagesInstallation {
 
 /** A malformed successful write remains uncertain; it must never be sent again blindly. */
 export class ChannexMessageDataError extends ChannexError {
-  override readonly statusCode = 502
-  override readonly data: { code: 'INVALID_PROVIDER_RESPONSE'; resource: string; field: string; uncertain: boolean }
-
   constructor(resource: string, field: string, message: string, uncertain = false) {
-    super(`Channex returned invalid ${resource}.${field}: ${message}`, 502, uncertain)
-    this.data = { code: 'INVALID_PROVIDER_RESPONSE', resource, field, uncertain }
+    super(`Channex returned invalid ${resource}.${field}: ${message}`, 502, uncertain, { code: 'INVALID_PROVIDER_RESPONSE', resource, field })
   }
 }
 

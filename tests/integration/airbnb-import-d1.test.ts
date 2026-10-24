@@ -71,6 +71,8 @@ class FakeChannex {
   listings = [LISTING]
   messagesProperty: string | null = null
   failMessages = false
+  /** Airbnb failing behind Channex: Channex answers 422 carrying Airbnb's own 500, as it did on production 2026-10-23. */
+  airbnbDown = false
   /** Whether listing_details carries the listing's content; off, it is the record as the import read it before the content stage existed. */
   content = true
   /** An Airbnb image id whose CDN fetch answers 503. */
@@ -123,6 +125,9 @@ class FakeChannex {
     }
     if (method === 'GET' && path === '/channels/chan-1') {
       return json({ data: { id: this.channelId, type: 'channel', attributes: { channel: 'AirBNB', title: this.channel.title, is_active: this.channel.active, properties: this.channel.properties, rate_plans: this.channel.ratePlans }, relationships: { group: { data: { id: 'grp-1' } } } } })
+    }
+    if (method === 'GET' && path === '/channels/chan-1/action/listings' && this.airbnbDown) {
+      return new Response(JSON.stringify({ errors: { error_code: 500, error_message: 'Unfortunately, a server error prevented your request from being completed. Airbnb may be undergoing maintenance or your connection may have timed out. Please try again.', error_type: 'unknown_error' } }), { status: 422, headers: { 'content-type': 'application/json' } })
     }
     if (method === 'GET' && path === '/channels/chan-1/action/listings') return json({ data: { listing_id_dictionary: { values: this.listings.map(id => ({ id, title: 'Cliff Cabin', city: 'Moab', country_code: 'US' })) } } })
     if (method === 'GET' && path === '/channels/chan-1/action/listing_details') {
@@ -473,6 +478,15 @@ test('the backfill route fills a home imported without content and the listings 
       const response = await app.request(Object.assign(new Request(`${BASE}/api/organizations/${ORG}/integrations/airbnb${path}`, { method, headers: { cookie, origin: BASE } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       return { status: response.status, body: await response.json() as Record<string, unknown> }
     }
+    // Airbnb failing behind Channex answers the listings with the coded error, 502, never a bare 500.
+    channex.airbnbDown = true
+    const unavailable = await call('GET', '/listings')
+    assert.deepEqual({ status: unavailable.status, message: unavailable.body.message, data: unavailable.body.data }, {
+      status: 502,
+      message: 'Airbnb did not answer GET /channels/chan-1/action/listings through Channex: Unfortunately, a server error prevented your request from being completed. Airbnb may be undergoing maintenance or your connection may have timed out. Please try again.',
+      data: { code: 'AIRBNB_UNAVAILABLE', field: 'provider_response', uncertain: false, provider_status: 422 },
+    })
+    channex.airbnbDown = false
     const listedBefore = await call('GET', '/listings')
     assert.deepEqual((listedBefore.body.listings as Array<{ import: unknown }>)[0]!.import, { status: 'imported', product_id: productId, stage: 'complete', syncing: true, content: null })
 
@@ -608,7 +622,14 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.deepEqual([failedRow.status, failedRow.error.code], ['failed', 'MISSING_DETAIL'])
     assert.equal(await count(db, 'product_channel_mappings'), 0)
 
-    // With the missing contact in the request's details, the same listing imports, a few photos per step, and goes live.
+    // Airbnb failing behind Channex when the job runs is retried on its own, with its code, rather than failing the listing.
+    assert.equal((await call('POST', { sync: [{ listing_id: LISTING, details: form.missingDetails }] })).status, 202)
+    channex.airbnbDown = true
+    await runAirbnbSyncJobs(env, Date.now() + 60_000)
+    assert.deepEqual(await db.prepare('SELECT state, attempts, last_error_code FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first(), { state: 'error', attempts: 1, last_error_code: 'AIRBNB_UNAVAILABLE' })
+    channex.airbnbDown = false
+
+    // With the missing contact in the request's details, asked again, the same listing imports, a few photos per step, and goes live.
     channex.extraPhotos = 8
     const propertyCreatesBefore = channex.seen.filter(request => request.method === 'POST' && request.path === '/properties').length
     assert.equal((await call('POST', { sync: [{ listing_id: LISTING, details: form.missingDetails }] })).status, 202)
