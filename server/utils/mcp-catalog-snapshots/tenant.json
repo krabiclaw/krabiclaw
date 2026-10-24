@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:46ff17e0613e7f0d232386cdc92a9522198006849eea5c09aedb27366d076ae4",
-  "documentationFingerprint": "sha256:47637178b92c62ba72c6605e2f72926f726e418ec54ae708980c22c42abaf7ef",
+  "fingerprint": "sha256:3c5e5fb36a07fa7c864120734c8ac7f598c0d61b4dd9848442663d2f7f000132",
+  "documentationFingerprint": "sha256:f147c541fa64c9394da6ffced9931d76c66e69d306268b640c63759979fb7539",
   "tools": [
     {
       "name": "add_organization_language",
@@ -106695,7 +106695,7 @@
     {
       "name": "update_member_public_profile",
       "title": "Update member public profile",
-      "description": "Edit only the supplied public host profile fields using the latest shared revision from get_member_public_profile. Omitted fields retain their values; null clears a field. Profile content edits revoke prior approval unless an owner/admin explicitly approves that edit. Only owners/admins may supply public_approved: true publishes the authored profile as a host on public offerings, and false withholds it. Approval requires a nonblank public_name. A profile can be saved before any working hours exist; this operation leaves hours, time off and Calendar settings unchanged. Returns the saved profile and shared revision.",
+      "description": "Edit only the supplied public host profile fields using the latest shared revision from get_member_public_profile. Omitted fields retain their values; null clears a field. Profile content edits revoke prior approval unless an owner/admin explicitly approves that edit. Only owners/admins may supply public_approved. True publishes the authored profile as a host on public offerings. False withholds it. Approval requires a nonblank public_name. A profile can be saved before any working hours exist; this operation leaves hours, time off and Calendar settings unchanged. Returns the saved profile and shared revision.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
