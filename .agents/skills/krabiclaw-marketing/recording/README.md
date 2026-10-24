@@ -69,3 +69,17 @@ Screen Recording permission for the terminal that runs it.
   consent). Plan scene order so the account ends where it started.
 - Close the recording window when done and put the owner's tabs back where
   they were.
+- Removing the Krabiclaw grant cuts off every Google integration linked
+  through that account (Analytics, Search Console, Ads, Calendar). List them
+  first (`organization_integrations` by `account_id`), then Disconnect →
+  Connect → pick → save each one and load its leaf to see it reads data.
+  Better Auth keeps the old scope list on the account; only a live read
+  proves access. Search Console saves with "Connect property", not "Save".
+- Before replying to a provider, check the video plays
+  (`https://www.youtube.com/oembed?url=<link>`). Reply on the provider's own
+  thread: Reply, insert the body with `execCommand('insertText')`, click
+  Send once. Gmail can leave the reply box open after sending; the "Message
+  sent" toast is the confirmation. Never click Send a second time.
+- Replies to reviewers say what changed and what each timestamp shows.
+  Nothing about how the video was made.
+
