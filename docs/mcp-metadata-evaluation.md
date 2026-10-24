@@ -56,6 +56,7 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `get_channel_post` | Show me the current caption and photo on this Facebook post. | What does this post look like on our connected Instagram account now? | Read the website draft instead. |
 | `get_location` | Show this location's address, hours and contact details. | I need to check what our venue currently says about opening hours. | Change the venue's hours to close on Sunday. |
 | `get_member_scheduling` | Show this team member's working hours and time off. | When is this person available to take appointments? | Change their weekly working hours. |
+| `get_member_public_profile` | Show this member's authored host profile and publication approval. | What name and biography have we saved for this host, including an unpublished draft? | Read their Better Auth account profile or working hours. |
 | `get_organization` | Show our business's identity and public website address. | Which public website belongs to the business we're managing? | Change the website's brand colors. |
 | `get_organization_analytics` | Give me our website performance overview for last month. | How has our website been doing lately? | Show only visits from this campaign, grouped by country. |
 | `list_media_assets` | Show the photos already saved in our media library. | Do we already have a picture I can use on this page? | Save this newly attached image from the conversation. |
@@ -121,6 +122,7 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `set_media` | Replace this location's hero image with this saved asset. | Use this photo as the main image, replacing the current one. | Append an extra photo to an ordered gallery. |
 | `set_member_busy_calendars` | Use these already-linked calendars to avoid double bookings for me. | Check these personal calendars when deciding if I'm free for appointments. | Grant new Google OAuth access or write a Google event. |
 | `set_member_scheduling` | Save these weekly hours and time-off dates for this team member. | This is when that person will be available for future appointments. | Change a guest's existing appointment time. |
+| `update_member_public_profile` | Save this authored host biography and, as an admin, explicitly approve the named profile for public display. | Update the introduction guests see for this host, keeping working hours unchanged. | Change their account identity, grant a membership role or alter working hours. |
 | `set_product_booking_config` | Set this class's duration, capacity and staff-review policy. | These should be the defaults when we create future class sessions. | Cancel sessions or remove existing guest bookings. |
 | `set_product_location` | Offer this product at this location and show it on that venue's site. | This venue should now sell and display this dish too. | Change its price or automatically offer it at every location. |
 | `set_product_publication` | Make this product visible on our main website. | Show this existing catalog item on the site, keeping its sale settings. | Change the product's price or its location offering. |

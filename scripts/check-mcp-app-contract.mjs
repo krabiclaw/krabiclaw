@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import { readFileSync } from 'node:fs'
 import { authHeaders, BASE_URL, credentialsConfigured, expectStatus, fail, finish, pass, request, run, skip } from './utils/mcp-check.mjs'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { catalogFingerprint } from '../server/utils/mcp-catalog.ts'
 
 const MCP_VERSION = process.env.MCP_PROTOCOL_VERSION ?? '2025-06-18'
 
@@ -46,7 +48,38 @@ async function main() {
 
   const tools = await request('tools/list', {}, headers)
   expectStatus('tools/list succeeds', tools, 200)
-  const toolList = tools.body?.result?.tools ?? []
+  const toolList = tools.body?.result?.tools
+  if (!Array.isArray(toolList)) {
+    fail('tools/list returns a tool array', tools.body)
+    return
+  }
+  const snapshot = JSON.parse(readFileSync(new URL('../server/utils/mcp-catalog-snapshots/tenant.json', import.meta.url), 'utf8'))
+  const expectedNames = new Set(snapshot.tools.map(tool => tool.name))
+  const actualNames = toolList.map(tool => tool.name)
+  const actualNameSet = new Set(actualNames)
+  if (toolList.length === snapshot.tools.length && actualNameSet.size === toolList.length
+    && actualNames.every(name => expectedNames.has(name))) {
+    pass(`tools/list matches all ${snapshot.tools.length} unique canonical tool names`)
+  } else {
+    fail('tools/list differs from the canonical tool names', {
+      expectedCount: snapshot.tools.length,
+      actualCount: toolList.length,
+      missing: [...expectedNames].filter(name => !actualNameSet.has(name)),
+      unexpected: actualNames.filter(name => !expectedNames.has(name)),
+      duplicateNames: actualNames.filter((name, index) => actualNames.indexOf(name) !== index),
+    })
+  }
+  const expectedFingerprint = catalogFingerprint(snapshot.tools)
+  const actualFingerprint = catalogFingerprint(toolList)
+  const advertisedFingerprint = tools.body?.result?._meta?.['krabiclaw/catalogFingerprint']
+  if (expectedFingerprint === snapshot.fingerprint && actualFingerprint === expectedFingerprint
+    && advertisedFingerprint === expectedFingerprint) {
+    pass(`tools/list complete contracts match the canonical snapshot (${expectedFingerprint})`)
+  } else {
+    fail('tools/list contract fingerprint differs from the canonical snapshot', {
+      saved: snapshot.fingerprint, expected: expectedFingerprint, actual: actualFingerprint, advertised: advertisedFingerprint,
+    })
+  }
   for (const tool of toolList) {
     const securitySchemes = tool.securitySchemes ?? []
     const metaSecuritySchemes = tool._meta?.securitySchemes ?? []

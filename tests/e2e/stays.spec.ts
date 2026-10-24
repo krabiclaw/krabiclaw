@@ -2638,6 +2638,15 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   expect(unlisted.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
   // The organization is this test's own, so the host's published profile is left with it.
   const host = await publishOwnHostProfile(request, baseURL!, organizationId, 'Cliff Cabin host')
+  const members = await call<{ members: Array<{ id: string; user: { id: string } }> }>('list_organization_members', {})
+  expect(members.error).toBeNull()
+  const membership = members.data!.members.find(member => member.id === host.memberId)!
+  expect(membership.user.id).not.toBe(membership.id)
+  const userIdAssignment = await call('update_product', { product_id: productId, stay: { assigned_member_id: membership.user.id } })
+  expect(JSON.parse(userIdAssignment.error!)).toMatchObject({ status: 404, message: 'stay.assigned_member_id is not a member of this organization' })
+  const unchangedAssignment = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`)
+  expect(unchangedAssignment.status(), await unchangedAssignment.text()).toBe(200)
+  expect((await unchangedAssignment.json()).product.stay).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
   const hosted = await call<{ product: Product }>('update_product', { product_id: productId, stay: { assigned_member_id: host.memberId } })
   expect(hosted.error).toBeNull()
   expect(hosted.data!.product.stay).toMatchObject({ assigned_member_id: host.memberId, assigned_team_id: null })

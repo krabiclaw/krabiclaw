@@ -34,11 +34,20 @@ its `organization_id`.
 
 ## Member availability and Google Calendar
 
-`get_member_scheduling` lists accessible members or reads an explicitly named
-member. `set_member_scheduling` saves timezone, hours, time off and public profile
-using the latest `expected_updated_at`. Members can manage only their own record;
-owners and admins can manage their team and approve public profiles. Profile edits
-revoke approval unless an admin explicitly approves them.
+`get_member_scheduling` lists accessible organization memberships or reads a
+member's hours, time off and Calendar status. `set_member_scheduling` changes
+working hours or time off. `get_member_public_profile` and
+`update_member_public_profile` read and edit the separate authored host profile,
+including unpublished drafts. Valid memberships without settings return null.
+Both concerns use the same latest `expected_updated_at`; either edit can make a
+previous read stale. Member IDs are organization membership IDs, not user IDs.
+
+Members can manage only their own settings; owners and admins can manage their
+team and approve public profiles. Profile edits revoke approval unless an admin
+explicitly approves them. Approval requires a nonblank public name and makes the
+authored name, photo and biography visible on assigned public offerings. A host
+profile needs no working hours. Assigning a member or team alone does not approve
+its profile or satisfy the offering's publication prerequisite.
 
 Google consent and account linking happen through Better Auth in the dashboard.
 `set_member_busy_calendars` selects explicit calendar IDs on the member's own

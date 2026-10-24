@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f764e335879eb2b7d25a825386891e128128413c825c07fa26e7d423158eb0fc",
-  "documentationFingerprint": "sha256:0cf39e5abdd56cf14fb4f1eb63fc2cf47269c411c14ff29689b02ff929d89142",
+  "fingerprint": "sha256:46ff17e0613e7f0d232386cdc92a9522198006849eea5c09aedb27366d076ae4",
+  "documentationFingerprint": "sha256:47637178b92c62ba72c6605e2f72926f726e418ec54ae708980c22c42abaf7ef",
   "tools": [
     {
       "name": "add_organization_language",
@@ -8735,14 +8735,14 @@
                       "type": "array"
                     },
                     "assigned_member_id": {
-                      "description": "Member who looks after the home; their assigned access shows its stays.",
+                      "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile. Clear assigned_team_id when choosing a member.",
                       "type": [
                         "string",
                         "null"
                       ]
                     },
                     "assigned_team_id": {
-                      "description": "Team who look after the home, such as cleaners.",
+                      "description": "Host team ID from list_teams. This assignment grants the team access to the home’s stays and shows its members with approved public profiles to guests. At least one approved profile is required for publication. Clear assigned_member_id when choosing a team.",
                       "type": [
                         "string",
                         "null"
@@ -9180,14 +9180,14 @@
                 "booking": {
                   "properties": {
                     "assigned_member_id": {
-                      "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                      "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
                       "type": [
                         "string",
                         "null"
                       ]
                     },
                     "assigned_team_id": {
-                      "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                      "description": "Better Auth team ID of the assigned host team; null when no team is selected.",
                       "type": [
                         "string",
                         "null"
@@ -10492,14 +10492,14 @@
                       "type": "array"
                     },
                     "assigned_member_id": {
-                      "description": "Member who looks after the home; their assigned access shows its stays.",
+                      "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
                       "type": [
                         "string",
                         "null"
                       ]
                     },
                     "assigned_team_id": {
-                      "description": "Team who look after the home, such as cleaners.",
+                      "description": "Better Auth team ID assigned to host and look after the home; null when no team is selected.",
                       "type": [
                         "string",
                         "null"
@@ -21901,14 +21901,14 @@
             "description": "Complete booking setup for a published offering. At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member or team, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
             "properties": {
               "assigned_member_id": {
-                "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name. Clear assigned_team_id when choosing a member.",
                 "type": [
                   "string",
                   "null"
                 ]
               },
               "assigned_team_id": {
-                "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                "description": "Host team ID from list_teams. Guests see the team’s members with approved public profiles; at least one is required for publication. Clear assigned_member_id when choosing a team.",
                 "type": [
                   "string",
                   "null"
@@ -24935,14 +24935,14 @@
                 "type": "array"
               },
               "assigned_member_id": {
-                "description": "Member who looks after the home; their assigned access shows its stays.",
+                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile. Clear assigned_team_id when choosing a member.",
                 "type": [
                   "string",
                   "null"
                 ]
               },
               "assigned_team_id": {
-                "description": "Team who look after the home, such as cleaners.",
+                "description": "Host team ID from list_teams. This assignment grants the team access to the home’s stays and shows its members with approved public profiles to guests. At least one approved profile is required for publication. Clear assigned_member_id when choosing a team.",
                 "type": [
                   "string",
                   "null"
@@ -25369,14 +25369,14 @@
               "booking": {
                 "properties": {
                   "assigned_member_id": {
-                    "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                    "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
                     "type": [
                       "string",
                       "null"
                     ]
                   },
                   "assigned_team_id": {
-                    "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                    "description": "Better Auth team ID of the assigned host team; null when no team is selected.",
                     "type": [
                       "string",
                       "null"
@@ -26681,14 +26681,14 @@
                     "type": "array"
                   },
                   "assigned_member_id": {
-                    "description": "Member who looks after the home; their assigned access shows its stays.",
+                    "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
                     "type": [
                       "string",
                       "null"
                     ]
                   },
                   "assigned_team_id": {
-                    "description": "Team who look after the home, such as cleaners.",
+                    "description": "Better Auth team ID assigned to host and look after the home; null when no team is selected.",
                     "type": [
                       "string",
                       "null"
@@ -46059,14 +46059,119 @@
       "uiResourceUri": null
     },
     {
-      "name": "get_member_scheduling",
-      "title": "Get member scheduling",
-      "description": "List accessible members and their scheduling when member_id is omitted, or read one member’s hours, time off, explicitly approved public profile and Calendar status. Ordinary members can read only their own scheduling record; owners/admins can inspect their team. Before hours are authored, timezone, weekly and time_off are null. No Google event content or credentials are returned.",
+      "name": "get_member_public_profile",
+      "title": "Get member public profile",
+      "description": "Read one organization membership’s authored public host name, photo, biography, approval and shared revision, including unpublished drafts. A valid membership without saved settings returns profile null. This is separate from the person’s Better Auth account profile and does not return working hours or Calendar data. Ordinary members can read only themselves; owners/admins can inspect their team.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "member_id": {
-            "description": "Existing Better Auth organization member ID. Ordinary members may name only themselves.",
+            "description": "Organization membership ID from get_member_scheduling.members[].id or list_organization_members.members[].id, not the person’s userId. Ordinary members may name only their own membership.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "additionalProperties": false,
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "profile": {
+            "additionalProperties": false,
+            "properties": {
+              "member_id": {
+                "type": "string"
+              },
+              "public_approved": {
+                "description": "1 approves this authored profile for display as a host on public offerings; 0 withholds it.",
+                "enum": [
+                  0,
+                  1
+                ],
+                "type": "integer"
+              },
+              "public_bio": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "public_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "public_photo_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "updated_at": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "member_id",
+              "updated_at",
+              "public_name",
+              "public_photo_url",
+              "public_bio",
+              "public_approved"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "providers",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "get_member_scheduling",
+      "title": "Get member scheduling",
+      "description": "List accessible organization memberships and their hours, time off and Calendar status when member_id is omitted, or read one membership’s scheduling. A valid membership without saved settings returns scheduling null. A profile-only record has null timezone, weekly and time_off. Use get_member_public_profile for authored host profiles and approval. Ordinary members can read only themselves; owners/admins can inspect their team. No Google event content or credentials are returned.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "member_id": {
+            "description": "Organization membership ID from get_member_scheduling.members[].id or list_organization_members.members[].id, not the person’s userId. Ordinary members may name only their own membership.",
+            "minLength": 1,
             "type": "string"
           },
           "organization_id": {
@@ -46082,7 +46187,8 @@
       "outputSchema": {
         "$defs": {},
         "additionalProperties": false,
-        "anyOf": [
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "oneOf": [
           {
             "required": [
               "scheduling"
@@ -46094,7 +46200,6 @@
             ]
           }
         ],
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "members": {
             "items": {
@@ -46193,42 +46298,16 @@
                     "member_id": {
                       "type": "string"
                     },
-                    "organization_id": {
-                      "type": "string"
-                    },
-                    "public_approved": {
-                      "enum": [
-                        0,
-                        1
-                      ],
-                      "type": "integer"
-                    },
-                    "public_bio": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "public_name": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "public_photo_url": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
                     "time_off": {
                       "items": {
                         "additionalProperties": false,
                         "properties": {
                           "end": {
+                            "format": "date-time",
                             "type": "string"
                           },
                           "start": {
+                            "format": "date-time",
                             "type": "string"
                           }
                         },
@@ -46250,9 +46329,6 @@
                       ]
                     },
                     "updated_at": {
-                      "type": "string"
-                    },
-                    "updated_by": {
                       "type": "string"
                     },
                     "weekly": {
@@ -46285,12 +46361,19 @@
                   },
                   "required": [
                     "member_id",
-                    "organization_id",
                     "timezone",
                     "updated_at",
                     "weekly",
                     "time_off",
-                    "calendar_status"
+                    "calendar_account_id",
+                    "calendar_ids",
+                    "calendar_status",
+                    "busy_from",
+                    "busy_until",
+                    "busy_checked_at",
+                    "busy_error",
+                    "calendar_conflict_count",
+                    "calendar_conflicts"
                   ],
                   "type": [
                     "object",
@@ -46394,42 +46477,16 @@
               "member_id": {
                 "type": "string"
               },
-              "organization_id": {
-                "type": "string"
-              },
-              "public_approved": {
-                "enum": [
-                  0,
-                  1
-                ],
-                "type": "integer"
-              },
-              "public_bio": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "public_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "public_photo_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "time_off": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
                     "end": {
+                      "format": "date-time",
                       "type": "string"
                     },
                     "start": {
+                      "format": "date-time",
                       "type": "string"
                     }
                   },
@@ -46451,9 +46508,6 @@
                 ]
               },
               "updated_at": {
-                "type": "string"
-              },
-              "updated_by": {
                 "type": "string"
               },
               "weekly": {
@@ -46486,14 +46540,24 @@
             },
             "required": [
               "member_id",
-              "organization_id",
               "timezone",
               "updated_at",
               "weekly",
               "time_off",
-              "calendar_status"
+              "calendar_account_id",
+              "calendar_ids",
+              "calendar_status",
+              "busy_from",
+              "busy_until",
+              "busy_checked_at",
+              "busy_error",
+              "calendar_conflict_count",
+              "calendar_conflicts"
             ],
-            "type": "object"
+            "type": [
+              "object",
+              "null"
+            ]
           }
         },
         "type": "object"
@@ -49442,14 +49506,14 @@
               "booking": {
                 "properties": {
                   "assigned_member_id": {
-                    "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                    "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
                     "type": [
                       "string",
                       "null"
                     ]
                   },
                   "assigned_team_id": {
-                    "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                    "description": "Better Auth team ID of the assigned host team; null when no team is selected.",
                     "type": [
                       "string",
                       "null"
@@ -50754,14 +50818,14 @@
                     "type": "array"
                   },
                   "assigned_member_id": {
-                    "description": "Member who looks after the home; their assigned access shows its stays.",
+                    "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
                     "type": [
                       "string",
                       "null"
                     ]
                   },
                   "assigned_team_id": {
-                    "description": "Team who look after the home, such as cleaners.",
+                    "description": "Better Auth team ID assigned to host and look after the home; null when no team is selected.",
                     "type": [
                       "string",
                       "null"
@@ -83163,14 +83227,14 @@
                       "type": "array"
                     },
                     "assigned_member_id": {
-                      "description": "Member who looks after the home; their assigned access shows its stays.",
+                      "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile. Clear assigned_team_id when choosing a member.",
                       "type": [
                         "string",
                         "null"
                       ]
                     },
                     "assigned_team_id": {
-                      "description": "Team who look after the home, such as cleaners.",
+                      "description": "Host team ID from list_teams. This assignment grants the team access to the home’s stays and shows its members with approved public profiles to guests. At least one approved profile is required for publication. Clear assigned_member_id when choosing a team.",
                       "type": [
                         "string",
                         "null"
@@ -83607,14 +83671,14 @@
                 "booking": {
                   "properties": {
                     "assigned_member_id": {
-                      "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                      "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
                       "type": [
                         "string",
                         "null"
                       ]
                     },
                     "assigned_team_id": {
-                      "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                      "description": "Better Auth team ID of the assigned host team; null when no team is selected.",
                       "type": [
                         "string",
                         "null"
@@ -84945,14 +85009,14 @@
                       "type": "array"
                     },
                     "assigned_member_id": {
-                      "description": "Member who looks after the home; their assigned access shows its stays.",
+                      "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
                       "type": [
                         "string",
                         "null"
                       ]
                     },
                     "assigned_team_id": {
-                      "description": "Team who look after the home, such as cleaners.",
+                      "description": "Better Auth team ID assigned to host and look after the home; null when no team is selected.",
                       "type": [
                         "string",
                         "null"
@@ -97602,7 +97666,8 @@
             "uniqueItems": true
           },
           "member_id": {
-            "description": "Existing Better Auth organization member ID. Ordinary members may name only themselves.",
+            "description": "Organization membership ID from get_member_scheduling.members[].id or list_organization_members.members[].id, not the person’s userId. Ordinary members may name only their own membership.",
+            "minLength": 1,
             "type": "string"
           },
           "organization_id": {
@@ -97655,93 +97720,17 @@
               "member_id": {
                 "type": "string"
               },
-              "public_approved": {
-                "enum": [
-                  0,
-                  1
-                ],
-                "type": "integer"
-              },
-              "public_bio": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "public_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "public_photo_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "time_off": {
-                "items": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "end": {
-                      "type": "string"
-                    },
-                    "start": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "start",
-                    "end"
-                  ],
-                  "type": "object"
-                },
-                "type": [
-                  "array",
-                  "null"
-                ]
-              },
-              "timezone": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "updated_at": {
                 "type": "string"
-              },
-              "weekly": {
-                "items": {
-                  "properties": {
-                    "end": {
-                      "type": "string"
-                    },
-                    "start": {
-                      "type": "string"
-                    },
-                    "weekday": {
-                      "maximum": 6,
-                      "minimum": 0,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "weekday",
-                    "start",
-                    "end"
-                  ],
-                  "type": "object"
-                },
-                "type": [
-                  "array",
-                  "null"
-                ]
               }
             },
             "required": [
               "member_id",
-              "updated_at"
+              "updated_at",
+              "calendar_account_id",
+              "calendar_ids",
+              "calendar_status",
+              "calendar_conflict_count"
             ],
             "type": "object"
           }
@@ -97773,7 +97762,7 @@
     {
       "name": "set_member_scheduling",
       "title": "Set member scheduling",
-      "description": "Update only the supplied member settings using updated_at from get_member_scheduling, or null when its member list shows no scheduling record. Omitted fields retain their values. Profile fields accept null to clear them and may be saved before hours exist. The first hours save requires timezone, weekly and time_off together; explicit empty arrays mean no working hours or time off. Later hours changes may name only the changed fields. Owner/admin may oversee any member and approve their public profile. Profile edits revoke approval unless explicitly approved by an admin. Returns saved values for supplied settings and the resulting profile approval. Existing booking assignments and times stay fixed; no guest messages are sent.",
+      "description": "Change a member’s working hours or time off using the latest shared revision from get_member_scheduling. Omitted fields retain their values. When saved timezone is null, provide timezone, weekly and time_off together; explicit empty arrays mean no working hours or time off. Later edits can supply only changed fields. Returns the saved hours and revision. Changes affect future bookable availability; existing booking assignments and times stay fixed and no guest messages are sent. Public host profile edits use update_member_public_profile.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -97791,38 +97780,20 @@
             "required": [
               "time_off"
             ]
-          },
-          {
-            "required": [
-              "public_name"
-            ]
-          },
-          {
-            "required": [
-              "public_photo_url"
-            ]
-          },
-          {
-            "required": [
-              "public_bio"
-            ]
-          },
-          {
-            "required": [
-              "public_approved"
-            ]
           }
         ],
         "properties": {
           "expected_updated_at": {
-            "description": "updated_at from get_member_scheduling; null only when no scheduling record exists.",
+            "description": "Latest updated_at from get_member_scheduling or get_member_public_profile; null only when that read returns null. Both concerns share this revision, so either kind of edit can make an earlier read stale.",
+            "format": "date-time",
             "type": [
               "string",
               "null"
             ]
           },
           "member_id": {
-            "description": "Existing Better Auth organization member ID. Ordinary members may name only themselves.",
+            "description": "Organization membership ID from get_member_scheduling.members[].id or list_organization_members.members[].id, not the person’s userId. Ordinary members may name only their own membership.",
+            "minLength": 1,
             "type": "string"
           },
           "organization_id": {
@@ -97831,40 +97802,16 @@
             "pattern": "\\S",
             "type": "string"
           },
-          "public_approved": {
-            "type": "boolean"
-          },
-          "public_bio": {
-            "maxLength": 2000,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "public_name": {
-            "maxLength": 100,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "public_photo_url": {
-            "format": "uri",
-            "maxLength": 2048,
-            "pattern": "^https://",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "time_off": {
             "items": {
               "additionalProperties": false,
               "properties": {
                 "end": {
+                  "format": "date-time",
                   "type": "string"
                 },
                 "start": {
+                  "format": "date-time",
                   "type": "string"
                 }
               },
@@ -97878,6 +97825,7 @@
             "type": "array"
           },
           "timezone": {
+            "description": "IANA timezone for these working hours.",
             "type": "string"
           },
           "weekly": {
@@ -97885,9 +97833,11 @@
               "additionalProperties": false,
               "properties": {
                 "end": {
+                  "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
                   "type": "string"
                 },
                 "start": {
+                  "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$",
                   "type": "string"
                 },
                 "weekday": {
@@ -97921,67 +97871,19 @@
           "scheduling": {
             "additionalProperties": false,
             "properties": {
-              "calendar_account_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "calendar_conflict_count": {
-                "type": "integer"
-              },
-              "calendar_ids": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "calendar_status": {
-                "enum": [
-                  "internal",
-                  "disconnected",
-                  "error",
-                  "stale",
-                  "ready"
-                ],
-                "type": "string"
-              },
               "member_id": {
                 "type": "string"
-              },
-              "public_approved": {
-                "enum": [
-                  0,
-                  1
-                ],
-                "type": "integer"
-              },
-              "public_bio": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "public_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "public_photo_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
               },
               "time_off": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
                     "end": {
+                      "format": "date-time",
                       "type": "string"
                     },
                     "start": {
+                      "format": "date-time",
                       "type": "string"
                     }
                   },
@@ -98035,7 +97937,10 @@
             },
             "required": [
               "member_id",
-              "updated_at"
+              "updated_at",
+              "timezone",
+              "weekly",
+              "time_off"
             ],
             "type": "object"
           }
@@ -98072,14 +97977,14 @@
         "additionalProperties": false,
         "properties": {
           "assigned_member_id": {
-            "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+            "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name. Clear assigned_team_id when choosing a member.",
             "type": [
               "string",
               "null"
             ]
           },
           "assigned_team_id": {
-            "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+            "description": "Host team ID from list_teams. Guests see the team’s members with approved public profiles; at least one is required for publication. Clear assigned_member_id when choosing a team.",
             "type": [
               "string",
               "null"
@@ -98149,14 +98054,14 @@
           "config": {
             "properties": {
               "assigned_member_id": {
-                "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
                 "type": [
                   "string",
                   "null"
                 ]
               },
               "assigned_team_id": {
-                "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                "description": "Better Auth team ID of the assigned host team; null when no team is selected.",
                 "type": [
                   "string",
                   "null"
@@ -98326,7 +98231,7 @@
     {
       "name": "set_product_publication",
       "title": "Set product publication",
-      "description": "Publish or withhold a product on the selected site and return its saved publication flag. This setting is independent of whether the product is available for sale and of visibility at individual locations. Read get_product for the complete product.",
+      "description": "Publish or withhold a product on the selected site and return its saved publication flag. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -106788,6 +106693,164 @@
       "uiResourceUri": null
     },
     {
+      "name": "update_member_public_profile",
+      "title": "Update member public profile",
+      "description": "Edit only the supplied public host profile fields using the latest shared revision from get_member_public_profile. Omitted fields retain their values; null clears a field. Profile content edits revoke prior approval unless an owner/admin explicitly approves that edit. Only owners/admins may supply public_approved: true publishes the authored profile as a host on public offerings, and false withholds it. Approval requires a nonblank public_name. A profile can be saved before any working hours exist; this operation leaves hours, time off and Calendar settings unchanged. Returns the saved profile and shared revision.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "public_name"
+            ]
+          },
+          {
+            "required": [
+              "public_photo_url"
+            ]
+          },
+          {
+            "required": [
+              "public_bio"
+            ]
+          },
+          {
+            "required": [
+              "public_approved"
+            ]
+          }
+        ],
+        "properties": {
+          "expected_updated_at": {
+            "description": "Latest updated_at from get_member_scheduling or get_member_public_profile; null only when that read returns null. Both concerns share this revision, so either kind of edit can make an earlier read stale.",
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "member_id": {
+            "description": "Organization membership ID from get_member_scheduling.members[].id or list_organization_members.members[].id, not the person’s userId. Ordinary members may name only their own membership.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          "public_approved": {
+            "description": "Owner/admin only. True approves this authored profile for public host display; false withholds it.",
+            "type": "boolean"
+          },
+          "public_bio": {
+            "maxLength": 2000,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "public_name": {
+            "maxLength": 100,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "public_photo_url": {
+            "format": "uri",
+            "maxLength": 2048,
+            "pattern": "^https://",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "member_id",
+          "expected_updated_at"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "additionalProperties": false,
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "profile": {
+            "additionalProperties": false,
+            "properties": {
+              "member_id": {
+                "type": "string"
+              },
+              "public_approved": {
+                "description": "1 approves this authored profile for display as a host on public offerings; 0 withholds it.",
+                "enum": [
+                  0,
+                  1
+                ],
+                "type": "integer"
+              },
+              "public_bio": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "public_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "public_photo_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "updated_at": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "member_id",
+              "updated_at",
+              "public_name",
+              "public_photo_url",
+              "public_bio",
+              "public_approved"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "providers",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "update_menu",
       "title": "Update menu",
       "description": "Update and publish supplied menu dishes, prices and sections at the selected location. Omitted items, variants, prices and order remain; new items and sections append in supplied order.",
@@ -107709,14 +107772,14 @@
                       "booking": {
                         "properties": {
                           "assigned_member_id": {
-                            "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                            "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
                             "type": [
                               "string",
                               "null"
                             ]
                           },
                           "assigned_team_id": {
-                            "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                            "description": "Better Auth team ID of the assigned host team; null when no team is selected.",
                             "type": [
                               "string",
                               "null"
@@ -109021,14 +109084,14 @@
                             "type": "array"
                           },
                           "assigned_member_id": {
-                            "description": "Member who looks after the home; their assigned access shows its stays.",
+                            "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
                             "type": [
                               "string",
                               "null"
                             ]
                           },
                           "assigned_team_id": {
-                            "description": "Team who look after the home, such as cleaners.",
+                            "description": "Better Auth team ID assigned to host and look after the home; null when no team is selected.",
                             "type": [
                               "string",
                               "null"
@@ -111049,14 +111112,14 @@
             "description": "Complete booking setup for a published offering. At a location, provide weekly_slots or dated sessions; an update can retain its saved weekly times. location_id null holds it online: it needs scheduling_mode provider with an assigned member or team, takes no weekly_slots or sessions, and is booked in that provider's working hours. Runtime validation requires actual future availability before publication.",
             "properties": {
               "assigned_member_id": {
-                "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. Guests see this member’s approved public profile. Read get_member_public_profile; publication requires an approved profile with a nonblank public_name. Clear assigned_team_id when choosing a member.",
                 "type": [
                   "string",
                   "null"
                 ]
               },
               "assigned_team_id": {
-                "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                "description": "Host team ID from list_teams. Guests see the team’s members with approved public profiles; at least one is required for publication. Clear assigned_member_id when choosing a team.",
                 "type": [
                   "string",
                   "null"
@@ -112485,14 +112548,14 @@
                 "type": "array"
               },
               "assigned_member_id": {
-                "description": "Member who looks after the home; their assigned access shows its stays.",
+                "description": "Host membership ID from list_organization_members → members[].id or get_member_scheduling → members[].id, not userId. This assignment grants the member access to the home’s stays and shows their approved public profile to guests. Publication requires an approved profile with a nonblank public_name; read get_member_public_profile. Clear assigned_team_id when choosing a member.",
                 "type": [
                   "string",
                   "null"
                 ]
               },
               "assigned_team_id": {
-                "description": "Team who look after the home, such as cleaners.",
+                "description": "Host team ID from list_teams. This assignment grants the team access to the home’s stays and shows its members with approved public profiles to guests. At least one approved profile is required for publication. Clear assigned_member_id when choosing a team.",
                 "type": [
                   "string",
                   "null"
@@ -112923,14 +112986,14 @@
               "booking": {
                 "properties": {
                   "assigned_member_id": {
-                    "description": "The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.",
+                    "description": "Better Auth organization membership ID of the assigned host; null when no individual host is selected.",
                     "type": [
                       "string",
                       "null"
                     ]
                   },
                   "assigned_team_id": {
-                    "description": "The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.",
+                    "description": "Better Auth team ID of the assigned host team; null when no team is selected.",
                     "type": [
                       "string",
                       "null"
@@ -114261,14 +114324,14 @@
                     "type": "array"
                   },
                   "assigned_member_id": {
-                    "description": "Member who looks after the home; their assigned access shows its stays.",
+                    "description": "Better Auth organization membership ID of the home’s assigned host; null when no individual host is selected.",
                     "type": [
                       "string",
                       "null"
                     ]
                   },
                   "assigned_team_id": {
-                    "description": "Team who look after the home, such as cleaners.",
+                    "description": "Better Auth team ID assigned to host and look after the home; null when no team is selected.",
                     "type": [
                       "string",
                       "null"
@@ -123787,18 +123850,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:bb8c4cd12112dd9b68854a871b8f51b6d93131481d70a75a62dfe224a3fb6af4",
-        "get_product": "sha256:6d0c889348615c7b53b2635228283cd4a0f28513fa17b92de3da0714ef90097f",
+        "create_product": "sha256:3e9393aed7b679691324ae80726eab0405c60d0a0f1ef0ec32738753e6b74029",
+        "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
         "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
         "list_collections": "sha256:48902175cc81e038f9e191dee455e9befd9995c538c83d9e787bf5f1db977cd5",
         "list_location_products": "sha256:c8f03bb72de1ce359c0aa574724f6475046b29e3643739feb311bf00cbae5fc2",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
         "list_organizations": "sha256:a4a05425a7b910a81efe4a7fdf2b0a7e3d458cb90495753de26a829ba0b8ce8e",
-        "reconcile_products": "sha256:dcf6c60aa8c15854b88c8de58f400e1b232f86c3ec106c5886124ad9a9690b2f",
+        "reconcile_products": "sha256:8b5b7a005719da4407b2c90d622e2d4ae195ab6d079a90ed6fb7620adcbcc8b5",
         "reorder_collections": "sha256:a18f120ce1711ffdc7fc6c274079d0cfde771ecbc90152deb3452ba35291a800",
         "set_collection_products": "sha256:ebd552fb78c8253f565f58d96c43d78f6c74c89e144e29b4700ba20a187d5ffc",
-        "update_menu": "sha256:66f23387615714e55718c8204429f0262868a28e0a8e827ed662311db38a64b4",
-        "update_product": "sha256:0179fc706bb0decf289b8ff6138f0599b663cd5ac9614035e3e63c82f538345c"
+        "update_menu": "sha256:75e154739d430569aebfd9ccb2251cc96aba483d7d44616495c29777baa5887e",
+        "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e"
       }
     },
     {
@@ -123843,8 +123906,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:3d10393438ba444756ca1709c23080ca27854a4405fca1f4c7451b0ab31fd450",
-        "create_product": "sha256:bb8c4cd12112dd9b68854a871b8f51b6d93131481d70a75a62dfe224a3fb6af4",
-        "get_product": "sha256:6d0c889348615c7b53b2635228283cd4a0f28513fa17b92de3da0714ef90097f",
+        "create_product": "sha256:3e9393aed7b679691324ae80726eab0405c60d0a0f1ef0ec32738753e6b74029",
+        "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
         "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
         "list_product_booking_sessions": "sha256:d83b2e5cca9bf0fed8d402b5e04074988598a9ed745f61c48024d3849b826b73",
@@ -123908,7 +123971,7 @@
         "attach_media": "sha256:3d10393438ba444756ca1709c23080ca27854a4405fca1f4c7451b0ab31fd450",
         "get_location": "sha256:1aca413612e5d5a38f6799d1f8c6293783c35f449c2a6daab57bb9a50184f5df",
         "get_post": "sha256:90a66e74e4c1bd71f9898112b21121f2ae6e2ebc9bfdca6fbd1edf74f4014bec",
-        "get_product": "sha256:6d0c889348615c7b53b2635228283cd4a0f28513fa17b92de3da0714ef90097f",
+        "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
         "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
         "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
         "save_media_attachment": "sha256:420c7df571df0cd02f519a706d231efe51544183d79b66def3b90fc08d9b1bef",
@@ -123924,7 +123987,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:bb8c4cd12112dd9b68854a871b8f51b6d93131481d70a75a62dfe224a3fb6af4",
+        "create_product": "sha256:3e9393aed7b679691324ae80726eab0405c60d0a0f1ef0ec32738753e6b74029",
         "get_organization": "sha256:7ebc3f74bcada2b704d555b6f1b3380a16b39ee6f9694f1a74ab1d5579879063",
         "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
         "get_website_draft": "sha256:ba4ac466ac8155b67b570e373c132ed877f24a5769b5d33c48dde59fd83e69e3",
@@ -123935,7 +123998,7 @@
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
         "publish_website": "sha256:551ce05b37fe76c1b6620e4f09d6bdb6ea35e4cf319bca8fcf0a25b10d648211",
         "save_website_draft": "sha256:b492a71234d030ddcf7a065ec5af65900f6c879ba98b28c6a73c95c358dd8fc4",
-        "update_menu": "sha256:66f23387615714e55718c8204429f0262868a28e0a8e827ed662311db38a64b4",
+        "update_menu": "sha256:75e154739d430569aebfd9ccb2251cc96aba483d7d44616495c29777baa5887e",
         "update_organization_settings": "sha256:7476c3c5cbb2c97f2d3c3a25b71f2d961779ab35706bc125665fbfd1a12d2475",
         "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
       }
@@ -123950,15 +124013,15 @@
       },
       "toolContracts": {
         "get_location": "sha256:1aca413612e5d5a38f6799d1f8c6293783c35f449c2a6daab57bb9a50184f5df",
-        "get_product": "sha256:6d0c889348615c7b53b2635228283cd4a0f28513fa17b92de3da0714ef90097f",
+        "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
         "get_reservation_policy": "sha256:4045310c41d2fc80d5a07e206d3b6f9d4726bb5b6697f4941332034e1474980b",
         "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
         "list_product_booking_sessions": "sha256:d83b2e5cca9bf0fed8d402b5e04074988598a9ed745f61c48024d3849b826b73",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "replace_product_weekly_schedule": "sha256:f2882dc99a1da0d407f05dd05e807f26501faf2697c8a270504c63c52c158c69",
-        "set_product_booking_config": "sha256:3e0e38581ce7c9c13f6b2a98e419cb34d119a6e1cbdf96c283c2bfdaf66050ca",
-        "update_product": "sha256:0179fc706bb0decf289b8ff6138f0599b663cd5ac9614035e3e63c82f538345c",
+        "set_product_booking_config": "sha256:e536617c2cd6082ed184e772ee67f57c790db259bba741dfaccb7d99ff64b867",
+        "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e",
         "update_reservation_policy": "sha256:1704f7adb7b780ff9ea397b791cb7a09d316e7741894a22c630e50e018b06409"
       }
     },
@@ -123978,7 +124041,7 @@
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
         "set_media": "sha256:e3d4681eb033e3f7c7f472c3e470b835724475a6e096e87168c2f0145e00a0f2",
-        "update_product": "sha256:0179fc706bb0decf289b8ff6138f0599b663cd5ac9614035e3e63c82f538345c",
+        "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e",
         "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
       }
     },
@@ -123994,14 +124057,14 @@
         "create_post": "sha256:e3c2701bb920fadd2b0bff26925c13f4bdf7045c7471d37777c5b6166fed9846",
         "get_guest_conversation": "sha256:74b41ebb885766ddf605efbbc63148e2028c4fb63512a75b950b96f9c8330941",
         "get_organization_analytics": "sha256:069948b51c35d21c56d9db36f9e1f2f42702911af83649e4775792be47f5f950",
-        "get_product": "sha256:6d0c889348615c7b53b2635228283cd4a0f28513fa17b92de3da0714ef90097f",
+        "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
         "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
         "list_guest_conversations": "sha256:ddf04afce74f786a28bd5a72f31eb9d14c0279e8ce20bfbbee6cb2e8a2b1a3bb",
         "list_product_booking_sessions": "sha256:d83b2e5cca9bf0fed8d402b5e04074988598a9ed745f61c48024d3849b826b73",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "publish_post": "sha256:58f8905fe25459178581a8b47f51706e96ac0d93742ec099ee9fc92f576751d5",
         "reply_to_guest": "sha256:e0edcb5a1472a53fe7e010d2714e5a7ff82f0bab492c3647825a3729523f8797",
-        "update_product": "sha256:0179fc706bb0decf289b8ff6138f0599b663cd5ac9614035e3e63c82f538345c"
+        "update_product": "sha256:caf6c1767b589f86f35d6097b77a779e28b26fd95fd68682883acc4630e5cf8e"
       }
     }
   ],
@@ -124031,7 +124094,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:6d0c889348615c7b53b2635228283cd4a0f28513fa17b92de3da0714ef90097f",
+        "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
         "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
         "list_collections": "sha256:48902175cc81e038f9e191dee455e9befd9995c538c83d9e787bf5f1db977cd5",
         "list_location_products": "sha256:c8f03bb72de1ce359c0aa574724f6475046b29e3643739feb311bf00cbae5fc2",
@@ -124039,7 +124102,7 @@
         "list_organizations": "sha256:a4a05425a7b910a81efe4a7fdf2b0a7e3d458cb90495753de26a829ba0b8ce8e",
         "reorder_collections": "sha256:a18f120ce1711ffdc7fc6c274079d0cfde771ecbc90152deb3452ba35291a800",
         "set_collection_products": "sha256:ebd552fb78c8253f565f58d96c43d78f6c74c89e144e29b4700ba20a187d5ffc",
-        "update_menu": "sha256:66f23387615714e55718c8204429f0262868a28e0a8e827ed662311db38a64b4"
+        "update_menu": "sha256:75e154739d430569aebfd9ccb2251cc96aba483d7d44616495c29777baa5887e"
       }
     },
     {
@@ -124050,7 +124113,7 @@
         "confirm_product_booking": "sha256:0b27d98ebe4b2034c847a90dee73700b6885e2508920116437f751f8d9e23d91",
         "create_product_booking": "sha256:0818f5e809e595e32ddd424a7c4b41d5127092124a1c2e00d04bffc8c6bba08f",
         "create_product_session": "sha256:3b5d8f3d4f7c6a45f59219d789fefd0e8b6da31ebe3cecf5cac0394bbbaab912",
-        "get_member_scheduling": "sha256:6236377d6c83083a3d8c45fb9d5fef55d0ce6e9cbc837811b232f0cf33a97ff9",
+        "get_member_scheduling": "sha256:abde339f5d9440c25569531ffa09205ff73c60c6422640a2bb196f04acf8cf4d",
         "get_product_booking": "sha256:2d113f750fa03eceae5c3baba37fbaf24dddcec13ed6421571e505cec9b4032e",
         "list_product_booking_sessions": "sha256:d83b2e5cca9bf0fed8d402b5e04074988598a9ed745f61c48024d3849b826b73",
         "list_product_bookings": "sha256:af06a6e491cbcf33f182683154d81a35c5b617b9ab372747a8c50944eb686f2d",
@@ -124059,7 +124122,7 @@
         "reject_product_booking": "sha256:04c98b168fd16d5f33616b268a7b41f3334f8c8b556428fd5f41c49cca6c39cc",
         "replace_product_weekly_schedule": "sha256:f2882dc99a1da0d407f05dd05e807f26501faf2697c8a270504c63c52c158c69",
         "request_product_booking_change": "sha256:e808c894e4b389ad861cc6398fb18163cea4cd153384b6f7156dba9abc08dfae",
-        "set_member_scheduling": "sha256:d1e4d9f9b88f02b10fe0920363882393f8c21e7f8becae9018c00924ab127dc8",
+        "set_member_scheduling": "sha256:e4646557cf22d5e24b27582f1729e1370084deb9c545bfc70024ff66244d9a9f",
         "update_product_session": "sha256:1e36ad1b7e6784af2fc11253ba95877b71b9a622255931ed435655e4c66ff034"
       }
     },

@@ -2267,8 +2267,9 @@ test.describe('dashboard pane hierarchy', () => {
     const availability = '/dashboard/account/profile/calendar/org-ncls-blawby'
     let originalUser: { id: string; name: string; image: string | null } | null = null
     let memberId: string | null = null
-    let previous: MemberSchedule = null
-    let bioSaved = false
+    type PublicProfile = Pick<NonNullable<MemberSchedule>, 'member_id' | 'updated_at' | 'public_name' | 'public_photo_url' | 'public_bio' | 'public_approved'>
+    let originalSettings: Omit<NonNullable<MemberSchedule>, 'updated_at' | 'updated_by'> | null = null
+    let profileSaved = false
     let nameSaved = false
     let cleanupRequest: APIRequestContext | undefined
     const failures: unknown[] = []
@@ -2300,13 +2301,49 @@ test.describe('dashboard pane hierarchy', () => {
     const member = (await membersRead.json() as { members: Array<{ id: string; self: boolean; scheduling: MemberSchedule }> }).members.find(item => item.self)
     expect(member, 'the account edits its own existing Better Auth membership').toBeDefined()
     memberId = member!.id
-    previous = member!.scheduling
+    const previous = member!.scheduling
+    if (previous) {
+      const { updated_at: _updatedAt, updated_by: _updatedBy, ...fields } = previous
+      originalSettings = fields
+    } else {
+      originalSettings = { member_id: memberId, organization_id: organizationId, timezone: null, weekly: null, time_off: null,
+        public_name: null, public_photo_url: null, public_bio: null, public_approved: 0,
+        calendar_account_id: null, calendar_ids: [], calendar_status: 'internal', calendar_conflict_count: 0, calendar_conflicts: [],
+        busy_from: null, busy_until: null, busy_checked_at: null, busy_error: null }
+    }
+    const initialProfile = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
+    expect(initialProfile.status(), await initialProfile.text()).toBe(200)
+    expect(mcpData<{ profile: PublicProfile | null }>(await initialProfile.json()).profile).toEqual(previous ? {
+      member_id: memberId, updated_at: previous.updated_at, public_name: previous.public_name,
+      public_photo_url: previous.public_photo_url, public_bio: previous.public_bio, public_approved: previous.public_approved,
+    } : null)
     await page.getByRole('link', { name: /^Profile & availability/ }).click()
     await expect(page).toHaveURL(availability)
     await expect(page.getByRole('link', { name: /^Google Calendar/ })).toBeVisible()
 
     // Public profile editing never asks this person to initialize Hours first.
     await page.getByRole('link', { name: /^Public profile/ }).click()
+    await page.getByRole('link', { name: /^Name(?:\s|$)/ }).click()
+    const publicNameLeaf = page.locator('#dashboard-panel-member-name')
+    const publicName = `E2E Legal Host ${Date.now().toString(36)}`
+    await publicNameLeaf.getByRole('textbox', { name: 'Name', exact: true }).fill(publicName)
+    const publicNameWrite = page.waitForResponse(response => new URL(response.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && response.request().method() === 'PUT')
+    await publicNameLeaf.getByRole('button', { name: 'Save', exact: true }).click()
+    const publicNameResponse = await publicNameWrite
+    expect(publicNameResponse.status(), await publicNameResponse.text()).toBe(200)
+    profileSaved = true
+    expect(publicNameResponse.request().postDataJSON()).toEqual({ public_name: publicName, expected_updated_at: previous?.updated_at ?? null })
+    const namedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
+    expect(namedRead.status(), await namedRead.text()).toBe(200)
+    const namedProfile = mcpData<{ profile: PublicProfile }>(await namedRead.json()).profile
+    expect(namedProfile).toEqual({ member_id: memberId, updated_at: namedProfile.updated_at, public_name: publicName,
+      public_photo_url: originalSettings.public_photo_url, public_bio: originalSettings.public_bio, public_approved: 0 })
+    const namedNativeRead = await page.request.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
+    expect(namedNativeRead.status(), await namedNativeRead.text()).toBe(200)
+    const namedNative = (await namedNativeRead.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
+    expect(namedNative).toEqual({ ...originalSettings, public_name: publicName, public_approved: 0, updated_at: namedProfile.updated_at, updated_by: originalUser.id })
+    await publicNameLeaf.getByTestId('dashboard-navbar-close').click()
+    await expect(page).toHaveURL(`${availability}/profile`)
     await page.getByRole('link', { name: /^About you/ }).click()
     const bioLeaf = page.locator('#dashboard-panel-member-bio')
     const bio = `I help clients understand their options and prepare for family law consultations. My goal is to make the next steps clear and give each client time to ask questions.\n\nFictional example profile · ${Date.now().toString(36)}`
@@ -2315,18 +2352,16 @@ test.describe('dashboard pane hierarchy', () => {
     await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const bioResponse = await bioWrite
     expect(bioResponse.status(), await bioResponse.text()).toBe(200)
-    bioSaved = true
-    expect(bioResponse.request().postDataJSON()).toEqual({ public_bio: bio, expected_updated_at: previous?.updated_at ?? null })
-    const independentProfile = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+    expect(bioResponse.request().postDataJSON()).toEqual({ public_bio: bio, expected_updated_at: namedProfile.updated_at })
+    const independentProfile = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(independentProfile.status(), await independentProfile.text()).toBe(200)
-    const saved = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await independentProfile.json()).scheduling
-    expect(saved).toMatchObject({ public_bio: bio, public_approved: 0, updated_by: originalUser.id })
-    if (previous) {
-      expect(saved).toEqual({ ...previous, public_bio: bio, public_approved: 0, updated_at: saved.updated_at, updated_by: originalUser.id })
-      expect(saved.updated_at).not.toBe(previous.updated_at)
-    } else {
-      expect(saved).toMatchObject({ timezone: null, weekly: null, time_off: null, public_name: null, public_photo_url: null, calendar_account_id: null, calendar_ids: [], busy_from: null, busy_until: null, busy_checked_at: null, busy_error: null, calendar_status: 'internal' })
-    }
+    const saved = mcpData<{ profile: PublicProfile }>(await independentProfile.json()).profile
+    expect(saved).toEqual({ ...namedProfile, public_bio: bio, public_approved: 0, updated_at: saved.updated_at })
+    expect(saved.updated_at).not.toBe(namedProfile.updated_at)
+    const savedNativeRead = await page.request.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
+    expect(savedNativeRead.status(), await savedNativeRead.text()).toBe(200)
+    const savedNative = (await savedNativeRead.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
+    expect(savedNative).toEqual({ ...namedNative, public_bio: bio, public_approved: 0, updated_at: saved.updated_at, updated_by: originalUser.id })
 
     await expect(bioLeaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     await page.setViewportSize(WIDE)
@@ -2342,10 +2377,10 @@ test.describe('dashboard pane hierarchy', () => {
     const attemptedBio = `${bio} unsaved edit`
     await bioLeaf.getByRole('textbox', { name: 'About you', exact: true }).fill(attemptedBio)
     const concurrentBio = `${bio} concurrent edit`
-    const concurrentWrite = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'set_member_scheduling', args: { organization_id: organizationId, member_id: memberId, public_bio: concurrentBio, expected_updated_at: saved.updated_at } })
+    const concurrentWrite = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: memberId, public_bio: concurrentBio, expected_updated_at: saved.updated_at } })
     expect(concurrentWrite.status(), await concurrentWrite.text()).toBe(200)
-    const concurrent = mcpData<{ scheduling: Pick<NonNullable<MemberSchedule>, 'member_id' | 'updated_at' | 'public_bio' | 'public_approved'> }>(await concurrentWrite.json()).scheduling
-    expect(concurrent).toEqual({ member_id: memberId, updated_at: concurrent.updated_at, public_bio: concurrentBio, public_approved: 0 })
+    const concurrent = mcpData<{ profile: PublicProfile }>(await concurrentWrite.json()).profile
+    expect(concurrent).toEqual({ ...saved, updated_at: concurrent.updated_at, public_bio: concurrentBio, public_approved: 0 })
     const conflictWrite = page.waitForResponse(response => new URL(response.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && response.request().method() === 'PUT')
     await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const conflictResponse = await conflictWrite
@@ -2354,10 +2389,13 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(bioLeaf.getByRole('textbox', { name: 'About you', exact: true })).toHaveValue(attemptedBio)
     await expect(bioLeaf.getByText(/These settings changed after your edit\. Use the saved values before editing again\./)).toBeVisible()
     await expect(bioLeaf.getByRole('button', { name: 'Retry', exact: true })).toBeDisabled()
-    const concurrentRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+    const concurrentRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(concurrentRead.status(), await concurrentRead.text()).toBe(200)
-    const concurrentSaved = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await concurrentRead.json()).scheduling
-    expect(concurrentSaved).toEqual({ ...saved, public_bio: concurrentBio, public_approved: 0, updated_at: concurrent.updated_at, updated_by: originalUser.id })
+    expect(mcpData<{ profile: PublicProfile }>(await concurrentRead.json()).profile).toEqual(concurrent)
+    const concurrentNativeRead = await page.request.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
+    expect(concurrentNativeRead.status(), await concurrentNativeRead.text()).toBe(200)
+    const concurrentSaved = (await concurrentNativeRead.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
+    expect(concurrentSaved).toEqual({ ...savedNative, public_bio: concurrentBio, public_approved: 0, updated_at: concurrent.updated_at, updated_by: originalUser.id })
     let reloadWrites = 0
     const observeReload = (request: Request) => {
       if (new URL(request.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && request.method() === 'PUT') reloadWrites++
@@ -2391,11 +2429,14 @@ test.describe('dashboard pane hierarchy', () => {
     const approvalResponse = await approvalWrite
     expect(approvalResponse.status(), await approvalResponse.text()).toBe(200)
     expect(approvalResponse.request().postDataJSON()).toEqual({ public_approved: true, expected_updated_at: concurrent.updated_at })
-    const approvalRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+    const approvalRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
     expect(approvalRead.status(), await approvalRead.text()).toBe(200)
-    const approved = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await approvalRead.json()).scheduling
-    expect(approved).toEqual({ ...concurrentSaved, public_approved: 1, updated_at: approved.updated_at, updated_by: originalUser.id })
+    const approved = mcpData<{ profile: PublicProfile }>(await approvalRead.json()).profile
+    expect(approved).toEqual({ ...concurrent, public_approved: 1, updated_at: approved.updated_at })
     expect(approved.updated_at).not.toBe(concurrent.updated_at)
+    const approvedNativeRead = await page.request.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
+    expect(approvedNativeRead.status(), await approvedNativeRead.text()).toBe(200)
+    expect((await approvedNativeRead.json()).scheduling).toEqual({ ...concurrentSaved, public_approved: 1, updated_at: approved.updated_at, updated_by: originalUser.id })
 
     await open(page, '/dashboard/account/profile/personal')
     const personal = page.locator('#dashboard-panel-account-personal')
@@ -2460,17 +2501,23 @@ test.describe('dashboard pane hierarchy', () => {
         }
       } catch (error) { failures.push(error) }
       try {
-        if (bioSaved && memberId && originalUser) {
+        if (profileSaved && memberId && originalUser && originalSettings) {
           const current = await cleanupRequest!.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
           expect(current.status(), await current.text()).toBe(200)
           const record = (await current.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
-          const restored = await cleanupRequest!.put(`/api/organizations/${organizationId}/members/${memberId}/scheduling`, { data: { public_bio: previous?.public_bio ?? null, public_approved: Boolean(previous?.public_approved), expected_updated_at: record.updated_at } })
+          const restored = await cleanupRequest!.put(`/api/organizations/${organizationId}/members/${memberId}/scheduling`, { data: {
+            public_name: originalSettings.public_name, public_photo_url: originalSettings.public_photo_url,
+            public_bio: originalSettings.public_bio, public_approved: Boolean(originalSettings.public_approved), expected_updated_at: record.updated_at,
+          } })
           expect(restored.status(), await restored.text()).toBe(200)
-          const independent = await mcpRequest(cleanupRequest!, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
+          const independent = await mcpRequest(cleanupRequest!, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: memberId } })
           expect(independent.status(), await independent.text()).toBe(200)
-          const read = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await independent.json()).scheduling
-          if (previous) expect(read).toEqual({ ...previous, updated_at: read.updated_at, updated_by: originalUser.id })
-          else expect(read).toMatchObject({ public_bio: null, public_name: null, public_photo_url: null, public_approved: 0, timezone: null, weekly: null, time_off: null, calendar_account_id: null, calendar_ids: [], busy_from: null, busy_until: null, busy_checked_at: null, busy_error: null, calendar_status: 'internal' })
+          const read = mcpData<{ profile: PublicProfile }>(await independent.json()).profile
+          expect(read).toEqual({ member_id: memberId, updated_at: read.updated_at, public_name: originalSettings.public_name,
+            public_photo_url: originalSettings.public_photo_url, public_bio: originalSettings.public_bio, public_approved: originalSettings.public_approved })
+          const native = await cleanupRequest!.get(`/api/organizations/${organizationId}/members/${memberId}/scheduling`)
+          expect(native.status(), await native.text()).toBe(200)
+          expect((await native.json()).scheduling).toEqual({ ...originalSettings, updated_at: read.updated_at, updated_by: originalUser.id })
         }
       } catch (error) { failures.push(error) }
       try { await cleanupRequest?.dispose() } catch (error) { failures.push(error) }

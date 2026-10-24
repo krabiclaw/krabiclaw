@@ -644,6 +644,18 @@
         "destructive_justification": "Reads the selected location, including operational contact and notification settings."
       }
     },
+    "get_member_public_profile": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one authorized membership’s authored host name, photo, biography, approval and shared revision, including drafts; returns null for a valid membership with no settings. It exposes no hours or Calendar data.",
+        "open_world_justification": "Reads one authorized membership’s authored host name, photo, biography, approval and shared revision, including drafts; returns null for a valid membership with no settings. It exposes no hours or Calendar data. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads one authorized membership’s authored host name, photo, biography, approval and shared revision, including drafts; returns null for a valid membership with no settings. It exposes no hours or Calendar data."
+      }
+    },
     "get_member_scheduling": {
       "annotations": {
         "readOnlyHint": true,
@@ -651,9 +663,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records.",
-        "open_world_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records."
+        "read_only_justification": "Reads authorized membership hours, time off and interval-only Calendar status, or null for a valid membership with no settings. Ordinary members can read only themselves; public profile content is read separately.",
+        "open_world_justification": "Reads authorized membership hours, time off and interval-only Calendar status, or null for a valid membership with no settings. Ordinary members can read only themselves; public profile content is read separately. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads authorized membership hours, time off and interval-only Calendar status, or null for a valid membership with no settings. Ordinary members can read only themselves; public profile content is read separately."
       }
     },
     "get_organization": {
@@ -1635,9 +1647,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Updates supplied member profile or availability fields using optimistic revision. Profile saves retain Hours and Calendar; the first Hours save explicitly supplies timezone, weekly hours and time off. Existing Booking assignments remain fixed.",
-        "open_world_justification": "Changes public booking availability and any approved member profile shown to website visitors.",
-        "destructive_justification": "Updates supplied member profile or availability fields using optimistic revision. Profile saves retain Hours and Calendar; the first Hours save explicitly supplies timezone, weekly hours and time off. Existing Booking assignments remain fixed."
+        "read_only_justification": "Updates supplied working hours or time off using the shared optimistic revision. The first Hours save explicitly supplies timezone, weekly hours and time off. Public profiles and existing booking assignments remain fixed.",
+        "open_world_justification": "Changes future public booking availability while preserving existing bookings and public host profile content.",
+        "destructive_justification": "Updates supplied working hours or time off using the shared optimistic revision. The first Hours save explicitly supplies timezone, weekly hours and time off. Public profiles and existing booking assignments remain fixed."
       }
     },
     "set_product_booking_config": {
@@ -1806,6 +1818,18 @@
         "read_only_justification": "Overwrites media metadata such as alt text or category.",
         "open_world_justification": "Changes alt text that can appear with the asset on the public website; category changes organize the media library.",
         "destructive_justification": "Overwrites media metadata such as alt text or category."
+      }
+    },
+    "update_member_public_profile": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Updates supplied authored host profile fields using the shared optimistic revision, leaving Hours and Calendar unchanged. Content edits revoke prior approval unless explicitly approved by an owner/admin. Approval requires a nonblank public name; ordinary members cannot approve profiles.",
+        "open_world_justification": "Changes authored host content displayed on assigned public offerings; explicit owner/admin approval publishes it and withholding approval removes it from public display.",
+        "destructive_justification": "Updates supplied authored host profile fields using the shared optimistic revision, leaving Hours and Calendar unchanged. Content edits revoke prior approval unless explicitly approved by an owner/admin. Approval requires a nonblank public name; ordinary members cannot approve profiles."
       }
     },
     "update_menu": {

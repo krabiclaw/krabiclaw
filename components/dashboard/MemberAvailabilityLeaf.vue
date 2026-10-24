@@ -41,7 +41,12 @@ const account=inject(accountEditorKey,null)
 const day=computed(()=>WEEK_ROWS.find(d=>d.slug===props.concern))
 const labels:Record<string,string>={timezone:'Timezone',name:'Name',photo:'Photo',bio:'About you',published:'Publish profile'}
 const title=computed(()=>day.value?.label??labels[props.concern]??'')
-const lead=computed(()=>editor.record.value?.timezone?undefined:props.concern==='timezone'?'No working hours or time off are set yet. Add your hours before accepting bookings.':day.value?'Choose your timezone in Hours before adding working hours.':undefined)
+const lead=computed(()=>{
+ if(props.concern==='published')return 'Publish this name, photo and bio on the offerings you host. A public name is required. Working hours and existing booking assignments stay unchanged.'
+ if(['name','photo','bio'].includes(props.concern))return 'Saving changes removes approval until an owner or admin publishes the profile again.'
+ if(!editor.record.value?.timezone)return props.concern==='timezone'?'Choose a timezone before adding working hours and time off.':day.value?'Choose your timezone in Hours before adding working hours.':undefined
+ return undefined
+})
 const saveDisabled=computed(()=>!editor.loaded.value || !editor.dirty.value || editor.recovery.value?.status==='conflict' || (props.concern==='timezone'?!editor.draft.value.timezone:Boolean(day.value)&&!editor.record.value?.timezone))
 const accountPhoto=computed(()=>account?.photoPreview.value??account?.sessionData.value?.user?.image??null)
 const bioTextarea=useTemplateRef('bioTextarea')
