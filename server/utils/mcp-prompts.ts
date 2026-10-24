@@ -37,7 +37,7 @@ export const MCP_PROMPTS: McpPromptDefinition[] = [
   },
   {
     name: "triage_inbox",
-    description: "Summarize guest conversations, pending bookings and reviews awaiting a reply.",
+    description: "Summarize guest and team conversations, pending bookings and reviews awaiting a reply.",
     arguments: [],
   },
   {
@@ -131,9 +131,10 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
     }
     case "triage_inbox": {
       return {
-        description: "Summarize guest conversations, pending bookings, and unreplied reviews",
+        description: "Summarize guest and team conversations, pending bookings, and unreplied reviews",
         text: [
           'Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts.',
+          'For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients; start_team_conversation reuses the same participants and explicit stay or location context. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies and Better Auth Team/group management.',
           'Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action.',
           'Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion.',
           'Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google.',

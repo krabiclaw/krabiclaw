@@ -141,6 +141,51 @@ test('a malformed accepted reply is uncertain and does not trigger a second prov
   assert.equal(sends, 1)
 })
 
+test('photo replies upload base64 once and send only the singular attachment identity to the same inquiry thread', async (t) => {
+  const photo = { filename: 'entry.jpeg', contentType: 'image/jpeg', bytes: new Uint8Array([0xff, 0xd8, 0xff]) }
+  const paths: string[] = []
+  t.mock.method(globalThis, 'fetch', async (input: string, init: RequestInit) => {
+    paths.push(input)
+    assert.equal(init.method, 'POST')
+    const body = JSON.parse(String(init.body))
+    if (input.endsWith('/attachments')) {
+      assert.deepEqual(body, { attachment: { file: '/9j/', file_name: 'entry.jpeg', file_type: 'image/jpeg' } })
+      // Unlike message resources, the documented upload response has no attributes.
+      return Response.json({ data: { id: 'uploaded-photo', type: 'attachment' } })
+    }
+    assert.equal(input, 'https://staging.channex.io/api/v1/message_threads/thread/messages')
+    assert.deepEqual(body, { message: { attachment_id: 'uploaded-photo' } })
+    return Response.json({ data: { ...message, attributes: { ...message.attributes, sender: 'property', message: null, attachments: ['attachments/uploaded-photo'] } } })
+  })
+  const sent = await sendChannexMessage(env, 'thread', '', photo)
+  assert.equal(sent.id, 'message')
+  assert.equal(sent.text, null)
+  assert.deepEqual(sent.attachments, ['https://staging.channex.io/api/v1/attachments/uploaded-photo'])
+  assert.equal(paths.length, 2)
+  await assert.rejects(sendChannexMessage(env, 'thread', 'Caption would silently discard the photo', photo), { providerStatus: 400, uncertain: false })
+  assert.equal(paths.length, 2, 'invalid mixed content performs no provider writes')
+})
+
+test('an invalid attachment upload never sends a message, and a discarded accepted photo remains uncertain', async (t) => {
+  const photo = { filename: 'photo.png', contentType: 'image/png', bytes: new Uint8Array([1]) }
+  let requests = 0
+  t.mock.method(globalThis, 'fetch', async () => {
+    requests += 1
+    return Response.json({ data: { id: 'uploaded', type: 'message' } })
+  })
+  await assert.rejects(sendChannexMessage(env, 'thread', '', photo), { providerStatus: 502, uncertain: false, writeRefused: true, data: { code: 'INVALID_PROVIDER_RESPONSE', field: 'photos', resource: 'attachment', uncertain: false, provider_status: 502 } })
+  assert.equal(requests, 1)
+  t.mock.restoreAll()
+  t.mock.method(globalThis, 'fetch', async (input: string) => {
+    requests += 1
+    return input.endsWith('/attachments')
+      ? Response.json({ data: { id: 'uploaded', type: 'attachment' } })
+      : Response.json({ data: { ...message, attributes: { ...message.attributes, sender: 'property', message: 'Attachment was omitted', attachments: [] } } })
+  })
+  await assert.rejects(sendChannexMessage(env, 'thread', '', photo), invalidField('attachments', true))
+  assert.equal(requests, 3)
+})
+
 test('an already installed Messages application requires no is_active field and performs no write', async (t) => {
   const methods: string[] = []
   t.mock.method(globalThis, 'fetch', async (_input: string, init: RequestInit) => {

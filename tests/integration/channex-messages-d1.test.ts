@@ -4,6 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import { H3 } from 'h3'
 import { hashPassword } from 'better-auth/crypto'
+import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, type ChannelBooking } from '../../server/domain/stays.ts'
@@ -30,7 +31,9 @@ class Provider {
   propertyId = 'property'
   empty = false
   uncertain = false
+  refuseAttachment = false
   sends = 0
+  uploads: Array<{ file: string; file_name: string; file_type: string }> = []
   onSend?: () => void
   holdReply?: Promise<void>
   messages = [this.message('first', 'guest', 'Hello'), this.message('second', 'system', null, ['/attachment/file'])]
@@ -55,10 +58,17 @@ class Provider {
       assert.equal(url.searchParams.get('order[inserted_at]'), 'asc')
       return json({ data: this.messages, meta: { total: this.messages.length } })
     }
+    if (method === 'POST' && url.pathname === '/api/v1/attachments') {
+      const body = JSON.parse(String(init.body)) as { attachment: { file: string; file_name: string; file_type: string } }
+      this.uploads.push(body.attachment)
+      if (this.refuseAttachment) return Response.json({ errors: { code: 'not_supported', title: 'Attachment refused' } }, { status: 422 })
+      return json({ data: { id: `photo-${this.uploads.length}`, type: 'attachment' } })
+    }
     if (method === 'POST' && url.pathname === '/api/v1/message_threads/thread/messages') {
       this.sends += 1
-      const body = JSON.parse(String(init.body)) as { message: { message: string } }
-      const sent = this.message(`accepted-${this.sends}`, 'property', body.message.message)
+      const body = JSON.parse(String(init.body)) as { message: { message?: string; attachment_id?: string } }
+      if (body.message.attachment_id) assert.deepEqual(Object.keys(body.message), ['attachment_id'])
+      const sent = this.message(`accepted-${this.sends}`, 'property', body.message.message ?? null, body.message.attachment_id ? [`attachments/${body.message.attachment_id}`] : [])
       this.messages.push(sent)
       this.onSend?.()
       if (this.holdReply) await this.holdReply
@@ -85,7 +95,7 @@ async function boot() {
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('owner-member', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('location', ?, 'cabin', 'Cabin', 'active', 'America/Denver', ?, ?)`).bind(ORG, NOW, NOW).run()
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), MEDIA_BASE_URL: 'https://media.example.test', CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' } as CloudflareEnv
     const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'location', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: 'owner-member', assigned_team_id: null },
@@ -266,7 +276,103 @@ test('replies use actual provider receipts once; an uncertain write remains visi
     assert.equal(detail.deliveryFailures.length, 1)
     assert.equal(detail.deliveryFailures[0]!.status, 'uncertain')
     await assert.rejects(executeGuestThreadOperation(db, { ...input, body: 'Changed text' }), code('IDEMPOTENCY_CONFLICT'))
-    await assert.rejects(executeGuestThreadOperation(db, { ...input, photos: [{ filename: 'file', bytes: new Uint8Array([1]) }] }), code('CHANNEL_ATTACHMENTS_UNSUPPORTED'))
+    await assert.rejects(executeGuestThreadOperation(db, { ...input, photos: [{ filename: 'file', bytes: new Uint8Array([1]) }] }), code('CHANNEL_PHOTO_MESSAGE_INVALID'))
+  } finally { globalThis.fetch = realFetch; await runtime.dispose() }
+})
+
+test('photo replies retain their canonical media, replay without expired source resolution and dedupe only accepted provider identities', async () => {
+  const { runtime, db, env } = await boot()
+  const provider = new Provider(), realFetch = globalThis.fetch
+  globalThis.fetch = provider.fetch as typeof fetch
+  try {
+    const mirrored = await mirrorChannexThread(db, env, 'thread', 'property')
+    if (mirrored.status !== 'mirrored') throw new Error('Expected mapped inquiry')
+    const bytes = Uint8Array.from(await sharp({ create: { width: 12, height: 8, channels: 3, background: '#2563eb' } }).avif().toBuffer())
+    const photo = { filename: 'entry.avif', bytes }
+    let resolutions = 0
+    const input = { threadId: mirrored.request_id, organizationId: ORG, action: 'reply', body: '', idempotencyKey: 'photo', actorUserId: OWNER, env,
+      photos: { sourceIds: ['host-photo-id'], resolve: async () => { resolutions += 1; return [photo] } } }
+    await assert.rejects(executeGuestThreadOperation(db, { ...input, body: 'Text would discard this photo' }), code('CHANNEL_PHOTO_MESSAGE_INVALID'))
+    await assert.rejects(executeGuestThreadOperation(db, { ...input, photos: [photo, photo] }), code('CHANNEL_PHOTO_MESSAGE_INVALID'))
+    const invalid = await executeGuestThreadOperation(db, { ...input, photos: [{ filename: 'document.svg', bytes: new TextEncoder().encode('<svg/>') }] })
+    assert.deepEqual(invalid, { ok: false, status: 400, reason: 'invalid_photo', message: 'document.svg is not a JPEG, PNG, WebP, GIF or AVIF photo.' })
+    assert.equal(provider.sends, 0)
+    assert.equal(provider.uploads.length, 0)
+    assert.equal(await db.prepare('SELECT count(*) FROM guest_thread_deliveries').first('count(*)'), 0)
+
+    assert.equal((await executeGuestThreadOperation(db, input)).ok, true)
+    assert.deepEqual(provider.uploads, [{ file: Buffer.from(bytes).toString('base64'), file_name: 'entry.avif', file_type: 'image/avif' }])
+    const asset = await db.prepare(`SELECT ma.id, ma.r2_key, ma.public_url FROM media_assets ma JOIN media_placements mp ON mp.asset_id = ma.id
+      JOIN activity_entries a ON a.id = mp.owner_id WHERE mp.owner_type = 'activity_entry' AND a.request_id = ? AND a.event_name = 'thread.member_reply'`).bind(mirrored.request_id).first<{ id: string; r2_key: string; public_url: string }>()
+    assert.ok(asset)
+    const saved = await (await runtime.getR2Bucket('MEDIA_BUCKET')).get(asset.r2_key)
+    assert.ok(saved)
+    assert.deepEqual(new Uint8Array(await saved.arrayBuffer()), bytes, 'the canonical media store retained the actual uploaded image')
+    assert.deepEqual(await db.prepare('SELECT status, provider_message_id FROM guest_thread_deliveries').first(), { status: 'accepted', provider_message_id: 'accepted-1' })
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    const detail = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
+    assert.equal(detail.entries.length, 3, 'the receipt suppresses only its exact provider echo')
+    assert.deepEqual(detail.entries[2]!.attachments.map(item => [item.id, item.url]), [[asset.id, asset.public_url]])
+    assert.equal(detail.entries[2]!.body, '')
+    const replay = { ...input, photos: { sourceIds: ['host-photo-id'], resolve: async () => { throw new Error('Host download has expired') } } }
+    assert.equal((await executeGuestThreadOperation(db, replay)).ok, true)
+    assert.deepEqual([resolutions, provider.sends, provider.uploads.length], [1, 1, 1])
+    await assert.rejects(executeGuestThreadOperation(db, { ...replay, photos: { ...replay.photos, sourceIds: ['different-photo-id'] } }), code('IDEMPOTENCY_CONFLICT'))
+
+    provider.uncertain = true
+    const uncertainInput = { ...input, idempotencyKey: 'uncertain-photo' }
+    const uncertain = await executeGuestThreadOperation(db, uncertainInput)
+    if (uncertain.ok || uncertain.reason !== 'delivery_failed') throw new Error('Expected an explicit recorded delivery failure')
+    assert.equal(uncertain.code, 'CHANNEL_REPLY_UNCERTAIN')
+    const retry = await executeGuestThreadOperation(db, uncertainInput)
+    if (retry.ok || retry.reason !== 'delivery_failed') throw new Error('Expected explicit review-required result')
+    assert.equal(retry.code, 'CHANNEL_REPLY_REVIEW_REQUIRED')
+    assert.deepEqual([resolutions, provider.sends, provider.uploads.length], [2, 2, 2])
+    await mirrorChannexThread(db, env, 'thread', 'property')
+    const afterUncertain = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
+    assert.equal(afterUncertain.entries.length, 5, 'an unknown provider identity preserves both the attempted photo and actual resource')
+    assert.equal(afterUncertain.deliveryFailures[0]!.status, 'uncertain')
+    assert.equal(await db.prepare('SELECT count(*) FROM media_assets').first('count(*)'), 2)
+
+    provider.uncertain = false
+    const simultaneous = { ...input, idempotencyKey: 'simultaneous-photo' }
+    const raced = await Promise.all([executeGuestThreadOperation(db, simultaneous), executeGuestThreadOperation(db, simultaneous)])
+    assert.ok(raced.some(outcome => outcome.ok), 'one concurrent request completes the actual send')
+    for (const outcome of raced) {
+      if (outcome.ok) continue
+      if (outcome.reason !== 'delivery_failed') throw new Error(`Unexpected concurrent reply result: ${outcome.reason}`)
+      assert.deepEqual([outcome.status, outcome.code], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED'])
+    }
+    assert.deepEqual([provider.sends, provider.uploads.length], [3, 3], 'the same concurrent photo intent delivers once')
+    assert.deepEqual(await db.prepare(`SELECT d.status, d.provider_message_id, COUNT(mp.asset_id) AS photos FROM guest_thread_deliveries d
+      JOIN activity_entries a ON a.id = d.entry_id LEFT JOIN media_placements mp ON mp.owner_type = 'activity_entry' AND mp.owner_id = a.id
+      WHERE a.dedupe_key = ? GROUP BY d.id`).bind(`guest-thread-operation:${mirrored.request_id}:simultaneous-photo`).first(),
+    { status: 'accepted', provider_message_id: 'accepted-3', photos: 1 })
+    assert.equal(await db.prepare("SELECT count(*) FROM media_assets WHERE status = 'active'").first('count(*)'), 3, 'the losing request retains no active orphan media asset')
+    assert.equal((await (await runtime.getR2Bucket('MEDIA_BUCKET')).list({ prefix: `organizations/${ORG}/media/` })).objects.length, 3, 'only the three retained photos remain stored')
+    assert.equal(await db.prepare("SELECT count(*) FROM media_placements WHERE owner_type = 'activity_entry'").first('count(*)'), 3)
+    assert.equal((await getGuestThreadDetail(db, mirrored.request_id, ORG))!.entries.filter(entry => entry.eventName === 'thread.member_reply').length, 3)
+
+    provider.refuseAttachment = true
+    const refusedInput = { ...input, idempotencyKey: 'refused-photo-upload' }
+    const refused = await executeGuestThreadOperation(db, refusedInput)
+    if (refused.ok || refused.reason !== 'delivery_failed') throw new Error('Expected a recorded attachment preparation failure')
+    assert.deepEqual([refused.status, refused.code], [502, 'CHANNEL_REPLY_FAILED'])
+    assert.equal(refused.provider_error?.uncertain, false)
+    assert.deepEqual([provider.sends, provider.uploads.length], [3, 4], 'a refused upload never calls the guest message endpoint')
+    const refusedReceipt = await db.prepare(`SELECT d.status, d.provider_message_id, d.error, a.id FROM guest_thread_deliveries d
+      JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`).bind(`guest-thread-operation:${mirrored.request_id}:refused-photo-upload`)
+      .first<{ status: string; provider_message_id: string | null; error: string; id: string }>()
+    assert.ok(refusedReceipt)
+    assert.deepEqual([refusedReceipt.status, refusedReceipt.provider_message_id], ['failed', null])
+    assert.match(refusedReceipt.error, /no guest message was sent/)
+    const refusalDetail = (await getGuestThreadDetail(db, mirrored.request_id, ORG))!
+    assert.equal(refusalDetail.entries.find(entry => entry.id === refusedReceipt.id)!.attachments.length, 1, 'the failed send retains the chosen photo for review')
+    assert.equal(refusalDetail.deliveryFailures.find(delivery => delivery.status === 'failed')?.error, refusedReceipt.error)
+    const refusedRetry = await executeGuestThreadOperation(db, refusedInput)
+    if (refusedRetry.ok || refusedRetry.reason !== 'delivery_failed') throw new Error('Expected explicit review-required result')
+    assert.deepEqual([refusedRetry.status, refusedRetry.code], [409, 'CHANNEL_REPLY_REVIEW_REQUIRED'])
+    assert.deepEqual([provider.sends, provider.uploads.length], [3, 4])
   } finally { globalThis.fetch = realFetch; await runtime.dispose() }
 })
 

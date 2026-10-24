@@ -7,7 +7,7 @@ import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { getGuestRequest, getThreadOperationalRecord, partySizeIsMinimum, requestActions, requestSummary, type ThreadOperationalRecord } from '~/server/domain/requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
 import { findEntryByDedupeKey, parseEntryPayload } from './entries'
-import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhoto } from './attachments'
+import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { mailboxTransitionQueries, updateThreadProjectionIfLatestEntry } from './repository'
 import { resolveGuestThreadMailbox } from './mailbox'
@@ -61,7 +61,7 @@ export type ExecuteOperationInput = {
   action: string
   body?: string
   /** The photos a reply carries, in the order they were chosen. */
-  photos?: MessagePhoto[] | { sourceIds: string[]; resolve: () => Promise<MessagePhoto[]> }
+  photos?: MessagePhotoInput
   env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv
   idempotencyKey?: string
   actorUserId: string
@@ -504,20 +504,25 @@ async function executeReply(
   if (actorUserId === null && photoCount) throw new HTTPError({ statusCode: 400, message: 'Scheduled messages carry text only', data: { code: 'SCHEDULED_MESSAGE_PHOTOS_UNSUPPORTED', field: 'photos' } })
   const eventName = actorUserId === null ? 'thread.scheduled_message' : 'thread.member_reply'
   const purpose = actorUserId === null ? 'scheduled_message' : 'member_reply'
+  const photoIdentity = Array.isArray(photoInput)
+    ? await Promise.all(photoInput.map(async photo => ({ filename: photo.filename, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('') })))
+    : photoInput.sourceIds
+  const requestHash = await creationRequestHash({ body, photos: photoIdentity })
   const channel = await getChannelThreadMapping(db, context.thread.id, context.thread.organization_id)
   if (channel) {
-    if (photoCount) throw new HTTPError({ statusCode: 400, message: 'Airbnb replies currently accept text; send attachments through Airbnb', data: { code: 'CHANNEL_ATTACHMENTS_UNSUPPORTED', field: 'photos' } })
-    const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey! })
+    if (photoCount > 1 || (photoCount && body)) throw new HTTPError({ statusCode: 400, message: 'Send one Airbnb photo at a time, separately from text', data: { code: 'CHANNEL_PHOTO_MESSAGE_INVALID', field: 'photos' } })
+    const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey!, requestHash,
+      photoCount, resolvePhotos: async () => Array.isArray(photoInput) ? photoInput : await photoInput.resolve() }).catch((error: unknown) => {
+      if (error instanceof MessagePhotoRejection) return error
+      throw error
+    })
+    if (sent instanceof MessagePhotoRejection) return { ok: false, status: 400, reason: 'invalid_photo', message: sent.message }
     if (!sent.ok) return { ...sent, reason: 'delivery_failed' }
     return successfulOutcome(db, context)
   }
   if (context.thread.kind === 'stay' && await queryFirst(db, "SELECT id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel'", [context.thread.organization_id, context.thread.id])) {
     throw new HTTPError({ statusCode: 409, message: 'This channel stay has no addressable provider conversation; import its conversation before replying', data: { code: 'CHANNEL_THREAD_UNADDRESSABLE', field: 'channel_thread' } })
   }
-  const photoIdentity = Array.isArray(photoInput)
-    ? await Promise.all(photoInput.map(async photo => ({ filename: photo.filename, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('') })))
-    : photoInput.sourceIds
-  const requestHash = await creationRequestHash({ body, photos: photoIdentity })
   const matchesReply = (entry: GuestThreadEntryRow): boolean => {
     if (!entryMatchesRequest(entry, eventName, body)) return false
     const payload = JSON.parse(entry.payload_json ?? '{}') as { request_hash?: string }

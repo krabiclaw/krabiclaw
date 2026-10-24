@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:fe68ff9904dc5f454e046695dff33bf5a540e927509aa72e126c5cd174202d77",
-  "documentationFingerprint": "sha256:99507f9e62ed427bb8b0cc500da09ba52ae8c22ee9880f9a0c9b8e7785f794c5",
+  "fingerprint": "sha256:a7d9ecd1e4491867e4d41d8362f6db2ec87c514a0a84c3ae22fc4cfe24e96798",
+  "documentationFingerprint": "sha256:0a09db2e7bfe73ce1ee476975b6f2bdf14a17924aff8dadeee2da01b4f037029",
   "tools": [
     {
       "name": "add_organization_language",
@@ -65618,6 +65618,174 @@
       "uiResourceUri": null
     },
     {
+      "name": "get_team_conversation",
+      "title": "Get team conversation",
+      "description": "Read messages and photo/push receipts from one of your internal conversations, newest first. Defaults to 20, maximum 100. When hasMore is true, page back with both before and before_id from the oldest loaded message’s createdAt and id. Reading does not mark the conversation read.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "before": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "before_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "thread_id": {
+            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request or Better Auth Team ID.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "messages": {
+            "items": {
+              "properties": {
+                "attachments": {
+                  "items": {
+                    "properties": {
+                      "height": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "url": {
+                        "type": "string"
+                      },
+                      "width": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "url",
+                      "width",
+                      "height"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "body": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "deliveries": {
+                  "items": {
+                    "properties": {
+                      "channel": {
+                        "const": "push"
+                      },
+                      "error": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "updatedAt": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "channel",
+                      "status",
+                      "error",
+                      "updatedAt"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "senderId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "threadId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "threadId",
+                "senderId",
+                "body",
+                "createdAt",
+                "attachments",
+                "deliveries"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "messages",
+          "hasMore"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "team_messaging",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "get_website_draft",
       "title": "Get website draft",
       "description": "Read your saved website setup. Omit draft_id to resume your unfinished website.",
@@ -70994,6 +71162,347 @@
       "uiResourceUri": null
     },
     {
+      "name": "list_team_conversation_recipients",
+      "title": "List team conversation recipients",
+      "description": "Read the current organization members available for internal conversations. Select actual user IDs from these results; current_user_id identifies you. This is not Better Auth Team/group management and does not include guests.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "current_user_id": {
+            "type": "string"
+          },
+          "members": {
+            "items": {
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "image": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "memberId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "memberId",
+                "name",
+                "image",
+                "email",
+                "role"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "current_user_id",
+          "members"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "team_messaging",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_team_conversations",
+      "title": "List team conversations",
+      "description": "Read only your internal team conversations, newest activity first. Optional stay_id or location_id filters narrow their explicit context. Follow page_info; guest conversations use list_guest_conversations instead.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque next_cursor from the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size. Defaults to 50; maximum 100.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "location_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "stay_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "conversations": {
+            "items": {
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastMessage": {
+                  "properties": {
+                    "attachmentCount": {
+                      "type": "integer"
+                    },
+                    "body": {
+                      "type": "string"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "senderId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "senderId",
+                    "body",
+                    "attachmentCount",
+                    "createdAt"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "lastMessageAt": {
+                  "type": "string"
+                },
+                "location": {
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "slug": {
+                      "type": "string"
+                    },
+                    "timezone": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "slug",
+                    "timezone"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "locationId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "participants": {
+                  "items": {
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "image": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "memberId": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "memberId",
+                      "name",
+                      "image"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
+                "stay": {
+                  "properties": {
+                    "checkInDate": {
+                      "type": "string"
+                    },
+                    "checkOutDate": {
+                      "type": "string"
+                    },
+                    "homeName": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "productId": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "pending",
+                        "confirmed",
+                        "cancelled"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "productId",
+                    "homeName",
+                    "checkInDate",
+                    "checkOutDate",
+                    "status"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "stayId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "unread": {
+                  "type": "boolean"
+                },
+                "unreadCount": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "createdAt",
+                "lastMessageAt",
+                "stayId",
+                "locationId",
+                "participants",
+                "unread",
+                "unreadCount",
+                "stay",
+                "location",
+                "lastMessage"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "page_info": {
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "conversations",
+          "page_info"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "team_messaging",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "list_teams",
       "title": "List teams",
       "description": "Read the business’s Better Auth teams and their members. Choose a team for an offering when any available member can host its bookings.",
@@ -71092,6 +71601,63 @@
       ],
       "domain": "organizations",
       "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "mark_team_conversation_read",
+      "title": "Mark team conversation read",
+      "description": "Mark one of your internal conversations read through now. Changes only your own read position; does not send a message or change another participant’s unread state.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "thread_id": {
+            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request or Better Auth Team ID.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "lastReadAt": {
+            "type": "string"
+          },
+          "status": {
+            "const": "read"
+          }
+        },
+        "required": [
+          "status",
+          "lastReadAt"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "team_messaging",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -101876,7 +102442,7 @@
     {
       "name": "reply_to_guest",
       "title": "Reply to guest",
-      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A pending or uncertain Airbnb send needs review and is never resent automatically.",
+      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text or one photo, sent separately; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A pending or uncertain Airbnb send needs review and is never resent automatically.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -103590,6 +104156,205 @@
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "send_team_message",
+      "title": "Send team message",
+      "description": "Send the text and/or supplied photo to an internal team conversation you belong to. Sends as the authenticated member and records push outcomes; a saved message does not prove delivery to a participant’s device. Reuse the same idempotency_key for an identical retry; a failed realtime publication may report committed:true and must retry that same request. This never replies to a guest.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "message"
+            ]
+          },
+          {
+            "required": [
+              "file"
+            ]
+          }
+        ],
+        "properties": {
+          "file": {
+            "description": "Optional photo supplied as a ChatGPT file attachment.",
+            "properties": {
+              "download_url": {
+                "type": "string"
+              },
+              "file_id": {
+                "type": "string"
+              },
+              "file_name": {
+                "type": "string"
+              },
+              "mime_type": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "download_url",
+              "file_id"
+            ],
+            "type": "object"
+          },
+          "idempotency_key": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "thread_id": {
+            "description": "Team conversation ID from list_team_conversations or start_team_conversation; never a guest request or Better Auth Team ID.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "message": {
+            "properties": {
+              "attachments": {
+                "items": {
+                  "properties": {
+                    "height": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "url",
+                    "width",
+                    "height"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "body": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string"
+              },
+              "deliveries": {
+                "items": {
+                  "properties": {
+                    "channel": {
+                      "const": "push"
+                    },
+                    "error": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "channel",
+                    "status",
+                    "error",
+                    "updatedAt"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "id": {
+                "type": "string"
+              },
+              "senderId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "threadId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "threadId",
+              "senderId",
+              "body",
+              "createdAt",
+              "attachments",
+              "deliveries"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "message",
+          "created"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "team_messaging",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [
+        "file"
+      ],
       "uiResourceUri": null
     },
     {
@@ -112259,6 +113024,79 @@
         }
       ],
       "domain": "context",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "start_team_conversation",
+      "title": "Start team conversation",
+      "description": "Start an internal conversation with the selected organization members, or reuse the existing conversation with exactly those participants and optional stay/location context. This does not send a message, invite a person, create a Better Auth Team or manage participants. Choose at least one other user from list_team_conversation_recipients.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "location_id": {
+            "description": "Optional explicit location context you may read.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "member_user_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "stay_id": {
+            "description": "Optional canonical stay ID you may read; never a guest request ID.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "member_user_ids"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "created": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "created"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "team_messaging",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -140356,11 +141194,11 @@
     },
     {
       "name": "triage_inbox",
-      "description": "Summarize guest conversations, pending bookings and reviews awaiting a reply.",
+      "description": "Summarize guest and team conversations, pending bookings and reviews awaiting a reply.",
       "arguments": [],
       "rendered": {
-        "description": "Summarize guest conversations, pending bookings, and unreplied reviews",
-        "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
+        "description": "Summarize guest and team conversations, pending bookings, and unreplied reviews",
+        "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts. For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients; start_team_conversation reuses the same participants and explicit stay or location context. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies and Better Auth Team/group management. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
         "cancel_product_booking": "sha256:09fbbd2f3d89627aa78eb5b60d27b5e949edc7b8304b610422045cf5a89671a1",
@@ -140368,14 +141206,20 @@
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
+        "get_team_conversation": "sha256:d591edb6103d1b32bc9ee5d412f38ee0496a42d4642e0097d459f97b5f64ee61",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_location_reviews": "sha256:b09a24e98ab12f02cb71581d1afc290edd559790a17c4c55308f9b0e059b46fb",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
+        "list_team_conversation_recipients": "sha256:508d4405885f0cb1868e3e45ec2f7b9d57c1664f1973410e2c8c293daf8c212f",
+        "list_team_conversations": "sha256:1f7da923959f7fd3c4dfb41afa14f5ca1fc3020d8c8163275e9626750a725c77",
+        "mark_team_conversation_read": "sha256:cdebd21bc15dc5b19edf4c685bece3df9408d5c8828cbc571abf58dec1c173ef",
         "reject_product_booking": "sha256:557fcf98b488029ac8081da295552e9ee2569dfc54a0ba561418a5ca7b8492d4",
-        "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
+        "reply_to_guest": "sha256:e89353b5e24d15cc863b2274ca44b37303fa32427a684bd3cd53565734f959df",
         "request_product_booking_change": "sha256:da50fa96ac71952ddaa8d3097a319ae2965b6e0ec0a3b52208b22cc5f6d95025",
-        "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4"
+        "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4",
+        "send_team_message": "sha256:31c33b5a8b2166284281db4adf29ca6c1681ed08f0abd485e05fadad1c103c4b",
+        "start_team_conversation": "sha256:29489b67113825ef8aa17f59055a7e709d0cbaa64eaa8531bb3839b3bb62340e"
       }
     },
     {
@@ -140502,7 +141346,7 @@
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:9f39ce0ed18caee35c9059863a91f69bc84e1059c941e31e4c8fe6b49f1ae121",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
-        "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
+        "reply_to_guest": "sha256:e89353b5e24d15cc863b2274ca44b37303fa32427a684bd3cd53565734f959df",
         "update_product": "sha256:d264006b1b1b9cfd00b70238b8ba2019dfbaa90a9a39063e5d1a3f062515e528"
       }
     }
@@ -140510,7 +141354,7 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:0b2917dfdebeaf67144d8f312a5f9aeba159c8a3a02c3dc78346ba03ac712bf9",
+      "contentHash": "sha256:d704713996c36e522b3e306210d12e058c6a0ca5c990d0b61e975f81f0864b36",
       "toolContracts": {
         "create_location": "sha256:76191e793ce66aae9289cf1e505b47bd44a04320d4b29660f173959391e9c5b0",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
@@ -140522,7 +141366,7 @@
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
         "list_stays": "sha256:5b9e594406177ab852bc7e715f13167cc4f72a0b1a2f5a7e78de728aa95188ea",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
-        "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
+        "reply_to_guest": "sha256:e89353b5e24d15cc863b2274ca44b37303fa32427a684bd3cd53565734f959df",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
         "set_stay_nights": "sha256:b2258cacc2c579029f9c667bc50fb66136b85d522bbd2fc9a424a03bcebd2c07",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
@@ -140596,7 +141440,7 @@
     },
     {
       "slug": "handle-inquiries-and-reservation-requests",
-      "contentHash": "sha256:e79f2a9c6917973a49b4d96cfaf67bf6d587c727e619be056eb394f3cd32b944",
+      "contentHash": "sha256:b97de959cb9af2fc8f4ed27973c2a17a61c867fb3eb6fa4281a90cccf015ad9b",
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "create_table_reservation": "sha256:9c27873124240d1f214c93c3e7ba73db383038fd555d7b93da570781ca2a4a18",
@@ -140608,7 +141452,7 @@
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
         "list_reservation_inquiries": "sha256:85cb564470d0026c00b8727287edb2a6c2d403fec987c2ac13f4aaaa28e5d171",
         "list_stays": "sha256:5b9e594406177ab852bc7e715f13167cc4f72a0b1a2f5a7e78de728aa95188ea",
-        "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
+        "reply_to_guest": "sha256:e89353b5e24d15cc863b2274ca44b37303fa32427a684bd3cd53565734f959df",
         "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }

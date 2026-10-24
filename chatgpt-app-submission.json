@@ -4,7 +4,7 @@
   "app_info": {
     "display_name": "KrabiClaw",
     "subtitle": "Manage your business website",
-    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and propose changes for guest acceptance. Manage host-entered stays, nightly availability and prices; connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Read payment reports, transactions and payouts. Read Google Ads campaigns, create Search campaigns, pause or enable campaigns and change daily budgets in the connected account; enabled campaigns can spend its advertising budget. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations only when requested. A KrabiClaw account is required, with access to each business you manage.",
+    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and propose changes for guest acceptance. Read and send internal team messages with the current business members, optionally about an accessible stay or location. Manage host-entered stays, nightly availability and prices; connected homes update Airbnb through Channex and apply existing automatic guest-message schedules. Read payment reports, transactions and payouts. Read Google Ads campaigns, create Search campaigns, pause or enable campaigns and change daily budgets in the connected account; enabled campaigns can spend its advertising budget. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations only when requested. A KrabiClaw account is required, with access to each business you manage.",
     "category": "BUSINESS"
   },
   "tools": {
@@ -860,6 +860,18 @@
         "destructive_justification": "Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it."
       }
     },
+    "get_team_conversation": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads messages, photos and push receipts from one internal conversation the authenticated member participates in, without changing its read position.",
+        "open_world_justification": "Reads messages, photos and push receipts from one internal conversation the authenticated member participates in, without changing its read position. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads messages, photos and push receipts from one internal conversation the authenticated member participates in, without changing its read position."
+      }
+    },
     "get_website_draft": {
       "annotations": {
         "readOnlyHint": true,
@@ -1196,6 +1208,30 @@
         "destructive_justification": "Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after."
       }
     },
+    "list_team_conversation_recipients": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads current Better Auth members available for internal conversations in the selected business and identifies the authenticated caller.",
+        "open_world_justification": "Reads current Better Auth members available for internal conversations in the selected business and identifies the authenticated caller. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads current Better Auth members available for internal conversations in the selected business and identifies the authenticated caller."
+      }
+    },
+    "list_team_conversations": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads only internal conversations the authenticated member participates in, with optional explicit stay or location context.",
+        "open_world_justification": "Reads only internal conversations the authenticated member participates in, with optional explicit stay or location context. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads only internal conversations the authenticated member participates in, with optional explicit stay or location context."
+      }
+    },
     "list_teams": {
       "annotations": {
         "readOnlyHint": true,
@@ -1206,6 +1242,18 @@
         "read_only_justification": "Reads Better Auth teams and their members in the selected business.",
         "open_world_justification": "Reads Better Auth teams and their members in the selected business. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Reads Better Auth teams and their members in the selected business."
+      }
+    },
+    "mark_team_conversation_read": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Advances only the authenticated participant’s read position through now in one internal conversation.",
+        "open_world_justification": "Advances only the authenticated participant’s read position through now in one internal conversation. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Advances only the authenticated participant’s read position through now in one internal conversation."
       }
     },
     "move_stay_photos": {
@@ -1515,9 +1563,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key.",
-        "open_world_justification": "Downloads a supplied host photo when present and emails the reply and attachments to the conversation’s guest, or sends a text reply to a mapped Airbnb conversation through Channex.",
-        "destructive_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key."
+        "read_only_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends text or one photo separately through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key.",
+        "open_world_justification": "Downloads a supplied host photo when present and emails the reply and attachments to the conversation’s guest, or uploads and sends one photo or a separate text reply to a mapped Airbnb conversation through Channex.",
+        "destructive_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends text or one photo separately through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key."
       }
     },
     "request_product_booking_change": {
@@ -1566,6 +1614,18 @@
         "read_only_justification": "Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish.",
         "open_world_justification": "Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish."
+      }
+    },
+    "send_team_message": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Saves text and/or a supplied photo as the authenticated participant in an internal conversation, under a stable retry key, and records native push outcomes.",
+        "open_world_justification": "Downloads a supplied host photo when present. The message and native push recipients are bounded to the authenticated member’s internal conversation in the selected business.",
+        "destructive_justification": "Saves text and/or a supplied photo as the authenticated participant in an internal conversation, under a stable retry key, and records native push outcomes."
       }
     },
     "set_collection_products": {
@@ -1710,6 +1770,18 @@
         "read_only_justification": "Overwrites the authenticated user selected workspace organization or location.",
         "open_world_justification": "Overwrites the authenticated user selected workspace organization or location. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Overwrites the authenticated user selected workspace organization or location."
+      }
+    },
+    "start_team_conversation": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates or reuses an internal conversation with exactly the selected current members and optional accessible stay or location context. Sends no message and creates no Better Auth Team.",
+        "open_world_justification": "Creates or reuses an internal conversation with exactly the selected current members and optional accessible stay or location context. Sends no message and creates no Better Auth Team. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Creates or reuses an internal conversation with exactly the selected current members and optional accessible stay or location context. Sends no message and creates no Better Auth Team."
       }
     },
     "update_article_category": {
