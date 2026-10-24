@@ -15,6 +15,7 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import { countCatalog, type CatalogCounts } from '../../utils/product-presentation'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
@@ -1276,7 +1277,8 @@ test.describe('dashboard pane hierarchy', () => {
     const menu = page.locator('#dashboard-panel-catalog-menu')
     await expect(menu).toContainText(owner.title)
     await expect(menu.getByRole('combobox', { name: 'Location', exact: true })).toHaveCount(0)
-    await open(page, `${ORG}/products/menu/${section!.id}?location_id=${encodeURIComponent(owner.id)}`)
+    await menu.getByRole('link', { name: section!.name, exact: true }).click()
+    await expect(page).toHaveURL(`${ORG}/products/menu/${section!.id}?location_id=${encodeURIComponent(owner.id)}&kind=dish`)
     const member = products.find(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === section!.id))!
     await expect(page.getByTestId(`product-${member.id}`)).toContainText(member.name)
   })
@@ -1615,7 +1617,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
   })
 
-  test('personal navigation keeps owned activity and Updates in its own context', async ({ page, baseURL }) => {
+  test('personal navigation keeps owned activity and Notifications in its own context', async ({ page, baseURL }) => {
     await page.setViewportSize(PHONE)
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
     try {
@@ -1709,17 +1711,28 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
       await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
       await expect(page).toHaveURL('/dashboard/account/messages')
-      const personalUpdates = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
-        && new URL(response.url()).searchParams.get('scope') === 'personal')
       await page.getByRole('button', { name: 'All, filter by message type' }).click()
-      await page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true }).click()
-      const updatesResponse = await personalUpdates
+      await expect(page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true })).toHaveCount(0)
+      await page.keyboard.press('Escape')
+      const personalUnread = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications/unread-count'
+        && new URL(response.url()).searchParams.get('scope') === 'personal')
+      const personalNotifications = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
+        && new URL(response.url()).searchParams.get('scope') === 'personal')
+      await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
+      const notificationBell = page.locator('#dashboard-panel-account-menu').getByTestId('dashboard-notification-bell')
+      await expect(notificationBell).toHaveAttribute('href', '/dashboard/account/notifications')
+      await notificationBell.click()
+      const updatesResponse = await personalNotifications
       expect(updatesResponse.status(), await updatesResponse.text()).toBe(200)
-      const updates = await updatesResponse.json() as { notifications: Array<{ id: string; scope: string; title: string | null; target_user_id: string | null }> }
+      const updates = await updatesResponse.json() as { notifications: Array<{ id: string; scope: string; title: string | null; target_user_id: string | null }>; unread_count: number }
+      const unreadResponse = await personalUnread
+      expect(unreadResponse.status(), await unreadResponse.text()).toBe(200)
+      expect((await unreadResponse.json()).unread_count, 'the Personal bell reads the same owned unread total through its count endpoint').toBe(updates.unread_count)
       const viewer = await (await page.request.get('/api/auth/get-session')).json() as { user: { id: string } }
-      // Personal Updates are platform notifications addressed to this account, or to everyone; never a business's.
-      expect(updates.notifications.every(item => item.scope === 'global' && (item.target_user_id === viewer.user.id || item.target_user_id === null)), 'personal Updates carry only this account\'s notifications').toBe(true)
-      await expect(page).toHaveURL('/dashboard/account/messages?view=updates')
+      // Personal Notifications are platform notifications addressed to this account, or to everyone; never a business's.
+      expect(updates.notifications.every(item => item.scope === 'global' && (item.target_user_id === viewer.user.id || item.target_user_id === null)), 'personal Notifications carry only this account\'s notifications').toBe(true)
+      await expect(page).toHaveURL('/dashboard/account/notifications')
+      await expect(page.getByRole('heading', { name: 'Notifications', exact: true })).toBeVisible()
       if (updates.notifications.length) {
         for (const item of updates.notifications) {
           const row = page.getByTestId(`notification-${item.id}`)
@@ -1727,7 +1740,7 @@ test.describe('dashboard pane hierarchy', () => {
           if (item.title) await expect(row).toContainText(item.title)
         }
       } else {
-        await expect(page.getByText('No updates yet.', { exact: true })).toBeVisible()
+        await expect(page.getByText('No notifications yet.', { exact: true })).toBeVisible()
       }
       await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
       await page.setViewportSize(WIDE)
@@ -1787,7 +1800,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.locator('[aria-current="page"]', { hasText: 'Today' }).first()).toBeVisible()
   })
 
-  test('Calendar can filter by a team member and return to all assigned people', async ({ page }) => {
+  test('Calendar can filter by a host and return to everyone', async ({ page }) => {
     const membersResponse = await page.request.get('/api/organizations/org-demo/members/scheduling')
     expect(membersResponse.status()).toBe(200)
     const { members } = await membersResponse.json() as { members: Array<{ id: string; name: string }> }
@@ -1795,11 +1808,11 @@ test.describe('dashboard pane hierarchy', () => {
     const member = members[0]!
     await open(page, `${ORG}/calendar`)
     // The selects sit behind the one Filters control, as Airbnb keeps them.
-    await page.getByRole('button', { name: 'Filter bookings', exact: true }).click()
-    const filter = page.getByRole('combobox', { name: 'Assigned person' })
-    await expect(filter).toContainText('All assigned people')
+    await page.getByRole('button', { name: 'Filter activity', exact: true }).click()
+    const filter = page.getByRole('combobox', { name: 'Host' })
+    await expect(filter).toContainText('Everyone')
     await filter.click()
-    await expect(page.getByRole('option', { name: 'All assigned people', exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: 'Everyone', exact: true })).toBeVisible()
     const filtered = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/agenda'
       && new URL(response.url()).searchParams.get('assigned_member_id') === member.id)
     await page.getByRole('option', { name: member.name, exact: true }).first().click()
@@ -1808,9 +1821,9 @@ test.describe('dashboard pane hierarchy', () => {
     await filter.click()
     const unfiltered = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/agenda'
       && !new URL(response.url()).searchParams.has('assigned_member_id'))
-    await page.getByRole('option', { name: 'All assigned people', exact: true }).click()
+    await page.getByRole('option', { name: 'Everyone', exact: true }).click()
     expect((await unfiltered).status()).toBe(200)
-    await expect(filter).toContainText('All assigned people')
+    await expect(filter).toContainText('Everyone')
   })
 
   test('below lg indexes show one screen and choose no child', async ({ page }) => {
@@ -2157,6 +2170,26 @@ test.describe('dashboard pane hierarchy', () => {
       expect((await officeReadback.json() as { product: Product }).product.locations).toEqual([{ location_id: office!.id, active: true, published: true }])
       await expect(cards.getByTestId('editor-card-locations')).toContainText(office!.title)
 
+      // The Office hub counts actual assignments even when Legal has no Menu
+      // presentation. Compare its complete read with the independent catalog.
+      const catalogRead = await page.request.get(`${editor}/products`)
+      expect(catalogRead.status(), await catalogRead.text()).toBe(200)
+      const officeProducts = (await catalogRead.json() as { products: Product[] }).products.filter(product => product.locations.some(location => location.location_id === office!.id))
+      expect(officeProducts.some(product => product.id === productId)).toBe(true)
+      const overviewPath = `/api/dashboard/organizations/org-ncls-blawby/locations/${office!.id}/overview`
+      const officeOverview = page.waitForResponse(response => new URL(response.url()).pathname === overviewPath)
+      await open(page, `${services}/locations/${office!.slug}`)
+      const overviewResponse = await officeOverview
+      expect(overviewResponse.status(), await overviewResponse.text()).toBe(200)
+      expect((await overviewResponse.json() as { catalog: CatalogCounts }).catalog).toEqual(countCatalog(officeProducts))
+      const officeIndex = page.locator('#dashboard-panel-location-index')
+      await expect(officeIndex.getByRole('heading', { name: office!.title, exact: true })).toBeVisible()
+      await expect(officeIndex.getByRole('link', { name: `Name ${office!.title}`, exact: true })).toBeVisible()
+      await expect(officeIndex.getByText('Failed to load location overview', { exact: true })).toHaveCount(0)
+      await open(page, `${services}/products/${productId}/locations/${office!.id}`)
+      await expect(officeLeaf.getByRole('switch', { name: 'Show at this office', exact: true })).toBeChecked()
+      await expect(officeLeaf.getByRole('switch', { name: 'Available at this office', exact: true })).toBeChecked()
+
       await page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true }).click()
       const preview = page.getByRole('dialog', { name: 'Legal Services preview', exact: true })
       const frame = preview.getByTestId('content-preview-frame')
@@ -2425,7 +2458,7 @@ test.describe('dashboard pane hierarchy', () => {
     // On the team, your own row opens the same page; the admin view is for everyone else.
     await open(page, `${services}/team`)
     const ownRow = page.getByRole('listitem').filter({ hasText: 'ncls-owner@playwright.example' })
-    await expect(ownRow.getByRole('link', { name: 'Profile, hours & Calendar', exact: true })).toHaveAttribute('href', availability)
+    await expect(ownRow.getByRole('link').filter({ hasText: 'ncls-owner@playwright.example' })).toHaveAttribute('href', availability)
 
     // Only the fictional fixture account appears in shared visual evidence.
     await open(page, '/dashboard/account/profile/payments')

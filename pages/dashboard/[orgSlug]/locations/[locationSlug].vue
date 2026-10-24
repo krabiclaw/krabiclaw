@@ -150,7 +150,6 @@ const featureSet = computed(() => new Set<ProductFeature>([
   ...(capabilities.value?.managers.map(manager => manager.id) ?? []),
 ]))
 const hasFeature = (feature: ProductFeature) => featureSet.value.has(feature)
-const includeProducts = computed(() => hasFeature('products'))
 
 const currentOpeningState = computed(() => {
   const hours = location.value?.opening_hours
@@ -258,10 +257,9 @@ const { data: overview, error: overviewError } = await useAsyncData<LocationOver
   if (isNew.value) return null
   const requestedLocationId = locationId.value
   if (!requestedLocationId) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
-  const shouldIncludeProducts = includeProducts.value
   return await dashboardApi<LocationOverviewResource>(
     `/api/dashboard/organizations/${organizationId}/locations/${requestedLocationId}/overview`,
-    { query: { includeProducts: String(shouldIncludeProducts) }, validate: isOverviewResponse },
+    { validate: isOverviewResponse },
   )
 })
 

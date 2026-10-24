@@ -277,7 +277,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [
       { id: 'login', icon: 'i-lucide-shield-check', label: 'Login & security', summary: sessionData.value?.user?.email ?? '', to: `${profilePath.value}/login` },
       { id: 'notifications', icon: 'i-lucide-bell', label: 'Notifications', summary: notificationSummary.value, to: `${profilePath.value}/notifications` },
       // Inside an organization, availability is that organization's; Personal names one first.
-      { id: 'calendar', icon: 'i-lucide-calendar-clock', label: 'Profile & availability', summary: 'Public profile, hours, time off and Google Calendar', to: organization.value ? `${profilePath.value}/calendar/${encodeURIComponent(organization.value.id)}` : `${profilePath.value}/calendar` },
+      ...((scopeHeaderModel?.value.peers ?? []).some(peer => peer.id) ? [{ id: 'calendar', icon: 'i-lucide-calendar-clock', label: 'Profile & availability', summary: 'Public profile, hours, time off and Google Calendar', to: organization.value ? `${profilePath.value}/calendar/${encodeURIComponent(organization.value.id)}` : `${profilePath.value}/calendar` }] : []),
       { id: 'appearance', icon: 'i-lucide-sun-moon', label: 'Appearance', summary: `${themePreference.value.charAt(0).toUpperCase()}${themePreference.value.slice(1)} theme`, to: `${profilePath.value}/appearance` },
       { id: 'payments', icon: 'i-lucide-credit-card', label: 'Payments', summary: 'Your payments and refunds', to: `${profilePath.value}/payments` },
       { id: 'organizations', icon: 'i-lucide-building-2', label: 'Organizations', summary: organizationsSummary.value, to: `${profilePath.value}/organizations` },

@@ -10,14 +10,14 @@
     @save="c.save"
   >
     <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/120 available</p>
-    <UInput v-model="c.form.name" aria-label="Name" placeholder="Starters" maxlength="120" autofocus class="w-full" />
+    <UInput v-model="c.form.name" aria-label="Name" maxlength="120" autofocus class="w-full" />
     <DashboardResourceLocalization
       v-if="!c.isNew.value && c.hasRecord.value"
       class="mt-6"
       :organization-id="c.organizationId"
       resource-type="collection"
       :resource-id="c.collectionId.value"
-      resource-label="section"
+      :resource-label="c.form.name"
       :fields="c.localizationFields.value"
       :language-settings-path="c.organizationLocalizationSettingsPath.value"
     />

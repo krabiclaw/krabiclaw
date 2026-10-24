@@ -130,13 +130,13 @@ const change = computed<{ label: string; to: string; outline?: boolean } | null>
 const pending = computed(() => !!billing.value && (!!billing.value.cancelAtPeriodEnd || !!scheduledPlan.value))
 
 // Beside a pane the index opens a way up; Business, with nothing above it, opens its first service.
-const firstLeaf = computed(() => change.value && !change.value.outline ? change.value.to : to('managed-ads'))
+const firstLeaf = computed(() => !dashboard.canUpdateBilling.value ? null : change.value && !change.value.outline ? change.value.to : to('managed-ads'))
 
 // Stripe's phrasing: the locations in use, the included allowance, then the charge per additional one.
 const locationsRow = computed<EditorNavigationItem | null>(() => {
   const used = billing.value?.usage.locations
   if (used === undefined) return null
-  return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
+  return { id: 'locations', label: dashboard.organization.value?.vertical === 'service' ? 'Offices' : 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
 })
 // Homes from the quote the capacity check answers by: live (billed), drafts
 // (free), included, and what the live ones past those cost each month. A
@@ -144,7 +144,7 @@ const locationsRow = computed<EditorNavigationItem | null>(() => {
 // charged nothing for them, so the row says so.
 const homesRow = computed<EditorNavigationItem | null>(() => {
   const current = homes.value
-  if (!current) return null
+  if (!current || (!current.homes.used && !current.homes.drafts && dashboard.organization.value?.vertical !== 'lodging')) return null
   const counted = `${current.homes.used} live · ${current.homes.drafts} ${current.homes.drafts === 1 ? 'draft' : 'drafts'}`
   const summary = onStarter.value
     ? `${counted} · ${current.homes.included} included · ${nameOf(STARTER_PLAN_ID)} stops at ${current.homes.included}`

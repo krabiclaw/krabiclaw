@@ -25,10 +25,10 @@ test('an article created from a direct action prepares a Facebook draft without 
     expect((await page.goto(blogCreatePath(orgSlug)))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     const headline = page.locator('#dashboard-panel-organization-blog-new-headline')
-    await expect(headline.getByRole('button', { name: 'Create post', exact: true })).toBeDisabled()
+    await expect(headline.getByRole('button', { name: 'Create article', exact: true })).toBeDisabled()
     await headline.getByRole('textbox', { name: 'Headline*', exact: true }).fill(title)
     const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/blog/posts` && response.request().method() === 'POST')
-    await headline.getByRole('button', { name: 'Create post', exact: true }).click()
+    await headline.getByRole('button', { name: 'Create article', exact: true }).click()
     const createResponse = await created
     expect(createResponse.status(), await createResponse.text()).toBe(200)
     articleId = (await createResponse.json() as { id: string }).id

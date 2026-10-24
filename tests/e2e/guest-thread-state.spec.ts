@@ -612,7 +612,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page.getByRole('heading', { name: /^You have \d+ things? to do$/ })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Filter bookings', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
 
   const upcomingResponse = await page.request.get('/api/dashboard/today', { params: {
     org: 'ember-slice-demo', range: 'upcoming', from: localToday.date,

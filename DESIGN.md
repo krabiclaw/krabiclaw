@@ -107,6 +107,13 @@ The destinations are files under `O`, and their URLs are their files:
 | Notifications | `O/notifications` |
 | Platform accounts | `O/platform-accounts` |
 
+Notifications have one destination in each scope, reached by the Menu bell.
+Personal uses `/dashboard/account/notifications` and the same notification
+reader with explicit personal scope. They are not a Messages filter. Insights
+holds performance and reviews; canonical audit records do not need a second
+generic Activity feed. A Reports link must open an actual report concern, not
+another copy of Performance. Financial range labels name the interval read.
+
 **The shell is the active organization's.** Tabs, Menu and where a root exits
 follow Better Auth's active organization — the route's, otherwise the
 session's. Account settings (`/dashboard/account/profile`) and Past activity
@@ -228,7 +235,18 @@ on desktop, while several amounts leave the choice to the host. Named priced
 versions remain valid without choice dimensions. Adding a dimension requires
 an explicit value for each saved version and preserves its identity and prices.
 Typed facts open their own editors from the record; they do not need another
-overview card.
+overview card. Show authored optional facts; missing optional facts are offered
+through the existing registry's Add detail action, not a permanent stack of
+empty cards. Short introduction belongs with Description and retains its
+separate canonical value. Existing records do not reopen a single-choice Type
+step. Empty grouping and consultation-only concerns do not belong on an
+informational practice area; real memberships, pricing and terms remain
+editable through their existing owners.
+
+Price summaries read the actual saved offers across their explicit scopes.
+No shared price is different from no price anywhere. Editing names the shared
+or selected location scope and never chooses another location for the caller.
+Website visibility states publication; consultation availability is independent.
 
 ### Tabs, parents and exits
 
@@ -436,6 +454,14 @@ again without silently rebasing the draft. Conflict recovery is an explicit
 choice to use the current saved facts. A successful write whose required read
 failed remains a visible failure.
 
+Save is available for a valid pending change, including a retry after a failed
+write. Reverting to saved values clears that change. Use the installed form's
+validation and the owning editor's saved baseline, not another save-state
+framework. Required errors appear after interaction or submission. Immediate
+actions, connection instructions and unavailable/read-only settings have no
+commit footer. New Team invitations start with Member; elevated access is an
+explicit choice through Better Auth's existing roles and permissions.
+
 **Icons identify destinations and meaningful choices.** Follow the captured
 Airbnb host editor's restraint: amenities have recognizable pictograms;
 ordinary listing fields, house rules and safety switches stay text and their
@@ -524,14 +550,34 @@ Beside a child every index fills its own pane. Standalone widths live in
 `dashboardColumnWidths`; a page never states one. A column's title heads it,
 as a leaf's does. Every level title is `dashboardTitleClass`.
 
-**Focused writing is bare.** A name, title, headline or link renders as a
-borderless 22–26px field with a counter, the way Airbnb's title and custom
-link do. A description uses the native textarea's `none` variant with no inner
-padding and native autoresize, filling its pane without a fixed-height scroll
-box. Pane-width changes invoke that same textarea sizing API. The live Airbnb
-listing-description editor was checked at phone and
-desktop breakpoints on October 21, 2026. Structured date, time and address
-controls retain their visible field boundaries.
+**The text control follows the task.** The live Airbnb Title editor uses
+outlined fields and embedded labels; Listing description uses a plain textarea
+(desktop and phone, October 24, 2026). Do not infer a blanket rule against
+field borders. Structured names, dates, times and addresses may retain visible
+boundaries. Narrative prose uses the installed textarea's `none` variant,
+without redundant labels or inner padding, and its native autoresize API.
+Fields fill their pane. Width changes invoke that same sizing API where needed;
+do not add a second textarea-sizing implementation. Rich Markdown and article
+canvases retain their own native editing controls.
+
+**Preview belongs to customer-facing saved content.** Product, Page, Post,
+Article and Links previews reuse `DashboardContentPreview` and
+`useDashboardContentPreview`. The editor URL holds the preview mode and device;
+closing returns to the same concern and restores focus. A compact eye control
+opens it; a URL or external View row is not another editing concern. Share
+belongs inside the preview and uses only a real published public URL, never a
+preview credential. Settings and internal facts need no decorative preview.
+The private Arrival guide uses that interaction with its existing authorized
+read, no iframe or public URL, and never becomes public listing content.
+
+**Languages is an index; translating is a content mode.** Add language is an
+explicit action, independent of Publish, Disable and Delete content. The index
+has no page-wide Save. Translation controls name the actual saved content and
+human language, make source text available where needed, and avoid repeated
+resource identifiers and language-code labels. The existing canonical writer
+preserves the complete translation, unseen fields, explicit empty/null values
+and revision checks. Saving a private language does not publish it. Dashboard
+and MCP use the same operations and owners.
 
 **Sizes come from the theme.** Controls are `lg` — 16px text, 44px tall, 8px
 radius — and the commit bar's Save is the one `xl` (48px). Body text is 16px
@@ -557,9 +603,11 @@ pane — never that the canvas replaces the application. A surface that escapes
 the frame takes the tenant's rail, navbar and place in the chain with it, which
 is what re-rooting exists to prevent.
 
-The canvas carries no Cancel/Save bar, because you cannot cancel an hour of
-writing. It leads its level the way a photograph leads a product: the article
-first, then the rows that describe it.
+The canvas carries no Cancel/Save footer. Its one editable title is in the
+canvas; Save, Preview and metadata destinations stay accessible in its header
+while the article grows. Those actions use the existing saved article and
+draft, not a second initial snapshot. Blog creation calls the artifact an
+Article, distinct from a short Post.
 
 **The exception covers the writing and nothing around it.** Category, tags,
 excerpt, publishing time, visibility and search appearance

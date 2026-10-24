@@ -18,8 +18,8 @@
         color="error"
         variant="soft"
         icon="i-lucide-circle-alert"
-        title="Updates could not be loaded"
-        :description="getErrorMessage(loadError, 'Updates request failed')"
+        title="Notifications could not be loaded"
+        :description="getErrorMessage(loadError, 'Notifications request failed')"
         class="mb-4"
       >
         <template #actions>
@@ -31,7 +31,7 @@
       <UAlert v-if="actionError" color="error" :description="actionError" class="mb-4" />
       <div v-if="!loadError && notifications.length === 0" class="py-16 text-center">
         <UIcon name="i-lucide-bell-off" class="mx-auto mb-3 size-7 text-muted" />
-        <p class="text-sm text-muted">No updates yet.</p>
+        <p class="text-sm text-muted">No notifications yet.</p>
       </div>
 
       <!--
@@ -57,7 +57,7 @@
           </span>
           <span class="min-w-0 flex-1">
             <span class="block text-highlighted" :class="notification.read_at ? 'font-medium' : 'font-semibold'">{{ notification.title }}</span>
-            <span v-if="notification.message" class="mt-0.5 line-clamp-2 block text-sm text-muted">{{ notification.message }}</span>
+            <span v-if="notification.message" class="mt-0.5 line-clamp-2 text-sm text-muted">{{ notification.message }}</span>
             <span class="mt-1 block text-sm text-dimmed">{{ formatRelativeTime(notification.created_at) }}</span>
           </span>
         </button>
@@ -170,7 +170,7 @@ async function markAllRead() {
     // still in flight, which a local rewrite of the rows would not.
     await refreshNotifications()
   } catch (error) {
-    actionError.value = getErrorMessage(error, 'Updates could not be marked as read.')
+    actionError.value = getErrorMessage(error, 'Notifications could not be marked as read.')
   } finally {
     markingAll.value = false
   }

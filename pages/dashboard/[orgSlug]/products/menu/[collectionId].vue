@@ -17,6 +17,7 @@ import type { Collection } from '~/server/types/products'
 /** The section's fields — its name, the description that introduces it, its picture — and the walk that creates it. */
 export interface CollectionEditor {
   form: { name: string; description: string }
+  noun: ComputedRef<'section' | 'collection'>
   /** The section's own picture as stored; a photo saves the moment it is chosen. */
   image: ComputedRef<Collection['image']>
   imageError: Ref<string>
@@ -47,6 +48,7 @@ import { mediaStillUrl } from '~/shared/media-placement-contract'
 definePageMeta({ layout: 'dashboard' })
 
 const route = useRoute()
+const noun = computed(() => route.query.kind === 'dish' ? 'section' : 'collection')
 const router = useRouter()
 const dashboardApi = useDashboardApi()
 const collectionId = computed(() => String(route.params.collectionId ?? ''))
@@ -95,7 +97,7 @@ const saving = ref(false)
 const errorMessage = ref('')
 
 function fieldPath(field: CollectionLeaf) {
-  return router.resolve({ path: `${collectionPath.value}/${field}`, query: { location_id: (isNew.value ? locationId.value : collection.value?.location_id) ?? undefined } }).fullPath
+  return router.resolve({ path: `${collectionPath.value}/${field}`, query: { location_id: (isNew.value ? locationId.value : collection.value?.location_id) ?? undefined, kind: route.query.kind === 'dish' ? 'dish' : undefined } }).fullPath
 }
 
 // A section being created gives only its name; once it exists it also has the
@@ -106,7 +108,7 @@ const collectionNavigation = computed<EditorNavigationGroup[]>(() => [{
     { id: 'name', label: 'Name', summary: (isNew.value ? form.name : collection.value?.name)?.trim() || 'Not named yet', placeholder: !(isNew.value ? form.name : collection.value?.name)?.trim(), to: fieldPath('name') },
     ...(isNew.value ? [] : [
       { id: 'description', label: 'Description', summary: collection.value?.description?.trim() || 'Not added', placeholder: !collection.value?.description?.trim(), to: fieldPath('description') },
-      { id: 'photo', label: 'Photo', summary: collection.value?.image ? 'Section photo' : 'No photo', placeholder: !collection.value?.image, to: fieldPath('photo'), image: mediaStillUrl(collection.value?.image) },
+      { id: 'photo', label: 'Photo', summary: collection.value?.image ? `${noun.value === 'section' ? 'Section' : 'Collection'} photo` : 'No photo', placeholder: !collection.value?.image, to: fieldPath('photo'), image: mediaStillUrl(collection.value?.image) },
     ]),
   ],
 }])
@@ -120,8 +122,11 @@ const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveLeaf } = 
   labels: COLLECTION_LABELS,
   order: ['name'],
   missing: () => !form.name.trim(),
-  noun: 'section',
+  noun,
   saving,
+  existingBlocked: () => !collection.value || !form.name.trim() || Boolean(catalog.error.value) || !errorMessage.value && (level.child.value === 'description'
+    ? form.description.trim() === (collection.value.description ?? '')
+    : form.name.trim() === collection.value.name),
   commit,
 })
 
@@ -148,7 +153,7 @@ async function commit() {
     if (createdId) await navigateTo(router.resolve({ path: collectionPath.value.replace(/\/new$/, `/${createdId}`), query: route.query }).fullPath, { replace: true })
     else await level.close()
   } catch (error) {
-    errorMessage.value = `${committed ? 'The section was saved, but its editor could not be updated. ' : ''}${getErrorMessage(error, 'The section could not be saved')}`
+    errorMessage.value = `${committed ? `The ${noun.value} was saved, but its editor could not be updated. ` : ''}${getErrorMessage(error, `The ${noun.value} could not be saved`)}`
   } finally {
     saving.value = false
   }
@@ -177,6 +182,7 @@ async function setImage(assetId: string | null) {
 
 provide(collectionEditorKey, {
   form,
+  noun,
   image: computed(() => collection.value?.image ?? null),
   imageError,
   setImage,

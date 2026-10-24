@@ -1,21 +1,22 @@
 <template>
-  <DashboardLeafPanel
+  <DashboardIndexPanel
     id="organization-localization"
     title="Languages"
     lead="English is the permanent source language. Growth includes every available language at no extra cost."
-    :saving="busy"
-    :disabled="!newLocale || Boolean(validationMessage)"
-    :error="actionError ?? ''"
-    @cancel="newLocale = ''"
-    @save="enableLanguage"
   >
+    <template #right>
+      <UDropdownMenu v-if="enableableCatalogOptions.length" :items="addLanguageItems">
+        <UButton label="Add language" icon="i-lucide-plus" color="neutral" variant="ghost" :disabled="busy || Boolean(validationMessage)" />
+      </UDropdownMenu>
+    </template>
+    <UAlert v-if="actionError" class="mb-6" color="error" variant="soft" :description="actionError" />
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="loadError" />
     <template v-else-if="settings">
       <!-- One row per language: its name, then its state. -->
       <ul>
         <li v-for="language in settings.languages" :key="language.locale" class="flex flex-wrap items-center justify-between gap-4 border-b border-default py-6 last:border-b-0">
           <div class="min-w-0">
-            <p class="text-base text-highlighted">{{ language.label || language.locale }}</p>
+            <p class="text-base text-highlighted">{{ languageName(language.locale) }}</p>
             <p class="mt-1 text-sm text-muted">{{ languageSummary(language) }}</p>
           </div>
           <div v-if="!language.is_source" class="flex gap-2">
@@ -27,8 +28,8 @@
       </ul>
       <!-- What is left to translate, as rows that open the field's own editor. -->
       <section v-for="progress in progressRows ?? []" :key="progress.locale" class="mt-8">
-        <h2 class="text-sm font-semibold text-muted">Let’s translate your site</h2>
-        <p class="mt-1 text-sm text-muted">{{ progress.completed }}/{{ progress.total }} fields translated in {{ progress.locale }}.</p>
+        <h2 class="text-sm font-semibold text-muted">{{ languageName(progress.locale) }} translations</h2>
+        <p class="mt-1 text-sm text-muted">{{ progress.completed }} of {{ progress.total }} fields translated.</p>
         <ul v-if="progress.opportunities.length">
           <li v-for="item in progress.opportunities" :key="item.id" class="border-b border-default last:border-b-0">
             <NuxtLink :to="item.path" class="flex items-center justify-between gap-4 py-6">
@@ -43,13 +44,9 @@
         <p v-else class="mt-3 text-sm text-muted">Every source field with content has a translation.</p>
       </section>
       <UAlert v-if="progressError" class="mt-6" color="error" variant="soft" :description="progressError" />
-      <p v-if="!enableableCatalogOptions.length" class="mt-6 text-sm text-muted">No additional languages are available to enable right now.</p>
-      <UFormField v-else class="mt-8" label="Available language">
-        <USelect v-model="newLocale" :items="enableableCatalogOptions" placeholder="Select a language to enable" class="w-full" />
-      </UFormField>
+      <p v-if="enableableCatalogOptions.length && validationMessage" class="mt-6 text-sm text-muted">{{ validationMessage }}</p>
     </template>
-    <UAlert v-if="newLocale && validationMessage" class="mt-6" color="error" variant="soft" :description="validationMessage" />
-  </DashboardLeafPanel>
+  </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
@@ -90,17 +87,27 @@ const { data: progressRows, error: progressFailure, refresh: refreshProgress } =
 const loadError = computed(() => settingsError.value ? getErrorMessage(settingsError.value, 'Failed to load localization settings') : null)
 const progressError = computed(() => progressFailure.value ? getErrorMessage(progressFailure.value, 'Translation progress could not be loaded') : null)
 
-const newLocale = ref('')
 const busy = ref(false)
 const actionError = ref<string | null>(null)
 const enableableCatalogOptions = computed(() => (settings.value?.available_catalogs ?? [])
-  .filter(catalog => !settings.value?.languages.some(language => language.locale === catalog.locale && language.status !== 'disabled'))
-  .map(catalog => ({ label: `${catalog.label} (${catalog.locale})`, value: catalog.locale })))
+  .filter(catalog => !settings.value?.languages.some(language => language.locale === catalog.locale))
+  .map(catalog => ({ label: catalog.label, value: catalog.locale })))
 const validationMessage = computed(() => settings.value?.effective_plan !== 'growth' ? 'A Growth subscription is required.' : null)
+const addLanguageItems = computed(() => enableableCatalogOptions.value.map(option => ({
+  label: option.label,
+  onSelect: () => enableLanguage(option.value),
+})))
+
+function languageName(locale: string): string {
+  const language = settings.value?.languages.find(language => language.locale === locale)
+    ?? settings.value?.available_catalogs.find(language => language.locale === locale)
+  if (!language?.label) throw new Error('The language is missing its display name.')
+  return language.label
+}
 
 function languageSummary(language: Language): string {
-  if (language.is_source) return 'Source · published'
-  return language.status === 'published' ? 'published' : 'Not published'
+  if (language.is_source) return 'Source language · Published'
+  return language.status === 'published' ? 'Published' : 'Not published'
 }
 
 async function mutate(path: string, method: 'POST' | 'DELETE', body?: Record<string, unknown>) {
@@ -111,6 +118,7 @@ async function mutate(path: string, method: 'POST' | 'DELETE', body?: Record<str
     await refreshSettings()
     if (settingsError.value) throw settingsError.value
     await refreshProgress()
+    if (progressFailure.value) throw progressFailure.value
     return true
   } catch (error) {
     actionError.value = getErrorMessage(error, 'Localization request failed')
@@ -119,14 +127,16 @@ async function mutate(path: string, method: 'POST' | 'DELETE', body?: Record<str
     busy.value = false
   }
 }
-async function enableLanguage() {
-  const catalog = settings.value?.available_catalogs.find(candidate => candidate.locale === newLocale.value)
-  if (!catalog) return
-  if (await mutate(`${localesPath}/${encodeURIComponent(catalog.locale)}/add`, 'POST', { label: catalog.label })) newLocale.value = ''
+async function enableLanguage(locale: string) {
+  if (busy.value || validationMessage.value) return
+  const catalog = settings.value?.available_catalogs.find(candidate => candidate.locale === locale)
+  if (!catalog) throw new Error('The selected language is unavailable.')
+  await mutate(`${localesPath}/${encodeURIComponent(catalog.locale)}/add`, 'POST', { label: catalog.label })
 }
 async function publishLanguage(locale: string) { await mutate(`${localesPath}/${encodeURIComponent(locale)}/publish`, 'POST') }
 async function disableLanguage(locale: string) { await mutate(`${localesPath}/${encodeURIComponent(locale)}/disable`, 'POST') }
 async function deleteLanguage(locale: string) {
-  if (await confirmDialog.open({ title: `Delete ${locale} content`, description: `Every ${locale} translation on this site is deleted permanently.`, confirmLabel: 'Delete content', cancelLabel: 'Keep content' })) await mutate(`${localesPath}/${encodeURIComponent(locale)}`, 'DELETE')
+  const label = languageName(locale)
+  if (await confirmDialog.open({ title: `Delete ${label} content`, description: `Every ${label} translation on this site is deleted permanently.`, confirmLabel: 'Delete content', cancelLabel: 'Keep content' })) await mutate(`${localesPath}/${encodeURIComponent(locale)}`, 'DELETE')
 }
 </script>

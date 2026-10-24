@@ -74,7 +74,7 @@ import {
   type TenantPageBlock,
   type TenantPageBlockType,
 } from '~/utils/tenant-page-blocks'
-import { TENANT_PAGE_RECORD_NOUNS, tenantPageBlockLabel, tenantPageBlockSections, type TenantPageBlockSection } from '~/utils/tenant-page-block-sections'
+import { TENANT_PAGE_RECORD_NOUNS, tenantPageBlockLabel, tenantPageBlockSections, tenantPageBlockFieldsForSection, type TenantPageBlockSection } from '~/utils/tenant-page-block-sections'
 
 /** The block and the way its leaves commit, for the section and record levels below it. */
 export interface TenantPageBlockEditor {
@@ -99,7 +99,7 @@ import EditorNavigationList, { type EditorNavigationGroup } from '~/components/d
 import TenantPageBlockFields from '~/components/dashboard/TenantPageBlockFields.vue'
 import { getErrorMessage, showNotFound } from '~/utils/errors'
 import { tenantPageEditorKey } from '~/components/dashboard/TenantPageEditorPage.vue'
-import { createTenantPageEditorData, tenantPageBlockSummary, validateTenantPageBlock } from '~/utils/tenant-page-editor'
+import { createTenantPageEditorData, validateTenantPageBlock } from '~/utils/tenant-page-editor'
 
 const props = defineProps<{ organizationId: string; pageId: string; blockId: string }>()
 
@@ -162,25 +162,14 @@ function sectionSummary(section: TenantPageBlockSection): { summary: string; pla
     const has = current.media.some(item => item.slot === 'media')
     return { summary: has ? 'Chosen' : 'No image yet', placeholder: !has }
   }
-  const summary = tenantPageBlockSummary({ ...current, data: sectionData(current, section) })
+  const summary = tenantPageBlockFieldsForSection(current, section.key).map(({ key, field }) => {
+    const value = field.store === 'level' ? current.level : current.data[key]
+    if (field.kind === 'enum') return field.options?.find(option => option.value === value)?.label ?? ''
+    if (typeof value === 'string' || typeof value === 'number') return String(value).trim()
+    if (Array.isArray(value)) return value.length ? `${value.length} selected` : ''
+    return ''
+  }).filter(Boolean).join(' · ')
   return { summary: summary || 'Nothing yet', placeholder: !summary }
-}
-
-/** The fields this row stands for, so its preview reads that row rather than the block. */
-function sectionData(current: TenantPageBlock, section: TenantPageBlockSection): Record<string, unknown> {
-  const keys: Record<string, string[]> = {
-    title: ['title'],
-    copy: current.type === 'hero' ? ['eyebrow', 'title', 'subtitle'] : ['title', 'description'],
-    message: ['title', 'body'],
-    settings: ['title'],
-    button: current.type === 'hero' ? ['cta_label', 'cta_url'] : ['label', 'url'],
-    destination: ['destination'],
-    locations: ['location_ids'],
-    calculator: ['calculator'],
-  }
-  const picked: Record<string, unknown> = {}
-  for (const key of keys[section.key] ?? []) picked[key] = current.data[key]
-  return picked
 }
 
 const navigationGroups = computed<EditorNavigationGroup[]>(() => {

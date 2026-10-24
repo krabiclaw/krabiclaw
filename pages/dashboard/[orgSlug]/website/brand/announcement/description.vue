@@ -9,7 +9,7 @@
     @save="editor.save"
   >
     <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/500 available</p>
-    <UTextarea v-model="editor.form.announcementDescription" aria-label="Description" :rows="4" maxlength="500" autofocus class="w-full" />
+    <UTextarea v-model="editor.form.announcementDescription" aria-label="Description" variant="none" :rows="1" autoresize maxlength="500" autofocus class="w-full" />
   </DashboardLeafPanel>
 </template>
 

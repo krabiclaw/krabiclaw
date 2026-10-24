@@ -29,6 +29,8 @@ export interface BlogPost {
   created_at?: string | null
   editor_organization_name?: string | null
   public_path?: string | null
+  public_url?: string | null
+  preview_url?: string | null
 }
 
 export interface BlogEditorBlock {

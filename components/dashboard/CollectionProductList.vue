@@ -1,18 +1,18 @@
 <template>
-  <DashboardIndexPanel id="menu-section" :title="collection?.name ?? 'Section'">
+  <DashboardIndexPanel id="menu-section" :title="collection?.name ?? 'Collection'">
     <EditorNavigationList class="mb-10" :groups="rows" :active-item="level.child.value" variant="cards" />
     <h2 class="mb-4 text-xl font-semibold text-highlighted">Items</h2>
     <DashboardListEditor
       v-model:editing="editing"
       v-model:selected="selected"
-      :title="collection?.name ?? 'Section'"
+      :title="collection?.name ?? 'Collection'"
       :items="listItems"
       :error="loadError"
       :disabled="busy || Boolean(loadError)"
       :addable="!editing"
-      empty-title="No items in this section yet"
-      empty-icon="i-lucide-utensils"
-      add-label="Add dish"
+      :empty-title="`No items in this ${noun} yet`"
+      :empty-icon="menuSection ? 'i-lucide-utensils' : 'i-lucide-folder'"
+      :add-label="menuSection ? 'Add dish' : 'Add item'"
       reorderable
       selectable
       @add="openAdd"
@@ -20,7 +20,7 @@
     >
       <template #selection-actions>
         <UButton label="Move" color="neutral" variant="soft" data-testid="product-move-open" :disabled="busy || Boolean(loadError)" @click="moveDialogOpen = true" />
-        <UButton label="Remove from section" color="neutral" variant="soft" :loading="removing" :disabled="busy || Boolean(loadError)" data-testid="product-remove-from-section" @click="removeSelected" />
+        <UButton :label="`Remove from ${noun}`" color="neutral" variant="soft" :loading="removing" :disabled="busy || Boolean(loadError)" data-testid="product-remove-from-section" @click="removeSelected" />
       </template>
       <template #item="{ item }">
         <span class="flex w-full items-center gap-4 text-left" :data-testid="'product-' + item.id">
@@ -40,7 +40,7 @@
 
     <DashboardListItemDialog
       v-model:open="addDialogOpen"
-      title="Add dishes"
+      :title="menuSection ? 'Add dishes' : 'Add items'"
       :removable="false"
       :saving="adding"
       :save-disabled="!addSelected.length || busy"
@@ -48,8 +48,8 @@
       :error="addError"
       @save="addExisting"
     >
-      <UButton :to="newDishTo" label="Create new dish" color="neutral" variant="soft" block :disabled="busy || Boolean(loadError)" @click="addDialogOpen = false" />
-      <UInput v-model="addSearch" aria-label="Search dishes" placeholder="Search dishes" class="w-full" :disabled="busy || Boolean(loadError)" />
+      <UButton :to="newProductTo" :label="menuSection ? 'Create new dish' : 'Create new item'" color="neutral" variant="soft" block :disabled="busy || Boolean(loadError)" @click="addDialogOpen = false" />
+      <UInput v-model="addSearch" :aria-label="menuSection ? 'Search dishes' : 'Search items'" :placeholder="menuSection ? 'Search dishes' : 'Search items'" class="w-full" :disabled="busy || Boolean(loadError)" />
       <ul v-if="addCandidates.length" class="divide-y divide-default">
         <li v-for="dish in addCandidates" :key="dish.id" class="flex items-center gap-3 py-3">
           <DashboardMediaThumb :asset="dish.image" :label="dish.name" fallback-icon="i-lucide-image" />
@@ -63,7 +63,7 @@
           />
         </li>
       </ul>
-      <p v-else class="text-sm text-muted">{{ addSearch.trim() ? 'No dishes match your search.' : 'Every existing dish is already in this section.' }}</p>
+      <p v-else class="text-sm text-muted">{{ addSearch.trim() ? `No ${menuSection ? 'dishes' : 'items'} match your search.` : `Every existing ${menuSection ? 'dish' : 'item'} is already in this ${noun}.` }}</p>
     </DashboardListItemDialog>
 
     <CollectionMoveDialog
@@ -74,6 +74,7 @@
       :product-ids="products.map(product => product.id)"
       :selected-product-ids="selected"
       :expected-product-ids="expectedOrder()"
+      :menu="menuSection"
       @saved="resetEditing"
       @reset="resetEditing"
     />
@@ -111,13 +112,16 @@ const loadError = computed(() => {
   return cause ? getErrorMessage(cause, 'The section could not be loaded') : null
 })
 const catalogPath = computed(() => '/dashboard/' + String(route.params.orgSlug) + '/products')
-const scoped = (path: string, query: Record<string, string | undefined> = {}) => router.resolve({ path, query: { location_id: locationId.value ?? undefined, ...query } }).fullPath
+const scoped = (path: string, query: Record<string, string | undefined> = {}) => router.resolve({ path, query: { location_id: locationId.value ?? undefined, kind: route.query.kind === 'dish' ? 'dish' : undefined, ...query } }).fullPath
 
 function membersFor(id: string): Product[] {
   return groupProductsByCollection(catalog.products.value, collections.value).find(group => group.id === id)?.products ?? []
 }
 const localOrder = ref<Product[] | null>(null)
 const products = computed(() => localOrder.value ?? membersFor(collectionId.value))
+// Menu names its own dish scope. Empty or mixed membership never changes it.
+const menuSection = computed(() => route.query.kind === 'dish')
+const noun = computed(() => menuSection.value ? 'section' : 'collection')
 const editing = ref(false)
 const selected = ref<string[]>([])
 const orderSnapshot = ref<string[] | null>(null)
@@ -132,7 +136,7 @@ const busy = computed(() => committing.value || moving.value || removing.value |
 function itemStatus(product: Product): string {
   const listed = product.publications.some(publication => publication.organization_id === organizationId && publication.published)
   const context = catalogProductItem(product, { collections: collections.value, locations: locations.value, priceLabel, to: '' }).summary
-  return [!product.active ? 'Unavailable' : null, listed ? 'Listed' : 'Not listed', context].filter(Boolean).join(' · ')
+  return [!product.active && (product.kind !== 'service' || product.booking) ? 'Unavailable' : null, listed ? 'Listed' : 'Not listed', context].filter(Boolean).join(' · ')
 }
 const listItems = computed(() => loadError.value ? [] : products.value.map(row => ({ id: row.id, title: row.name, to: scoped(catalogPath.value + '/' + row.id), row, status: itemStatus(row) })))
 
@@ -208,9 +212,9 @@ const addSearch = ref('')
 const addSelected = ref<string[]>([])
 const addSnapshot = ref<string[]>([])
 const addError = ref<string | null>(null)
-const addCandidates = computed(() => catalog.products.value.filter(product => product.kind === 'dish' && !addSnapshot.value.includes(product.id)
+const addCandidates = computed(() => catalog.products.value.filter(product => (!menuSection.value || product.kind === 'dish') && !addSnapshot.value.includes(product.id)
   && product.name.toLocaleLowerCase().includes(addSearch.value.trim().toLocaleLowerCase())))
-const newDishTo = computed(() => scoped(catalogPath.value + '/new/name', { kind: 'dish', collection_id: collectionId.value }))
+const newProductTo = computed(() => scoped(catalogPath.value + (menuSection.value ? '/new/name' : '/new/kind'), { kind: menuSection.value ? 'dish' : undefined, collection_id: collectionId.value }))
 function openAdd() {
   if (busy.value || editing.value || loadError.value) return
   addSnapshot.value = membersFor(collectionId.value).map(product => product.id)
@@ -233,7 +237,7 @@ async function addExisting() {
     await catalog.setCollectionProducts(sourceId, [...expected, ...additions], expected)
     addDialogOpen.value = false
     resetEditing()
-  } catch (error) { addError.value = getErrorMessage(error, 'The dishes could not be added') }
+  } catch (error) { addError.value = getErrorMessage(error, 'The items could not be added') }
   finally { adding.value = false }
 }
 

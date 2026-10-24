@@ -31,17 +31,16 @@
           -->
           <UButton
             color="neutral"
-            :variant="activeType || updatesView ? 'solid' : 'outline'"
+            :variant="activeType ? 'solid' : 'outline'"
             class="h-10 rounded-full px-4 text-sm font-normal"
             trailing-icon="i-lucide-chevron-down"
             aria-label="All, filter by message type"
           >
-            {{ updatesView ? 'Updates' : 'All' }}
+            All
           </UButton>
         </UDropdownMenu>
 
         <UButton
-          v-if="!updatesView"
           class="h-10 rounded-full px-4 text-sm font-normal"
           color="neutral"
           :variant="unreadOnly ? 'solid' : 'outline'"
@@ -53,9 +52,7 @@
       </div>
     </header>
 
-    <!-- Updates: what the platform told this account or business, under the same pills. -->
-    <NotificationList v-if="updatesView" :personal-scope="personalScope" class="min-h-0 flex-1 overflow-y-auto pb-4" :class="dashboardGutterClass" />
-    <div v-else class="min-h-0 flex-1 overflow-y-auto" :class="dashboardGutterClass">
+    <div class="min-h-0 flex-1 overflow-y-auto" :class="dashboardGutterClass">
       <UAlert
         v-if="mailboxError"
         color="error"
@@ -214,7 +211,6 @@
 </template>
 <script setup lang="ts">
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
-import NotificationList from '~/components/dashboard/NotificationList.vue'
 import { authClient } from '~/lib/auth-client'
 import type { LocationQueryRaw } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
@@ -269,7 +265,6 @@ const activeType = computed<SubmissionType | null>(() => {
   return value === 'contact' || value === 'reservation' || value === 'booking' || value === 'stay' ? value : null
 })
 const unreadOnly = computed(() => route.query.unread === '1')
-const updatesView = computed(() => route.query.view === 'updates')
 
 function setQuery(patch: Record<string, string | undefined>) {
   void router.replace({ path: route.path, query: { ...route.query, ...patch } })
@@ -284,12 +279,10 @@ const typeMenuItems = computed(() => [[
     label: option.label,
     icon: option.icon,
     type: 'checkbox' as const,
-    checked: !updatesView.value && activeType.value === option.value,
-    onSelect: () => setQuery({ filter: option.value ?? undefined, view: undefined }),
+    checked: activeType.value === option.value,
+    onSelect: () => setQuery({ filter: option.value ?? undefined }),
     ui: { itemLabel: 'text-base' },
   })),
-  // Updates replaces the conversation pane, so an open conversation closes with it.
-  { label: 'Updates', icon: 'i-lucide-bell', type: 'checkbox' as const, checked: updatesView.value, onSelect: () => void router.replace({ path: listRoute.value, query: { ...route.query, view: 'updates', filter: undefined, unread: undefined } }), ui: { itemLabel: 'text-base' } },
 ]])
 
 const filtersApplied = computed(() => Boolean(route.query.query || route.query.filter || route.query.unread))
@@ -324,7 +317,7 @@ const effectiveFeatureSet = computed(() => new Set<ProductFeature>([
 */
 const vertical = computed(() => dashboard.organization.value?.vertical ?? null)
 const typeOptions = computed(() => {
-  // The account has no kinds to narrow by: its choices are All and Updates.
+  // Personal conversations share one All view.
   if (props.personalScope) return [{ value: null, label: 'All', icon: 'i-lucide-message-square' }]
   const kinds: SubmissionType[] = []
   if (effectiveFeatureSet.value.has('reservations')) kinds.push('reservation')
@@ -461,8 +454,7 @@ useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')
 
 // The newest thread, for the index above to open into its second column on
 // arrival. The list only says which; whether there is a column is the shell's.
-watch([threads, openThreadId, updatesView], ([rows, open, updates]) => {
-  if (updates) { emit('first', null); return }
+watch([threads, openThreadId], ([rows, open]) => {
   if (open) return
   const first = rows[0]
   emit('first', first ? { path: threadRoute(first), query: route.query } : null)

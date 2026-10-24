@@ -40,20 +40,29 @@ definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
 const route = useRoute()
+const router = useRouter()
 const level = useRouteLevel()
+const { priceLabel } = useCatalogPrice(p.locationId, p.allOrganizationLocations)
 const nightlyPrice = computed(() => p.product.value?.kind === 'stay' && p.form.variants.length === 1)
 watchEffect(() => {
   if (nightlyPrice.value && level.child.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
-const firstAmount = computed(() => p.product.value?.variants.length === 1 ? p.sectionPath(`price/amounts/${encodeURIComponent(p.product.value.variants[0]!.id)}`) : null)
+const priceLocations = computed(() => p.locationId.value || nightlyPrice.value ? [] : p.allOrganizationLocations.value.filter(location => p.product.value?.locations.some(entry => entry.location_id === location.id) || p.product.value?.variants.some(variant => variant.prices.some(price => price.location_id === location.id))))
+const firstAmount = computed(() => !priceLocations.value.length && p.product.value?.variants.length === 1 ? p.sectionPath(`price/amounts/${encodeURIComponent(p.product.value.variants[0]!.id)}`) : null)
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'prices',
   items: [
     ...p.form.variants.map(variant => ({
       id: `price-${variant.id ?? variant.key}`,
-      label: p.form.variants.length === 1 ? 'Amount' : variant.name,
-      summary: variant.price_major ? `${variant.price_major} ${p.currency}` : p.form.variants.length === 1 && typeof p.product.value?.details.pricing_note === 'string' ? p.product.value.details.pricing_note : 'No price set',
+      label: p.form.variants.length === 1 ? p.locationId.value ? 'Amount' : 'Shared price' : `${variant.name}${p.locationId.value ? '' : ' · Shared price'}`,
+      summary: variant.price_major ? `${variant.price_major} ${p.currency}` : p.form.variants.length === 1 && typeof p.product.value?.details.pricing_note === 'string' ? p.product.value.details.pricing_note : p.locationId.value ? 'No price set' : 'No shared price set',
       ...(variant.id ? { to: p.sectionPath(`price/amounts/${encodeURIComponent(variant.id)}`) } : {}),
+    })),
+    ...priceLocations.value.map(location => ({
+      id: `location-${location.id}`,
+      label: `Price at ${location.title}`,
+      summary: `${p.product.value ? priceLabel(p.product.value, true, location.id) || 'No price set' : ''}${location.status === 'active' ? '' : ' · Location inactive'}`,
+      to: router.resolve({ path: level.path.value, query: { ...route.query, location_id: location.id } }).fullPath,
     })),
     ...p.form.options.map(option => ({
       id: `option-${option.id}`,
