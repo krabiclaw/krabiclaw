@@ -1188,6 +1188,7 @@ const additionalDetails = computed(() => {
   return [
     ...definitions.value.filter(field => ![PRICING_NOTE_HANDLE, 'tagline'].includes(field.key) && !isStayFocusedDetail(field.key) && !visible.has(field.key)).map(field => ({ id: field.key, label: field.name, icon: field.icon, to: sectionPath(`attributes/${field.id}`) })),
     ...(!row.order_url && row.kind !== 'stay' ? [{ id: 'order-url', label: sectionLabels['order-url'], to: sectionPath('order-url') }] : []),
+    ...(!visible.has('collections') ? [{ id: 'collections', label: sectionLabels.collections, to: sectionPath('collections') }] : []),
     ...(legalEditor.value ? [
       ...(!visible.has('price') ? [{ id: 'price', label: sectionLabels.price, to: sectionPath('price') }] : []),
       ...(!row.booking ? [{ id: 'booking', label: 'Set up consultations', to: sectionPath('booking') }] : []),
