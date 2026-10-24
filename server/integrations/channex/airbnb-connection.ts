@@ -1151,7 +1151,7 @@ export class AirbnbConnection {
     try {
       return await channexGet(this.env, path, type)
     } catch (error) {
-      if (error instanceof ChannexError && error.status === 404) return null
+      if (error instanceof ChannexError && error.providerStatus === 404) return null
       throw error
     }
   }

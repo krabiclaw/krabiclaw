@@ -153,7 +153,7 @@ test('a refused provider write releases the lock; one that may have applied keep
   try {
     const owner = new AirbnbConnection(db, env, ORG, OWNER)
     channex.failNext = { path: '/groups', status: 422 }
-    await assert.rejects(owner.start(), (error: unknown) => (error as { status?: number }).status === 422)
+    await assert.rejects(owner.start(), (error: unknown) => (error as { providerStatus?: number; status?: number }).providerStatus === 422 && (error as { status?: number }).status === 502)
     assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step, group_id FROM channex_connections').first(), { status: 'not_connected', operation_id: null, pending_step: null, group_id: null })
 
     channex.failNext = { path: '/groups', status: 500 }

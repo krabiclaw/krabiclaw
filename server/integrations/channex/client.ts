@@ -1,3 +1,4 @@
+import { HTTPError } from 'nitro'
 import { ChannexDataError, object, resource, type JsonRecord, type Resource } from './data'
 
 /**
@@ -14,21 +15,48 @@ export interface ChannexEnv {
   requestSignal?: AbortSignal
 }
 
-export class ChannexError extends Error {
-  readonly status: number
-  readonly statusCode: number
+/**
+ * A Channex call that failed, answered as KrabiClaw's coded error: 502 for a
+ * provider failure, 504 when the background slice ended first, 500 when
+ * KrabiClaw is not configured to call Channex. `providerStatus` is Channex's
+ * own status (or the one KrabiClaw assigned a failure it detected), which
+ * decides whether a failure is worth retrying; `data.provider_status` carries
+ * it to the caller.
+ */
+export class ChannexError extends HTTPError<{ code: string; field: string; resource?: string; uncertain: boolean; provider_status: number }> {
+  readonly providerStatus: number
   readonly uncertain: boolean
   /** Only an unsent or explicitly refused write proves a pending mutation did not apply. */
   readonly writeRefused: boolean
-  readonly data: { code: string; field: string; resource?: string; uncertain: boolean }
-  constructor(message: string, status: number, uncertain: boolean, context?: { code: string; field: string; resource?: string }, writeRefused = false) {
-    super(message)
-    this.status = status
-    this.statusCode = status
+  declare readonly data: { code: string; field: string; resource?: string; uncertain: boolean; provider_status: number }
+  constructor(message: string, providerStatus: number, uncertain: boolean, context?: { code: string; field: string; resource?: string }, writeRefused = false) {
+    const coded = context ?? { code: 'CHANNEX_REQUEST_FAILED', field: 'provider_response' }
+    const status = coded.code === 'SYNC_SLICE_ENDED' ? 504 : coded.code === 'CHANNEX_NOT_CONFIGURED' ? 500 : 502
+    super({ status, message, data: { ...coded, uncertain, provider_status: providerStatus } })
+    this.providerStatus = providerStatus
     this.uncertain = uncertain
     this.writeRefused = writeRefused
-    this.data = { ...(context ?? { code: 'CHANNEX_REQUEST_FAILED', field: 'provider_response' }), uncertain }
   }
+}
+
+/**
+ * Channex answers 422 with Airbnb's own `error_code` when Airbnb failed behind
+ * it ("Airbnb may be undergoing maintenance … Please try again"): that is
+ * Airbnb unavailable, not a refusal of the request. Airbnb's message, when it
+ * is one.
+ */
+function airbnbUnavailable(status: number, text: string): string | null {
+  if (status !== 422) return null
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return null
+  }
+  const errors = typeof body === 'object' && body !== null ? (body as { errors?: unknown }).errors : null
+  if (typeof errors !== 'object' || errors === null) return null
+  const { error_code: code, error_message: message } = errors as { error_code?: unknown; error_message?: unknown }
+  return typeof code === 'number' && code >= 500 ? (typeof message === 'string' && message.trim() ? message.trim() : `Airbnb answered ${code}`) : null
 }
 
 // Statuses that prove Channex refused a write before applying it.
@@ -38,7 +66,7 @@ const MAX_RESPONSE_BYTES = 10_000_000
 export async function channexRequest(env: ChannexEnv, path: string, method: 'GET' | 'POST' | 'PUT' | 'DELETE' = 'GET', body?: JsonRecord): Promise<JsonRecord> {
   const baseUrl = env.CHANNEX_BASE_URL?.trim().replace(/\/$/, '')
   const apiKey = env.CHANNEX_API_KEY?.trim()
-  if (!baseUrl || !apiKey) throw new ChannexError('CHANNEX_BASE_URL and CHANNEX_API_KEY are required', 500, false, undefined, method !== 'GET')
+  if (!baseUrl || !apiKey) throw new ChannexError('CHANNEX_BASE_URL and CHANNEX_API_KEY are required', 500, false, { code: 'CHANNEX_NOT_CONFIGURED', field: 'CHANNEX_API_KEY' }, method !== 'GET')
   const label = `${method} ${path.split('?')[0]}`
   if (env.requestSignal?.aborted) throw new ChannexError(`The background slice ended before ${label} was sent`, 504, false, { code: 'SYNC_SLICE_ENDED', field: 'background_slice' }, method !== 'GET')
   let response: Response | undefined
@@ -65,6 +93,8 @@ export async function channexRequest(env: ChannexEnv, path: string, method: 'GET
   }
   if (!response.ok) {
     const refused = method !== 'GET' && REFUSED.has(response.status)
+    const airbnb = airbnbUnavailable(response.status, text)
+    if (airbnb) throw new ChannexError(`Airbnb did not answer ${label} through Channex: ${airbnb}`, response.status, method !== 'GET' && !refused, { code: 'AIRBNB_UNAVAILABLE', field: 'provider_response' }, refused)
     throw new ChannexError(`Channex answered ${response.status} to ${label}: ${text.slice(0, 500)}`, response.status, method !== 'GET' && !refused, undefined, refused)
   }
   if (text.length > MAX_RESPONSE_BYTES) throw new ChannexError(`Channex's answer to ${label} exceeds 10 MB`, 502, method !== 'GET')
