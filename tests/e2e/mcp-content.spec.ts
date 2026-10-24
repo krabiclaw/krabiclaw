@@ -3,12 +3,38 @@ import Ajv from 'ajv'
 import { loginAs } from './helpers/auth'
 import { openTenantPage, tenantBaseURL, tenantExtraHeaders, waitForNuxtHydration } from './helpers'
 import { MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 
 // Split out of mcp.spec.ts (content/publishing tool tests) — see
 // helpers/mcp.ts for why. This group covers post publishing, tenant blog
 // tools, and the stateless discovery/list/error protocol flow.
 
 test.describe('stateless MCP server', () => {
+  test('a named reservation cancellation policy excludes raw cutoff fields without changing the saved policy', async ({ request, baseURL }, testInfo) => {
+    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+    try {
+      await loginAs(request, baseURL!)
+      const policyUrl = `${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}/locations/loc-demo/reservation-config`
+      const beforeResponse = await request.get(policyUrl)
+      expect(beforeResponse.status()).toBe(200)
+      const before = await beforeResponse.json()
+      expect(before.config, 'The existing demo location takes table reservations').not.toBeNull()
+      for (const rawFields of [{ free_cancellation_until_minutes: 60 }, { reschedule_allowed: false }, { reschedule_cutoff_minutes: 60 }]) {
+        const conflicted = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_reservation_policy', args: {
+          organization_id: MCP_ORGANIZATION_ID, location_id: 'loc-demo', expected_updated_at: before.config.updated_at,
+          cancellation_policy: 'flexible', ...rawFields,
+        } })
+        expect(conflicted.status()).toBe(200)
+        expect((await conflicted.json()).result.isError).toBe(true)
+        const afterResponse = await request.get(policyUrl)
+        expect(afterResponse.status()).toBe(200)
+        expect(await afterResponse.json()).toEqual(before)
+      }
+    } finally {
+      await releaseTenantMutationLock()
+    }
+  })
+
   test('separate language operations publish only authored translations and preserve source content', async ({ request, page, baseURL }) => {
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Language writes use local D1 only.')
     test.setTimeout(120_000)
@@ -70,6 +96,24 @@ test.describe('stateless MCP server', () => {
       expect(privateSettings.status()).toBe(200)
       const configuredLanguages = (await privateSettings.json()).languages as Array<{ locale: string; label: string; status: string }>
       expect(configuredLanguages).toContainEqual(expect.objectContaining({ locale, status: 'disabled' }))
+
+      // A translation names one resource type. Fields from another type must
+      // be refused before creating even the first representation in a batch.
+      const mediaLocalization = `${editor}/localization/media_asset/media-demo-margherita/${locale}`
+      const untranslatedMedia = await request.get(mediaLocalization)
+      expect(untranslatedMedia.status()).toBe(404)
+      for (const [toolName, fields] of [
+        ['put_resource_localization', { resource_id: 'media-demo-margherita', values: { name: 'This is not media alt text' } }],
+        ['replace_resource_localizations', { items: [{ resource_id: 'media-demo-margherita', values: { name: 'This is not media alt text' } }] }],
+      ] as const) {
+        const wrongResourceFields = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: {
+          organization_id: MCP_ORGANIZATION_ID, resource_type: 'media_asset', locale, ...fields,
+        } })
+        expect(wrongResourceFields.status()).toBe(200)
+        expect((await wrongResourceFields.json()).result.isError).toBe(true)
+        const stillUntranslated = await request.get(mediaLocalization)
+        expect(stillUntranslated.status()).toBe(404)
+      }
 
       const premature = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
@@ -340,6 +384,7 @@ test.describe('stateless MCP server', () => {
       const now = Date.now()
       const createArgs = {
         organization_id: organizationId,
+        location_id: 'loc-demo',
         idempotency_key: `mcp-explicit-publication-${now}`,
         title: `MCP explicit publication ${now}`,
         body: 'Visible after explicit publication through MCP and the public API.',
@@ -378,12 +423,30 @@ test.describe('stateless MCP server', () => {
       expect(draft.published_at).toBeNull()
       expect(draft.public_url).toBeNull()
       expect(draft.preview_url).toContain('preview_token=')
+      expect(draft).toMatchObject({ body: createArgs.body, call_to_action: createArgs.call_to_action, media: [expect.objectContaining({ asset_id: imageAssetId, slot: 'cover' })], publications: [] })
+      for (const field of ['created_by', 'metadata_json', 'social_image']) expect(draft).not.toHaveProperty(field)
       expect((await request.get(`${tenantBaseURL}/api/public/posts/${encodeURIComponent(draft.slug)}`, { headers: tenantExtraHeaders })).status()).toBe(404)
 
       const postEditorPath = `${baseURL}/api/editor/organizations/${organizationId}/posts/${created.post.id}`
       const beforeRename = await request.get(postEditorPath)
       expect(beforeRename.status()).toBe(200)
       const originalDraft = (await beforeRename.json()).post
+      expect(originalDraft.location_id).toBe(createArgs.location_id)
+      const { preview_url: _privatePreview, ...beforeInvalidPostChanges } = originalDraft
+      for (const [toolName, fields] of [
+        ['update_post', { post_id: created.post.id, expected_updated_at: draft.updated_at }],
+        ['delete_channel_post', { channel: 'instagram', target_id: 'unused-unsupported-channel', connection_revision: 'unused-unsupported-channel', provider_post_id: 'unused-unsupported-channel' }],
+      ] as const) {
+        const invalid = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, ...fields } })
+        expect(invalid.status()).toBe(200)
+        const refusal = (await invalid.json()).result
+        expect(refusal.isError).toBe(true)
+        expect(refusal.content[0].text).toContain(`Invalid arguments for tool ${toolName}`)
+        const unchanged = await request.get(postEditorPath)
+        expect(unchanged.status()).toBe(200)
+        const { preview_url: _preview, ...afterInvalidPostChanges } = (await unchanged.json()).post
+        expect(afterInvalidPostChanges).toEqual(beforeInvalidPostChanges)
+      }
       const move = await request.patch(postEditorPath, { data: {
         expected_updated_at: draft.updated_at, title: 'Must not be saved', slug: 'another-post-address',
       } })
@@ -413,9 +476,23 @@ test.describe('stateless MCP server', () => {
       const afterRename = await request.get(postEditorPath)
       expect(afterRename.status()).toBe(200)
       const renamedPost = (await afterRename.json()).post
-      expect(renamedPost).toMatchObject({ title: `Renamed short post ${now}`, slug: created.post.slug, body: createArgs.body })
+      expect(renamedPost).toMatchObject({ title: `Renamed short post ${now}`, slug: created.post.slug, body: createArgs.body, location_id: createArgs.location_id })
       expect(renamedPost.updated_at).not.toBe(draft.updated_at)
       draft = { ...draft, ...renamedPost }
+
+      const clearLocation = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_post', args: {
+        organization_id: organizationId, post_id: created.post.id, expected_updated_at: draft.updated_at, location_id: null,
+      } })
+      expect(clearLocation.status()).toBe(200)
+      const clearedPost = mcpData<{ post: Record<string, unknown> }>(await clearLocation.json()).post
+      expect(clearedPost).toMatchObject({ location_id: null, title: renamedPost.title, body: createArgs.body, call_to_action: createArgs.call_to_action, media: renamedPost.media, publications: [] })
+      for (const field of ['created_by', 'metadata_json', 'social_image']) expect(clearedPost).not.toHaveProperty(field)
+      const clearedRead = await request.get(postEditorPath)
+      expect(clearedRead.status()).toBe(200)
+      const clearedDraft = (await clearedRead.json()).post
+      expect(clearedDraft).toMatchObject({ location_id: null, title: renamedPost.title, body: createArgs.body, call_to_action: createArgs.call_to_action, media: renamedPost.media })
+      expect(clearedDraft.updated_at).toBe(clearedPost.updated_at)
+      draft = { ...draft, ...clearedDraft }
 
       // Facebook is named with what get_social_connections reports; this
       // organization has no Page connected, so the outcome is exactly the
@@ -504,6 +581,16 @@ test.describe('stateless MCP server', () => {
       expect(kitchenCategories).toHaveLength(1)
       const categoryId = kitchenCategories[0]!.id
       expect(categoryId).toEqual(expect.any(String))
+      const categoryUrl = `${baseURL}/api/editor/organizations/${organizationId}/blog/categories/${categoryId}`
+      const categoryBefore = await request.get(categoryUrl)
+      expect(categoryBefore.status()).toBe(200)
+      const originalCategory = await categoryBefore.json()
+      const emptyCategoryEdit = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_article_category', args: { organization_id: organizationId, category_id: categoryId } })
+      expect(emptyCategoryEdit.status()).toBe(200)
+      expect((await emptyCategoryEdit.json()).result.isError).toBe(true)
+      const categoryAfter = await request.get(categoryUrl)
+      expect(categoryAfter.status()).toBe(200)
+      expect(await categoryAfter.json()).toEqual(originalCategory)
 
       const create = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'create_blog_post',
@@ -541,6 +628,25 @@ test.describe('stateless MCP server', () => {
       expect(readPost.updated_at).toEqual(created.updated_at)
       expect(readPost.category).toMatchObject({ id: categoryId, name: 'Kitchen' })
       expect(readPost.content_blocks.map(block => block.type)).toEqual(['heading', 'markdown'])
+
+      const unchangedDocumentUrl = `${baseURL}/api/editor/organizations/${organizationId}/blog/${postId}`
+      const originalDocumentRead = await request.get(unchangedDocumentUrl)
+      expect(originalDocumentRead.status()).toBe(200)
+      const { preview_url: _originalPreview, ...originalDocument } = (await originalDocumentRead.json()).post
+      for (const [toolName, fields] of [
+        ['update_blog_post', { post_id: postId }],
+        ['update_blog_post', { post_id: postId, content_blocks: [{ type: 'markdown', data: { markdown: 'No concurrency token', editor_mode: 'rich' } }] }],
+        ['append_content_block', { document_id: postId, type: 'markdown', data: { text: 'Heading data is not Markdown data' } }],
+        ['append_content_block', { document_id: postId, type: 'image', data: {} }],
+      ] as const) {
+        const invalidEdit = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, ...fields } })
+        expect(invalidEdit.status()).toBe(200)
+        expect((await invalidEdit.json()).result.isError).toBe(true)
+        const afterInvalidEdit = await request.get(unchangedDocumentUrl)
+        expect(afterInvalidEdit.status()).toBe(200)
+        const { preview_url: _preview, ...unchangedDocument } = (await afterInvalidEdit.json()).post
+        expect(unchangedDocument).toEqual(originalDocument)
+      }
 
       const update = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'update_blog_post',
@@ -730,7 +836,7 @@ test.describe('stateless MCP server', () => {
     const allToolNames = listBody.result.tools.map(tool => tool.name)
     expect(allToolNames).toEqual(expect.arrayContaining([
       'list_organizations',
-      'get_organization', 'list_locations', 'list_location_products', 'list_posts', 'get_organization_media_assets',
+      'get_organization', 'list_locations', 'list_location_products', 'list_posts', 'list_media_assets',
       'list_site_pages', 'list_products', 'list_collections', 'list_guest_conversations',
     ]))
     const invalid = await mcpRequest(request, baseURL!, { method: 'bad/method', id: 'bad-method' })

@@ -211,7 +211,7 @@ uses durable caller idempotency and records operator provenance independently
 of guest identity. Guest acknowledgement is an explicit choice; owner alerts
 and audit history remain mandatory. Booking writes are annotated as open-world
 because they can email guests. Tool names and descriptions retain staging's
-submission corrections, including update_site_page and list_reservation_inquiries.
+submission corrections, including update_site_page and list_table_reservations.
 
 Calendar provider assignment and payment collection are separate integrations.
 This PR does not collect payments or assign team members. Required online payment

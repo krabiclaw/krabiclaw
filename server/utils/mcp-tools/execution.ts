@@ -44,7 +44,7 @@ export async function requireActiveVideoAsset(
   if (!asset || asset.status !== "active" || asset.kind !== "video") {
     throw mcpProtocolError(
       MCP_ERROR.invalidParams,
-      `${fieldName} must reference an active video asset from this organization. Upload the video via the dashboard media library first, then call get_organization_media_assets to find its asset id.`,
+      `${fieldName} must reference an active video asset from this organization. Upload the video via the dashboard media library first, then call list_media_assets to find its asset id.`,
     );
   }
   return asset;

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import Ajv from 'ajv'
 import { loginAs } from './helpers/auth'
 import { MCP_VERSION, MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -64,6 +65,46 @@ test.describe('stateless MCP server', () => {
     const mismatchedTargetBody = await mismatchedTarget.json() as { result?: { isError?: boolean, content?: Array<{ text?: string }> } }
     expect(mismatchedTargetBody.result?.isError).toBe(true)
     expect(mismatchedTargetBody.result?.content?.[0]?.text).toContain('location_id')
+
+    // Library responses expose media metadata needed for selection, while
+    // storage keys and the uploader's identity stay at the provider boundary.
+    const libraryTool = toolsBody.result.tools.find(tool => tool.name === 'list_media_assets')
+    expect(libraryTool).toBeDefined()
+    const libraryResponse = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'list_media_assets', args: { organization_id: MCP_ORGANIZATION_ID, kind: 'image', limit: 100 },
+    })
+    expect(libraryResponse.status()).toBe(200)
+    const library = mcpData<{ assets: Array<Record<string, unknown>> }>(await libraryResponse.json())
+    const validateLibrary = new Ajv({ strict: false, allErrors: true }).compile(libraryTool!.outputSchema!)
+    expect(validateLibrary(library), JSON.stringify(validateLibrary.errors)).toBe(true)
+    const selected = library.assets.find(asset => asset.asset_id === 'media-demo-margherita')
+    expect(selected, 'The existing Margherita photo is available for selection').toBeDefined()
+    const editorMedia = await request.get(`${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}/media`, { params: { id: String(selected!.asset_id) } })
+    expect(editorMedia.status()).toBe(200)
+    const storedMedia = (await editorMedia.json()).media
+    expect(storedMedia).toHaveLength(1)
+    const stored = storedMedia[0]
+    expect(selected).toEqual({
+      asset_id: stored.id, kind: stored.kind, provider: stored.provider, source: stored.source,
+      public_url: stored.public_url, thumbnail_url: stored.thumbnail_url, mime_type: stored.mime_type,
+      file_name: stored.file_name, file_size: stored.file_size, width: stored.width, height: stored.height,
+      duration: stored.duration, alt_text: stored.alt_text, category: stored.category, status: stored.status,
+      created_at: stored.created_at, updated_at: stored.updated_at,
+    })
+    for (const asset of library.assets) {
+      expect(asset).not.toHaveProperty('r2_key')
+      expect(asset).not.toHaveProperty('cloudflare_image_id')
+      expect(asset).not.toHaveProperty('created_by_user_id')
+      expect(asset).not.toHaveProperty('organization_id')
+    }
+    const emptyMetadataEdit = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'update_media_asset', args: { organization_id: MCP_ORGANIZATION_ID, asset_id: selected!.asset_id },
+    })
+    expect(emptyMetadataEdit.status()).toBe(200)
+    expect((await emptyMetadataEdit.json()).result.isError).toBe(true)
+    const unchangedMedia = await request.get(`${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}/media`, { params: { id: String(selected!.asset_id) } })
+    expect(unchangedMedia.status()).toBe(200)
+    expect((await unchangedMedia.json()).media).toEqual([stored])
   })
 
   test('a gallery reorder moves the fixture gallery and get_location reads the new order', async ({ request, baseURL }, testInfo) => {
@@ -83,6 +124,17 @@ test.describe('stateless MCP server', () => {
       const [first, second] = original
       // Nothing changes until the fixture is known to be exactly the two images restored below.
       expect(original, 'loc-demo-2 fixture gallery').toHaveLength(2)
+      const conflictingAnchors = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'reorder_media', args: {
+          organization_id: MCP_ORGANIZATION_ID, placement,
+          moves: [{ asset_id: second, before_asset_id: first, after_asset_id: first }],
+        },
+      })
+      expect(conflictingAnchors.status()).toBe(200)
+      expect((await conflictingAnchors.json()).result.isError).toBe(true)
+      expect(await galleryOrder()).toEqual(original)
+      await call('reorder_media', { placement, moves: [{ asset_id: first }] })
+      expect(await galleryOrder()).toEqual([second, first])
       await call('reorder_media', { placement, moves: [{ asset_id: second, before_asset_id: first }] })
       expect(await galleryOrder()).toEqual([second, first])
       await call('reorder_media', { placement, moves: [{ asset_id: first, before_asset_id: second }] })

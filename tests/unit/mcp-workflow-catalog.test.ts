@@ -56,7 +56,7 @@ test('equivalent Markdown screenshots can use different delivery URLs while alt 
     source.replace('Upload \\[picker\\] controls', 'Different upload controls'),
     source.replace('Current controls', 'Different controls'),
     source.replace('The picker has Add files and a drop zone.', 'The picker saves immediately.'),
-    source.replace('Use `save_media_attachment`.', 'Read `get_organization_media_assets`.'),
+    source.replace('Use `save_media_attachment`.', 'Read `list_media_assets`.'),
     source.replace('https://production.example/help', 'https://staging.example/help'),
   ]) {
     assert.notEqual(reviewPublicGuide('add-photos-and-video', changed, MCP_PUBLIC_TOOLS).contentHash, reviewed.contentHash)

@@ -352,11 +352,38 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   // report both rather than implying one from the other.
   for (const [toolName, args] of [
     ['set_product_publication', { organization_id: organizationId, product_id: created.id, published: true }],
-    ['set_product_location', { organization_id: organizationId, product_id: created.id, location_id: locationId, active: true, published: true }],
+    ['set_product_location', { organization_id: organizationId, product_id: created.id, location_id: locationId }],
   ] as const) {
     const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args })
     expect(response.status(), await response.text()).toBe(200)
+    const result = mcpData<Record<string, unknown>>(await response.json())
+    expect(result).toEqual(toolName === 'set_product_publication'
+      ? { product_id: created.id, organization_id: organizationId, published: true }
+      : { product_id: created.id, location_id: locationId, active: true, published: true })
   }
+  const savedPublication = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
+  expect(savedPublication.status()).toBe(200)
+  const offeredProduct = (await savedPublication.json()).product
+  expect(offeredProduct.publications).toContainEqual(expect.objectContaining({ organization_id: organizationId, published: true }))
+  expect(offeredProduct.locations).toContainEqual(expect.objectContaining({ location_id: locationId, active: true, published: true }))
+  const withholdAtLocation = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'set_product_location', args: {
+    organization_id: organizationId, product_id: created.id, location_id: locationId, published: false,
+  } })
+  expect(withholdAtLocation.status()).toBe(200)
+  expect(mcpData(await withholdAtLocation.json())).toEqual({ product_id: created.id, location_id: locationId, active: true, published: false })
+  const retainLocation = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'set_product_location', args: {
+    organization_id: organizationId, product_id: created.id, location_id: locationId,
+  } })
+  expect(retainLocation.status()).toBe(200)
+  expect(mcpData(await retainLocation.json())).toEqual({ product_id: created.id, location_id: locationId, active: true, published: false })
+  const retainedRead = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
+  expect(retainedRead.status()).toBe(200)
+  expect((await retainedRead.json()).product.locations).toContainEqual(expect.objectContaining({ location_id: locationId, active: true, published: false }))
+  const restoreLocation = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'set_product_location', args: {
+    organization_id: organizationId, product_id: created.id, location_id: locationId, published: true,
+  } })
+  expect(restoreLocation.status()).toBe(200)
+  expect(mcpData(await restoreLocation.json())).toEqual({ product_id: created.id, location_id: locationId, active: true, published: true })
 
   // A Product whose variant has no price is created, and is simply not
   // purchasable: nothing substitutes zero or a note for the amount.
@@ -402,4 +429,22 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   const unchanged = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
   expect(unchanged.status()).toBe(200)
   expect((await unchanged.json() as { product: Product }).product.details).toEqual(edited.details)
+
+  const beforeRemovalResponse = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: {
+    organization_id: organizationId, product_id: created.id,
+  } })
+  expect(beforeRemovalResponse.status()).toBe(200)
+  const beforeRemoval = mcpData<{ product: Product }>(await beforeRemovalResponse.json()).product
+  expect(beforeRemoval.locations).toContainEqual(expect.objectContaining({ location_id: locationId, active: true, published: true }))
+  const removal = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'remove_product_location', args: {
+    organization_id: organizationId, product_id: created.id, location_id: locationId,
+  } })
+  expect(removal.status()).toBe(200)
+  expect(mcpData(await removal.json())).toEqual({ product_id: created.id, location_id: locationId, removed: true })
+  const afterRemovalResponse = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: {
+    organization_id: organizationId, product_id: created.id,
+  } })
+  expect(afterRemovalResponse.status()).toBe(200)
+  const afterRemoval = mcpData<{ product: Product }>(await afterRemovalResponse.json()).product
+  expect(afterRemoval).toEqual({ ...beforeRemoval, locations: beforeRemoval.locations.filter(location => location.location_id !== locationId) })
 })

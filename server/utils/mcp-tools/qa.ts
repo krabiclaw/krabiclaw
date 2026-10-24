@@ -6,8 +6,9 @@ import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
 import { NOT_HANDLED, requiredString, assertDomainSuccess } from './execution'
 
 const qaScope = {
-  location_id: { type: ['string', 'null'], description: 'Location scope; omit for site or page Q&A. Cannot be combined with page_path.' },
-  page_path: { type: ['string', 'null'], description: 'Page scope such as /about; omit for general site Q&A.' },
+  location_id: { type: ['string', 'null'], description: 'Location scope; omit or use null for site or page Q&A. A location ID cannot be combined with a non-null page_path.' },
+  page_path: { type: ['string', 'null'], description: 'Page scope such as /about; omit or use null for general site or location Q&A.' },
+  allOf: [{ not: { required: ['location_id', 'page_path'], properties: { location_id: { type: 'string' }, page_path: { type: 'string' } } } }],
 } as const
 const qaFields = {
   question: { type: 'string', description: 'Required non-empty question; at most 500 characters after trimming.' },
@@ -17,7 +18,7 @@ const qaFields = {
 
 export const QA_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'create_qa', description: 'Create authored Q&A in the explicit site, page or location scope. Omitted sort_order appends. This creates a new record on every call and is not idempotent: do not automatically retry an uncertain response. Imported Google content remains managed in Google.', domain: 'qa', minimumRole: 'admin', inputSchema: { ...qaScope, ...qaFields }, required: ['question'], outputSchema: { type: 'object', properties: { id: { type: 'string' }, created: { type: 'boolean' } }, required: ['id', 'created'] } }),
-  organizationTool({ name: 'update_qa', description: 'Update authored Q&A in its explicit scope. Omitted fields retain their values. Imported Google records and translations cannot be edited through this tool.', domain: 'qa', minimumRole: 'admin', inputSchema: { ...qaScope, ...qaFields, qa_id: { type: 'string' } }, required: ['qa_id'], outputSchema: { type: 'object', properties: { qa_id: { type: 'string' }, updated: { type: 'boolean' } }, required: ['qa_id', 'updated'] } }),
+  organizationTool({ name: 'update_qa', description: 'Update at least one authored Q&A field in its explicit scope. Omitted fields retain their values. Imported Google records and translations cannot be edited through this tool.', domain: 'qa', minimumRole: 'admin', inputSchema: { ...qaScope, ...qaFields, qa_id: { type: 'string' }, anyOf: Object.keys(qaFields).map(field => ({ required: [field] })) }, required: ['qa_id'], outputSchema: { type: 'object', properties: { qa_id: { type: 'string' }, updated: { type: 'boolean' } }, required: ['qa_id', 'updated'] } }),
   organizationTool({ name: 'delete_qa', description: 'Delete authored Q&A and its content document tree in its explicit scope. Imported Google records are protected.', domain: 'qa', minimumRole: 'admin', inputSchema: { ...qaScope, qa_id: { type: 'string' } }, required: ['qa_id'], outputSchema: { type: 'object', properties: { qa_id: { type: 'string' }, deleted: { type: 'boolean' } }, required: ['qa_id', 'deleted'] } }),
   organizationTool({ name: 'reorder_qa', description: 'Set sort positions of authored Q&A records in one explicit scope. Every id must be distinct, manual and in scope; otherwise no record is reordered. Imported Google records are protected.', domain: 'qa', minimumRole: 'admin', inputSchema: { ...qaScope, updates: { type: 'array', minItems: 1, items: { type: 'object', properties: { id: { type: 'string', minLength: 1 }, sort_order: { type: 'integer' } }, required: ['id', 'sort_order'], additionalProperties: false } } }, required: ['updates'], outputSchema: { type: 'object', properties: { updated: { type: 'integer' } }, required: ['updated'] } }),
   organizationTool({
