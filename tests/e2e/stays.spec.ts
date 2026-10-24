@@ -491,7 +491,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
   } else {
     // This independent description/safety home starts with the property facts
     // exercised through the UI in the sibling journey, via the canonical writer.
-    const propertySetup = await call('update_product', { product_id: productId, stay: { ...propertyFacts, amenities: ['dryer', 'wireless_internet'] } })
+    const propertySetup = await call<{ product: Product }>('update_product', { product_id: productId, stay: { ...propertyFacts, amenities: ['dryer', 'wireless_internet'] } })
     expect(propertySetup.error).toBeNull()
     await page.goto(`/dashboard/${slug}/products/${productId}`)
     // Each public description section is edited through its own leaf and read
@@ -518,8 +518,32 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await descriptionOverview.getByRole('link', { name: /^Guest access/ }).click()
     await descriptionSection.getByRole('textbox', { name: 'Guest access', exact: true }).fill('Uncommitted access instructions.')
     await descriptionOverview.getByRole('link', { name: /^Your property/ }).click()
-    await descriptionSection.getByRole('textbox', { name: 'Your property', exact: true }).fill(listingDetails.your_property)
+    const propertyDescription = descriptionSection.getByRole('textbox', { name: 'Your property', exact: true })
+    await propertyDescription.fill(listingDetails.your_property)
+    const concurrentProperty = 'A newer description of the property, saved by another editor.'
+    const concurrentDescription = await call('update_product', { product_id: productId, details_mode: 'merge', details: { your_property: concurrentProperty } })
+    expect(concurrentDescription.error).toBeNull()
+    const staleDescriptionSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await descriptionSection.getByRole('button', { name: 'Save', exact: true }).click()
+    const staleDescriptionResponse = await staleDescriptionSaved
+    expect(staleDescriptionResponse.status(), await staleDescriptionResponse.text()).toBe(409)
+    expect(staleDescriptionResponse.request().postDataJSON()).toEqual({ expected_updated_at: propertySetup.data!.product.updated_at, details_mode: 'merge', details: { your_property: listingDetails.your_property } })
+    expect(await staleDescriptionResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: productId } })
+    await expect(descriptionSection).toContainText('The product changed while you were editing.')
+    await expect(propertyDescription).toHaveValue(listingDetails.your_property)
+    await expect(descriptionSection.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    const refusedDescription = await call<{ product: Product }>('get_product', { product_id: productId })
+    expect(refusedDescription.error).toBeNull()
+    expect(refusedDescription.data!.product.details).toEqual({ ...propertySetup.data!.product.details, your_property: concurrentProperty })
+    await descriptionSection.getByRole('button', { name: 'Use saved details', exact: true }).click()
+    await expect(propertyDescription).toHaveValue(concurrentProperty)
+    await expect(descriptionSection.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await propertyDescription.fill(listingDetails.your_property)
+    const reviewedDescriptionSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+    await descriptionSection.getByRole('button', { name: 'Save', exact: true }).click()
+    const reviewedDescriptionResponse = await reviewedDescriptionSaved
+    expect(reviewedDescriptionResponse.status(), await reviewedDescriptionResponse.text()).toBe(200)
+    expect(reviewedDescriptionResponse.request().postDataJSON().expected_updated_at).toBe(refusedDescription.data!.product.updated_at)
     await expect(page).toHaveURL(new RegExp(`/products/${productId}/description$`))
     const switchedDescription = await call<{ product: { details: Record<string, unknown> } }>('get_product', { product_id: productId })
     expect(switchedDescription.error).toBeNull()
@@ -883,6 +907,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     expect(await featuredResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: productId } })
     await expect(featuredEditor).toContainText('The product changed while you were editing.')
     await expect(featuredSwitch).not.toBeChecked()
+    await expect(featuredEditor.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     const refusedAttribute = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(refusedAttribute.error).toBeNull()
     expect(refusedAttribute.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: true })

@@ -24,6 +24,7 @@
     @save="p.save"
   >
     <template v-if="p.isNew.value || p.product.value">
+      <UButton v-if="p.saveError.value" label="Use saved details" color="neutral" variant="outline" :disabled="p.saving.value" class="mb-5" @click="p.revert()" />
       <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/{{ PRODUCT_LIMITS.description }} available</p>
       <UTextarea ref="descriptionTextarea" v-model="p.form.description" :aria-label="p.sectionLabels.description" variant="none" :rows="1" :maxlength="PRODUCT_LIMITS.description" autoresize :ui="{ base: 'resize-none' }" autofocus class="w-full" />
       <UFormField v-if="introduction" label="Short introduction" hint="Optional" class="mt-8">

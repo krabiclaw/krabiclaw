@@ -1673,8 +1673,9 @@ const { title: newTitle, firstStep, saveLabel: createSaveLabel, saveDisabled, sa
   missing: key => key === 'name' ? !form.name.trim() : key === 'stay' ? stayIncomplete() : !form.kind,
   noun: () => itemLabel.value.toLowerCase(),
   saving,
-  // A product that could not be read has no draft worth writing over it.
-  existingBlocked: () => !product.value || Boolean(loadError.value) || !sectionValid.value || sectionUnchanged.value && !saveError.value,
+  // A failed read cannot be saved. A retained stale draft needs an explicit
+  // reset to the current product before another save can use its revision.
+  existingBlocked: () => !product.value || Boolean(loadError.value) || editVersion.value !== product.value.updated_at || !sectionValid.value || sectionUnchanged.value && !saveError.value,
   commit,
 })
 

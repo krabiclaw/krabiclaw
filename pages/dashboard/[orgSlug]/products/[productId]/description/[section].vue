@@ -11,6 +11,7 @@
     @save="p.save(level.to.value ?? undefined)"
   >
     <template v-if="validSection && p.product.value && !p.loadError.value">
+      <UButton v-if="p.saveError.value" label="Use saved details" color="neutral" variant="outline" :disabled="p.saving.value" class="mb-5" @click="p.revert()" />
       <p class="mb-2 text-sm font-semibold text-muted" data-testid="stay-description-counter">{{ PRODUCT_LIMITS.description - value.length }}/{{ PRODUCT_LIMITS.description }} available</p>
       <UTextarea
         ref="descriptionTextarea"
