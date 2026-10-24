@@ -1,7 +1,8 @@
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
-import { ChannexError, type ChannexEnv } from '~/server/integrations/channex/client'
+import { channexGet, ChannexError, type ChannexEnv } from '~/server/integrations/channex/client'
+import { nullableString } from '~/server/integrations/channex/data'
 import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexMessage, type ChannexMessage, type ChannexMessageThread } from '~/server/integrations/channex/messages'
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload, GuestThreadEntryDedupeConflictError } from './entries'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
@@ -17,7 +18,7 @@ import type { GuestThreadEntryRow } from './types'
 
 type ChannelEnv = ChannexEnv & GuestInboxPublicationEnv
 interface HomeMapping { organization_id: string; product_id: string; property_id: string; channel_id: string; location_id: string; enabled: number }
-export interface ChannelThreadMapping { organization_id: string; product_id: string; request_id: string; external_thread_id: string; external_booking_id: string | null }
+export interface ChannelThreadMapping { organization_id: string; product_id: string; request_id: string; external_thread_id: string; external_booking_id: string | null; moved_from_thread_id: string | null }
 
 function fail(statusCode: number, code: string, message: string, field: string): never {
   throw new HTTPError({ statusCode, message, data: { code, field } })
@@ -33,20 +34,44 @@ async function homeMapping(db: DbClient, propertyId: string): Promise<HomeMappin
     WHERE m.provider = 'channex' AND m.property_id = ?`, [propertyId])
 }
 
-/** An inquiry and a stay share one immutable timeline; conflicting existing timelines are never discarded. */
-async function adoptThread(db: DbClient, home: HomeMapping, thread: ChannexMessageThread): Promise<ChannelThreadMapping> {
+/**
+ * The stay of an Airbnb reservation that already has a stay under another
+ * provider booking id: the same reservation re-imported through a new Channex
+ * account, before its booking revision moved the stay onto the new id.
+ */
+async function reimportedStay(db: DbClient, env: ChannexEnv, home: HomeMapping, bookingId: string): Promise<{ id: string; request_id: string | null; organization_id: string; product_id: string } | null> {
+  const booking = await channexGet(env, `/bookings/${encodeURIComponent(bookingId)}`, 'booking')
+  if (booking.attributes.property_id !== home.property_id) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider booking belongs to another property', 'relationships.booking')
+  const code = nullableString(booking.attributes.ota_reservation_code ?? null, 'ota_reservation_code')
+  return code === null ? null : await queryFirst(db, `SELECT id, request_id, organization_id, product_id FROM stays
+    WHERE organization_id = ? AND channel = 'airbnb' AND channel_booking_id = ? AND provider = 'channex' AND external_booking_id <> ?`, [home.organization_id, code, bookingId])
+}
+
+/**
+ * An inquiry and a stay share one immutable timeline; conflicting existing timelines are never discarded.
+ * A stay's conversation whose provider address belongs to its reservation's
+ * earlier booking id (a retired Channex account) moves to the new thread.
+ */
+async function adoptThread(db: DbClient, env: ChannexEnv, home: HomeMapping, thread: ChannexMessageThread): Promise<ChannelThreadMapping> {
   const mapped = await queryFirst<ChannelThreadMapping>(db, "SELECT * FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?", [thread.id])
   if (mapped && (mapped.organization_id !== home.organization_id || mapped.product_id !== home.product_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation belongs to another home', 'relationships.property')
   if (mapped?.external_booking_id && mapped.external_booking_id !== thread.bookingId) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The provider changed an existing conversation booking association; review its timeline', 'relationships.booking')
   if (thread.bookingId && await queryFirst(db, "SELECT request_id FROM channel_threads WHERE provider = 'channex' AND external_booking_id = ? AND external_thread_id <> ?", [thread.bookingId, thread.id])) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The booking is already associated with another provider conversation', 'relationships.booking')
-  const stay = thread.bookingId ? await queryFirst<{ id: string; request_id: string | null; organization_id: string; product_id: string }>(db,
-    "SELECT id, request_id, organization_id, product_id FROM stays WHERE provider = 'channex' AND external_booking_id = ?", [thread.bookingId]) : null
+  const stay = !thread.bookingId ? null : await queryFirst<{ id: string; request_id: string | null; organization_id: string; product_id: string }>(db,
+    "SELECT id, request_id, organization_id, product_id FROM stays WHERE provider = 'channex' AND external_booking_id = ?", [thread.bookingId])
+    ?? (mapped ? null : await reimportedStay(db, env, home, thread.bookingId))
   if (stay && (stay.organization_id !== home.organization_id || stay.product_id !== home.product_id)) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The provider booking belongs to another home', 'relationships.booking')
   if (mapped && stay?.request_id && mapped.request_id !== stay.request_id) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The inquiry and stay already have separate conversations; reconcile them without discarding either timeline', 'request_id')
   const requestId = mapped?.request_id ?? stay?.request_id ?? crypto.randomUUID()
-  if (await queryFirst(db, "SELECT request_id FROM channel_threads WHERE request_id = ? AND external_thread_id <> ?", [requestId, thread.id])) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The stay conversation already has another provider address', 'request_id')
+  const addressed = await queryFirst<ChannelThreadMapping>(db, "SELECT * FROM channel_threads WHERE request_id = ? AND external_thread_id <> ?", [requestId, thread.id])
+  const retired = !mapped && stay?.request_id === requestId && addressed?.external_booking_id != null && addressed.external_booking_id !== thread.bookingId ? addressed : null
+  if (addressed && !retired) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The stay conversation already has another provider address', 'request_id')
   const now = new Date().toISOString()
-  await executeBatch(db, [{
+  await executeBatch(db, [...(retired ? [{
+    query: `UPDATE channel_threads SET external_thread_id = ?, external_booking_id = ?, moved_from_thread_id = external_thread_id, provider_updated_at = ?, updated_at = ?
+      WHERE provider = 'channex' AND external_thread_id = ? AND request_id = ? AND organization_id = ? AND product_id = ?`,
+    params: [thread.id, thread.bookingId, thread.updatedAt, now, retired.external_thread_id, requestId, home.organization_id, home.product_id],
+  }] : []), {
     query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
       SELECT ?, 'stay', ?, ?, NULL, NULL, 'needs_attention', NULL, ?, ?, ?
       WHERE NOT EXISTS (SELECT 1 FROM requests WHERE id = ?)
@@ -87,8 +112,16 @@ async function mirrorMessage(db: DbClient, mapping: ChannelThreadMapping, messag
     if (owner?.request_id !== mapping.request_id) fail(409, 'CHANNEL_MESSAGE_ID_CONFLICT', 'The provider message is recorded in another conversation', 'message.id')
     if (message.sender !== 'property') fail(409, 'CHANNEL_MESSAGE_ID_CONFLICT', 'The provider assigned an outbound reply ID to a different sender', 'message.sender')
   }
+  const actorKind = message.sender === 'guest' ? 'guest' : message.sender === 'property' ? 'member' : 'system'
+  // A moved conversation's new account delivers its Airbnb history again under
+  // new ids: the same sender, Airbnb timestamp, text and attachment count is a
+  // message the conversation already has.
+  if (mapping.moved_from_thread_id !== null && !await findEntryByDedupeKey(db, `channex-message:${message.id}`)
+    && await queryFirst(db, `SELECT id FROM activity_entries WHERE request_id = ? AND event_name = 'channel.message_mirrored' AND actor_kind = ? AND body IS ?
+      AND json_extract(payload_json, '$.provider_inserted_at') = ? AND json_array_length(payload_json, '$.attachments') = ?`,
+    [mapping.request_id, actorKind, message.text, message.insertedAt, message.attachments.length])) return
   const entry = await appendEntry(db, {
-    threadId: mapping.request_id, kind: 'message', actorKind: message.sender === 'guest' ? 'guest' : message.sender === 'property' ? 'member' : 'system',
+    threadId: mapping.request_id, kind: 'message', actorKind,
     channel: 'airbnb', body: message.text, eventName: 'channel.message_mirrored', dedupeKey: `channex-message:${message.id}`,
     // This occurrence is the local mirroring operation. Provider timestamps are
     // retained exactly: a naive provider date is not an established UTC instant.
@@ -109,7 +142,7 @@ export async function mirrorChannexThread(db: DbClient, env: ChannelEnv, threadI
   if (assignedBookingId !== undefined && thread.bookingId !== assignedBookingId) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The assignment event does not match the provider conversation', 'payload.booking_id')
   const messages = await listChannexMessages(env, threadId)
   if (expectedMessageId !== undefined && !messages.some(message => message.id === expectedMessageId)) fail(409, 'CHANNEL_MESSAGE_NOT_READY', 'The provider conversation does not yet contain the webhook message', 'payload.id')
-  const mapping = await adoptThread(db, home, thread)
+  const mapping = await adoptThread(db, env, home, thread)
   // The provider query explicitly asks for ascending order. Keep its order; do not invent an absolute
   // ordering by converting offset-free timestamps through the server's timezone.
   for (const message of messages) await mirrorMessage(db, mapping, message)

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e44e1c3a-42f5-414c-8c32-80fe2bf3bb96",
+  "id": "30db8a66-797e-48e7-9399-2a2451814e6b",
   "prevId": "57abddaa-9988-4dc3-a93c-228f48b5898c",
   "tables": {
     "account": {
@@ -2286,6 +2286,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "moved_from_thread_id": {
+          "name": "moved_from_thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {

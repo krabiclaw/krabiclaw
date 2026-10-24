@@ -1956,6 +1956,10 @@ export const channel_threads = sqliteTable("channel_threads", {
 	request_id: text().notNull(),
 	external_booking_id: text(),
 	provider_updated_at: text().notNull(),
+	// The thread this conversation was addressed by in a retired Channex
+	// account, when its reservation was re-imported; its re-delivered Airbnb
+	// history is matched to the messages already recorded.
+	moved_from_thread_id: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, table => [

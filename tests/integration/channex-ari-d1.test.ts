@@ -41,6 +41,8 @@ function byNight(values: readonly Value[]): Map<string, Record<string, unknown>>
 class FakeChannex {
   sent: Array<{ path: string; values: Value[] }> = []
   answer: Partial<Record<'/restrictions' | '/availability', () => Response>> = {}
+  /** Runs while a call is in flight, before Channex answers it. */
+  during?: () => Promise<unknown>
 
   /** The listing settings a minimum-stay change sends, by mapping: Airbnb's default minimum before each night's own. */
   settings: Array<{ path: string; body: unknown }> = []
@@ -59,6 +61,7 @@ class FakeChannex {
     assert.equal(init.method, 'POST')
     assert.ok(path === '/restrictions' || path === '/availability', `unexpected ${path}`)
     this.sent.push({ path, values: (JSON.parse(init.body as string) as { values: Value[] }).values })
+    await this.during?.()
     const answer = this.answer[path]
     return answer ? answer() : new Response(JSON.stringify({ data: [{ id: 'task-1', type: 'task' }], meta: { message: 'Success', warnings: [] } }), { status: 200 })
   }
@@ -353,6 +356,19 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [['/restrictions', [[day(40), '142.00']]]])
     assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
     assert.deepEqual((await states(connected, day(40), day(41)))[0], { state: 'pushed', detail: null })
+    // A delivery that outlives its lease records nothing: the delivery that took the property over owns the nights.
+    const sentBefore = await db.prepare('SELECT sent_json FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(41)).first('sent_json')
+    channex.during = async () => { await lease(new Date(Date.now() + 60_000).toISOString()) }
+    const outlived = await setStayNights(db, env, manager, { product_id: connected, from: day(41), to: day(42), price_minor: 143_00 })
+    channex.during = undefined
+    assert.equal(outlived.channel_push?.state, 'pending')
+    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions'])
+    assert.deepEqual(await db.prepare('SELECT state, sent_json FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(41)).first(), { state: 'pending', sent_json: sentBefore })
+    assert.equal(await db.prepare('SELECT delivery_lease FROM product_channel_mappings WHERE product_id = ?').bind(connected).first('delivery_lease'), 'other-delivery')
+    await lease('2000-01-01T00:00:00.000Z')
+    assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
+    assert.deepEqual(channex.take().map(request => [request.path, request.values.map(value => [value.date_from, value.rate])]), [['/restrictions', [[day(41), '143.00']]]])
+    assert.deepEqual((await states(connected, day(41), day(42)))[0], { state: 'pushed', detail: null })
 
     // A connected home with no nightly price still sends its availability and rules; the missing price needs review.
     channex.answer['/availability'] = undefined

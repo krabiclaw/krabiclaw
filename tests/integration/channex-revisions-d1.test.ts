@@ -115,9 +115,17 @@ test('a reservation re-imported under a new Channex booking id updates its stay 
     const reimported = await applyBookingRevision(db, env, 'rev-production')
     assert.deepEqual(reimported, { status: 'acknowledged', stay_id: original.stay_id, overbooked: false })
     assert.deepEqual((await db.prepare("SELECT id, external_booking_id, channel_booking_id, check_out_date, total_minor, overbooked, version, revision_id FROM stays WHERE owner = 'channel'").all()).results, [
-      { id: original.stay_id, external_booking_id: 'bk-production', channel_booking_id: 'HMREIMPORT', check_out_date: '2027-02-14', total_minor: 40_000, overbooked: 0, version: 3, revision_id: 'rev-production' },
+      { id: original.stay_id, external_booking_id: 'bk-production', channel_booking_id: 'HMREIMPORT', check_out_date: '2027-02-14', total_minor: 40_000, overbooked: 0, version: 2, revision_id: 'rev-production' },
     ])
     assert.deepEqual(await nights(db, original.stay_id), ['2027-02-10', '2027-02-11', '2027-02-12', '2027-02-13'])
+    // A revision of the old booking delivered late does not take the stay back.
+    channex.superseded('rev-staging-late', before, '2026-10-16T01:00:00Z')
+    await applyBookingRevision(db, env, 'rev-staging-late')
+    assert.deepEqual(await db.prepare('SELECT external_booking_id, version FROM stays WHERE id = ?').bind(original.stay_id).first(), { external_booking_id: 'bk-production', version: 2 })
+    // Nor does an older revision of a new booking id move a newer stay onto it.
+    channex.revise('rev-stale', { ...before, id: 'bk-stale' }, '2026-10-19T01:00:00Z')
+    assert.deepEqual(await applyBookingRevision(db, env, 'rev-stale'), { status: 'acknowledged', stay_id: original.stay_id, overbooked: false })
+    assert.deepEqual((await db.prepare("SELECT id, external_booking_id, version FROM stays WHERE owner = 'channel'").all()).results, [{ id: original.stay_id, external_booking_id: 'bk-production', version: 2 }])
     // Later revisions arrive under the new id and keep updating the same stay.
     channex.revise('rev-production-cancel', { ...after, status: 'cancelled' }, '2026-10-21T01:00:00Z')
     await applyBookingRevision(db, env, 'rev-production-cancel')
@@ -130,7 +138,7 @@ test('a reservation re-imported under a new Channex booking id updates its stay 
     // The database holds one stay per channel reservation, whatever writes it.
     await assert.rejects(db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, total_minor, currency, provider, external_booking_id, channel_booking_id)
       VALUES ('duplicate', ?, ?, 'airbnb', 'channel', 'confirmed', '2027-03-01', '2027-03-02', 1, 100, 'USD', 'channex', 'bk-duplicate', 'HMREIMPORT')`).bind(ORG, productId).run(), /UNIQUE constraint failed: stays\.organization_id, stays\.channel, stays\.channel_booking_id/)
-    assert.deepEqual(channex.acked, ['rev-staging', 'rev-production', 'rev-production-cancel', 'rev-other'])
+    assert.deepEqual(channex.acked, ['rev-staging', 'rev-production', 'rev-staging-late', 'rev-stale', 'rev-production-cancel', 'rev-other'])
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

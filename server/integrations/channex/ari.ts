@@ -224,14 +224,19 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
   [lease, new Date(Date.now() + LEASE_MS).toISOString(), home.product_id, new Date().toISOString()])
   if (claimed.meta.changes !== 1) return
   try {
-    for (let round = 0; round < ROUNDS; round++) if (!await sendDue(db, env, organizationId, home, mapping, read)) break
+    for (let round = 0; round < ROUNDS; round++) if (!await sendDue(db, env, organizationId, home, mapping, read, lease)) break
   } finally {
     await execute(db, "UPDATE product_channel_mappings SET delivery_lease = NULL, delivery_lease_until = NULL WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [home.product_id, lease])
   }
 }
 
-/** One delivery of the due pending nights; false when none was due. */
-async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader): Promise<boolean> {
+/**
+ * One delivery of the due pending nights; false when none was due or the lease was lost. Its
+ * results are written only while it still holds the lease: a delivery that
+ * outlived it leaves them to the one that took over, which sends again what
+ * Channex has not confirmed to it.
+ */
+async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader, lease: string): Promise<boolean> {
   const now = new Date().toISOString()
   const due = await queryAll<OutboxRow>(db, `SELECT date, state, detail, sent_json, attempts, retry_at, updated_at FROM channel_night_pushes
     WHERE product_id = ? AND provider = 'channex' AND state = 'pending' AND (retry_at IS NULL OR retry_at <= ?) ORDER BY date`, [home.product_id, now])
@@ -312,18 +317,20 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
     }
   }
 
+  const held = `EXISTS (SELECT 1 FROM product_channel_mappings m WHERE m.product_id = channel_night_pushes.product_id AND m.provider = 'channex' AND m.delivery_lease = ?)`
+  if (!await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [home.product_id, lease])) return false
   await execute(db, `UPDATE channel_night_pushes SET sent_json = json_extract(value, '$[1]')
-    FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$[0]')`,
-  [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values)])), home.product_id])
+    FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$[0]') AND ${held}`,
+  [JSON.stringify([...confirmed].map(([date, values]) => [date, JSON.stringify(values)])), home.product_id, lease])
   // What Channex confirmed is kept whatever the night's state; a night changed again since this delivery read it stays pending for the next.
   await execute(db, `UPDATE channel_night_pushes SET state = json_extract(value, '$.state'), detail = json_extract(value, '$.detail'), attempts = json_extract(value, '$.attempts'),
       retry_at = json_extract(value, '$.retry_at'), updated_at = ?
-    FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$.date') AND channel_night_pushes.updated_at = json_extract(value, '$.updated_at')`,
+    FROM json_each(?) WHERE product_id = ? AND provider = 'channex' AND date = json_extract(value, '$.date') AND channel_night_pushes.updated_at = json_extract(value, '$.updated_at') AND ${held}`,
   [new Date().toISOString(), JSON.stringify(due.map((row) => {
     const outcome = outcomes.get(row.date)
     return { date: row.date, updated_at: row.updated_at, state: outcome?.state ?? 'pushed', detail: outcome?.detail ?? null,
       attempts: outcome?.state === 'pending' ? outcome.attempts : 0, retry_at: outcome?.state === 'pending' ? outcome.retry_at : null }
-  })), home.product_id])
+  })), home.product_id, lease])
   return true
 }
 
