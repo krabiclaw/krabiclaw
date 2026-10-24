@@ -37,8 +37,8 @@
                 class="relative flex size-10 items-center justify-center text-sm transition-colors"
                 :class="[
                   day.inRange ? 'bg-muted' : '',
-                  day.edge ? 'rounded-full bg-inverted text-inverted' : 'rounded-full',
-                  day.selectable ? 'cursor-pointer text-default hover:border hover:border-inverted' : 'cursor-default text-muted/50 line-through',
+                  day.edge ? 'rounded-full bg-inverted text-inverted' : day.selectable ? 'rounded-full text-default hover:border hover:border-inverted' : 'rounded-full text-muted/50 line-through',
+                  day.selectable ? 'cursor-pointer' : 'cursor-default',
                 ]"
                 :disabled="!day.selectable"
                 :aria-pressed="day.edge"
@@ -51,7 +51,7 @@
             </div>
           </div>
         </div>
-        <p v-if="checkIn && !checkOut && minNights > 1" class="mt-4 text-xs text-muted">{{ t('stay.min_nights', { count: minNights }) }}</p>
+        <p v-if="!checkOut && minNights > 1" class="mt-4 text-xs text-muted">{{ t('stay.min_nights', { count: minNights }) }}</p>
       </template>
 
       <button v-if="inline && checkIn" type="button" class="mt-4 text-sm font-semibold text-default underline underline-offset-4" @click="clearDates">{{ t('stay.clear_dates') }}</button>
