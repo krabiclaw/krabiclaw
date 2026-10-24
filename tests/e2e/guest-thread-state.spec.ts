@@ -14,6 +14,7 @@ import type { TodayFeedPayload } from '../../shared/dashboard-today'
 interface NotificationView {
   id: string
   title: string | null
+  created_at: string
   read_at: string | null
 }
 
@@ -228,26 +229,32 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(contactNotification(ownerNotificationsBefore, guestName).read_at).toBeNull()
     expect(contactNotification(secondOwnerNotificationsBefore, guestName).read_at).toBeNull()
 
-    // Anchor to this case's notification: parallel contacts may arrive ahead
-    // of it without changing the exact older rows in the independent snapshot.
-    const anchor = contactNotification(ownerNotificationsBefore, guestName)
-    const olderIds = ownerNotificationsBefore.notifications.slice(ownerNotificationsBefore.notifications.findIndex(row => row.id === anchor.id) + 1).map(row => row.id)
-    expect(olderIds[0], 'The saved notification history contains an older row to page to').toBeDefined()
-    const olderResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: anchor.id } })
-    await expectStatus(olderResponse, 200)
-    const older = await olderResponse.json() as NotificationList
-    expect(older.notifications.map(row => row.id)).toEqual([olderIds[0]])
-    expect(older.next_cursor).toBe(olderIds.length > 1 || ownerNotificationsBefore.next_cursor !== null ? olderIds[0] : null)
-    if (olderIds[1]) {
-      const nextResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: older.next_cursor! } })
-      await expectStatus(nextResponse, 200)
-      const next = await nextResponse.json() as NotificationList
-      expect(next.notifications.map(row => row.id)).toEqual([olderIds[1]])
-      expect(next.next_cursor).toBe(olderIds.length > 2 || ownerNotificationsBefore.next_cursor !== null ? olderIds[1] : null)
+    // Two real contacts own the endpoints of this paging proof. Parallel
+    // contacts can appear between them; no shared-history row is a premise.
+    const firstNotification = contactNotification(ownerNotificationsBefore, guestName)
+    const paginationGuestName = `Guest pagination proof ${nonce}`
+    await submitContact(owner, paginationGuestName)
+    const newerNotification = contactNotification(await loadNotifications(owner), paginationGuestName)
+    expect(newerNotification.created_at > firstNotification.created_at || newerNotification.created_at === firstNotification.created_at && newerNotification.id > firstNotification.id).toBe(true)
+    const seenNotifications = new Set([newerNotification.id])
+    let cursor = newerNotification
+    while (cursor.id !== firstNotification.id) {
+      const olderResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: cursor.id } })
+      await expectStatus(olderResponse, 200)
+      const older = await olderResponse.json() as NotificationList
+      expect(older.notifications).toHaveLength(1)
+      const row = older.notifications[0]!
+      expect(seenNotifications.has(row.id)).toBe(false)
+      expect(row.created_at < cursor.created_at || row.created_at === cursor.created_at && row.id < cursor.id).toBe(true)
+      expect(row.created_at > firstNotification.created_at || row.created_at === firstNotification.created_at && row.id >= firstNotification.id).toBe(true)
+      if (row.id !== firstNotification.id) expect(older.next_cursor).toBe(row.id)
+      seenNotifications.add(row.id)
+      cursor = row
     }
+    expect(cursor.id).toBe(firstNotification.id)
     // unread_count covers the whole audience and may change when concurrent
     // contacts arrive. Per-user read state is verified exactly below.
-    await expectStatus(await foreignOwner.get('/api/dashboard/notifications', { params: { limit: 1, after: anchor.id } }), 404)
+    await expectStatus(await foreignOwner.get('/api/dashboard/notifications', { params: { limit: 1, after: newerNotification.id } }), 404)
 
     const detail = await loadThreadDetail(owner, threadId)
     expect(detail).toMatchObject({
