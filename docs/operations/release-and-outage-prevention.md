@@ -592,9 +592,18 @@ schema, foreign keys and guest journeys before retiring either v20 database.
 with `--location wnam` on 2026-10-24, and Cloudflare reported WNAM before the
 baseline was applied. It was loaded from `krabiclaw-staging-v20` while unbound:
 113 tables, 99,128 rows, `foreign_key_check` empty, the native
-`0000_baseline.sql` ledger, no transforms. The staging binding uses v21; the
-production, development and E2E bindings stay on `krabiclaw-production-v20`
-until production v21 is loaded.
+`0000_baseline.sql` ledger, no transforms. The staging binding uses v21; its
+final delta from v20 carried three rows and left three OAuth rows whose only
+change was `updatedAt`.
+
+`krabiclaw-production-v21` (`f18a888c-e52e-4c76-b5d6-9a8c11acb165`) was created
+with `--location wnam` on 2026-10-24, and Cloudflare reported WNAM before the
+baseline was applied. It was loaded from `krabiclaw-production-v20` while
+unbound: 113 tables, 121,149 rows, `foreign_key_check` empty, the native
+`0000_baseline.sql` ledger, no transforms. The top-level production,
+development and E2E bindings move to it together, immediately before
+promotion; take the production final delta from v20 right after the
+production deployment.
 
 Before dropping or retiring a legacy table or writer:
 
