@@ -111,8 +111,28 @@ test('an article created from a direct action prepares a Facebook draft without 
       content_blocks: [{ type: 'markdown', data: { markdown: body, editor_mode: 'rich' } }],
     } })
     expect(update.status(), await update.text()).toBe(200)
+    // This editor still holds the earlier revision. A failed save keeps its
+    // metadata leaf open and cannot continue into navigation or publication.
+    await articleSettings.click()
+    await page.getByRole('menuitem', { name: 'Excerpt', exact: true }).click()
+    const staleExcerpt = 'A stale excerpt that must not replace the saved article.'
+    await excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true }).fill(staleExcerpt)
+    const staleSaveResponse = page.waitForResponse(response => new URL(response.url()).pathname === articlePath && response.request().method() === 'PATCH')
+    await excerptPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    const refusedSave = await staleSaveResponse
+    expect(refusedSave.status(), await refusedSave.text()).toBe(409)
+    expect(refusedSave.request().postDataJSON().expected_updated_at).toBe(savedArticle.updated_at)
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/excerpt`)
+    await expect(excerptPanel).toContainText('Content document was updated by another writer')
+    await expect(excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true })).toHaveValue(staleExcerpt)
+    await expect(excerptPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    const refusedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
+    expect(refusedRead.status()).toBe(200)
+    expect(mcpData<{ post: { title: string; excerpt: string; status: string } }>(await refusedRead.json()).post).toMatchObject({ title, excerpt, status: 'draft' })
     await page.reload()
     await waitForNuxtHydration(page)
+    await expect(excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true })).toHaveValue(excerpt)
+    await excerptPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await articleSettings.click()
     await page.getByRole('menuitem', { name: 'Visibility · Draft', exact: true }).click()
     await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/publishing`)

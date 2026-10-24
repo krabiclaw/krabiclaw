@@ -228,20 +228,26 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(contactNotification(ownerNotificationsBefore, guestName).read_at).toBeNull()
     expect(contactNotification(secondOwnerNotificationsBefore, guestName).read_at).toBeNull()
 
-    // The same scoped reader reaches older notifications without repeating
-    // the newest row or accepting another organization's cursor.
-    expect(ownerNotificationsBefore.notifications.length).toBeGreaterThan(1)
-    const newestResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1 } })
-    await expectStatus(newestResponse, 200)
-    const newest = await newestResponse.json() as NotificationList
-    expect(newest.notifications.map(row => row.id)).toEqual([ownerNotificationsBefore.notifications[0]!.id])
-    expect(newest.next_cursor).toBe(newest.notifications[0]!.id)
-    const olderResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: newest.next_cursor! } })
+    // Anchor to this case's notification: parallel contacts may arrive ahead
+    // of it without changing the exact older rows in the independent snapshot.
+    const anchor = contactNotification(ownerNotificationsBefore, guestName)
+    const olderIds = ownerNotificationsBefore.notifications.slice(ownerNotificationsBefore.notifications.findIndex(row => row.id === anchor.id) + 1).map(row => row.id)
+    expect(olderIds[0], 'The saved notification history contains an older row to page to').toBeDefined()
+    const olderResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: anchor.id } })
     await expectStatus(olderResponse, 200)
     const older = await olderResponse.json() as NotificationList
-    expect(older.notifications.map(row => row.id)).toEqual([ownerNotificationsBefore.notifications[1]!.id])
-    expect(older.unread_count).toBe(newest.unread_count)
-    await expectStatus(await foreignOwner.get('/api/dashboard/notifications', { params: { limit: 1, after: newest.next_cursor! } }), 404)
+    expect(older.notifications.map(row => row.id)).toEqual([olderIds[0]])
+    expect(older.next_cursor).toBe(olderIds.length > 1 || ownerNotificationsBefore.next_cursor !== null ? olderIds[0] : null)
+    if (olderIds[1]) {
+      const nextResponse = await owner.get('/api/dashboard/notifications', { params: { limit: 1, after: older.next_cursor! } })
+      await expectStatus(nextResponse, 200)
+      const next = await nextResponse.json() as NotificationList
+      expect(next.notifications.map(row => row.id)).toEqual([olderIds[1]])
+      expect(next.next_cursor).toBe(olderIds.length > 2 || ownerNotificationsBefore.next_cursor !== null ? olderIds[1] : null)
+    }
+    // unread_count covers the whole audience and may change when concurrent
+    // contacts arrive. Per-user read state is verified exactly below.
+    await expectStatus(await foreignOwner.get('/api/dashboard/notifications', { params: { limit: 1, after: anchor.id } }), 404)
 
     const detail = await loadThreadDetail(owner, threadId)
     expect(detail).toMatchObject({

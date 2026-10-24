@@ -2,7 +2,7 @@
   <!-- The article is the writing canvas; its metadata opens from its header. -->
   <DashboardIndexPanel :id="panelId" title="Article">
     <template #right>
-      <UButton label="Save" :loading="saveState === 'saving'" :disabled="saving || !contentDirty || !form.title.trim() || saveState === 'conflict'" @click="saveCanvas" />
+      <UButton label="Save" :loading="saveState === 'saving'" :disabled="saving || !contentDirty || !form.title.trim() || saveState === 'conflict'" @click="saveArticle" />
       <UTooltip text="Preview">
         <UButton ref="previewButton" color="neutral" variant="ghost" icon="i-lucide-eye" aria-label="Preview" :to="previewPath" :disabled="saving || !previewUrl" class="size-10 rounded-full" data-testid="article-preview" />
       </UTooltip>
@@ -184,15 +184,15 @@ type InserterBlockType = 'image' | 'video' | 'faq' | 'how_to' | 'cta' | 'divider
  * cannot know: the server's copy of the post and the ids of blocks saved for
  * the first time.
  */
-async function saveArticle() {
+async function saveArticle(): Promise<BlogPost | null> {
   if (!post.value || !contentDirty.value) return post.value
-  // A started video block is written with the rest, so it has to be finished first:
-  // the server refuses the whole document for one video without a link or a title.
-  assertVideosComplete()
   actionError.value = ''
-  saveState.value = 'saving'
-  const payload = buildSavePayload()
   try {
+    // A started video block is written with the rest, so it has to be finished first:
+    // the server refuses the whole document for one video without a link or a title.
+    assertVideosComplete()
+    const payload = buildSavePayload()
+    saveState.value = 'saving'
     const updated = await props.repository.update(persistedPostId.value, { ...payload, expected_updated_at: serverPostUpdatedAt })
     syncServerVersion(updated)
     post.value = updated
@@ -204,15 +204,8 @@ async function saveArticle() {
   } catch (error: unknown) {
     const status = Number((error as { statusCode?: number; status?: number })?.statusCode ?? (error as { status?: number })?.status)
     saveState.value = status === 409 ? 'conflict' : 'failed'
-    throw error
-  }
-}
-
-async function saveCanvas() {
-  try {
-    await saveArticle()
-  } catch (cause) {
-    actionError.value = getErrorMessage(cause, 'Failed to save the article.')
+    actionError.value = getErrorMessage(error, 'Failed to save the article.')
+    return null
   }
 }
 
@@ -269,8 +262,6 @@ function assertVideosComplete() {
     && Object.values(block.data).some(value => String(value ?? '').trim())
     && (!youTubeVideoId(block.data.url) || !String(block.data.title ?? '').trim()))
   if (!incomplete) return
-  actionError.value = INCOMPLETE_VIDEO
-  saveState.value = 'failed'
   throw new Error(INCOMPLETE_VIDEO)
 }
 function savedBlocks() {
@@ -293,7 +284,7 @@ async function saveSection() {
   actionError.value = ''
   savingExplicitly.value = true
   try {
-    await saveArticle()
+    if (!await saveArticle()) return
     // The publishing leaf's Save is what publishes. A post that is already
     // live has nothing left to publish, so only a draft goes through it.
     if (section.value === 'publishing' && post.value.status !== 'published') {
@@ -316,7 +307,7 @@ async function publish() {
     assertVideosComplete()
     // Publish what is on the canvas: an unsaved article is written first, so
     // the lifecycle token it hands over is the one the save produced.
-    await saveArticle()
+    if (!await saveArticle()) return
     const published = await props.repository.publish(persistedPostId.value, lifecycleVersionInput())
     syncServerVersion(published)
     post.value = published
