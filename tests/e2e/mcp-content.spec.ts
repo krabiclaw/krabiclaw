@@ -436,6 +436,7 @@ test.describe('stateless MCP server', () => {
       for (const [toolName, fields] of [
         ['update_post', { post_id: created.post.id, expected_updated_at: draft.updated_at }],
         ['delete_channel_post', { channel: 'instagram', target_id: 'unused-unsupported-channel', connection_revision: 'unused-unsupported-channel', provider_post_id: 'unused-unsupported-channel' }],
+        ['get_location', { location_id: null }],
       ] as const) {
         const invalid = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, ...fields } })
         expect(invalid.status()).toBe(200)

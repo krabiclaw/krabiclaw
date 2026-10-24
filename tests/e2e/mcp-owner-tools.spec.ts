@@ -1599,8 +1599,13 @@ test.describe('stateless MCP server', () => {
         const removed = await call<{team_id:string;user_id:string;included:boolean}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:false})
         expect(removed).toEqual({team_id:teamId,user_id:person!.userId,included:false})
         const nativeRemoved = await request.get(`${baseURL}/api/auth/organization/list-team-members`,{params:{teamId}})
-        expect(nativeRemoved.status(),await nativeRemoved.text()).toBe(200)
-        expect((await nativeRemoved.json()).map((member:{userId:string})=>member.userId)).not.toContain(person!.userId)
+        expect(nativeRemoved.status()).toBe(400)
+        expect(await nativeRemoved.json()).toMatchObject({code:'USER_IS_NOT_A_MEMBER_OF_THE_TEAM'})
+        const dashboardMembers = await request.get(`${baseURL}/api/dashboard/members`,{params:{org:'ember-slice-demo'}})
+        expect(dashboardMembers.status(),await dashboardMembers.text()).toBe(200)
+        const dashboardTeam = (await dashboardMembers.json()).teams.find((team:{id:string})=>team.id===teamId)
+        expect(dashboardTeam).toBeDefined()
+        expect(dashboardTeam.members.map((member:{userId:string})=>member.userId)).not.toContain(person!.userId)
         const email = `invite-${crypto.randomUUID()}@playwright.example`
         const invited = await call<{invitation:{id:string;status:string;delivery:{status:string}}}>('invite_organization_member',{email,role:'member'})
         invitationId = invited.invitation.id

@@ -1575,8 +1575,11 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages'])
     await page.getByTestId('dashboard-top-nav-menu-button').click()
     // Earnings is a card on Menu, as Airbnb's is; it shows the month and leads to payouts, transactions and refunds.
-    await page.getByRole('dialog', { name: 'Menu', exact: true }).getByTestId('dashboard-menu-earnings').click()
-    await expect(page).toHaveURL(`${ORG}/earnings`)
+    const earnings = page.getByRole('dialog', { name: 'Menu', exact: true }).getByTestId('dashboard-menu-earnings')
+    await expect(earnings).toHaveAttribute('href', `${ORG}/earnings`)
+    await earnings.click()
+    await expect(page).toHaveURL(`${ORG}/earnings/performance`)
+    await expectPanes(page, ['earnings', 'earnings-performance'])
     await expect(page.locator('#dashboard-panel-earnings [data-testid="dashboard-navbar-back"]')).toHaveAttribute('href', `${ORG}/menu`)
     await expect(page.getByRole('heading', { name: 'Earnings', exact: true })).toBeVisible()
     await open(page, `${ORG}/earnings/transactions`)
@@ -2341,8 +2344,8 @@ test.describe('dashboard pane hierarchy', () => {
     const concurrentBio = `${bio} concurrent edit`
     const concurrentWrite = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'set_member_scheduling', args: { organization_id: organizationId, member_id: memberId, public_bio: concurrentBio, expected_updated_at: saved.updated_at } })
     expect(concurrentWrite.status(), await concurrentWrite.text()).toBe(200)
-    const concurrent = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await concurrentWrite.json()).scheduling
-    expect(concurrent.public_bio).toBe(concurrentBio)
+    const concurrent = mcpData<{ scheduling: Pick<NonNullable<MemberSchedule>, 'member_id' | 'updated_at' | 'public_bio' | 'public_approved'> }>(await concurrentWrite.json()).scheduling
+    expect(concurrent).toEqual({ member_id: memberId, updated_at: concurrent.updated_at, public_bio: concurrentBio, public_approved: 0 })
     const conflictWrite = page.waitForResponse(response => new URL(response.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && response.request().method() === 'PUT')
     await bioLeaf.getByRole('button', { name: 'Save', exact: true }).click()
     const conflictResponse = await conflictWrite
@@ -2353,7 +2356,8 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(bioLeaf.getByRole('button', { name: 'Retry', exact: true })).toBeDisabled()
     const concurrentRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
     expect(concurrentRead.status(), await concurrentRead.text()).toBe(200)
-    expect(mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await concurrentRead.json()).scheduling).toEqual(concurrent)
+    const concurrentSaved = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await concurrentRead.json()).scheduling
+    expect(concurrentSaved).toEqual({ ...saved, public_bio: concurrentBio, public_approved: 0, updated_at: concurrent.updated_at, updated_by: originalUser.id })
     let reloadWrites = 0
     const observeReload = (request: Request) => {
       if (new URL(request.url()).pathname === `/api/organizations/${organizationId}/members/${memberId}/scheduling` && request.method() === 'PUT') reloadWrites++
@@ -2364,7 +2368,7 @@ test.describe('dashboard pane hierarchy', () => {
       await bioLeaf.getByRole('button', { name: 'Use saved values', exact: true }).click()
       const reloadResponse = await reload
       expect(reloadResponse.status(), await reloadResponse.text()).toBe(200)
-      expect((await reloadResponse.json()).scheduling).toEqual(concurrent)
+      expect((await reloadResponse.json()).scheduling).toEqual(concurrentSaved)
       await expect(bioLeaf.getByRole('textbox', { name: 'About you', exact: true })).toHaveValue(concurrentBio)
       await expect(bioLeaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
       await expect(bioLeaf.getByRole('button', { name: 'Use saved values', exact: true })).toHaveCount(0)
@@ -2390,7 +2394,7 @@ test.describe('dashboard pane hierarchy', () => {
     const approvalRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: organizationId, member_id: memberId } })
     expect(approvalRead.status(), await approvalRead.text()).toBe(200)
     const approved = mcpData<{ scheduling: NonNullable<MemberSchedule> }>(await approvalRead.json()).scheduling
-    expect(approved).toEqual({ ...concurrent, public_approved: 1, updated_at: approved.updated_at, updated_by: originalUser.id })
+    expect(approved).toEqual({ ...concurrentSaved, public_approved: 1, updated_at: approved.updated_at, updated_by: originalUser.id })
     expect(approved.updated_at).not.toBe(concurrent.updated_at)
 
     await open(page, '/dashboard/account/profile/personal')
