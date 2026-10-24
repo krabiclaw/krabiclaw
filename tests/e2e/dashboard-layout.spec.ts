@@ -2097,35 +2097,40 @@ test.describe('dashboard pane hierarchy', () => {
 
   // A service is a Product and the page that shows it: Catalog's Add opens the
   // shared create walk, and Create writes both, bound, through one request.
-  test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL }) => {
+  test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL, playwright }) => {
     const services = '/dashboard/north-carolina-legal-services'
     const editor = '/api/editor/organizations/org-ncls-blawby'
     await page.setViewportSize(WIDE)
     await page.context().clearCookies()
     await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
-    await open(page, `${services}/products`)
-    await expectPanes(page, ['catalog'])
-    await page.locator('#dashboard-panel-catalog').getByTestId('catalog-add').click()
-    await expect(page).toHaveURL(`${services}/products/new/kind`)
-    const kind = page.locator('#dashboard-panel-product-kind')
-    await kind.getByText('Practice area or consultation', { exact: true }).click()
-    await expect(kind.getByRole('radio', { name: 'Practice area or consultation', exact: true })).toBeChecked()
-    await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
-    await expect(page).toHaveURL(`${services}/products/new/name`)
-    // The level is named for what is being made, and the step's own footer is the only commit.
-    await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'New service', level: 1, exact: true })).toBeVisible()
-    await expect(page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create service', exact: true })).toHaveCount(0)
-    const name = `E2E Service ${Date.now().toString(36)}`
-    await page.getByRole('textbox', { name: 'Name' }).fill(name)
-    const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products` && response.request().method() === 'POST')
-    await page.locator('#dashboard-panel-product-name').getByRole('button', { name: 'Create service', exact: true }).click()
-    const response = await created
-    expect(response.status(), await response.text()).toBe(201)
-    const request = response.request().postDataJSON() as { idempotency_key?: string }
-    expect(request.idempotency_key).toBeTruthy()
-    const productId = (await response.json() as { product: { id: string } }).product.id
+    const cleanupRequest = await playwright.request.newContext({ baseURL, storageState: await page.request.storageState() })
+    let productId: string | undefined
     let pageId: string | null = null
+    const failures: unknown[] = []
     try {
+      await open(page, `${services}/products`)
+      await expectPanes(page, ['catalog'])
+      await page.locator('#dashboard-panel-catalog').getByTestId('catalog-add').click()
+      await expect(page).toHaveURL(`${services}/products/new/kind`)
+      const kind = page.locator('#dashboard-panel-product-kind')
+      await kind.getByText('Practice area or consultation', { exact: true }).click()
+      await expect(kind.getByRole('radio', { name: 'Practice area or consultation', exact: true })).toBeChecked()
+      await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
+      await expect(page).toHaveURL(`${services}/products/new/name`)
+      // The level is named for what is being made, and the step's own footer is the only commit.
+      await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'New service', level: 1, exact: true })).toBeVisible()
+      await expect(page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create service', exact: true })).toHaveCount(0)
+      const name = `E2E Service ${Date.now().toString(36)}`
+      await page.getByRole('textbox', { name: 'Name' }).fill(name)
+      const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products` && response.request().method() === 'POST')
+      await page.locator('#dashboard-panel-product-name').getByRole('button', { name: 'Create service', exact: true }).click()
+      const response = await created
+      expect(response.status(), await response.text()).toBe(201)
+      const request = response.request().postDataJSON() as { idempotency_key?: string }
+      expect(request.idempotency_key).toBeTruthy()
+      const createdProduct = (await response.json() as { product: Product }).product
+      productId = createdProduct.id
+      pageId = createdProduct.page?.id ?? null
       await expect(page).toHaveURL(`${services}/products/${productId}/name`)
       await expectPanes(page, ['product', 'product-name'])
       // Read back through other paths than the one that wrote it.
@@ -2209,6 +2214,7 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(officeLeaf.getByRole('switch', { name: 'Show at this office', exact: true })).toBeChecked()
       await expect(officeLeaf.getByRole('switch', { name: 'Available at this office', exact: true })).toBeChecked()
 
+      await open(page, `${services}/products/${productId}/name`)
       await page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true }).click()
       const preview = page.getByRole('dialog', { name: 'Legal Services preview', exact: true })
       const frame = preview.getByTestId('content-preview-frame')
@@ -2246,15 +2252,31 @@ test.describe('dashboard pane hierarchy', () => {
       await page.locator('#dashboard-panel-product').getByTestId('editor-card-page').click()
       await expect(page).toHaveURL(new RegExp(`${services}/website/pages/${pageId}`))
       await expect(page.locator('#dashboard-panel-organization-page')).toContainText(name)
-    } finally {
-      if (pageId) {
-        const current = (await (await page.request.get(`${editor}/pages/${pageId}`)).json() as { page: { document: { updated_at: string } } }).page
-        const removedPage = await page.request.delete(`${editor}/pages/${pageId}`, { data: { expectedUpdatedAt: current.document.updated_at } })
-        expect(removedPage.status(), await removedPage.text()).toBe(200)
-      }
-      const removed = await page.request.delete(`${editor}/products/${productId}`)
-      expect(removed.status(), await removed.text()).toBe(200)
+    } catch (error) { failures.push(error) }
+    finally {
+      try {
+        if (pageId) {
+          const read = await cleanupRequest.get(`${editor}/pages/${pageId}`)
+          expect(read.status(), await read.text()).toBe(200)
+          const current = (await read.json() as { page: { document: { updated_at: string } } }).page
+          const removedPage = await cleanupRequest.delete(`${editor}/pages/${pageId}`, { data: { expectedUpdatedAt: current.document.updated_at } })
+          expect(removedPage.status(), await removedPage.text()).toBe(200)
+          const removedRead = await cleanupRequest.get(`${editor}/pages/${pageId}`)
+          expect(removedRead.status(), await removedRead.text()).toBe(404)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        if (productId) {
+          const removed = await cleanupRequest.delete(`${editor}/products/${productId}`)
+          expect(removed.status(), await removed.text()).toBe(200)
+          const removedRead = await cleanupRequest.get(`${editor}/products/${productId}`)
+          expect(removedRead.status(), await removedRead.text()).toBe(404)
+        }
+      } catch (error) { failures.push(error) }
+      try { await cleanupRequest.dispose() }
+      catch (error) { failures.push(error) }
     }
+    if (failures.length) throw new AggregateError(failures, 'Legal Product creation or cleanup failed')
   })
 
   // KrabiClaw runs on KrabiClaw: the row and its page exist only inside
