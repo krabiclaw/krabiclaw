@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:0e8fa6cbfcedb32ded042a68267e7cd0187a3e1dcdcde288b5abef4d008905e4",
-  "documentationFingerprint": "sha256:f83c8968486c723d81ac6e9fc47892f644108a9e7dc735314812062bb2caee99",
+  "fingerprint": "sha256:f764e335879eb2b7d25a825386891e128128413c825c07fa26e7d423158eb0fc",
+  "documentationFingerprint": "sha256:0cf39e5abdd56cf14fb4f1eb63fc2cf47269c411c14ff29689b02ff929d89142",
   "tools": [
     {
       "name": "add_organization_language",
@@ -40324,7 +40324,7 @@
     {
       "name": "delete_stay_payment",
       "title": "Delete stay payment",
-      "description": "Remove a payment recorded by mistake from a stay.",
+      "description": "Remove one offline payment record entered by mistake. First call get_stay for its payment ID. Returns the removed payment ID and current paid amount/status. Does not refund or move money, and cannot remove the guest’s Stripe payment.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -85779,7 +85779,7 @@
     {
       "name": "record_stay_payment",
       "title": "Record stay payment",
-      "description": "Record money the host received outside KrabiClaw for a stay they took (cash, bank transfer, a card machine). A negative amount records a refund. Moves no money.",
+      "description": "Record money received outside KrabiClaw for a host-entered stay, such as cash or a bank transfer. Read get_stay for the stay ID and currency. A negative amount records an offline refund. Returns the exact recorded payment and current paid amount/status, without unrelated guest details or payment history. Moves no money.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -123061,7 +123061,7 @@
     {
       "name": "update_stay",
       "title": "Update stay",
-      "description": "Change a host-entered stay’s dates, party, guest details, total or notes under its current version. Omitted fields keep their values. Replans pending automatic guest messages and updates availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that the stay edit was saved. Stays from another channel must be changed on that channel.",
+      "description": "Change a host-entered stay’s dates, party, guest details, total or notes using stay.version from get_stay. Supply at least one changed field; empty and unchanged edits are refused. Omitted fields keep their values. Returns a compact stay receipt and the saved values of supplied fields. Replans pending automatic guest messages and updates connected Airbnb availability through Channex. A failed channel update reports the committed edit; read get_stay before retrying. Channel-owned stays must be edited on their channel.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
