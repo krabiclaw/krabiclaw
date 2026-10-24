@@ -63,7 +63,7 @@ export const integrationsKey = Symbol('integrations') as InjectionKey<{
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
-import { INTEGRATIONS, INTEGRATION_GROUP_LABELS, type IntegrationKey } from '~/shared/integrations'
+import { INTEGRATIONS, type IntegrationKey } from '~/shared/integrations'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 useSeoMeta({ title: 'Integrations | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
@@ -124,11 +124,7 @@ const items = computed<EditorNavigationItem[]>(() => INTEGRATIONS.map(definition
   ...rows.value[definition.key],
 })))
 
-// Grouped by the job the connection does, under its own heading (DESIGN.md: rows on the pane, no cards).
-const groups = computed(() => (Object.keys(INTEGRATION_GROUP_LABELS) as Array<keyof typeof INTEGRATION_GROUP_LABELS>).map(group => ({
-  id: group, label: INTEGRATION_GROUP_LABELS[group],
-  items: items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === group),
-})))
+const groups = computed(() => [{ id: 'integrations', items: items.value }])
 
 provide(integrationsKey, {
   organizationId,

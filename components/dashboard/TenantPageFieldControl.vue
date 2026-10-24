@@ -102,7 +102,8 @@
     <UTextarea
       v-else-if="field.multiline"
       :model-value="stringValue"
-      :rows="4"
+      variant="none"
+      :rows="1"
       autoresize
       class="w-full"
       @update:model-value="write($event)"

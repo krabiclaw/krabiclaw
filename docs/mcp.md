@@ -34,11 +34,20 @@ its `organization_id`.
 
 ## Member availability and Google Calendar
 
-`get_member_scheduling` lists accessible members or reads an explicitly named
-member. `set_member_scheduling` saves timezone, hours, time off and public profile
-using the latest `expected_updated_at`. Members can manage only their own record;
-owners and admins can manage their team and approve public profiles. Profile edits
-revoke approval unless an admin explicitly approves them.
+`get_member_scheduling` lists accessible organization memberships or reads a
+member's hours, time off and Calendar status. `set_member_scheduling` changes
+working hours or time off. `get_member_public_profile` and
+`update_member_public_profile` read and edit the separate authored host profile,
+including unpublished drafts. Valid memberships without settings return null.
+Both concerns use the same latest `expected_updated_at`; either edit can make a
+previous read stale. Member IDs are organization membership IDs, not user IDs.
+
+Members can manage only their own settings; owners and admins can manage their
+team and approve public profiles. Profile edits revoke approval unless an admin
+explicitly approves them. Approval requires a nonblank public name and makes the
+authored name, photo and biography visible on assigned public offerings. A host
+profile needs no working hours. Assigning a member or team alone does not approve
+its profile or satisfy the offering's publication prerequisite.
 
 Google consent and account linking happen through Better Auth in the dashboard.
 `set_member_busy_calendars` selects explicit calendar IDs on the member's own
@@ -96,7 +105,17 @@ MCP names map to shared domain functions. REST uses HTTP methods on the same res
 
 `set_workspace_context` saves the signed-in user's organization and location
 preference across connections. Explicit organization/location arguments always
-control the current operation.
+control the current operation. When an organization argument is omitted, the
+saved accessible business is used, or the only accessible business when no saved
+selection applies. With multiple businesses and no usable selection, the call
+fails and requires an explicit choice. `get_workspace_context` shows which
+business and location will be used.
+
+Tool output schemas describe successful results. A failed call uses MCP
+`isError: true` and text content explaining the reason. Execution failures may
+include a JSON object with `status`, `code` and recovery fields; schema failures
+use the SDK's validation text. A failure carrying `committed: true` means the
+write was saved and a later part failed: read current state before retrying.
 
 Every retained tool declares `readOnlyHint`, `destructiveHint` and `openWorldHint`
 explicitly. A tool is classified against all supported branches, including optional
@@ -115,32 +134,19 @@ refreshed ChatGPT session.
 
 1. Update the canonical definition and executor together.
 2. Update the owning invariant test and the affected runtime prompts in
-   `server/utils/mcp-prompts.ts`. Review the public workflow guides against the
-   changed behavior, including permissions, external effects and entitlements.
-3. Update the affected published guides through the existing CMS/MCP article
-   operations. Review their actual public Markdown, then run
-   `yarn mcp:catalog --review-docs --base-url https://staging.krabiclaw.com` to
-   record that explicit review. Use the production base URL when that is the
-   canonical CMS being edited. Review the resulting content and dependency hash
-   diff.
-4. Run `yarn mcp:catalog:write`, review the generated tool and runtime prompt
+   `server/utils/mcp-prompts.ts`. Update any help article whose workflow the
+   change affects through the existing CMS/MCP article operations.
+3. Run `yarn mcp:catalog:write`, review the generated tool and runtime prompt
    snapshot diff, then run `yarn mcp:catalog` and the affected MCP integration
-   tests. Ordinary regeneration does not update public workflow reviews.
-5. Run the local Worker and verify `tools/list`, the changed tool call, and
+   tests.
+4. Run the local Worker and verify `tools/list`, the changed tool call, and
    `_meta["krabiclaw/catalogFingerprint"]` through the real client.
-6. Refresh and publish the ChatGPT app action catalog when its schema changed
+5. Refresh and publish the ChatGPT app action catalog when its schema changed
    (`yarn chatgpt:submission:write`).
-7. Verify the deployed staging MCP app and run
-   `yarn mcp:catalog --check-live-docs --base-url https://staging.krabiclaw.com`
-   before promoting to production. Verify production documentation with the same
-   command and `--base-url https://krabiclaw.com`.
+6. Verify the deployed staging MCP app before promoting to production.
 
-On the initial rollout, the resolver must be deployed before publishing the
-directive article at `/docs/mcp-tool-reference` through the canonical CMS. A
-missing reference fails deployment verification with the publication instruction.
-Publish the article and rerun the full verification job; the rollout is incomplete
-until it passes. The same sequence applies when first creating the reference on
-staging. Subsequent releases require verification to pass directly.
+Help articles are CMS content: deploys do not check their prose, and editing one
+never blocks a release.
 
 Do not use `serverInfo.version` as a catalog boundary. The endpoint, live
 `tools/list` response, and reviewed snapshot define the contract.
@@ -148,27 +154,15 @@ Do not use `serverInfo.version` as a catalog boundary. The endpoint, live
 ### Catalog enforcement
 
 The public catalog is snapshotted in `server/utils/mcp-catalog-snapshots/`.
-`yarn mcp:catalog` requires every public tool to be dispatchable and rejects
-snapshot drift, unknown tool names in rendered runtime prompts, and public
-workflow reviews whose dependent tool contracts changed. The snapshot includes
-the generated tool contract and runtime prose; public guide prose stays in the
-canonical CMS and is represented here only by its content hash and dependency
-contract hashes.
+`yarn mcp:catalog` runs offline in CI. It requires every public tool to be
+dispatchable and rejects snapshot drift and unknown tool names in rendered
+runtime prompts. The snapshot holds the generated tool contracts and runtime
+prompt prose.
 
 The public tool reference at `/docs/mcp-tool-reference` is generated from the
 deployed registry. Its documentation fingerprint includes schemas, descriptions,
 titles, annotations, scopes, minimum roles, entitlements and file metadata. Guides
-identify their dependencies with exact tool names or links to reference anchors,
-such as `/docs/mcp-tool-reference#update_menu`.
-
-Ordinary `--write` preserves public guide reviews and refuses to bless stale
-dependencies. `--review-docs` is an explicit assertion that the operator reviewed
-the current published guides against the proposed registry; it fetches their
-public Markdown and records reviewed hashes. `--check-live-docs` is read-only:
-it verifies the deployed guide prose, tool dependencies and generated reference
-fingerprint. Guide hashes exclude generated front matter and Markdown image
-delivery URLs, retaining image alt text, titles, captions, ordinary links and all
-workflow prose. The default catalog check stays offline and runs in CI.
+can link a tool's reference anchor, such as `/docs/mcp-tool-reference#update_menu`.
 
 A dependency fingerprint detects a changed contract, not whether prose correctly
 explains it. Executor-only behavior changes still require the owning invariant
@@ -268,7 +262,7 @@ Restaurant table Reservations remain separate. `cancel_table_reservation` takes
 `operational_reservation_id` (`reservations.id`);
 `request_table_reservation_change` proposes location/date/time/party changes through
 the same guest approval flow. Restaurant Reservations have no pending review
-confirmation/rejection tools. `list_reservation_inquiries` reads them.
+confirmation/rejection tools. `list_table_reservations` reads them.
 
 ## Lodging homes, stays and nightly calendars
 
@@ -296,11 +290,26 @@ through Channex. A failed push returns `CHANNEL_PUSH_FAILED` with `committed:tru
 read the calendar and its channel state before retrying. No configured mapping
 means no channel push, not universal channel synchronization.
 
-The stay tools also manage authored photo-tour rooms and accessibility answers:
-`add_stay_photo_room`, `remove_stay_photo_room`, `move_stay_photos`,
-`update_stay_photo_room` and `update_stay_accessibility`. Read the current schema
-and concurrency values before writing; a positive accessibility answer needs
-image evidence and does not imply certification.
+Home photo tours group existing listing photos under rooms or spaces. A library
+asset, its placement in a home's gallery, and its room assignment are separate.
+`create_home_room` creates an empty room or space, without uploading a photo or
+asking for its optional amenities. `update_home_room` edits the optional room
+facts; `delete_home_room` removes the group and retains the photos.
+
+Read `get_product` first: `product.stay.photo_rooms` supplies room IDs, current
+memberships and room revisions, and the product's media supplies its existing
+photos. `assign_home_photos_to_room` takes exactly one destination: an existing
+`room_id`, explicit `room_id: null` for Additional photos, or `new_room_type` to
+create a destination. Omitting both or supplying both is invalid. Each selected
+photo needs its current `expected_room_id`; a stale selection refuses the whole
+move, including any new room. The result identifies the actual destination,
+created room when applicable, and moved photos.
+
+These room and photo-tour operations update KrabiClaw's listing only. They do not
+update Airbnb's photo tour; that requires a separate edit in Airbnb.
+`update_home_accessibility` records a listing accessibility answer under the
+current Product timestamp. A positive accessibility answer needs image evidence
+and does not imply certification.
 
 `get_guest_messaging_context` reads the home/stay behind a guest conversation.
 `update_stay_arrival_guide` saves private instructions without sending or

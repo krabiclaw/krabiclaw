@@ -1,7 +1,6 @@
 import { assertCalendarDate, isValidTimezone, instantDate, localDateAt, addLocalDays, localDateTimeToInstant } from '~/utils/timezone'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, type DbClient } from '~/server/db'
-import { resolveOrganizationCmsCapabilities } from '~/server/utils/cms-capabilities'
 import { assignedBookingSql, assignedHomeSql, assignedLocationSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
@@ -108,14 +107,6 @@ interface SourceRow {
   party_size: number | null
 }
 
-interface CapabilityOrganizationRow {
-  id: string
-  name: string | null
-  subdomain: string | null
-  vertical: string
-  theme_id: string
-}
-
 interface LocationRow {
   id: string
   organization_id: string
@@ -175,17 +166,17 @@ export async function listAgenda(
     ? query.principal.membership : null
   if (staff) await assertRoleAllows({ ...staff, permissions: { operations: ['assigned'] } })
 
-  // One round trip reads everything the scope alone decides: the businesses in
-  // scope, whether any has ever taken a booking or a reservation, and the
-  // business's branches. Each statement used to wait for the one before it.
+  // Read configured and historical activity kinds plus the explicit locations
+  // in one round trip. Template features do not establish actual activity.
   const scopeSql = scope.buyerUserId
     ? `IN (SELECT r.organization_id FROM requests r WHERE r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL})`
     : '= ?'
   const scopeParam = scope.buyerUserId ?? scope.organizationId
-  const [capabilityResult, bookableResult, reservingResult, locationResult, hostingResult] = await executeBatch(db, [
-    { query: `SELECT s.id, s.name, s.subdomain, s.vertical, s.theme_id FROM organization s WHERE s.id ${scopeSql} ORDER BY s.id`, params: [scopeParam] },
-    { query: `SELECT 1 AS present FROM product_booking_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
-    { query: `SELECT 1 AS present FROM reservations WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
+  const [bookableResult, reservingResult, locationResult, hostingResult] = await executeBatch(db, [
+    { query: `SELECT 1 AS present FROM product_booking_configs WHERE organization_id ${scopeSql}
+        UNION ALL SELECT 1 AS present FROM bookings WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam, scopeParam] },
+    { query: `SELECT 1 AS present FROM location_reservation_configs WHERE organization_id ${scopeSql}
+        UNION ALL SELECT 1 AS present FROM reservations WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam, scopeParam] },
     // A buyer's calendar is not filtered by branch; the business's is.
     { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql}
         ${staff ? `AND (EXISTS (SELECT 1 FROM requests r JOIN bookings b ON b.request_id = r.id AND b.organization_id = r.organization_id
@@ -196,24 +187,13 @@ export async function listAgenda(
     // A business with a place to stay has arrivals and departures; a buyer's agenda has none.
     { query: 'SELECT 1 AS present FROM product_stay_configs WHERE organization_id = ? LIMIT 1', params: [scope.organizationId ?? ''] },
   ], { operation: 'Read the agenda scope' })
-  const capabilityOrganizations = (capabilityResult?.results ?? []) as CapabilityOrganizationRow[]
   const locations = scope.organizationId ? (locationResult?.results ?? []) as LocationRow[] : []
   // A buyer has visits, not a publishing calendar.
   const available = new Set<AgendaKind>(scope.buyerUserId || staff ? [] : ['post'])
-  for (const organization of capabilityOrganizations) {
-    const { capabilities } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id)
-    const features = new Set([...capabilities.pages.map(page => page.feature), ...capabilities.managers.map(manager => manager.id)])
-    if (features.has('reservations')) available.add('reservation')
-    // A class's schedule is the product's own; the calendar carries who is
-    // coming to it, not every session it could run.
-    if (features.has('products')) available.add('booking')
-  }
   // A business that has taken bookings or reservations sees them whatever its
   // site template says: the record exists, so the calendar shows it.
-  if (capabilityOrganizations.length) {
-    if (bookableResult?.results?.length) available.add('booking')
-    if (reservingResult?.results?.length) available.add('reservation')
-  }
+  if (bookableResult?.results?.length) available.add('booking')
+  if (reservingResult?.results?.length) available.add('reservation')
   if (scope.organizationId && hostingResult?.results?.length) available.add('stay')
   const availableKinds = AGENDA_KINDS.filter(kind => available.has(kind))
   const requestedKinds = new Set((query.kinds?.length ? query.kinds : availableKinds).filter(kind => available.has(kind)))

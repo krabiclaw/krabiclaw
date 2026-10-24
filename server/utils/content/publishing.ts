@@ -45,6 +45,7 @@ import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~/server/utils/preview-token'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
+import { resolvePublicTenantOrigin } from '~/server/utils/public-base'
 import { ARTICLE_CATEGORY_SELECT, articleCategoryJoinSql, articleCategoryMembershipQuery, attachArticleCategory, localizeArticleCategories } from '~/server/utils/content/article-categories'
 import { renderContentBlocksForLlm } from '~/server/utils/platform-llm'
 
@@ -313,7 +314,7 @@ async function normalizeCanonicalBlogBlocks(
 }
 
 
-export interface ContentReviewContext { orgSlug: string }
+export interface ContentReviewContext { orgSlug: string; publicOrigin: string | null }
 
 async function contentReviewUrls(
   record: ApiRecord,
@@ -326,12 +327,12 @@ async function contentReviewUrls(
   // Every site's articles, KrabiClaw's included, are edited in the shared dashboard CMS.
   const adminEditUrl = context ? blogEditorPath(context.orgSlug, id) : null
   const isPublished = typeof record.status === 'string' ? record.status === 'published' : Boolean(record.published_at)
+  const publicUrl = isPublished && context?.publicOrigin ? publicPath : null
 
-  // An unpublished article is previewed the same way everything unpublished is
-  // previewed: the site's own preview token, which the tenant host turns into a
-  // cookie so the rest of the visit stays authorized.
+  // A saved article on a nonpublic site needs the same signed preview as a
+  // draft article. The tenant host turns the token into an authorized cookie.
   let previewUrl: string | null = null
-  if (!isPublished && publicPath) {
+  if (!publicUrl && publicPath) {
     if (!env?.PREVIEW_SECRET) throw new HTTPError({ statusCode: 500, statusMessage: 'Preview signing is not configured' })
     const token = await createPreviewToken(env.PREVIEW_SECRET, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
     previewUrl = `${publicPath}?${PREVIEW_TOKEN_QUERY}=${encodeURIComponent(token)}`
@@ -342,7 +343,7 @@ async function contentReviewUrls(
     admin_edit_url: adminEditUrl,
     edit_url: adminEditUrl,
     public_path: publicPath,
-    public_url: isPublished ? publicPath : null,
+    public_url: publicUrl,
     preview_url: previewUrl,
   }
 }
@@ -359,7 +360,7 @@ async function resolveTenantContext(db: DbClient, organizationId: string, env?: 
   if (!tenant?.subdomain) return undefined
   const organization = await findOrganizationById(env, organizationId)
   if (!organization) return undefined
-  return { orgSlug: organization.slug }
+  return { orgSlug: organization.slug, publicOrigin: await resolvePublicTenantOrigin(db, env, organizationId) }
 }
 
 function validateBlogCommon(input: Partial<PlatformBlogCreateInput>, operation: 'create' | 'update') {

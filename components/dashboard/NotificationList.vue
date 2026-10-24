@@ -18,8 +18,8 @@
         color="error"
         variant="soft"
         icon="i-lucide-circle-alert"
-        title="Updates could not be loaded"
-        :description="getErrorMessage(loadError, 'Updates request failed')"
+        title="Notifications could not be loaded"
+        :description="getErrorMessage(loadError, 'Notifications request failed')"
         class="mb-4"
       >
         <template #actions>
@@ -29,11 +29,11 @@
         </template>
       </UAlert>
       <UAlert v-if="actionError" color="error" :description="actionError" class="mb-4" />
-      <div v-if="!loadError && notifications.length === 0" class="py-16 text-center">
+      <USkeleton v-if="status === 'pending'" class="h-24 w-full" />
+      <div v-else-if="!loadError && notifications.length === 0" class="py-16 text-center">
         <UIcon name="i-lucide-bell-off" class="mx-auto mb-3 size-7 text-muted" />
-        <p class="text-sm text-muted">No updates yet.</p>
+        <p class="text-sm text-muted">{{ pageCursors.length ? 'No notifications on this page.' : 'No notifications yet.' }}</p>
       </div>
-
       <!--
         A row is what the reference draws: a mark for what happened, the
         title, one line under it, when. Unread is bold. Nothing else, and no
@@ -57,10 +57,14 @@
           </span>
           <span class="min-w-0 flex-1">
             <span class="block text-highlighted" :class="notification.read_at ? 'font-medium' : 'font-semibold'">{{ notification.title }}</span>
-            <span v-if="notification.message" class="mt-0.5 line-clamp-2 block text-sm text-muted">{{ notification.message }}</span>
+            <span v-if="notification.message" class="mt-0.5 line-clamp-2 text-sm text-muted">{{ notification.message }}</span>
             <span class="mt-1 block text-sm text-dimmed">{{ formatRelativeTime(notification.created_at) }}</span>
           </span>
         </button>
+      </div>
+      <div v-if="pageCursors.length || data?.next_cursor" class="mt-6 flex justify-between gap-4">
+        <UButton label="Newer" color="neutral" variant="outline" :disabled="!pageCursors.length || status === 'pending'" @click="pageCursors.pop()" />
+        <UButton label="Older" color="neutral" variant="outline" :disabled="!data?.next_cursor || status === 'pending'" @click="olderNotifications" />
       </div>
     </div>
   </div>
@@ -91,6 +95,7 @@ interface DashboardNotification {
 interface NotificationResponse {
   notifications: DashboardNotification[]
   unread_count: number
+  next_cursor: string | null
 }
 
 const isNotificationResponse = (value: unknown): value is NotificationResponse =>
@@ -109,12 +114,15 @@ const isNotificationResponse = (value: unknown): value is NotificationResponse =
     && (notification.read_at === null || typeof notification.read_at === 'string'),
   )
   && Number.isSafeInteger(value.unread_count) && Number(value.unread_count) >= 0
+  && (value.next_cursor === null || (typeof value.next_cursor === 'string' && value.next_cursor.length > 0))
 
 // Keyed by scope, so switching organization or to the personal inbox reads that list.
+const pageCursors = ref<string[]>([])
+const pageCursor = computed(() => pageCursors.value.at(-1))
 const { data, error: loadError, status, refresh: refreshNotifications } = await useAsyncData(
-  () => `dashboard-notifications:${props.personalScope ? 'personal' : dashboardScope.value?.orgSlug ?? ''}`,
+  () => `dashboard-notifications:${props.personalScope ? 'personal' : dashboardScope.value?.orgSlug ?? ''}:${pageCursor.value ?? ''}`,
   () => notificationApi.value<NotificationResponse>('/api/dashboard/notifications', {
-    query: { limit: 50, ...notificationQuery.value },
+    query: { after: pageCursor.value, ...notificationQuery.value },
     validate: isNotificationResponse,
   }),
 )
@@ -122,6 +130,10 @@ const notifications = computed(() => data.value?.notifications ?? [])
 const unreadCount = computed(() => data.value?.unread_count ?? 0)
 const markingAll = ref(false)
 const actionError = ref<string | null>(null)
+
+function olderNotifications() {
+  if (data.value?.next_cursor) pageCursors.value.push(data.value.next_cursor)
+}
 
 /** The mark for what happened: a message, a booking, a review, a person. */
 function iconFor(template: string) {
@@ -170,7 +182,7 @@ async function markAllRead() {
     // still in flight, which a local rewrite of the rows would not.
     await refreshNotifications()
   } catch (error) {
-    actionError.value = getErrorMessage(error, 'Updates could not be marked as read.')
+    actionError.value = getErrorMessage(error, 'Notifications could not be marked as read.')
   } finally {
     markingAll.value = false
   }
@@ -199,6 +211,7 @@ watch(realtime.connectionEpoch, (epoch) => {
 })
 
 watch(() => [props.personalScope, dashboardScope.value?.orgSlug], () => {
+  pageCursors.value = []
   actionError.value = null
 })
 </script>

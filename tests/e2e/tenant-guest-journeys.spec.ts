@@ -530,9 +530,14 @@ for (const target of [
       const events = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: {
         organization_id: target.org, mode: 'events', filters: { event_name: 'product_view', entity_id: product.id },
       } })
-      expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows).toContainEqual(expect.objectContaining({
+      const eventRows = mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows
+      expect(eventRows).toContainEqual(expect.objectContaining({
         event_id: pausedViewId, subject: { type: 'product', id: product.id },
       }))
+      const pausedEvent = eventRows.find(row => row.event_id === pausedViewId)
+      expect(pausedEvent).not.toHaveProperty('actor')
+      expect(pausedEvent).not.toHaveProperty('properties')
+      expect(pausedEvent).not.toHaveProperty('metadata')
     } finally {
       expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)
     }

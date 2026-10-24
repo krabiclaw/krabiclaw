@@ -31,7 +31,7 @@
         </template>
       </UAlert>
 
-      <h2 class="text-base font-semibold text-highlighted">
+      <h2 v-if="!personalScope || visibleItems.length" class="text-base font-semibold text-highlighted">
         {{ heading }}
       </h2>
 
@@ -161,7 +161,8 @@ const emptyTitle = computed(() => activeRange.value === 'today'
   : props.personalScope ? 'No upcoming bookings' : 'Nothing upcoming')
 const emptyDescription = computed(() => hasActiveFilters.value && !props.personalScope
   ? 'Try adjusting the filters.'
-  : activeRange.value === 'today' ? 'Your scheduled activity and outstanding work will appear here.' : 'Future scheduled activity will appear here.')
+  : props.personalScope ? 'Your booked activity will appear here.'
+    : activeRange.value === 'today' ? 'Your scheduled activity and outstanding work will appear here.' : 'Future scheduled activity will appear here.')
 
 function resetUpcoming() {
   upcomingEpoch += 1

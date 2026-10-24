@@ -3,19 +3,21 @@
     id="organization-blog-post-category"
     title="Category"
     :saving="editor.saving.value"
+    :disabled="editor.saveDisabled.value || Boolean(categoriesFailure) || !editor.form.category_id"
     :error="editor.actionError.value || editor.loadError.value || categoriesFailure"
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <div v-if="editor.post.value" class="space-y-6">
+    <div v-if="editor.post.value" class="space-y-6" :inert="editor.saving.value">
       <!-- A category belongs to one collection, so choosing the collection is choosing whose categories are offered. -->
       <UFormField label="Collection">
-        <USelect v-model="editor.form.collection" :items="editor.collectionOptions" value-key="value" class="w-full" />
+        <USelect v-model="editor.form.collection" :items="editor.collectionOptions" value-key="value" :disabled="editor.saving.value" class="w-full" />
       </UFormField>
       <UFormField label="Category" required>
         <USelect
           v-model="editor.form.category_id"
           :items="categoryOptions"
+          :disabled="editor.saving.value"
           value-key="value"
           :placeholder="editor.categories.value?.length === 0 ? 'No categories yet' : 'Choose a category'"
           class="w-full"

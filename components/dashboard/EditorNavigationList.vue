@@ -93,8 +93,8 @@
             />{{ item.label }}</span>
             <span
               v-if="item.summary && !item.card"
-              class="mt-1 block"
-              :class="[variant === 'cards' ? 'text-base' : 'line-clamp-2 text-sm', item.placeholder ? (variant === 'cards' ? 'text-muted' : 'italic text-dimmed') : 'text-muted']"
+              class="mt-1 line-clamp-2"
+              :class="[variant === 'cards' ? 'text-base' : 'text-sm', item.placeholder ? (variant === 'cards' ? 'text-muted' : 'italic text-dimmed') : 'text-muted']"
             ><span
               v-if="item.status && variant !== 'cards'"
               class="me-1.5 inline-block size-2 rounded-full align-middle"
@@ -122,7 +122,7 @@
               >{{ item.card.empty }}</span>
               <span class="block px-4 py-3">
                 <span class="block truncate text-sm font-semibold text-highlighted">{{ item.card.title }}</span>
-                <span v-if="item.card.description" class="mt-0.5 line-clamp-2 block text-sm text-muted">{{ item.card.description }}</span>
+                <span v-if="item.card.description" class="mt-0.5 line-clamp-2 text-sm text-muted">{{ item.card.description }}</span>
               </span>
             </span>
           </span>

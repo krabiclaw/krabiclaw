@@ -70,8 +70,12 @@ Google's form asks for the use case, a design document and a demo. State:
   and conversions). Tokens are the customer's, handled by Better Auth. No
   scraping, no automated bidding beyond the customer's explicit request.
 - **Demo:** the OAuth verification recording for the `adwords` scope,
-  https://youtu.be/-ItMxoHlCus (unlisted on the KrabiClaw YouTube channel,
-  2026-10-21; it replaces the rejected slideshow https://www.youtube.com/watch?v=H1g2bU4jbkY).
+  https://youtu.be/wdpBcTvmMRQ (unlisted on the KrabiClaw YouTube channel,
+  2026-10-24). It replaces https://youtu.be/-ItMxoHlCus, whose consent screen
+  also listed Calendar access the owner's Google account had granted earlier;
+  Google read that as a requested `calendar.events` scope. Record consent from
+  a Google account with no earlier Krabiclaw grant (remove it at
+  myaccount.google.com/connections first).
   Recorded on production in the owner's Chrome and cut with HyperFrames:
   NCLS Integrations → Google Ads disconnect and connect, Google's consent
   screen with the client ID and the adwords scope, the account pick

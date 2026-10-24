@@ -12,7 +12,7 @@
         <strong class="text-sm text-highlighted">{{ item.row.author_name }}</strong>
         <UBadge color="warning" variant="soft">{{ item.row.rating }} stars</UBadge>
         <UBadge :color="STATUS_COLORS[item.row.status]" variant="soft">{{ REVIEW_STATUS_LABELS[item.row.status] }}</UBadge>
-        <UBadge v-if="item.row.collection_method !== null" color="neutral" variant="subtle">{{ COLLECTION_METHOD_LABELS[item.row.collection_method] }}</UBadge>
+        <UBadge v-if="item.row.collection_method !== null && item.row.collection_method !== 'migration'" color="neutral" variant="subtle">{{ COLLECTION_METHOD_LABELS[item.row.collection_method] }}</UBadge>
       </div>
       <p v-if="item.row.title" class="mt-2 text-sm font-semibold text-highlighted">{{ item.row.title }}</p>
       <p class="mt-1 line-clamp-2 text-sm text-muted">{{ item.row.content }}</p>

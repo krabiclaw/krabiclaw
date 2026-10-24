@@ -119,6 +119,20 @@ test('Product batches validate and commit atomically for a 100-item catalog', as
         })
         expect(mcpData<{ products: unknown[] }>(await response.json()).products).toHaveLength(50)
       }
+      const collectionStateBefore = await request.get(editorUrl)
+      expect(collectionStateBefore.status()).toBe(200)
+      const beforeUnprotectedMove = await collectionStateBefore.json()
+      const unprotectedMove = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'set_collection_products', args: {
+          organization_id: organizationId, collection_id: collectionIds[0], product_ids: [],
+          move_to: { collection_id: collectionIds[1], expected_product_ids: created.slice(50).map(product => product.id) },
+        },
+      })
+      expect(unprotectedMove.status()).toBe(200)
+      expect((await unprotectedMove.json()).result.isError).toBe(true)
+      const collectionStateAfter = await request.get(editorUrl)
+      expect(collectionStateAfter.status()).toBe(200)
+      expect(await collectionStateAfter.json()).toEqual(beforeUnprotectedMove)
       await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'set_product_location',
         args: { organization_id: organizationId, product_id: created[0]!.id, location_id: locationId, active: true, published: true },

@@ -38,7 +38,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
     const context = await call<{ context: { organization_slug: string } }>('get_organization', {})
     const orgSlug = context.context.organization_slug
     expect(orgSlug).toBeTruthy()
-    const read = (id: string) => call<{ guest_user_id: string | null; guest: { email: string; phone: string | null }; provenance: { source: string; external_reference: string; guest_acknowledgement: boolean }; record: { id: string; status: string; party_size: number }; updated_at: string }>('get_product_booking', { operational_booking_id: id })
+    const read = (id: string) => call<{ guest: { email: string; phone: string | null }; provenance: { source: string; external_reference: string; guest_acknowledgement: boolean }; record: { id: string; status: string; party_size: number }; updated_at: string }>('get_product_booking', { operational_booking_id: id })
     const configure = async (confirmation_mode: 'review' | 'instant', online_payment_required = false) => {
       const res = await request.put(`${editor}/booking`, { data: { duration_minutes: 120, default_capacity: 8, confirmation_mode, online_payment_required } })
       expect(res.status(), await res.text()).toBe(200)
@@ -85,7 +85,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(available[0]!.remaining).not.toBeNull()
       expect(afterClaim.sessions.find(s => s.id === available[0]!.id)!.remaining).toBe(available[0]!.remaining! - 1)
       const stored = await read(created.operational_booking_id)
-      expect(stored.guest_user_id).toBeNull()
+      expect(stored).not.toHaveProperty('guest_user_id')
       expect(stored.guest.email).toBe(args.guest_email)
       expect(stored.guest.phone).toBeNull()
       expect(stored.provenance).toMatchObject({ source: 'operator', external_reference: args.external_reference, guest_acknowledgement: false })
@@ -96,7 +96,9 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
         listedBooking = page.bookings.find(row => row.operational_booking_id === created.operational_booking_id)
         cursor = page.page_info.next_cursor ?? undefined
       } while (!listedBooking && cursor)
-      expect(listedBooking).toMatchObject({ operational_booking_id: created.operational_booking_id, request_id: created.request_id, guest: stored.guest, provenance: stored.provenance })
+      expect(listedBooking).toMatchObject({ operational_booking_id: created.operational_booking_id, request_id: created.request_id, guest: { name: args.guest_name }, provenance: stored.provenance })
+      expect(listedBooking!.guest).toEqual({ name: args.guest_name })
+      expect(listedBooking).not.toHaveProperty('user_id')
       expect(listedBooking).not.toHaveProperty('guest_json')
       expect(listedBooking).not.toHaveProperty('provenance_json')
 
@@ -128,6 +130,47 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(accepted.status(), await accepted.text()).toBe(200)
       const changed = await read(created.operational_booking_id)
       expect(changed.record).toMatchObject({ id: created.operational_booking_id, status: 'pending', party_size: 2 })
+      const acceptedThread = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.request_id}`)
+      expect(acceptedThread.status()).toBe(200)
+      const acceptedThreadState = (await acceptedThread.json()).thread
+      const acceptedNotifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
+      expect(acceptedNotifications.status()).toBe(200)
+      const acceptedDeliveries = (await acceptedNotifications.json()).deliveries.filter((row: { request_id: string }) => row.request_id === created.request_id)
+      expect((await call<{ change_status: string }>('request_product_booking_change', proposals)).change_status).toBe('accepted')
+      expect(await read(created.operational_booking_id)).toEqual(changed)
+      const acceptedReplayThread = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.request_id}`)
+      expect(acceptedReplayThread.status()).toBe(200)
+      expect((await acceptedReplayThread.json()).thread).toEqual(acceptedThreadState)
+      const acceptedReplayNotifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
+      expect(acceptedReplayNotifications.status()).toBe(200)
+      expect((await acceptedReplayNotifications.json()).deliveries.filter((row: { request_id: string }) => row.request_id === created.request_id)).toEqual(acceptedDeliveries)
+
+      const declineProposal = { ...proposals, session_id: available[2]!.id, expected_updated_at: changed.updated_at, idempotency_key: crypto.randomUUID() }
+      expect((await call<{ change_status: string }>('request_product_booking_change', declineProposal)).change_status).toBe('awaiting_guest_acceptance')
+      const declineDetail = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.request_id}`)
+      expect(declineDetail.status()).toBe(200)
+      const declineEntries = (await declineDetail.json()).thread.entries.filter((entry: { id: string; eventName: string }) => entry.eventName === 'booking_change.requested' && entry.id !== changeId)
+      expect(declineEntries).toHaveLength(1)
+      const declineId = declineEntries[0].id
+      const declineToken = createHmac('sha256', 'local-playwright-email-reply-secret').update(`booking-change:v1:${created.request_id}:${declineId}`).digest('hex')
+      const declined = await request.post(`${baseURL}/api/public/booking-changes/${created.request_id}/${declineId}`, { headers: { authorization: `Bearer ${declineToken}` }, data: { decision: 'decline' } })
+      expect(declined.status(), await declined.text()).toBe(200)
+      const declinedThread = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.request_id}`)
+      expect(declinedThread.status()).toBe(200)
+      const declinedThreadState = (await declinedThread.json()).thread
+      const declinedRecord = await read(created.operational_booking_id)
+      expect(declinedRecord.record).toEqual(changed.record)
+      const declinedNotifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
+      expect(declinedNotifications.status()).toBe(200)
+      const declinedDeliveries = (await declinedNotifications.json()).deliveries.filter((row: { request_id: string }) => row.request_id === created.request_id)
+      expect((await call<{ change_status: string }>('request_product_booking_change', declineProposal)).change_status).toBe('declined')
+      expect(await read(created.operational_booking_id)).toEqual(declinedRecord)
+      const declinedReplayThread = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${created.request_id}`)
+      expect(declinedReplayThread.status()).toBe(200)
+      expect((await declinedReplayThread.json()).thread).toEqual(declinedThreadState)
+      const declinedReplayNotifications = await request.get(`${baseURL}/api/dev/notifications?organization_id=${org}&since=${encodeURIComponent(since)}`, { headers: devLoginHeaders() })
+      expect(declinedReplayNotifications.status()).toBe(200)
+      expect((await declinedReplayNotifications.json()).deliveries.filter((row: { request_id: string }) => row.request_id === created.request_id)).toEqual(declinedDeliveries)
 
       const confirmation = { operational_booking_id: created.operational_booking_id, idempotency_key: crypto.randomUUID() }
       expect((await call<{ ok: boolean }>('confirm_product_booking', confirmation)).ok).toBe(true)
@@ -182,7 +225,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const publicCreated = await publicResponse.json() as Created
       ids.push(publicCreated.operational_booking_id)
       expect(publicCreated).toMatchObject({ success: true, status: instant.status, booking_id: publicCreated.request_id })
-      expect((await read(publicCreated.operational_booking_id)).guest_user_id).toBe('user-e2e-pottery-owner')
+      expect(await read(publicCreated.operational_booking_id)).not.toHaveProperty('guest_user_id')
       const foreign = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product_booking', args: { organization_id: 'org-demo', operational_booking_id: instant.operational_booking_id } })
       expect(foreign.status()).toBe(200)
       expect((await foreign.json()).result.isError).toBe(true)

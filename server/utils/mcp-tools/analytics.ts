@@ -26,7 +26,7 @@ export const ANALYTICS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'query_organization_analytics',
-    description: 'Read unsampled filtered events, sessions, breakdowns or daily summaries. Coverage reports missing facts; use next_cursor with the same query to continue.',
+    description: 'Read unsampled filtered events, sessions, breakdowns or daily summaries. Coverage reports missing facts; use next_cursor with the same query to continue. Event results omit unrestricted actor, custom-properties and metadata payloads.',
     domain: 'analytics',
     minimumRole: 'admin',
     required: ['mode'],
@@ -75,7 +75,7 @@ export async function handleAnalyticsTools(ctx: McpExecutorContext): Promise<unk
   if (ctx.toolName === 'query_organization_analytics') {
     const args = ctx.args
     try {
-      return await queryOrganizationAnalytics(ctx.organization.db, {
+      const result = await queryOrganizationAnalytics(ctx.organization.db, {
         organizationId: ctx.organization.organizationId,
         mode: optionalString(args, 'mode') as AnalyticsQueryInput['mode'],
         startDate: optionalString(args, 'start_date') ?? undefined,
@@ -90,6 +90,7 @@ export async function handleAnalyticsTools(ctx: McpExecutorContext): Promise<unk
         outcomeEvent: optionalString(args, 'outcome_event') ?? undefined,
         cursorSecret: ctx.organization.env.BETTER_AUTH_SECRET,
       })
+      return { ...result, rows: result.rows.map(({ actor: _actor, properties: _properties, metadata: _metadata, ...facts }) => facts) }
     } catch (error) {
       if (error instanceof AnalyticsQueryError) throw mcpProtocolError(MCP_ERROR.invalidParams, error.message)
       throw error

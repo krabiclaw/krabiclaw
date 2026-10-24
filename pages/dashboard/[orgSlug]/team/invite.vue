@@ -39,14 +39,14 @@ const BASE_ROLE_OPTIONS = [
 // Owner is offered only to an owner, as Better Auth's creatorRole rule has it; enforced again server-side.
 const roleOptions = computed(() => (isOwner.value ? [...BASE_ROLE_OPTIONS, { label: 'Owner', value: 'owner' }] : BASE_ROLE_OPTIONS))
 
-const inviteForm = reactive({ email: '', role: 'admin' })
+const inviteForm = reactive({ email: '', role: 'member' })
 const inviting = ref(false)
 const inviteError = ref<string | null>(null)
 const savedInvitation = ref<string | null>(null)
 watch(() => [inviteForm.email,inviteForm.role], () => { savedInvitation.value = null })
 
 function resetInvite() {
-  Object.assign(inviteForm, { email: '', role: 'admin' })
+  Object.assign(inviteForm, { email: '', role: 'member' })
   inviteError.value = null
   savedInvitation.value = null
 }

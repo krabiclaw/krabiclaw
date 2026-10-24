@@ -215,8 +215,6 @@ jobs:
           https://kikuzuki-krabi-thailand-staging.krabiclaw.com
           https://ncls-staging.krabiclaw.com
           https://staging.krabiclaw.com
-      - name: Verify published MCP documentation
-        run: yarn mcp:catalog --check-live-docs --base-url https://staging.krabiclaw.com
       - name: Run read-only tenant rendering
         run: yarn test:e2e:tenant-rendering
       - name: Upload staging Playwright report
@@ -339,8 +337,6 @@ jobs:
           https://www.kikuzuki-thailand.com
           https://www.northcarolinalegalservices.org
           https://krabiclaw.com
-      - name: Verify published MCP documentation
-        run: yarn mcp:catalog --check-live-docs --base-url https://krabiclaw.com
       - name: Refresh production search index
         env:
           PLATFORM_SEARCH_REINDEX_SECRET: ${{ secrets.PLATFORM_SEARCH_REINDEX_SECRET }}

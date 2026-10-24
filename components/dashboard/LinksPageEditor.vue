@@ -6,31 +6,15 @@
   -->
   <DashboardIndexPanel id="organization-links" title="Links page" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
     <template #right>
-      <UButton
-        color="neutral"
-        variant="soft"
-        :icon="copiedUrl ? 'i-lucide-check' : 'i-lucide-copy'"
-        :disabled="!publicLinksUrl"
-        @click="copyPublicUrl"
-      >
-        {{ copiedUrl ? 'Copied' : 'Copy URL' }}
-      </UButton>
-      <UButton
-        color="neutral"
-        variant="soft"
-        icon="i-lucide-external-link"
-        :to="publicLinksUrl || undefined"
-        target="_blank"
-        :disabled="!publicLinksUrl"
-      >
-        Open
-      </UButton>
+      <UTooltip v-if="publicLinksUrl" text="Preview">
+        <UButton ref="previewButton" color="neutral" variant="ghost" icon="i-lucide-eye" aria-label="Preview" :to="previewPath" :disabled="saving" class="size-10 rounded-full" data-testid="links-preview" />
+      </UTooltip>
       <DashboardResourceLocalization
         v-if="form.id"
         :organization-id="organizationId"
         resource-type="content_document"
         :resource-id="form.id"
-        resource-label="links page"
+        :resource-label="data?.page.title || 'Links page'"
         :fields="linksPageLocalizationFields"
         :load-values="loadLinksLocalization"
         :save-values="saveLinksLocalization"
@@ -48,6 +32,7 @@
     />
     <EditorNavigationList v-else :groups="navigationGroups" :active-item="openSection" />
   </DashboardIndexPanel>
+  <DashboardContentPreview v-model:open="previewOpen" title="Links page preview" :content-title="form.title" :src="publicLinksUrl" :public-url="publicLinksUrl" :viewport="previewViewport" :error="previewFailure" @update:viewport="changePreviewViewport" @after:leave="restorePreviewFocus" />
 </template>
 
 <script lang="ts">
@@ -102,19 +87,21 @@ export const LINK_STATUS_OPTIONS = [
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
+import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
 import { getErrorMessage } from '~/utils/errors'
 
 const dashboardApi = useDashboardApi()
 const route = useRoute()
 
-type ApiLinksPage = LinksPage
+type ApiLinksPage = LinksPage & { path: string }
 
-const isLinksResponse = (
+const isLinksDocument = (
   value: unknown,
 ): value is { page: ApiLinksPage; items: LinkItem[] } =>
   isRecord(value)
   && isRecord(value.page)
   && typeof value.page.title === 'string'
+  && typeof value.page.path === 'string'
   && Array.isArray(value.items)
   && value.items.every(item =>
     isRecord(item)
@@ -125,17 +112,17 @@ const isLinksResponse = (
     && typeof item.status === 'string',
   )
 
+const isLinksResponse = (value: unknown): value is { page: ApiLinksPage; items: LinkItem[]; public_url: string | null } =>
+  isLinksDocument(value) && ('public_url' in value && (value.public_url === null || typeof value.public_url === 'string'))
+
 const isLinksWriteResponse = (
   value: unknown,
 ): value is { page: ApiLinksPage; items: LinkItem[]; created_item_ids: string[] } =>
-  isLinksResponse(value)
+  isLinksDocument(value)
   && Array.isArray((value as Record<string, unknown>).created_item_ids)
   && ((value as Record<string, unknown>).created_item_ids as unknown[]).every(id => typeof id === 'string')
 
 const organizationId = await useDashboardOrganizationId()
-const dashboard = useDashboardOrganization()
-const copiedUrl = ref(false)
-let copyTimer: ReturnType<typeof setTimeout> | undefined
 const saving = ref(false)
 const errorMessage = ref('')
 
@@ -153,9 +140,9 @@ const linksPageLocalizationFields = computed(() => [
 ])
 const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
 
-const { data, error } = await useAsyncData(
+const { data, error, refresh } = await useAsyncData(
   `links-page-editor-${organizationId}`,
-  () => dashboardApi<{ page: ApiLinksPage; items: LinkItem[] }>(
+  () => dashboardApi<{ page: ApiLinksPage; items: LinkItem[]; public_url: string | null }>(
     `/api/editor/organizations/${organizationId}/links-page`,
     { validate: isLinksResponse },
   ),
@@ -222,25 +209,10 @@ watch(data, (value) => {
 }, { immediate: true })
 
 const loadError = computed(() => (error.value ? getErrorMessage(error.value, 'Links page request failed') : null))
-const publicLinksUrl = computed(() => {
-  const base = dashboard.organization.value?.public_url || ''
-  return base ? `${base.replace(/\/+$/, '')}/links` : ''
-})
-
-async function copyPublicUrl() {
-  if (!publicLinksUrl.value) return
-  errorMessage.value = ''
-  try {
-    await navigator.clipboard.writeText(publicLinksUrl.value)
-    copiedUrl.value = true
-    if (copyTimer) clearTimeout(copyTimer)
-    copyTimer = setTimeout(() => {
-      copiedUrl.value = false
-    }, 1500)
-  } catch {
-    errorMessage.value = 'Failed to copy to clipboard'
-  }
-}
+const publicLinksUrl = computed(() => data.value?.public_url ?? null)
+const { previewButton, previewPath, previewOpen, previewViewport, previewFailure, changePreviewViewport, restorePreviewFocus } = useDashboardContentPreview(
+  computed(() => loadError.value || (!publicLinksUrl.value ? 'The saved Links page is not publicly available.' : '')),
+)
 
 /**
  * The page and its links are one document behind one endpoint, so a link's own
@@ -264,7 +236,8 @@ async function persist(nextItems: Array<Omit<LinkItem, 'id'> & { id?: string }>)
     },
     validate: isLinksWriteResponse,
   })
-  data.value = { page: response.page, items: response.items }
+  await refresh()
+  if (error.value) throw error.value
   return response
 }
 

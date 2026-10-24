@@ -49,7 +49,6 @@
   --tenant-primary-100:     color-mix(in oklab, var(--site-surface) 60%, var(--site-ground));
   --tenant-accent-100:      color-mix(in oklab, var(--site-surface) 45%, var(--site-ground));
   --tenant-accent-200:      color-mix(in oklab, var(--site-text) 7%, var(--site-surface));
-  --ui-text-inverted:       var(--site-text);
   --site-button-hover-bg:   color-mix(in oklab, var(--site-button-bg) 80%, white);
 }
 

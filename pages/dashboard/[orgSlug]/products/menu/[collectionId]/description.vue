@@ -2,7 +2,6 @@
   <DashboardLeafPanel
     id="menu-section-description"
     title="Description"
-    lead="What introduces the section on your site, under its name and picture, and what search engines read for it."
     :saving="c.saving.value"
     :disabled="c.saveDisabled.value"
     :save-label="c.saveLabel.value"
@@ -11,16 +10,19 @@
     @save="c.save"
   >
     <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/2000 available</p>
-    <UTextarea v-model="c.form.description" aria-label="Description" :rows="10" :maxlength="PRODUCT_LIMITS.collectionDescription" autofocus class="w-full" />
+    <UTextarea ref="descriptionTextarea" v-model="c.form.description" aria-label="Description" variant="none" :rows="1" autoresize :maxlength="PRODUCT_LIMITS.collectionDescription" autofocus class="w-full" />
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { collectionEditorKey } from '../[collectionId].vue'
+import { useResizeObserver } from '@vueuse/core'
 
 definePageMeta({ layout: 'dashboard' })
 
 const c = inject(collectionEditorKey)!
+const descriptionTextarea = useTemplateRef('descriptionTextarea')
+useResizeObserver(() => descriptionTextarea.value?.textareaRef, () => descriptionTextarea.value?.autoResize())
 const charactersRemaining = computed(() => PRODUCT_LIMITS.collectionDescription - (c.form.description?.length ?? 0))
 </script>

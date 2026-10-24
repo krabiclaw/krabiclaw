@@ -74,7 +74,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
 
     expect((await page.goto(`${catalog}/menu?location_id=loc-demo`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
-    await expect(page.locator('#dashboard-panel-catalog-menu').getByRole('link', { name: source.name })).toHaveAttribute('href', `${catalog}/menu/${source.id}`)
+    await expect(page.locator('#dashboard-panel-catalog-menu').getByRole('link', { name: source.name })).toHaveAttribute('href', `${catalog}/menu/${source.id}?kind=dish`)
 
     // Section order belongs to its explicit scope. Moving a shared section
     // stays a draft until Done and leaves the location's own section alone.
@@ -146,9 +146,9 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     expect(savedSections.filter(section => section.location_id === null).map(section => section.id)).toEqual(sharedBefore)
     expect(savedSections.filter(section => section.location_id === 'loc-demo')).toEqual(beforeSections.filter(section => section.location_id === 'loc-demo'))
 
-    // Old shared links can still carry a location query. It may scope prices,
+    // Menu supplies its dish context explicitly. A location may scope prices,
     // but it must never filter the membership this editor replaces.
-    expect((await page.goto(`${catalog}/menu/${source.id}?location_id=loc-demo`))?.status()).toBe(200)
+    expect((await page.goto(`${catalog}/menu/${source.id}?location_id=loc-demo&kind=dish`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     const panel = page.locator('#dashboard-panel-menu-section')
     const rows = panel.locator('span[data-testid^="product-"]')
@@ -241,7 +241,7 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     await expect(panel.getByTestId(`product-${located.id}`)).toHaveCount(0)
     await expect(panel.getByTestId(`product-${unassigned.id}`)).toBeVisible()
     await page.setViewportSize({ width: 390, height: 844 })
-    expect((await page.goto(`${catalog}/menu/${target.id}?location_id=loc-demo`))?.status()).toBe(200)
+    expect((await page.goto(`${catalog}/menu/${target.id}?location_id=loc-demo&kind=dish`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     await expect(panel.getByTestId(`product-${located.id}`)).toBeVisible()
     await expect(panel.getByTestId('editor-card-name')).toContainText(target.name)
@@ -249,10 +249,26 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
     // The dish's plural membership editor uses the same section operation;
     // removing one membership retains its other section and location offering.
     await page.setViewportSize({ width: 1440, height: 900 })
+    await panel.getByTestId(`product-${located.id}`).click()
+    const membershipCard = page.locator('#dashboard-panel-product').getByTestId('editor-card-collections')
+    await expect(membershipCard).toHaveAttribute('href', `${catalog}/${located.id}/collections?location_id=loc-demo&kind=dish`)
+    await membershipCard.click()
+    const memberships = page.locator('#dashboard-panel-product-collections')
+    await expect(memberships.getByRole('link', { name: target.name })).toHaveAttribute('href', `${catalog}/menu/${target.id}?location_id=loc-demo&kind=dish`)
+
+    // Entering the same dish without Menu context must not narrow the target
+    // collection's chooser to dishes solely because this member is a dish.
     expect((await page.goto(`${catalog}/${located.id}/collections`))?.status()).toBe(200)
     await waitForNuxtHydration(page)
-    const memberships = page.locator('#dashboard-panel-product-collections')
     await expect(memberships.getByRole('link', { name: target.name })).toHaveAttribute('href', `${catalog}/menu/${target.id}?location_id=loc-demo`)
+    await memberships.getByRole('link', { name: target.name }).click()
+    await expect(page).toHaveURL(`${catalog}/menu/${target.id}?location_id=loc-demo`)
+    await panel.getByRole('button', { name: 'Add item', exact: true }).click()
+    const generalChooser = page.getByRole('dialog', { name: 'Add items', exact: true })
+    await expect(generalChooser.getByRole('textbox', { name: 'Search items', exact: true })).toBeVisible()
+    await generalChooser.getByRole('button', { name: 'Close Add items', exact: true }).click()
+    expect((await page.goto(`${catalog}/${located.id}/collections`))?.status()).toBe(200)
+    await waitForNuxtHydration(page)
     await memberships.getByRole('button', { name: 'Add to section', exact: true }).click()
     const addMembership = page.getByRole('dialog', { name: 'Add to section', exact: true })
     await addMembership.getByText(sharedTarget.name, { exact: true }).click()

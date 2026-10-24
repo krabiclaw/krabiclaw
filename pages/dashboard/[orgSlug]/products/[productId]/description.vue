@@ -24,14 +24,18 @@
     @save="p.save"
   >
     <template v-if="p.isNew.value || p.product.value">
+      <UButton v-if="p.saveError.value" label="Use saved details" color="neutral" variant="outline" :disabled="p.saving.value" class="mb-5" @click="p.revert()" />
       <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/{{ PRODUCT_LIMITS.description }} available</p>
-      <UTextarea ref="descriptionTextarea" v-model="p.form.description" :aria-label="p.sectionLabels.description" variant="none" :rows="1" :maxlength="PRODUCT_LIMITS.description" :ui="{ base: 'resize-none' }" autofocus class="w-full" />
+      <UTextarea ref="descriptionTextarea" v-model="p.form.description" :aria-label="p.sectionLabels.description" variant="none" :rows="1" :maxlength="PRODUCT_LIMITS.description" autoresize :ui="{ base: 'resize-none' }" autofocus class="w-full" />
+      <UFormField v-if="introduction" label="Short introduction" hint="Optional" class="mt-8">
+        <UInput :model-value="p.textValue(introduction)" class="w-full" @update:model-value="p.setDetail(introduction, $event)" />
+      </UFormField>
     </template>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
-import { useTextareaAutosize } from '@vueuse/core'
+import { useResizeObserver } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
@@ -46,7 +50,8 @@ const router = useRouter()
 const isStay = computed(() => p.product.value?.kind === 'stay')
 const charactersRemaining = computed(() => PRODUCT_LIMITS.description - p.form.description.length)
 const descriptionTextarea = useTemplateRef('descriptionTextarea')
-useTextareaAutosize({ element: computed(() => descriptionTextarea.value?.textareaRef), input: computed(() => p.form.description) })
+useResizeObserver(() => descriptionTextarea.value?.textareaRef, () => descriptionTextarea.value?.autoResize())
+const introduction = computed(() => p.definitions.value.find(field => field.key === 'tagline'))
 const descriptionFields = productDetailFields('stay').filter(field => (STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(field.key))
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'description',

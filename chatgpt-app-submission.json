@@ -20,18 +20,6 @@
         "destructive_justification": "Adds a disabled website language for private authoring or refreshes its stored catalog label; existing publication status and translations are preserved."
       }
     },
-    "add_stay_photo_room": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Adds an explicitly authored room or space to one home’s photo tour and returns its created ID. Leaves bedroom, bed and bathroom counts, amenities, Product photos and library files unchanged.",
-        "open_world_justification": "Adds a room used by the home’s public photo tour; incomplete tours retain the complete ordinary gallery.",
-        "destructive_justification": "Adds an explicitly authored room or space to one home’s photo tour and returns its created ID. Leaves bedroom, bed and bathroom counts, amenities, Product photos and library files unchanged."
-      }
-    },
     "append_content_block": {
       "annotations": {
         "readOnlyHint": false,
@@ -42,6 +30,18 @@
         "read_only_justification": "Inserts one block into the selected blog article or tenant page after a named block, leaving every other block as it is.",
         "open_world_justification": "Adds content visible to website visitors when the selected article or page is published.",
         "destructive_justification": "Inserts one block into the selected blog article or tenant page after a named block, leaving every other block as it is."
+      }
+    },
+    "assign_home_photos_to_room": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Atomically changes selected Product photos’ room membership, optionally creating their destination room in the same batch. A changed expected source or missing Product photo refuses the whole move; the Product’s global photo order and library assets are retained.",
+        "open_world_justification": "Changes the home’s public photo-tour grouping without changing the selected Product photos or making provider requests.",
+        "destructive_justification": "Atomically changes selected Product photos’ room membership, optionally creating their destination room in the same batch. A changed expected source or missing Product photo refuses the whole move; the Product’s global photo order and library assets are retained."
       }
     },
     "attach_media": {
@@ -198,6 +198,18 @@
         "read_only_justification": "Creates a Google Ads Search campaign, ad group, keywords and responsive search ad in the connected account. It starts paused unless explicitly enabled; enabling can spend the account’s advertising budget.",
         "open_world_justification": "Creates a campaign in the Google Ads account the business explicitly connected. It starts paused unless enabled; enabled campaigns can spend that account’s advertising budget on Google.",
         "destructive_justification": "Creates a Google Ads Search campaign, ad group, keywords and responsive search ad in the connected account. It starts paused unless explicitly enabled; enabling can spend the account’s advertising budget."
+      }
+    },
+    "create_home_room": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Adds an explicitly authored room or space to one home’s photo tour and returns its created ID. Leaves bedroom, bed and bathroom counts, amenities, Product photos and library files unchanged.",
+        "open_world_justification": "Adds a room used by the home’s public photo tour; incomplete tours retain the complete ordinary gallery.",
+        "destructive_justification": "Adds an explicitly authored room or space to one home’s photo tour and returns its created ID. Leaves bedroom, bed and bathroom counts, amenities, Product photos and library files unchanged."
       }
     },
     "create_location": {
@@ -390,6 +402,18 @@
         "read_only_justification": "Deletes one block, and the blocks nested under it, from the selected blog article or tenant page after a version check.",
         "open_world_justification": "Removes content from the selected published article or page seen by website visitors.",
         "destructive_justification": "Deletes one block, and the blocks nested under it, from the selected blog article or tenant page after a version check."
+      }
+    },
+    "delete_home_room": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes one authored room and its photo memberships. The photos remain in the Product’s cover/gallery and media library, and appear as Additional photos.",
+        "open_world_justification": "Changes the home’s public photo-tour grouping, retaining the removed room’s pictures in Additional photos.",
+        "destructive_justification": "Deletes one authored room and its photo memberships. The photos remain in the Product’s cover/gallery and media library, and appear as Additional photos."
       }
     },
     "delete_media_asset": {
@@ -620,6 +644,18 @@
         "destructive_justification": "Reads the selected location, including operational contact and notification settings."
       }
     },
+    "get_member_public_profile": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one authorized membership’s authored host name, photo, biography, approval and shared revision, including drafts; returns null for a valid membership with no settings. It exposes no hours or Calendar data.",
+        "open_world_justification": "Reads one authorized membership’s authored host name, photo, biography, approval and shared revision, including drafts; returns null for a valid membership with no settings. It exposes no hours or Calendar data. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads one authorized membership’s authored host name, photo, biography, approval and shared revision, including drafts; returns null for a valid membership with no settings. It exposes no hours or Calendar data."
+      }
+    },
     "get_member_scheduling": {
       "annotations": {
         "readOnlyHint": true,
@@ -627,9 +663,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records.",
-        "open_world_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records."
+        "read_only_justification": "Reads authorized membership hours, time off and interval-only Calendar status, or null for a valid membership with no settings. Ordinary members can read only themselves; public profile content is read separately.",
+        "open_world_justification": "Reads authorized membership hours, time off and interval-only Calendar status, or null for a valid membership with no settings. Ordinary members can read only themselves; public profile content is read separately. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads authorized membership hours, time off and interval-only Calendar status, or null for a valid membership with no settings. Ordinary members can read only themselves; public profile content is read separately."
       }
     },
     "get_organization": {
@@ -654,18 +690,6 @@
         "read_only_justification": "Reads website analytics reports from stored aggregates and retained raw events without creating aggregates.",
         "open_world_justification": "Reads website analytics reports from stored aggregates and retained raw events without creating aggregates. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Reads website analytics reports from stored aggregates and retained raw events without creating aggregates."
-      }
-    },
-    "get_organization_media_assets": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Lists the selected organization media library and public asset URLs.",
-        "open_world_justification": "Lists the selected organization media library and public asset URLs. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists the selected organization media library and public asset URLs."
       }
     },
     "get_organization_settings": {
@@ -1016,6 +1040,18 @@
         "destructive_justification": "Lists locations accessible in the selected organization."
       }
     },
+    "list_media_assets": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Lists the selected organization media library and public asset URLs.",
+        "open_world_justification": "Lists the selected organization media library and public asset URLs. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Lists the selected organization media library and public asset URLs."
+      }
+    },
     "list_message_templates": {
       "annotations": {
         "readOnlyHint": true,
@@ -1148,18 +1184,6 @@
         "destructive_justification": "Lists the products of the selected organization."
       }
     },
-    "list_reservation_inquiries": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads authorized reservation inquiries, including guest contact and reservation information.",
-        "open_world_justification": "Reads authorized reservation inquiries, including guest contact and reservation information. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads authorized reservation inquiries, including guest contact and reservation information."
-      }
-    },
     "list_scheduled_guest_messages": {
       "annotations": {
         "readOnlyHint": true,
@@ -1196,6 +1220,18 @@
         "destructive_justification": "Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after."
       }
     },
+    "list_table_reservations": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads authorized reservation inquiries, including guest contact and reservation information.",
+        "open_world_justification": "Reads authorized reservation inquiries, including guest contact and reservation information. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads authorized reservation inquiries, including guest contact and reservation information."
+      }
+    },
     "list_teams": {
       "annotations": {
         "readOnlyHint": true,
@@ -1206,18 +1242,6 @@
         "read_only_justification": "Reads Better Auth teams and their members in the selected business.",
         "open_world_justification": "Reads Better Auth teams and their members in the selected business. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Reads Better Auth teams and their members in the selected business."
-      }
-    },
-    "move_stay_photos": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Atomically changes selected Product photos’ room membership, optionally creating their destination room in the same batch. A changed expected source or missing Product photo refuses the whole move; the Product’s global photo order and library assets are retained.",
-        "open_world_justification": "Changes the home’s public photo-tour grouping without changing the selected Product photos or making provider requests.",
-        "destructive_justification": "Atomically changes selected Product photos’ room membership, optionally creating their destination room in the same batch. A changed expected source or missing Product photo refuses the whole move; the Product’s global photo order and library assets are retained."
       }
     },
     "open_dates": {
@@ -1398,18 +1422,6 @@
         "read_only_justification": "Removes a product from a location, so the location no longer offers it.",
         "open_world_justification": "Removes the selected product offering from that location’s public website surfaces.",
         "destructive_justification": "Removes a product from a location, so the location no longer offers it."
-      }
-    },
-    "remove_stay_photo_room": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Deletes one authored room and its photo memberships. The photos remain in the Product’s cover/gallery and media library, and appear as Additional photos.",
-        "open_world_justification": "Changes the home’s public photo-tour grouping, retaining the removed room’s pictures in Additional photos.",
-        "destructive_justification": "Deletes one authored room and its photo memberships. The photos remain in the Product’s cover/gallery and media library, and appear as Additional photos."
       }
     },
     "reorder_article_categories": {
@@ -1635,9 +1647,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Updates supplied member profile or availability fields using optimistic revision. Profile saves retain Hours and Calendar; the first Hours save explicitly supplies timezone, weekly hours and time off. Existing Booking assignments remain fixed.",
-        "open_world_justification": "Changes public booking availability and any approved member profile shown to website visitors.",
-        "destructive_justification": "Updates supplied member profile or availability fields using optimistic revision. Profile saves retain Hours and Calendar; the first Hours save explicitly supplies timezone, weekly hours and time off. Existing Booking assignments remain fixed."
+        "read_only_justification": "Updates supplied working hours or time off using the shared optimistic revision. The first Hours save explicitly supplies timezone, weekly hours and time off. Public profiles and existing booking assignments remain fixed.",
+        "open_world_justification": "Changes future public booking availability while preserving existing bookings and public host profile content.",
+        "destructive_justification": "Updates supplied working hours or time off using the shared optimistic revision. The first Hours save explicitly supplies timezone, weekly hours and time off. Public profiles and existing booking assignments remain fixed."
       }
     },
     "set_product_booking_config": {
@@ -1760,6 +1772,30 @@
         "destructive_justification": "Pauses or enables the selected campaign, or changes its daily budget in the connected Google Ads account. A shared budget change affects every campaign using that budget."
       }
     },
+    "update_home_accessibility": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes one listing accessibility answer under the latest Product updated_at value. Positive accessibility requires image evidence; selected library images join Product photos atomically while preserving existing cover, order and room groups. With no existing photos the first image becomes the cover. False or clearing an answer retains its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; other feature answers and room facts are retained.",
+        "open_world_justification": "Changes listing accessibility facts shown to guests and appends explicitly selected library evidence images to the listing on Save when needed. Appended photos may create the cover and canonical completion may refresh a derived social card through the configured media provider. False or clearing an answer retains the Product photos. Answers are host-authored and carry no review or approval state.",
+        "destructive_justification": "Changes one listing accessibility answer under the latest Product updated_at value. Positive accessibility requires image evidence; selected library images join Product photos atomically while preserving existing cover, order and room groups. With no existing photos the first image becomes the cover. False or clearing an answer retains its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; other feature answers and room facts are retained."
+      }
+    },
+    "update_home_room": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes room sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer under its version. Positive accessibility needs image evidence; selected library images join Product photos atomically without reordering existing photos. With no existing photos the first image becomes the cover. False or clearing an answer keeps its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; listing totals are retained.",
+        "open_world_justification": "Changes room facts shown to guests, adding selected amenities or accessibility evidence images to the listing on Save when needed. Appended photos may create the cover and canonical completion may refresh a derived social card through the configured media provider. False or clearing an answer retains the Product photos. Accessibility answers are host-authored and carry no review or approval state.",
+        "destructive_justification": "Changes room sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer under its version. Positive accessibility needs image evidence; selected library images join Product photos atomically without reordering existing photos. With no existing photos the first image becomes the cover. False or clearing an answer keeps its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; listing totals are retained."
+      }
+    },
     "update_location": {
       "annotations": {
         "readOnlyHint": false,
@@ -1782,6 +1818,18 @@
         "read_only_justification": "Overwrites media metadata such as alt text or category.",
         "open_world_justification": "Changes alt text that can appear with the asset on the public website; category changes organize the media library.",
         "destructive_justification": "Overwrites media metadata such as alt text or category."
+      }
+    },
+    "update_member_public_profile": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Updates supplied authored host profile fields using the shared optimistic revision, leaving Hours and Calendar unchanged. Content edits revoke prior approval unless explicitly approved by an owner/admin. Approval requires a nonblank public name; ordinary members cannot approve profiles.",
+        "open_world_justification": "Changes authored host content displayed on assigned public offerings; explicit owner/admin approval publishes it and withholding approval removes it from public display.",
+        "destructive_justification": "Updates supplied authored host profile fields using the shared optimistic revision, leaving Hours and Calendar unchanged. Content edits revoke prior approval unless explicitly approved by an owner/admin. Approval requires a nonblank public name; ordinary members cannot approve profiles."
       }
     },
     "update_menu": {
@@ -1916,18 +1964,6 @@
         "destructive_justification": "Changes a host-entered stay under its version, moves its night claims, replans pending automatic guest messages and pushes availability to its connected channel. Channel-owned stays are refused; a failed channel update reports the committed edit."
       }
     },
-    "update_stay_accessibility": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Changes one listing accessibility answer under the latest Product updated_at value. Positive accessibility requires image evidence; selected library images join Product photos atomically while preserving existing cover, order and room groups. With no existing photos the first image becomes the cover. False or clearing an answer retains its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; other feature answers and room facts are retained.",
-        "open_world_justification": "Changes listing accessibility facts shown to guests and appends explicitly selected library evidence images to the listing on Save when needed. Appended photos may create the cover and canonical completion may refresh a derived social card through the configured media provider. False or clearing an answer retains the Product photos. Answers are host-authored and carry no review or approval state.",
-        "destructive_justification": "Changes one listing accessibility answer under the latest Product updated_at value. Positive accessibility requires image evidence; selected library images join Product photos atomically while preserving existing cover, order and room groups. With no existing photos the first image becomes the cover. False or clearing an answer retains its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; other feature answers and room facts are retained."
-      }
-    },
     "update_stay_arrival_guide": {
       "annotations": {
         "readOnlyHint": false,
@@ -1938,18 +1974,6 @@
         "read_only_justification": "Saves one home’s private arrival guide; nothing is sent to a guest or published. Returns canonical Airbnb editor advisories for supplied fields that Channex cannot update on a connected listing.",
         "open_world_justification": "Saves one home’s private arrival guide; nothing is sent to a guest or published. Returns canonical Airbnb editor advisories for supplied fields that Channex cannot update on a connected listing. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Saves one home’s private arrival guide; nothing is sent to a guest or published. Returns canonical Airbnb editor advisories for supplied fields that Channex cannot update on a connected listing."
-      }
-    },
-    "update_stay_photo_room": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Changes room sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer under its version. Positive accessibility needs image evidence; selected library images join Product photos atomically without reordering existing photos. With no existing photos the first image becomes the cover. False or clearing an answer keeps its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; listing totals are retained.",
-        "open_world_justification": "Changes room facts shown to guests, adding selected amenities or accessibility evidence images to the listing on Save when needed. Appended photos may create the cover and canonical completion may refresh a derived social card through the configured media provider. False or clearing an answer retains the Product photos. Accessibility answers are host-authored and carry no review or approval state.",
-        "destructive_justification": "Changes room sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer under its version. Positive accessibility needs image evidence; selected library images join Product photos atomically without reordering existing photos. With no existing photos the first image becomes the cover. False or clearing an answer keeps its Product images. Referenced evidence cannot be removed until replaced or cleared. Invalid or stale changes refuse the entire edit; listing totals are retained."
       }
     },
     "update_team": {
@@ -1996,7 +2020,7 @@
       "description": "Create a regular Brooklyn table reservation, then propose a one-hour change for guest acceptance.",
       "user_prompt": "Book a regular table for two at Ember & Slice in Brooklyn next Friday at 7 PM for Taylor Review, using the reviewer contact details in the review instructions. Then ask the guest to move it to 8 PM. Email the proposal and keep 7 PM until they accept.",
       "file_attachment_urls": null,
-      "tools_triggered": "list_organizations, list_locations, get_reservation_policy, get_calendar, create_table_reservation, list_reservation_inquiries, request_table_reservation_change",
+      "tools_triggered": "list_organizations, list_locations, get_reservation_policy, get_calendar, create_table_reservation, list_table_reservations, request_table_reservation_change",
       "expected_output": "Creates one regular table reservation using the actual location policy and controlled reviewer contact details. Emails one proposal for 8 PM while the reservation remains at 7 PM. Guest acceptance updates the same reservation once; reopening the accepted link preserves the accepted state. Experience bookings remain separate. Cancel the review reservation after verification.",
       "expected_output_url": null
     },

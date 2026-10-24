@@ -6,7 +6,7 @@ import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
-import type { GuestStay } from '../../server/domain/stays'
+import type { GuestStay, StayDetail } from '../../server/domain/stays'
 import { createReplayableReservationCancelToken } from '../../server/utils/reservation-cancel-token'
 import type { PostalAddress } from '../../utils/postal-address'
 import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
@@ -119,9 +119,58 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await page.getByRole('button', { name: 'Record payment' }).click()
   // The recorded row, not the method picker: it names the amount with its method.
   await expect(page.getByRole('listitem').filter({ hasText: /100\.00 · Cash/ })).toBeVisible()
-  const paid = await call<{ stay: { request_id: string | null; user_id: string | null; paid_minor: number; payment_status: string; payments: Array<{ method: string; amount_minor: number }> } }>('get_stay', { stay_id: stay.data!.stay.id })
+  const paid = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
   expect(paid.error).toBeNull()
   expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
+  expect(stay.data).toEqual({ stay: { id: paid.data!.stay.id, product_id: productId, request_id: paid.data!.stay.request_id, status: 'confirmed', version: 1, updated_at: paid.data!.stay.updated_at, check_in_date: checkIn, check_out_date: checkOut }, channel_push: null })
+  const messagingContext = await call<{ requestId: string; home: Record<string, unknown>; stay: Record<string, unknown> }>('get_guest_messaging_context', { request_id: paid.data!.stay.request_id })
+  expect(messagingContext.error).toBeNull()
+  expect(messagingContext.data).toEqual({ requestId: paid.data!.stay.request_id,
+    home: { product_id: productId, name: 'Cliff Cabin', timezone: TIME_ZONE, check_in_method: null, check_in_instructions: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [] },
+    stay: { id: paid.data!.stay.id, product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: paid.data!.stay.guest_name, adults: paid.data!.stay.adults, children: paid.data!.stay.children, infants: paid.data!.stay.infants },
+  })
+  const selectedStays = await call<{ stays: Array<Record<string, unknown>> }>('list_stays', { product_id: productId, from: checkIn, to: checkOut })
+  expect(selectedStays.error).toBeNull()
+  expect(selectedStays.data!.stays).toEqual([{ id: paid.data!.stay.id, product_id: productId, channel: 'direct', owner: 'app', status: 'confirmed', overbooked: false, check_in_date: checkIn, check_out_date: checkOut, arrival_time: null, adults: 2, children: 0, infants: 0, guest_name: 'Ana', guest_surname: 'Silva', location_id: location.id, timezone: TIME_ZONE, request_id: paid.data!.stay.request_id, version: 1 }])
+  const calendarPath = api(`stay-homes/${productId}/calendar?from=${checkIn}&to=${checkOut}`)
+  const beforeInvalidCalendarResponse = await request.get(calendarPath)
+  expect(beforeInvalidCalendarResponse.status()).toBe(200)
+  const beforeInvalidCalendar = await beforeInvalidCalendarResponse.json()
+  for (const fields of [{}, { reset: false }, { reset: true, closed: true }, { reset: true, price_minor: null }]) {
+    const refused = await call('set_stay_nights', { product_id: productId, from: checkIn, to: checkOut, ...fields })
+    expect(refused.error).toContain('Invalid arguments for tool set_stay_nights')
+    const unchanged = await request.get(calendarPath)
+    expect(unchanged.status()).toBe(200)
+    expect(await unchanged.json()).toEqual(beforeInvalidCalendar)
+  }
+  const emptyEdit = await call('update_stay', { stay_id: paid.data!.stay.id, expected_version: paid.data!.stay.version })
+  expect(emptyEdit.error).toContain('Invalid arguments for tool update_stay')
+  const unchangedEdit = await call('update_stay', { stay_id: paid.data!.stay.id, expected_version: paid.data!.stay.version, guest_name: 'Ana' })
+  expect(JSON.parse(unchangedEdit.error!)).toMatchObject({ status: 422, code: 'INVALID_STAY_FIELD' })
+  const zeroPayment = await call('record_stay_payment', { stay_id: paid.data!.stay.id, amount_minor: 0, method: 'cash', paid_on: checkIn, idempotency_key: `${slug}-zero-payment` })
+  expect(zeroPayment.error).toContain('Invalid arguments for tool record_stay_payment')
+  type PaymentReceipt = { stay_id: string; payment: Omit<StayDetail['payments'][number], 'created_by'>; currency: string; paid_minor: number; payment_status: string }
+  const paymentArgs = { stay_id: paid.data!.stay.id, amount_minor: 5000, method: 'bank_transfer', paid_on: checkIn, reference: 'Contract payment', note: 'Only this payment', idempotency_key: `${slug}-receipt-payment` }
+  const recordedPayment = await call<PaymentReceipt>('record_stay_payment', paymentArgs)
+  expect(recordedPayment.error).toBeNull()
+  const nativePaymentRead = await request.get(api(`stays/${paid.data!.stay.id}`))
+  expect(nativePaymentRead.status()).toBe(200)
+  const nativePaid = (await nativePaymentRead.json() as { stay: StayDetail }).stay
+  const savedPayment = nativePaid.payments.find(payment => payment.id === recordedPayment.data!.payment.id)!
+  expect(savedPayment, 'The receipt identifies the actual persisted payment').toBeDefined()
+  const { created_by: _paymentActor, ...expectedPayment } = savedPayment
+  expect(recordedPayment.data).toEqual({ stay_id: paid.data!.stay.id, payment: expectedPayment, currency: 'THB', paid_minor: 15000, payment_status: 'partial' })
+  const paymentReplay = await call<PaymentReceipt>('record_stay_payment', paymentArgs)
+  expect(paymentReplay.error).toBeNull()
+  expect(paymentReplay.data).toEqual(recordedPayment.data)
+  const changedPaymentRetry = await call('record_stay_payment', { ...paymentArgs, note: 'A different note' })
+  expect(JSON.parse(changedPaymentRetry.error!)).toMatchObject({ status: 409, code: 'IDEMPOTENCY_CONFLICT' })
+  const deletedPayment = await call('delete_stay_payment', { stay_id: paid.data!.stay.id, payment_id: savedPayment.id })
+  expect(deletedPayment.error).toBeNull()
+  expect(deletedPayment.data).toEqual({ stay_id: paid.data!.stay.id, deleted_payment_id: savedPayment.id, currency: 'THB', paid_minor: 10000, payment_status: 'partial' })
+  const restoredPaymentRead = await request.get(api(`stays/${paid.data!.stay.id}`))
+  expect(restoredPaymentRead.status()).toBe(200)
+  expect((await restoredPaymentRead.json()).stay).toEqual(paid.data!.stay)
 
   // The host hands the real conversation to the guest's own signed-in account.
   // Its confirmation link signs the same activity ID the account opens.
@@ -227,6 +276,12 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
   const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(21) })
   expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
+  const cancelledByMcp = await call('cancel_stay', { stay_id: native.id, expected_version: native.version + 1, reason: 'Contract cancellation' })
+  expect(cancelledByMcp.error).toBeNull()
+  const cancelledRead = await request.get(api(`stays/${native.id}`))
+  expect(cancelledRead.status()).toBe(200)
+  const savedCancellation = (await cancelledRead.json() as { stay: StayDetail }).stay
+  expect(cancelledByMcp.data).toEqual({ stay: { id: native.id, product_id: productId, request_id: savedCancellation.request_id, status: 'cancelled', version: savedCancellation.version, updated_at: savedCancellation.updated_at, check_in_date: later[0], check_out_date: later[1], cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation' }, channel_push: null })
 })
 
 for (const concern of ['property-and-amenities', 'description-and-safety'] as const) {
@@ -491,7 +546,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
   } else {
     // This independent description/safety home starts with the property facts
     // exercised through the UI in the sibling journey, via the canonical writer.
-    const propertySetup = await call('update_product', { product_id: productId, stay: { ...propertyFacts, amenities: ['dryer', 'wireless_internet'] } })
+    const propertySetup = await call<{ product: Product }>('update_product', { product_id: productId, stay: { ...propertyFacts, amenities: ['dryer', 'wireless_internet'] } })
     expect(propertySetup.error).toBeNull()
     await page.goto(`/dashboard/${slug}/products/${productId}`)
     // Each public description section is edited through its own leaf and read
@@ -518,8 +573,32 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await descriptionOverview.getByRole('link', { name: /^Guest access/ }).click()
     await descriptionSection.getByRole('textbox', { name: 'Guest access', exact: true }).fill('Uncommitted access instructions.')
     await descriptionOverview.getByRole('link', { name: /^Your property/ }).click()
-    await descriptionSection.getByRole('textbox', { name: 'Your property', exact: true }).fill(listingDetails.your_property)
+    const propertyDescription = descriptionSection.getByRole('textbox', { name: 'Your property', exact: true })
+    await propertyDescription.fill(listingDetails.your_property)
+    const concurrentProperty = 'A newer description of the property, saved by another editor.'
+    const concurrentDescription = await call('update_product', { product_id: productId, details_mode: 'merge', details: { your_property: concurrentProperty } })
+    expect(concurrentDescription.error).toBeNull()
+    const staleDescriptionSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await descriptionSection.getByRole('button', { name: 'Save', exact: true }).click()
+    const staleDescriptionResponse = await staleDescriptionSaved
+    expect(staleDescriptionResponse.status(), await staleDescriptionResponse.text()).toBe(409)
+    expect(staleDescriptionResponse.request().postDataJSON()).toEqual({ expected_updated_at: propertySetup.data!.product.updated_at, details_mode: 'merge', details: { your_property: listingDetails.your_property } })
+    expect(await staleDescriptionResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: productId } })
+    await expect(descriptionSection).toContainText('The product changed while you were editing.')
+    await expect(propertyDescription).toHaveValue(listingDetails.your_property)
+    await expect(descriptionSection.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    const refusedDescription = await call<{ product: Product }>('get_product', { product_id: productId })
+    expect(refusedDescription.error).toBeNull()
+    expect(refusedDescription.data!.product.details).toEqual({ ...propertySetup.data!.product.details, your_property: concurrentProperty })
+    await descriptionSection.getByRole('button', { name: 'Use saved details', exact: true }).click()
+    await expect(propertyDescription).toHaveValue(concurrentProperty)
+    await expect(descriptionSection.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await propertyDescription.fill(listingDetails.your_property)
+    const reviewedDescriptionSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+    await descriptionSection.getByRole('button', { name: 'Save', exact: true }).click()
+    const reviewedDescriptionResponse = await reviewedDescriptionSaved
+    expect(reviewedDescriptionResponse.status(), await reviewedDescriptionResponse.text()).toBe(200)
+    expect(reviewedDescriptionResponse.request().postDataJSON().expected_updated_at).toBe(refusedDescription.data!.product.updated_at)
     await expect(page).toHaveURL(new RegExp(`/products/${productId}/description$`))
     const switchedDescription = await call<{ product: { details: Record<string, unknown> } }>('get_product', { product_id: productId })
     expect(switchedDescription.error).toBeNull()
@@ -625,6 +704,9 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(arrivalPanel).toBeVisible()
     await arrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`) && !url.searchParams.has('guide'))
+    await expect(page.getByRole('tab', { name: 'Your space', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tab', { name: 'Arrival guide', exact: true })).toHaveAttribute('aria-selected', 'false')
     await expect(arrivalPanel).not.toBeVisible()
     const settingsRead = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(settingsRead.error).toBeNull()
@@ -854,18 +936,17 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await safetySection.getByRole('button', { name: 'Cancel', exact: true }).click()
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.getByRole('tab', { name: 'Arrival guide', exact: true }).click()
-    const safetyGuideOpened = page.waitForEvent('popup')
     await page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true }).click()
-    const safetyGuidePreview = await safetyGuideOpened
+    const safetyGuidePreview = page.getByRole('dialog', { name: 'Arrival guide', exact: true })
     const safetyGuide = safetyGuidePreview.getByTestId('arrival-guide-preview')
     await expect(safetyGuide).toBeVisible()
     await expect(safetyGuide.getByRole('heading', { name: 'Safety & property', exact: true }).locator('..').getByRole('listitem')).toHaveText([...authoredSafetyLines, 'Smoke alarm'])
-    await safetyGuidePreview.close()
+    await safetyGuidePreview.getByRole('button', { name: 'Close', exact: true }).click()
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`) && !url.searchParams.has('guide'))
 
-    // One generic attribute owns only its own detail key. A newer safety answer
-    // must survive when this leaf saves the older Product it originally read.
+    // Product detail leaves carry their read version. A concurrent safety
+    // answer refuses the stale draft until the host reviews current facts.
     await page.goto(`/dashboard/${slug}/products/${productId}/attributes/featured`)
     const featuredEditor = page.locator('#dashboard-panel-product-attribute')
     const featuredSwitch = featuredEditor.getByRole('switch', { name: 'Featured', exact: true })
@@ -877,9 +958,26 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const featuredSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await featuredEditor.getByRole('button', { name: 'Save', exact: true }).click()
     const featuredResponse = await featuredSaved
-    expect(featuredResponse.status(), await featuredResponse.text()).toBe(200)
+    expect(featuredResponse.status(), await featuredResponse.text()).toBe(409)
+    expect(featuredResponse.request().postDataJSON().expected_updated_at).toBe(savedSafety.data!.product.updated_at)
     expect(featuredResponse.request().postDataJSON().details_mode).toBe('merge')
     expect(featuredResponse.request().postDataJSON().details).toEqual({ featured: false })
+    expect(await featuredResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: productId } })
+    await expect(featuredEditor).toContainText('The product changed while you were editing.')
+    await expect(featuredSwitch).not.toBeChecked()
+    await expect(featuredEditor.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    const refusedAttribute = await call<{ product: Product }>('get_product', { product_id: productId })
+    expect(refusedAttribute.error).toBeNull()
+    expect(refusedAttribute.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: true })
+    await featuredEditor.getByRole('button', { name: 'Use saved details', exact: true }).click()
+    await expect(featuredSwitch).toBeChecked()
+    await expect(featuredEditor.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await featuredSwitch.click()
+    const reviewedAttributeSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+    await featuredEditor.getByRole('button', { name: 'Save', exact: true }).click()
+    const reviewedAttributeResponse = await reviewedAttributeSaved
+    expect(reviewedAttributeResponse.status(), await reviewedAttributeResponse.text()).toBe(200)
+    expect(reviewedAttributeResponse.request().postDataJSON().expected_updated_at).toBe(refusedAttribute.data!.product.updated_at)
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/photo`)
     const savedAttributeSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedAttributeSafety.error).toBeNull()
@@ -1437,10 +1535,10 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   expect(installed.data!.product.stay!.amenity_answers).toEqual([{ code: 'smoke_detector', available: true }])
   expect(installed.data!.product.stay!.amenities).toEqual(['smoke_detector'])
   expect(installed.data!.product.details.smoke_detector_details).toBe(alarmDescription)
-  const createdRoom = await call<{ room: StayPhotoRoom }>('add_stay_photo_room', { product_id: productId, type: 'bedroom' })
+  const createdRoom = await call<{ room: Pick<StayPhotoRoom, 'id' | 'type' | 'photo_ids' | 'details_version'> }>('create_home_room', { product_id: productId, type: 'bedroom' })
   expect(createdRoom.error).toBeNull()
   const roomId = createdRoom.data!.room.id
-  const assignedAlarm = await call('update_stay_photo_room', { product_id: productId, room_id: roomId, expected_details_version: 1, amenities: ['smoke_detector'] })
+  const assignedAlarm = await call('update_home_room', { product_id: productId, room_id: roomId, expected_details_version: 1, amenities: ['smoke_detector'] })
   expect(assignedAlarm.error).toBeNull()
   const roomAlarm = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(roomAlarm.error).toBeNull()
@@ -1476,7 +1574,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
 test("a host uploads, arranges, describes and removes a place to stay's photos", async ({ page, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
+  const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!)
   const { previewLink, previewModal, preview } = previewLocators(page)
   const checkIn = localDay(0)
   const checkOut = localDay(2)
@@ -1554,7 +1652,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   }
   await page.goto(photoPath)
   const [red, blue, green] = uploadedPhotos as [typeof uploadedPhotos[number], typeof uploadedPhotos[number], typeof uploadedPhotos[number]]
-  const storedUploads = await call<{ assets: Array<{ asset_id: string; public_url: string; provider: string; status: string; kind: string; alt_text: string | null }> }>('get_organization_media_assets', { kind: 'image' })
+  const storedUploads = await call<{ assets: Array<{ asset_id: string; public_url: string; provider: string; status: string; kind: string; alt_text: string | null }> }>('list_media_assets', { kind: 'image' })
   expect(storedUploads.error).toBeNull()
   expect(storedUploads.data!.assets.map(asset => ({ id: asset.asset_id, url: asset.public_url, provider: asset.provider, status: asset.status, kind: asset.kind })).sort((a, b) => a.id.localeCompare(b.id)))
     .toEqual(uploadedPhotos.map(photo => ({ id: photo.id, url: photo.url, provider: 'cloudflare_r2', status: 'active', kind: 'image' })).sort((a, b) => a.id.localeCompare(b.id)))
@@ -1574,10 +1672,9 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   expect(projectedHome.status(), await projectedHome.text()).toBe(200)
   expect((await projectedHome.json() as { home: { photos: Array<{ id: string; position: number }> } }).home.photos.map(photo => ({ id: photo.id, position: photo.position })))
     .toEqual(uploadedPhotos.map((photo, position) => ({ id: photo.id, position })))
-  const projectedCalendar = await call<{ home: { photos: Array<{ id: string; position: number }> } }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
+  const projectedCalendar = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
   expect(projectedCalendar.error).toBeNull()
-  expect(projectedCalendar.data!.home.photos.map(photo => ({ id: photo.id, position: photo.position })))
-    .toEqual(uploadedPhotos.map((photo, position) => ({ id: photo.id, position })))
+  expect(projectedCalendar.data!.home).toEqual({ product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null, check_in_time: '15:00', check_in_end_time: null, check_out_time: '11:00', max_guests: 4, min_nights: 2, channel: null })
   await previewLink.click()
   await expect(previewModal).toBeVisible()
   await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
@@ -1717,10 +1814,11 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await photoSelection.getByRole('button', { name: 'Remove selected photos', exact: true }).click()
   await expect(photoSelection).not.toBeVisible()
   await expect(photoLinks).toHaveCount(1)
-  const removedPhotos = await call<{ home: { photos: Array<{ id: string; position: number }> } }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
+  const removedPhotos = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(removedPhotos.error).toBeNull()
-  expect(removedPhotos.data!.home.photos.map(photo => ({ id: photo.id, position: photo.position }))).toEqual([{ id: red.id, position: 0 }])
-  const retainedFiles = await call<{ assets: Array<{ asset_id: string; status: string; alt_text: string | null }> }>('get_organization_media_assets', { kind: 'image' })
+  expect(removedPhotos.data!.product.image!.asset_id).toBe(red.id)
+  expect(removedPhotos.data!.product.gallery).toEqual([])
+  const retainedFiles = await call<{ assets: Array<{ asset_id: string; status: string; alt_text: string | null }> }>('list_media_assets', { kind: 'image' })
   expect(retainedFiles.error).toBeNull()
   expect(retainedFiles.data!.assets.map(asset => ({ id: asset.asset_id, status: asset.status })).sort((a, b) => a.id.localeCompare(b.id)))
     .toEqual(uploadedPhotos.map(photo => ({ id: photo.id, status: 'active' })).sort((a, b) => a.id.localeCompare(b.id)))
@@ -1817,7 +1915,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true }).check()
     await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     await homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true }).click()
-    const concurrentHomeAnswer = await call('update_stay_accessibility', { product_id: productId, expected_updated_at: absentHomeFeature.data!.product.updated_at, accessibility: { feature: 'disabled_parking_spot', available: false, photo_ids: [] } })
+    const concurrentHomeAnswer = await call<{ product_id: string; product_updated_at: string; accessibility: StayHomeAccessibility[] }>('update_home_accessibility', { product_id: productId, expected_updated_at: absentHomeFeature.data!.product.updated_at, accessibility: { feature: 'disabled_parking_spot', available: false, photo_ids: [] } })
     expect(concurrentHomeAnswer.error).toBeNull()
     const staleHomeFeatureResponse = page.waitForResponse(response => new URL(response.url()).pathname === homeAccessibilityEndpoint && response.request().method() === 'PATCH')
     await homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
@@ -1829,6 +1927,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     const staleHomeFeature = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
     expect(staleHomeFeature.error).toBeNull()
     const concurrentHomeAnswers = absentHomeAnswers.map(answer => answer.feature === 'disabled_parking_spot' ? { ...answer, available: false } : answer)
+    expect(concurrentHomeAnswer.data).toEqual({ product_id: productId, product_updated_at: staleHomeFeature.data!.product.updated_at, accessibility: concurrentHomeAnswers })
     expect(staleHomeFeature.data!.product.stay.accessibility).toEqual(concurrentHomeAnswers)
     expect([staleHomeFeature.data!.product.image!.asset_id, ...staleHomeFeature.data!.product.gallery.map(photo => photo.asset_id)]).toEqual([red.id, blue.id, green.id])
     await homeAccessibilityPanel.getByRole('button', { name: 'Use saved details', exact: true }).click()
@@ -1859,11 +1958,11 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   } else {
     // The room-tour journey starts with independently authored evidence facts;
     // their UI lifecycle is exercised in the separate accessibility journey.
-    const absentParking = await call('update_stay_accessibility', { product_id: productId, expected_updated_at: beforeRooms.data!.product.updated_at, accessibility: { feature: 'disabled_parking_spot', available: false, photo_ids: [] } })
+    const absentParking = await call('update_home_accessibility', { product_id: productId, expected_updated_at: beforeRooms.data!.product.updated_at, accessibility: { feature: 'disabled_parking_spot', available: false, photo_ids: [] } })
     expect(absentParking.error).toBeNull()
     const homeVersion = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
     expect(homeVersion.error).toBeNull()
-    expect((await call('update_stay_accessibility', { product_id: productId, expected_updated_at: homeVersion.data!.product.updated_at, accessibility: { feature: 'path_to_entrance_lit_at_night', available: true, photo_ids: [red.id] } })).error).toBeNull()
+    expect((await call('update_home_accessibility', { product_id: productId, expected_updated_at: homeVersion.data!.product.updated_at, accessibility: { feature: 'path_to_entrance_lit_at_night', available: true, photo_ids: [red.id] } })).error).toBeNull()
   }
   const { bedroomId, roomPath, roomGrid, bedroomFacts, chooseRoom, addBedroomPhotos } = concern === 'room-tour' ? await (async () => {
     await page.goto(photoPath)
@@ -1937,7 +2036,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect(beforeConcurrentPrivacy.error).toBeNull()
     const bedroomBeforeConcurrentPrivacy = beforeConcurrentPrivacy.data!.product.stay.photo_rooms.find(room => room.id === bedroomId)
     expect(bedroomBeforeConcurrentPrivacy).toMatchObject({ id: bedroomId, details_version: 6 })
-    const concurrentPrivacy = await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: bedroomBeforeConcurrentPrivacy!.details_version, private_attached_bathroom: false })
+    const concurrentPrivacy = await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: bedroomBeforeConcurrentPrivacy!.details_version, private_attached_bathroom: false })
     expect(concurrentPrivacy.error).toBeNull()
     const staleRoom = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/rooms/${bedroomId}` && response.request().method() === 'PATCH')
     await privacyPanel.getByRole('button', { name: 'Save', exact: true }).click()
@@ -1991,7 +2090,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await amenityPanel.getByRole('searchbox', { name: 'Search amenities', exact: true }).fill('Wifi')
     await expect(amenityPanel.getByRole('checkbox')).toHaveCount(2)
     await amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true }).check()
-    const concurrentAmenities = await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: 8, amenities: ['bed_linens'] })
+    const concurrentAmenities = await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 8, amenities: ['bed_linens'] })
     expect(concurrentAmenities.error).toBeNull()
     const staleAmenities = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/rooms/${bedroomId}` && response.request().method() === 'PATCH')
     await amenityPanel.getByRole('button', { name: 'Done', exact: true }).click()
@@ -2023,7 +2122,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     // A concurrent MCP move refuses the stale bulk write without moving its
     // sibling. The open dialog refreshes its sources and retries the same choice.
     await page.route(`${baseURL}/api/dashboard/stay-homes/${productId}/photos/move**`, async route => {
-      const concurrentRoomMove = await call('move_stay_photos', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: red.id, expected_room_id: null }] })
+      const concurrentRoomMove = await call('assign_home_photos_to_room', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: red.id, expected_room_id: null }] })
       expect(concurrentRoomMove.error).toBeNull()
       await route.continue()
     }, { times: 1 })
@@ -2062,7 +2161,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
     await addBedroomPhotos.getByRole('button', { name: 'Select photo 3', exact: true }).click()
     await page.route(`${baseURL}/api/dashboard/stay-homes/${productId}/photos/move**`, async route => {
-      const fulfilledElsewhere = await call('move_stay_photos', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: green.id, expected_room_id: null }] })
+      const fulfilledElsewhere = await call('assign_home_photos_to_room', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: green.id, expected_room_id: null }] })
       expect(fulfilledElsewhere.error).toBeNull()
       await route.continue()
     }, { times: 1 })
@@ -2075,18 +2174,18 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     const afterCompletedSelection = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
     expect(afterCompletedSelection.error).toBeNull()
     expect(afterCompletedSelection.data!.product.stay.photo_rooms).toEqual([{ ...afterRefusedRoomMove.data!.product.stay.photo_rooms[0]!, photo_ids: [red.id, blue.id, green.id] }])
-    const returnedToAdditional = await call('move_stay_photos', { product_id: productId, room_id: null, photos: [{ photo_id: green.id, expected_room_id: bedroomId }] })
+    const returnedToAdditional = await call('assign_home_photos_to_room', { product_id: productId, room_id: null, photos: [{ photo_id: green.id, expected_room_id: bedroomId }] })
     expect(returnedToAdditional.error).toBeNull()
     await page.reload()
     await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
     return { bedroomId, roomPath, roomGrid, bedroomFacts, chooseRoom, addBedroomPhotos }
   })() : await (async () => {
-    const createdBedroom = await call<{ room: StayPhotoRoom }>('add_stay_photo_room', { product_id: productId, type: 'bedroom' })
+    const createdBedroom = await call<{ room: Pick<StayPhotoRoom, 'id' | 'type' | 'photo_ids' | 'details_version'> }>('create_home_room', { product_id: productId, type: 'bedroom' })
     expect(createdBedroom.error).toBeNull()
     const bedroomId = createdBedroom.data!.room.id
     expect((await call('update_product', { product_id: productId, stay: { beds: 3, bedrooms: 2, bathrooms: 1 } })).error).toBeNull()
-    expect((await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, amenities: ['wireless_internet', 'bed_linens'] })).error).toBeNull()
-    expect((await call('move_stay_photos', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: red.id, expected_room_id: null }, { photo_id: blue.id, expected_room_id: null }] })).error).toBeNull()
+    expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, amenities: ['wireless_internet', 'bed_linens'] })).error).toBeNull()
+    expect((await call('assign_home_photos_to_room', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: red.id, expected_room_id: null }, { photo_id: blue.id, expected_room_id: null }] })).error).toBeNull()
     const bedroomFacts: Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'details_version' | 'amenities' | 'accessibility'> = { sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: 2, amenities: ['wireless_internet', 'bed_linens'], accessibility: unknownBedroomAccessibility }
     const roomPath = `${photoPath}/rooms/${bedroomId}`
     const roomGrid = page.locator('#dashboard-panel-product-all-photos')
@@ -2168,7 +2267,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
       }
     }
     const purpleEvidence = evidenceUploads[1]!
-    const concurrentAccessibility = await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: 4, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })
+    const concurrentAccessibility = await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 4, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })
     expect(concurrentAccessibility.error).toBeNull()
     const staleAccessibility = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/rooms/${bedroomId}` && response.request().method() === 'PATCH')
     await accessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
@@ -2241,8 +2340,8 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await accessibilityBack.click()
     await expect(page).toHaveURL(`${baseURL}${roomPath}`)
   } else {
-    expect((await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: 10, accessibility: { feature: 'step_free_access', available: true, photo_ids: [green.id] } })).error).toBeNull()
-    expect((await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: 11, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })).error).toBeNull()
+    expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 10, accessibility: { feature: 'step_free_access', available: true, photo_ids: [green.id] } })).error).toBeNull()
+    expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 11, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })).error).toBeNull()
     bedroomFacts.details_version = 12
     bedroomFacts.accessibility = [{ feature: 'step_free_access', available: true, photo_ids: [green.id] }, { feature: 'wide_doorway', available: false, photo_ids: [] }]
     await page.reload()
@@ -2264,7 +2363,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   ])
   const livingRoomId = livingRoomProduct.data!.product.stay.photo_rooms[1]!.id
   await expect(page).toHaveURL(`${baseURL}${photoPath}/rooms/${livingRoomId}`)
-  const livingRoomAmenities = await call('update_stay_photo_room', { product_id: productId, room_id: livingRoomId, expected_details_version: 1, amenities: ['tv'] })
+  const livingRoomAmenities = await call('update_home_room', { product_id: productId, room_id: livingRoomId, expected_details_version: 1, amenities: ['tv'] })
   expect(livingRoomAmenities.error).toBeNull()
   const livingRoomFacts = { ...unknownRoomDetails, details_version: 2, amenities: ['tv'] }
   const amenityOnlyRoom = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
@@ -2399,7 +2498,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
   await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
   await page.setViewportSize({ width: 1440, height: 900 })
 
-  const retainedLibrary = await call<{ assets: Array<{ asset_id: string; status: string }> }>('get_organization_media_assets', { kind: 'image' })
+  const retainedLibrary = await call<{ assets: Array<{ asset_id: string; status: string }> }>('list_media_assets', { kind: 'image' })
   expect(retainedLibrary.error).toBeNull()
   expect(retainedLibrary.data!.assets.map(asset => ({ id: asset.asset_id, status: asset.status })).sort((a, b) => a.id.localeCompare(b.id)))
     .toEqual([...uploadedPhotos, ...evidenceUploads].map(photo => ({ id: photo.id, status: 'active' })).sort((a, b) => a.id.localeCompare(b.id)))
@@ -2430,26 +2529,86 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
 
     // Native MCP writes use the same authored IDs and selected-photo contract.
-    const addedByMcp = await call<{ room: StayPhotoRoom; home: { photo_rooms: StayPhotoRoom[] } }>('add_stay_photo_room', { product_id: productId, type: 'office' })
+    type RoomIdentity = Pick<StayPhotoRoom, 'id' | 'type' | 'photo_ids' | 'details_version'>
+    type Assignment = { product_id: string; destination_room_id: string | null; created_room_id: string | null; moved_photo_ids: string[] }
+    const discovery = await mcpRequest(request, baseURL!, { method: 'tools/list' })
+    expect(discovery.status()).toBe(200)
+    const catalog = await discovery.json() as { result: { tools: Array<{ name: string; inputSchema: object; outputSchema: object }> } }
+    const assignmentTool = catalog.result.tools.find(tool => tool.name === 'assign_home_photos_to_room')
+    expect(assignmentTool).toBeDefined()
+    const ajv = new Ajv({ strict: false, allErrors: true })
+    const validAssignment = ajv.compile(assignmentTool!.inputSchema)
+    const validAssignmentResult = ajv.compile(assignmentTool!.outputSchema)
+    const addedByMcp = await call<{ product_id: string; room: RoomIdentity }>('create_home_room', { product_id: productId, type: 'office' })
     expect(addedByMcp.error).toBeNull()
     const officeId = addedByMcp.data!.room.id
-    expect(addedByMcp.data!.room).toEqual({ id: expect.any(String), type: 'office', photo_ids: [], ...unknownRoomDetails })
+    expect(addedByMcp.data).toEqual({ product_id: productId, room: { id: officeId, type: 'office', photo_ids: [], details_version: 1 } })
     const afterMcpCreate = await request.get(api(`stay-homes/${productId}`))
     expect(afterMcpCreate.status(), await afterMcpCreate.text()).toBe(200)
     expect((await afterMcpCreate.json() as { home: { photo_rooms: StayPhotoRoom[] } }).home.photo_rooms).toEqual([
       { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
       { id: officeId, type: 'office', photo_ids: [], ...unknownRoomDetails },
     ])
-    const movedByMcp = await call('move_stay_photos', { product_id: productId, room_id: officeId, photos: [{ photo_id: green.id, expected_room_id: null }] })
+    const updatedOffice = await call<{ product_id: string; product_updated_at: string; room: StayPhotoRoom }>('update_home_room', { product_id: productId, room_id: officeId, expected_details_version: 1, amenities: ['tv'] })
+    expect(updatedOffice.error).toBeNull()
+    const beforeAssignments = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(beforeAssignments.error).toBeNull()
+    const officeFacts = { ...unknownRoomDetails, details_version: 2, amenities: ['tv'] }
+    expect(updatedOffice.data).toEqual({ product_id: productId, product_updated_at: beforeAssignments.data!.product.updated_at, room: { id: officeId, type: 'office', photo_ids: [], ...officeFacts } })
+    const staleDetails = await call('update_home_room', { product_id: productId, room_id: officeId, expected_details_version: 1, amenities: [] })
+    expect(JSON.parse(staleDetails.error!)).toMatchObject({ status: 409, code: 'ROOM_DETAILS_CHANGED' })
+    const selectedPhotos = [{ photo_id: green.id, expected_room_id: null }]
+    for (const destination of [{}, { room_id: officeId, new_room_type: 'patio' }, { room_id: null, new_room_type: 'patio' }]) {
+      const ambiguous = { organization_id: organizationId, product_id: productId, ...destination, photos: selectedPhotos }
+      expect(validAssignment(ambiguous), JSON.stringify(ambiguous)).toBe(false)
+      const refused = await call('assign_home_photos_to_room', ambiguous)
+      expect(refused.error).toContain('Invalid arguments for tool assign_home_photos_to_room')
+    }
+    const afterRefusedAssignments = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(afterRefusedAssignments.error).toBeNull()
+    expect(afterRefusedAssignments.data).toEqual(beforeAssignments.data)
+    const existingRoomDestination = { product_id: productId, room_id: officeId, photos: selectedPhotos }
+    expect(validAssignment({ organization_id: organizationId, ...existingRoomDestination }), JSON.stringify(validAssignment.errors)).toBe(true)
+    const movedByMcp = await call<Assignment>('assign_home_photos_to_room', existingRoomDestination)
     expect(movedByMcp.error).toBeNull()
+    expect(movedByMcp.data).toEqual({ product_id: productId, destination_room_id: officeId, created_room_id: null, moved_photo_ids: [green.id] })
+    expect(validAssignmentResult(movedByMcp.data), JSON.stringify(validAssignmentResult.errors)).toBe(true)
     const afterMcpMove = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
     expect(afterMcpMove.error).toBeNull()
     expect(afterMcpMove.data!.product.stay.photo_rooms).toEqual([
       { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
-      { id: officeId, type: 'office', photo_ids: [green.id], ...unknownRoomDetails },
+      { id: officeId, type: 'office', photo_ids: [green.id], ...officeFacts },
     ])
-    const removedByMcp = await call('remove_stay_photo_room', { product_id: productId, room_id: officeId })
+    const staleSource = await call('assign_home_photos_to_room', { product_id: productId, new_room_type: 'patio', photos: selectedPhotos })
+    expect(JSON.parse(staleSource.error!)).toMatchObject({ status: 409, code: 'PHOTOS_CHANGED' })
+    const afterStaleSource = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(afterStaleSource.error).toBeNull()
+    expect(afterStaleSource.data).toEqual(afterMcpMove.data)
+    const additionalDestination = { product_id: productId, room_id: null, photos: [{ photo_id: green.id, expected_room_id: officeId }] }
+    expect(validAssignment({ organization_id: organizationId, ...additionalDestination }), JSON.stringify(validAssignment.errors)).toBe(true)
+    const unassignedByMcp = await call<Assignment>('assign_home_photos_to_room', additionalDestination)
+    expect(unassignedByMcp.error).toBeNull()
+    expect(unassignedByMcp.data).toEqual({ product_id: productId, destination_room_id: null, created_room_id: null, moved_photo_ids: [green.id] })
+    const newRoomDestination = { product_id: productId, new_room_type: 'patio', photos: selectedPhotos }
+    expect(validAssignment({ organization_id: organizationId, ...newRoomDestination }), JSON.stringify(validAssignment.errors)).toBe(true)
+    const createdByAssignment = await call<Assignment>('assign_home_photos_to_room', newRoomDestination)
+    expect(createdByAssignment.error).toBeNull()
+    const patioId = createdByAssignment.data!.created_room_id!
+    expect(patioId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(createdByAssignment.data).toEqual({ product_id: productId, destination_room_id: patioId, created_room_id: patioId, moved_photo_ids: [green.id] })
+    expect(validAssignmentResult(createdByAssignment.data), JSON.stringify(validAssignmentResult.errors)).toBe(true)
+    const afterCreatedDestination = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(afterCreatedDestination.error).toBeNull()
+    expect(afterCreatedDestination.data!.product.stay.photo_rooms).toEqual([
+      { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
+      { id: officeId, type: 'office', photo_ids: [], ...officeFacts },
+      { id: patioId, type: 'patio', photo_ids: [green.id], ...unknownRoomDetails },
+    ])
+    const removedOffice = await call('delete_home_room', { product_id: productId, room_id: officeId })
+    expect(removedOffice.error).toBeNull()
+    const removedByMcp = await call('delete_home_room', { product_id: productId, room_id: patioId })
     expect(removedByMcp.error).toBeNull()
+    expect(removedByMcp.data).toEqual({ product_id: productId, deleted_room_id: patioId, photo_memberships: [{ photo_id: red.id, room_id: bedroomId }, { photo_id: blue.id, room_id: bedroomId }, { photo_id: green.id, room_id: null }] })
     const afterMcpRemove = await request.get(api(`stay-homes/${productId}`))
     expect(afterMcpRemove.status(), await afterMcpRemove.text()).toBe(200)
     expect((await afterMcpRemove.json() as { home: { photo_rooms: StayPhotoRoom[]; photos: Array<{ id: string }> } }).home).toMatchObject({
@@ -2522,6 +2681,15 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   expect(unlisted.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
   // The organization is this test's own, so the host's published profile is left with it.
   const host = await publishOwnHostProfile(request, baseURL!, organizationId, 'Cliff Cabin host')
+  const members = await call<{ members: Array<{ id: string; user: { id: string } }> }>('list_organization_members', {})
+  expect(members.error).toBeNull()
+  const membership = members.data!.members.find(member => member.id === host.memberId)!
+  expect(membership.user.id).not.toBe(membership.id)
+  const userIdAssignment = await call('update_product', { product_id: productId, stay: { assigned_member_id: membership.user.id } })
+  expect(JSON.parse(userIdAssignment.error!)).toMatchObject({ status: 404, message: 'stay.assigned_member_id is not a member of this organization' })
+  const unchangedAssignment = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`)
+  expect(unchangedAssignment.status(), await unchangedAssignment.text()).toBe(200)
+  expect((await unchangedAssignment.json()).product.stay).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
   const hosted = await call<{ product: Product }>('update_product', { product_id: productId, stay: { assigned_member_id: host.memberId } })
   expect(hosted.error).toBeNull()
   expect(hosted.data!.product.stay).toMatchObject({ assigned_member_id: host.memberId, assigned_team_id: null })
@@ -2712,10 +2880,10 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     expect(validateBatchOutput(otherHomes.data), JSON.stringify(validateBatchOutput.errors)).toBe(true)
     expect(otherHomes.data!.products).toHaveLength(1)
     const otherHome = otherHomes.data!.products[0]!
-    const unpricedCalendar = await call<{ home: { product_id: string; base_price_minor: number | null; airbnb_listing_id: string | null; airbnb_editor_url: string | null }; nights: Array<{ price_minor: number | null }> }>('get_stay_calendar', { product_id: otherHome.id, from: localDay(0), to: localDay(2) })
+    const unpricedCalendar = await call<{ home: { product_id: string; base_price_minor: number | null }; nights: Array<{ price_minor: number | null }> }>('get_stay_calendar', { product_id: otherHome.id, from: localDay(0), to: localDay(2) })
     expect(unpricedCalendar.error).toBeNull()
     expect(validateCalendar(unpricedCalendar.data), JSON.stringify(validateCalendar.errors)).toBe(true)
-    expect(unpricedCalendar.data!.home).toMatchObject({ product_id: otherHome.id, base_price_minor: null, airbnb_listing_id: null, airbnb_editor_url: null })
+    expect(unpricedCalendar.data!.home).toMatchObject({ product_id: otherHome.id, base_price_minor: null })
     expect(unpricedCalendar.data!.nights.map(night => night.price_minor)).toEqual([null, null])
     const homes = [assignedHome, { product_id: otherHome.id, location_id: locations.data!.locations[0]!.id }]
     const assigned = await call('update_product', { product_id: homes[0]!.product_id, stay: { assigned_member_id: memberId } })
@@ -2767,9 +2935,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(directionsPanel.getByRole('textbox', { name: 'Directions', exact: true })).toHaveValue(guide.directions)
       await expect(directionsPanel.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
       expect(interruptedWrites).toBe(1)
-      const unwrittenGuide = await call<{ home: { directions: string | null } }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
-      expect(unwrittenGuide.error).toBeNull()
-      expect(unwrittenGuide.data!.home.directions).toBeNull()
+      const unwrittenGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
+      expect(unwrittenGuide.status(), await unwrittenGuide.text()).toBe(200)
+      expect((await unwrittenGuide.json() as { home: { directions: string | null } }).home.directions).toBeNull()
       await page.unroute(interceptArrival)
       await directionsPanel.getByRole('button', { name: 'Save', exact: true }).click()
       await expect(directionsPanel).not.toBeVisible()
@@ -3076,9 +3244,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await checkoutOverview.getByRole('link', { name: /Gather used towels/ }).click()
       await checkoutPanel.getByRole('button', { name: 'Remove instruction', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === `${productPath}/checkout-instructions`)
-      const removedInstruction = await call<{ home: { checkout_instructions: unknown[] } }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
-      expect(removedInstruction.error).toBeNull()
-      expect(removedInstruction.data!.home.checkout_instructions).toEqual([])
+      const removedInstruction = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
+      expect(removedInstruction.status(), await removedInstruction.text()).toBe(200)
+      expect((await removedInstruction.json() as { home: { checkout_instructions: unknown[] } }).home.checkout_instructions).toEqual([])
       await checkoutOverview.getByRole('link', { name: 'Add instructions', exact: true }).click()
       await instructionChoices.getByRole('link', { name: 'Gather used towels', exact: true }).click()
       await checkoutPanel.getByRole('textbox', { name: 'Gather used towels', exact: true }).fill(guide.checkout_instructions[0]!.details)
@@ -3088,11 +3256,11 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const guideRead = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
       expect(guideRead.error).toBeNull()
       expect(validateCalendar(guideRead.data), JSON.stringify(validateCalendar.errors)).toBe(true)
-      expect(guideRead.data!.home).toMatchObject(guide)
-      const guideSaved = await call<{ home: Record<string, unknown>; channel_push: unknown; airbnb_unsynced: unknown[] }>('update_stay_arrival_guide', { product_id: assignedHome.product_id, directions: guide.directions })
+      expect(guideRead.data!.home).toEqual({ product_id: assignedHome.product_id, name: 'Assigned Cabin', location_id: assignedHome.location_id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: 320_000, base_price_tax_behavior: 'unspecified', check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00', max_guests: 5, min_nights: 1, channel: null })
+      const guideSaved = await call<{ product_id: string; guide: { directions: string }; channel_push: unknown; airbnb_unsynced: unknown[] }>('update_stay_arrival_guide', { product_id: assignedHome.product_id, directions: guide.directions })
       expect(guideSaved.error).toBeNull()
       expect(validateArrival(guideSaved.data), JSON.stringify(validateArrival.errors)).toBe(true)
-      expect(guideSaved.data).toMatchObject({ home: { ...guide, product_id: assignedHome.product_id, airbnb_listing_id: null, airbnb_editor_url: null }, channel_push: null, airbnb_unsynced: [] })
+      expect(guideSaved.data).toEqual({ product_id: assignedHome.product_id, guide: { directions: guide.directions }, channel_push: null, airbnb_unsynced: [] })
       const managerGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
       expect(managerGuide.status(), await managerGuide.text()).toBe(200)
       expect(managerGuide.headers()['cache-control']).toBe('private, no-store, max-age=0')
@@ -3107,20 +3275,24 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       // preview and its API contain the house rules and none of the private guide.
       const privateView = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
       const privateURL = new URL((await privateView.getAttribute('href'))!, baseURL!)
-      expect(privateURL.pathname).toBe(`${productPath}/arrival-guide`)
+      expect(privateURL.pathname).toBe(new URL(page.url()).pathname)
+      expect(privateURL.searchParams.get('editMode')).toBe('preview')
+      expect(privateURL.searchParams.get('guide')).toBe('arrival')
       expect(privateURL.searchParams.has('preview_token')).toBe(false)
-      const privateOpened = page.waitForEvent('popup')
       await privateView.click()
-      const privatePreview = await privateOpened
+      await expect(page).toHaveURL(privateURL.href)
+      const privatePreview = page.getByRole('dialog', { name: 'Arrival guide', exact: true })
       const privateGuide = privatePreview.getByTestId('arrival-guide-preview')
       await expect(privateGuide).toBeVisible()
+      await expect(privatePreview.getByTestId('preview-share')).toHaveCount(0)
+      await expect(privatePreview.getByTestId('content-preview-frame')).toHaveCount(0)
       for (const value of [guide.directions, guide.wifi_network, guide.wifi_password, guide.house_manual, guide.check_in_instructions, guide.checkout_instructions[0]!.details, houseRules]) await expect(privateGuide).toContainText(value)
       const privateRules = privateGuide.getByRole('heading', { name: 'House rules', exact: true }).locator('..')
       for (const line of houseRuleLines) await expect(privateRules.getByText(line, { exact: true })).toHaveCount(1)
       await expect(privateRules.getByText('No smoking, vaping or e-cigarettes', { exact: true })).toHaveCount(0)
       await expect(privateRules.getByText('Smoking, vaping and e-cigarettes allowed', { exact: true })).toHaveCount(0)
       await expect(privateGuide.getByRole('heading', { name: 'Safety & property', exact: true })).toHaveCount(0)
-      await privatePreview.close()
+      await privatePreview.getByRole('button', { name: 'Close', exact: true }).click()
       const anonymous = await browser.newContext({ baseURL: baseURL! })
       try {
         const privateDenied = await anonymous.request.get(privateURL.href, { maxRedirects: 0 })
@@ -3144,9 +3316,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await page.setViewportSize({ width: 390, height: 844 })
       await wifiPanel.getByRole('link', { name: 'Close', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === productPath && url.searchParams.get('guide') === 'arrival')
-      const cancelledGuide = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
-      expect(cancelledGuide.error).toBeNull()
-      expect(cancelledGuide.data!.home).toMatchObject(guide)
+      const cancelledGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
+      expect(cancelledGuide.status(), await cancelledGuide.text()).toBe(200)
+      expect((await cancelledGuide.json() as { home: Record<string, unknown> }).home).toMatchObject(guide)
       await page.setViewportSize({ width: 1440, height: 900 })
       await page.getByRole('tab', { name: 'Your space', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === `${productPath}/photo` && !url.searchParams.has('guide'))
@@ -3212,9 +3384,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
         expect(outsideGuide.status()).toBe(404)
         expect(await outsideGuide.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND' } })
       } finally { await outsider.close() }
-      const protectedGuide = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
-      expect(protectedGuide.error).toBeNull()
-      expect(protectedGuide.data!.home).toMatchObject(guide)
+      const protectedGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
+      expect(protectedGuide.status(), await protectedGuide.text()).toBe(200)
+      expect((await protectedGuide.json() as { home: Record<string, unknown> }).home).toMatchObject(guide)
 
     } else {
       // Calendar edits target one explicit home and inclusive selected nights.
@@ -3458,8 +3630,10 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       // Another device's edit updates the assigned stay without navigation. An
       // ordered later event proves that the intervening other-home event was filtered.
       const current = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[0]!.id })
-      const renamed = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: current.data!.stay.version, guest_name: 'Ana Live' })
+      const renamed = await call<{ stay: { version: number }; saved_fields: Record<string, unknown>; channel_push: unknown }>('update_stay', { stay_id: stays[0]!.id, expected_version: current.data!.stay.version, guest_name: 'Ana Live' })
       expect(renamed.error).toBeNull()
+      expect(renamed.data!.saved_fields).toEqual({ guest_name: 'Ana Live' })
+      expect(renamed.data!.channel_push).toBeNull()
       await expect(cleanerPage.getByRole('heading', { name: 'Ana Live Silva', level: 2, exact: true })).toBeVisible()
       const privateStay = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[1]!.id })
       expect((await call('update_stay', { stay_id: stays[1]!.id, expected_version: privateStay.data!.stay.version, notes: 'Other home only' })).error).toBeNull()

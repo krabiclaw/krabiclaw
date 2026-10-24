@@ -11,7 +11,7 @@
       :model-value="c.image.value?.asset_id ?? null"
       :preview-url="c.image.value?.public_url ?? null"
       :preview-alt="c.image.value?.alt_text || c.form.name"
-      title="Section photo"
+      :title="c.noun.value === 'section' ? 'Section photo' : 'Collection photo'"
       testid="menu-section-photo"
       @update:model-value="c.setImage"
     />

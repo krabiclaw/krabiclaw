@@ -106,7 +106,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   organizationTool({
     name: 'delete_channel_post',
     description: 'Permanently delete exactly the provider_post_id on the explicitly selected connected Facebook Page, or the KrabiClaw bot\'s message in the connected Discord channel. Keeps the website post and marks its publication receipt removed. Read get_social_connections and list_channel_posts first. Instagram deletion is unavailable with this app\'s Instagram Login connection; delete Instagram posts in Instagram. Use delete_post to remove website content separately.',
-    domain: 'posts', minimumRole: 'admin', inputSchema: { ...channelTargetProperties, provider_post_id: { type: 'string' } },
+    domain: 'posts', minimumRole: 'admin', inputSchema: { ...channelTargetProperties, channel: { type: 'string', enum: ['facebook', 'discord'] }, provider_post_id: { type: 'string' } },
     required: [...channelTargetRequired, 'provider_post_id'],
     outputSchema: { type: 'object', properties: {
       channel: { type: 'string', enum: ['facebook', 'discord'] }, target_id: { type: 'string' }, provider_post_id: { type: 'string' }, deleted: { type: 'boolean' },
@@ -146,6 +146,7 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
     inputSchema: {
       idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'A value you make up once for this post, such as a UUID, and reuse only to retry this same request.' },
       ...postUpdateProperties,
+      visibility: { ...postUpdateProperties.visibility, default: 'listed', description: 'New drafts default to listed. Listed posts appear in feeds after publication; unlisted posts are reachable only by their URL. This setting does not publish the draft.' },
       slug: postSlugSchema,
       media: postMediaSchema,
     },
@@ -154,10 +155,16 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'update_post',
-    description: 'Change only supplied website post fields using its current revision. Published social posts are unchanged; unresolved publication prevents content edits.',
+    description: 'Change at least one supplied website post field. First call get_post for its updated_at and use that as expected_updated_at. Omitted fields retain their values; null clears a nullable field. Published social posts are unchanged; unresolved publication prevents content edits.',
     domain: 'posts',
     minimumRole: 'admin',
-    inputSchema: { post_id: { type: 'string' }, expected_updated_at: { type: 'string' }, ...postUpdateProperties },
+    inputSchema: {
+      post_id: { type: 'string' },
+      expected_updated_at: { type: 'string', description: 'Current post.updated_at from get_post. A stale revision refuses the change.' },
+      ...postUpdateProperties,
+      location_id: { ...postUpdateProperties.location_id, description: 'Omit to retain the current scope. A location ID scopes the post there; null makes it organization-wide.' },
+      anyOf: Object.keys(postUpdateProperties).map(field => ({ required: [field] })),
+    },
     required: ['post_id', 'expected_updated_at'],
     outputSchema: postMutationResultObject,
   }),
@@ -223,11 +230,12 @@ async function asMcpValidationError<T>(work: () => Promise<T>): Promise<T> {
 
 /** A draft has the path it will be published at, but no public URL until it is published. */
 function forMcp(post: Post, organization: McpExecutorContext['organization']) {
-  return {
+  const record = {
     ...attachViewUrlToRecord(post, organization, { publicPath: post.status === 'published' ? post.public_path : null }),
     public_path: post.public_path,
     preview_url: absolutizeOrganizationUrl(organization, post.preview_url),
-  }
+  } as Record<string, unknown>
+  return Object.fromEntries(Object.keys(postObject.properties).filter(field => Object.hasOwn(record, field)).map(field => [field, record[field]]))
 }
 
 export async function handlePostsTools(ctx: McpExecutorContext): Promise<unknown> {

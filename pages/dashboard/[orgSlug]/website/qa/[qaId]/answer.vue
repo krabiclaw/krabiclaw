@@ -9,7 +9,7 @@
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <UTextarea v-model="editor.form.answer" aria-label="Answer" :rows="10" autofocus class="w-full" />
+    <UTextarea v-model="editor.form.answer" aria-label="Answer" variant="none" :rows="1" autoresize autofocus class="w-full" />
   </DashboardLeafPanel>
 </template>
 

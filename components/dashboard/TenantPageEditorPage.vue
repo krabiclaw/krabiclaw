@@ -12,7 +12,7 @@
         :organization-id="organizationId"
         resource-type="content_document"
         :resource-id="draft.page_id"
-        resource-label="page"
+        :resource-label="data?.page?.title || 'Page'"
         :fields="localizationFields"
         :load-values="loadPageLocalization"
         :save-values="savePageLocalization"
@@ -83,8 +83,6 @@ export function useTenantPageId(): ComputedRef<string> {
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
-import { isNavigationFailure } from 'vue-router'
-import { dashboardOverlayOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import { tenantPageBlockLabel } from '~/utils/tenant-page-block-sections'
 import {
@@ -129,40 +127,9 @@ const openKey = computed<SectionKey>(() => (level.child.value ?? 'title') as Sec
 const saving = ref(false)
 const errorMessage = ref('')
 
-const previewButton = useTemplateRef('previewButton')
-const previewRequested = computed(() => route.query.editMode === 'preview')
-provide(dashboardOverlayOpenKey, previewRequested)
-const previewViewport = computed(() => route.query.previewViewport === undefined ? 'desktop'
-  : route.query.previewViewport === 'desktop' || route.query.previewViewport === 'mobile' ? route.query.previewViewport : null)
-const previewNavigationError = ref('')
-const previewPath = computed(() => router.resolve({ path: route.path, query: { ...route.query, editMode: 'preview', previewViewport: 'desktop' }, hash: route.hash }).fullPath)
-const previewFailure = computed(() => previewNavigationError.value || loadError.value || (!previewUrl.value ? 'The saved page could not be loaded for preview.'
-  : !previewViewport.value ? 'Choose Desktop view or Mobile view to open this preview.' : ''))
-const previewOpen = computed({
-  get: () => previewRequested.value,
-  set: (open: boolean) => { if (!open) void closePreview() },
-})
-watch(() => route.fullPath, () => { previewNavigationError.value = '' })
-async function closePreview() {
-  try {
-    const result = await navigateTo({ path: route.path, query: { ...route.query, editMode: undefined, previewViewport: undefined }, hash: route.hash })
-    if (isNavigationFailure(result)) throw result
-  } catch (cause) {
-    previewNavigationError.value = getErrorMessage(cause, 'The preview could not be closed')
-  }
-}
-async function changePreviewViewport(value: string | number) {
-  if (value !== 'desktop' && value !== 'mobile') return
-  try {
-    const result = await navigateTo({ path: route.path, query: { ...route.query, previewViewport: value }, hash: route.hash }, { replace: true })
-    if (isNavigationFailure(result)) throw result
-  } catch (cause) {
-    previewNavigationError.value = getErrorMessage(cause, 'The preview device could not be changed')
-  }
-}
-function restorePreviewFocus() {
-  if (previewButton.value?.$el instanceof HTMLElement && previewButton.value.$el.isConnected) previewButton.value.$el.focus({ preventScroll: true })
-}
+const { previewButton, previewPath, previewOpen, previewViewport, previewFailure, changePreviewViewport, restorePreviewFocus } = useDashboardContentPreview(
+  computed(() => loadError.value || (!previewUrl.value ? 'The saved page could not be loaded for preview.' : '')),
+)
 const organizationLocalizationSettingsPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/website/localization`)
 
 function preview(value: string, empty: string) {

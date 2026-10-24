@@ -24,7 +24,8 @@ const agendaItem = { type: 'object', properties: {
   locationId: nullableText, locationTitle: nullableText, guestImageUrl: nullableText,
   resourceImageUrl: nullableText, resourceTitle: nullableText, partySize: { type: ['integer', 'null'] }, to: text,
 }, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'operationalReservationId', 'stayId', 'stayMoment', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
-const calendarMutation = { ...locationMutationSummaryObject, properties: { ...locationMutationSummaryObject.properties, affected_commitments: { type: 'array', items: agendaItem } }, required: [...locationMutationSummaryObject.required, 'affected_commitments'] }
+const locationMutation = { ...locationMutationSummaryObject, properties: { ...locationMutationSummaryObject.properties, saved_fields: { ...locationObject, required: [], description: 'Persisted values of the fields named in changed_fields.' } }, required: [...locationMutationSummaryObject.required, 'saved_fields'] }
+const calendarMutation = { ...locationMutation, properties: { ...locationMutation.properties, affected_commitments: { type: 'array', items: agendaItem } }, required: [...locationMutation.required, 'affected_commitments'] }
 
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
@@ -102,7 +103,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         special_hours: specialHoursInputSchema,
       },
       required: ['location_id'],
-      outputSchema: locationMutationSummaryObject,
+      outputSchema: locationMutation,
     }),
   organizationTool({
       name: 'get_calendar',
@@ -225,7 +226,7 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
         organization.env,
       );
       assertDomainSuccess(result);
-      const updatedLocation = (result.data as { location: LocationRecord }).location;
+      const updatedLocation = await requireLocation(organization, locationId);
       const updateContext = await mutationContextPayload(organization, { locationId });
       return renderStructuredResponse(
         {
@@ -234,11 +235,11 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
           id: updatedLocation.id,
           slug: updatedLocation.slug,
           changed_fields: Object.keys(omit(args, ["location_id"])),
+          saved_fields: Object.fromEntries(Object.keys(updateFields).map(key => [key, updatedLocation[key as keyof LoadedLocation]])),
           updated_at: updatedLocation.updated_at,
           context: updateContext,
         },
         `Updated "${updatedLocation.title}".`,
-        { ...result.data, context: updateContext },
       );
     }
     // The calendar's read, as the dashboard draws it: the agenda for the days,
@@ -311,7 +312,7 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
         location = await requireLocation(organization, location.id);
       }
       assertDomainSuccess(result!);
-      const updated = (result!.data as { location: LocationRecord }).location;
+      const updated = await requireLocation(organization, location.id);
       const context = await mutationContextPayload(organization, { locationId: location.id });
       const span = from === to ? from : `${from} to ${to}`;
       return renderStructuredResponse(
@@ -321,12 +322,12 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
           id: updated.id,
           slug: updated.slug,
           changed_fields: ["special_hours"],
+          saved_fields: { special_hours: updated.special_hours },
           updated_at: updated.updated_at,
           affected_commitments: toolName === 'block_dates' ? (await listAgenda(organization.db, { organizationId: organization.organizationId }, { from, to, locationId: location.id, kinds: ['booking', 'reservation'], organizationSlug: organization.organizationSlug, principal: { env: organization.env, membership: organization.membership } })).items.filter(item => item.status === 'pending' || item.status === 'confirmed') : [],
           context,
         },
         toolName === "block_dates" ? `Blocked ${span} at "${updated.title}".` : `Opened ${span} at "${updated.title}".`,
-        { ...result!.data, context },
       );
     }
     default:

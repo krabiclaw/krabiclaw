@@ -138,7 +138,12 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
       description: 'Add a block to an existing article or site page, returning the changed block and document timestamp. An image in the first article block becomes its cover.',
       domain: 'content',
       minimumRole: 'admin',
-      inputSchema: APPEND_CONTENT_BLOCK_PROPERTIES,
+      inputSchema: {
+        ...APPEND_CONTENT_BLOCK_PROPERTIES,
+        anyOf: contentBlockTypeBranches({ properties: APPEND_CONTENT_BLOCK_PROPERTIES, required: APPEND_CONTENT_BLOCK_REQUIRED }).map(branch => branch.properties.type.const === 'image'
+          ? { ...branch, properties: { ...branch.properties, media: { ...CONTENT_BLOCK_WRITE_SCHEMA.media, minItems: 1, maxItems: 1 } }, required: [...branch.required, 'media'] }
+          : branch),
+      },
       required: APPEND_CONTENT_BLOCK_REQUIRED,
       outputSchema: CONTENT_BLOCKS_OUTPUT,
     }),
@@ -304,6 +309,7 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
         advance_notice_minutes: { ...locationReservationConfigWriteSchema.advance_notice_minutes, description: 'Required notice before the start. Defaults to zero on setup; null removes the rule.' },
         deposit_required: { ...locationReservationConfigWriteSchema.deposit_required, description: 'Defaults to false on setup. Omit to keep the current requirement.' },
         cancellation_policy: { type: 'string', enum: CANCELLATION_TIER_IDS, description: 'Flexible: 2 hours. Moderate: 1 day. Firm: 2 days. Sets the deposit-refund and reschedule cutoffs together; do not also pass those fields.' },
+        allOf: [{ not: { required: ['cancellation_policy'], anyOf: ['free_cancellation_until_minutes', 'reschedule_allowed', 'reschedule_cutoff_minutes'].map(field => ({ required: [field] })) } }],
       },
       required: ['location_id', 'expected_updated_at'],
       outputSchema: {

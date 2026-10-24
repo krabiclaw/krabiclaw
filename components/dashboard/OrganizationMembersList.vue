@@ -6,7 +6,6 @@
   -->
   <div class="space-y-8">
     <section>
-      <h2 class="text-sm font-semibold text-muted">Team</h2>
       <UAlert
         v-if="loadError"
         class="mt-3"
@@ -19,15 +18,13 @@
       <ul v-else-if="members.length">
         <li v-for="member in members" :key="member.id" class="border-b border-default py-6 last:border-b-0">
           <div class="flex items-center justify-between gap-4">
-            <div class="flex min-w-0 items-center gap-3">
+            <NuxtLink :to="memberAvailabilityPath(member)" class="flex min-w-0 items-center gap-3">
               <UAvatar :src="member.user.image || undefined" :alt="member.user.name || member.user.email" icon="i-lucide-user" size="lg" />
               <div class="min-w-0">
                 <p class="truncate text-base text-highlighted">{{ member.user.name || member.user.email }}</p>
                 <p class="truncate text-sm text-muted">{{ member.user.email }}</p>
-                <!-- Your own row opens your availability, where you connect your Google Calendar; anyone else's is the admin view. -->
-                <UButton color="neutral" variant="link" :to="memberAvailabilityPath(member)">Profile, hours &amp; Calendar</UButton>
               </div>
-            </div>
+            </NuxtLink>
             <div class="flex shrink-0 items-center gap-2">
               <USelect
                 v-if="canEditMemberRole(member)"
@@ -66,8 +63,8 @@
       <UAlert v-if="memberError" class="mt-4" color="error" variant="soft" icon="i-lucide-circle-alert" :description="memberError" />
     </section>
 
-    <section>
-      <h2 class="text-sm font-semibold text-muted">Pending Invitations</h2>
+    <section v-if="invitations.length || pendingInvitationError">
+      <h2 class="text-sm font-semibold text-muted">Pending invitations</h2>
       <ul v-if="invitations.length">
         <li v-for="invitation in invitations" :key="invitation.id" class="flex items-center justify-between gap-4 border-b border-default py-6 last:border-b-0">
           <div class="min-w-0">
@@ -94,7 +91,6 @@
           </div>
         </li>
       </ul>
-      <p v-else-if="!loadError" class="mt-3 px-1 text-sm text-muted">No pending invitations.</p>
       <UAlert v-if="pendingInvitationError" class="mt-4" color="error" variant="soft" icon="i-lucide-circle-alert" :description="pendingInvitationError" />
     </section>
   </div>

@@ -78,32 +78,40 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     return nightsByDate.value.get(date) ?? null
   }
 
-  /** A night can start a stay when it is free, priced and open to arrival. */
-  function canCheckIn(date: string): boolean {
-    const value = night(date)
-    return Boolean(value?.available && !value.closed_to_arrival)
-  }
-
   /**
-   * A day can end the stay that starts at check-in when every night between is
+   * The days that can end a stay arriving on `from`: every night between is
    * free, the stay meets the arrival night's minimum and maximum and every
    * stayed night's minimum-through, and the day itself is open to departure.
    * The calendar only greys out what the nights already say; the server's quote
    * still decides, and names its reason when it refuses.
    */
-  function canCheckOut(date: string): boolean {
-    const arrival = checkIn.value ? night(checkIn.value) : null
-    if (!checkIn.value || !arrival || date <= checkIn.value) return false
-    let nights = 0
+  function* checkOuts(from: string) {
+    const arrival = night(from)
+    if (!arrival) return
     let minimum = arrival.min_stay_arrival
-    for (let day = checkIn.value; day < date; day = addLocalDays(day, 1)) {
-      const stayed = night(day)
-      if (!stayed?.available) return false
-      minimum = Math.max(minimum, stayed.min_stay_through ?? 1)
+    let nights = 0
+    for (let day = from; night(day)?.available; day = addLocalDays(day, 1)) {
+      minimum = Math.max(minimum, night(day)!.min_stay_through ?? 1)
       nights++
+      if (arrival.max_stay !== null && nights > arrival.max_stay) return
+      const end = addLocalDays(day, 1)
+      if (nights >= minimum && !night(end)?.closed_to_departure) yield end
     }
-    if (nights < minimum || (arrival.max_stay !== null && nights > arrival.max_stay)) return false
-    return !night(date)?.closed_to_departure
+  }
+
+  /** A night can start a stay when it is not past, free, open to arrival and some day can end the stay. */
+  function canCheckIn(date: string): boolean {
+    const value = night(date)
+    return Boolean(calendar.value && date >= calendar.value.home.today && value?.available && !value.closed_to_arrival && !checkOuts(date).next().done)
+  }
+
+  /** The first night a stay can start, or null when no stay fits the calendar's open nights. */
+  const firstCheckIn = computed(() => calendar.value?.nights.find(value => canCheckIn(value.date))?.date ?? null)
+
+  const checkOutDates = computed(() => [...(checkIn.value ? checkOuts(checkIn.value) : [])])
+  const earliestCheckOut = computed(() => checkOutDates.value[0] ?? null)
+  function canCheckOut(date: string): boolean {
+    return checkOutDates.value.includes(date)
   }
 
   /** Nights between check-in and checkout, read from the dates themselves. */
@@ -114,16 +122,43 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     return nights
   })
 
+  /** A day pressed on the calendar ends the stay when it can, and otherwise starts one. */
   function selectDay(date: string) {
+    if (checkIn.value && !checkOut.value && canCheckOut(date)) setCheckOut(date)
+    else if (canCheckIn(date)) setCheckIn(date)
+  }
+
+  /** A typed or pressed check-in; one that cannot start a stay says why and changes nothing. */
+  function setCheckIn(date: string) {
     bookingError.value = ''
-    if (!checkIn.value || checkOut.value || date <= checkIn.value || !canCheckOut(date)) {
-      if (!canCheckIn(date)) return
-      checkIn.value = date
-      checkOut.value = null
-      quote.value = null
+    if (!canCheckIn(date)) {
+      bookingError.value = t('stay.error_no_check_in')
       return
     }
-    checkOut.value = date
+    checkIn.value = date
+    checkOut.value = null
+    quote.value = null
+  }
+
+  /** A typed or pressed checkout for the chosen check-in; one that cannot end the stay says why. */
+  function setCheckOut(date: string) {
+    bookingError.value = ''
+    if (canCheckOut(date)) {
+      checkOut.value = date
+      return
+    }
+    if (!checkIn.value) {
+      bookingError.value = t('stay.select_check_in')
+      return
+    }
+    let nights = 0
+    let available = true
+    for (let day = checkIn.value; day < date; day = addLocalDays(day, 1)) {
+      available &&= Boolean(night(day)?.available)
+      nights++
+    }
+    const minimum = night(checkIn.value)?.min_stay_arrival ?? 1
+    bookingError.value = !available ? t('stay.error_unavailable') : nights < minimum ? t('stay.error_min_nights', { count: minimum }) : t('stay.error_no_check_out')
   }
 
   function clearDates() {
@@ -248,7 +283,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     checkout, enquiryPath,
     bookingOpen, bookingStep, contactForm, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel, nightCount,
-    loadCalendar, night, canCheckIn, canCheckOut, selectDay, clearDates, openBooking, submitBooking, money, nightsLabel, dateLabel,
+    loadCalendar, night, canCheckIn, canCheckOut, firstCheckIn, earliestCheckOut, selectDay, setCheckIn, setCheckOut, clearDates, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }
 }
 export type StayBookingController = ReturnType<typeof useStayBooking>

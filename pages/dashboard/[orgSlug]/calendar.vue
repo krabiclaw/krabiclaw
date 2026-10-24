@@ -76,7 +76,7 @@ const scopeError = computed(() => {
 })
 const stayScope = computed(() => Boolean(knownHome.value || scoped.value?.product.kind === 'stay'))
 const offeringItems = computed(() => [
-  { label: 'All bookings', value: AGENDA_FILTER_ALL },
+  { label: 'All activity', value: AGENDA_FILTER_ALL },
   ...(homes.value?.homes ?? []).map(home => ({ label: `Availability: ${home.name}`, value: home.product_id })),
   ...(products.value?.products ?? []).filter(product => ['experience', 'service'].includes(product.kind) && product.booking).map(product => ({ label: `Availability: ${product.name}${product.active ? '' : ' · Paused'}`, value: product.id })),
 ])

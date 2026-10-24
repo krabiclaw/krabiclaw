@@ -83,7 +83,7 @@ watch([from, through, locationId, earningsType], () => {
 
 const months = Array.from({ length: 12 }, (_, offset) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offset, 1)))
 const monthItems = computed(() => [[
-  { label: 'All dates', type: 'checkbox' as const, checked: !from.value, onSelect: () => { from.value = ''; through.value = '' } },
+  { label: 'Last 12 months', type: 'checkbox' as const, checked: !from.value, onSelect: () => { from.value = ''; through.value = '' } },
   ...months.map(date => ({
     label: formatCalendarDate(date.toISOString().slice(0, 10), 'en', { month: 'long', year: 'numeric' }),
     type: 'checkbox' as const,
@@ -95,7 +95,7 @@ const monthItems = computed(() => [[
   })),
 ]])
 const periodLabel = computed(() => !from.value
-  ? 'All dates'
+  ? 'Last 12 months'
   : from.value.slice(0, 7) === through.value.slice(0, 7)
     ? formatCalendarDate(from.value, 'en', { month: 'long', year: 'numeric' })
     : `${formatCalendarDate(from.value, 'en', { month: 'short', day: 'numeric' })} – ${formatCalendarDate(through.value, 'en', { month: 'short', day: 'numeric', year: 'numeric' })}`)
@@ -125,7 +125,7 @@ const typeLabel = computed(() => TYPES.find(type => type.value === earningsType.
 const { data, error } = await useAsyncData(
   () => `earnings-transactions:${route.params.orgSlug}:${from.value}:${through.value}:${locationId.value}:${earningsType.value}:${after.value ?? ''}`,
   async () => {
-    // "All dates" is the last twelve months, the span the month list offers.
+    // The default range is the same twelve months the picker offers.
     const start = from.value ? new Date(`${from.value}T00:00:00.000Z`) : months.at(-1)!
     const end = through.value ? new Date(`${through.value}T00:00:00.000Z`) : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
     if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start > end) throw new Error('Choose a valid period')
@@ -158,7 +158,7 @@ function whenLabel(row: TransactionRow): string {
   return `${row.title} · ${start === end ? start : `${start}–${end}`}`
 }
 function exportCsv() {
-  downloadCsv(`transactions-${String(route.params.orgSlug)}-${from.value || 'all'}.csv`, ['Date', 'Status', 'Buyer', 'Item', 'Paid', 'Refunded', 'Currency', 'Payment ID'],
+  downloadCsv(`transactions-${String(route.params.orgSlug)}-${from.value || 'last-12-months'}.csv`, ['Date', 'Status', 'Buyer', 'Item', 'Paid', 'Refunded', 'Currency', 'Payment ID'],
     rows.value.map(row => [row.created_at.slice(0, 10), paymentStateLabel(row), row.buyer_name ?? '', row.title, minorAmountToMajor(row.captured_amount, row.currency as CurrencyCode), minorAmountToMajor(row.refunded_amount, row.currency as CurrencyCode), row.currency, row.id]))
 }
 </script>

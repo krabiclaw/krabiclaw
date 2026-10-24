@@ -1,22 +1,24 @@
 <template>
-  <!--
-    A blog post is read the way every other record is: the thing itself first,
-    then the rows that describe it. The canvas takes the place a product's
-    photograph takes on its index — it does not take the place of the index. Each
-    row is a leaf below this level.
-  -->
-  <DashboardIndexPanel :id="panelId" :title="form.title || 'Untitled post'">
+  <!-- The article is the writing canvas; its metadata opens from its header. -->
+  <DashboardIndexPanel :id="panelId" title="Article">
     <template #right>
-      <slot name="actions" />
+      <UButton label="Save" :loading="saveState === 'saving'" :disabled="saving || !contentDirty || !form.title.trim() || saveState === 'conflict'" @click="saveArticle" />
+      <UTooltip text="Preview">
+        <UButton ref="previewButton" color="neutral" variant="ghost" icon="i-lucide-eye" aria-label="Preview" :to="previewPath" :disabled="saving || !previewUrl" class="size-10 rounded-full" data-testid="article-preview" />
+      </UTooltip>
+      <UDropdownMenu :items="settingsActions" :disabled="saving">
+        <UButton color="neutral" variant="ghost" icon="i-lucide-ellipsis" aria-label="Article settings" :disabled="saving" class="size-10 rounded-full" />
+      </UDropdownMenu>
+      <slot v-if="post" name="actions" :post="post" :saving="saving" />
     </template>
 
     <!-- Inert while a write is in flight: the ids that come back are matched to the blocks that were sent. -->
-    <div class="space-y-8" :inert="publishing || saveState === 'saving'">
+    <div class="space-y-8" :inert="saving">
       <p v-if="actionError" role="alert" class="rounded-lg border border-error/30 bg-error/10 px-4 py-2 text-sm text-error">{{ actionError }}</p>
 
       <UAlert v-if="loadError" color="error" variant="soft" :description="loadError" />
-
       <template v-else>
+      <p class="text-xs" :class="saveState === 'failed' || saveState === 'conflict' ? 'text-error' : 'text-muted'" role="status">{{ saveLabel }}</p>
       <div class="overflow-hidden rounded-lg bg-[var(--editor-canvas,#fff)] text-[var(--editor-ink,#1f2937)]" :style="editorCanvasStyle">
         <div class="mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
           <BlogArticleRenderer
@@ -58,32 +60,18 @@
         </div>
       </div>
 
-      <!--
-        The article commits on Save, like every other editor. It used to write
-        the whole document after every burst of typing — a write nothing else
-        in the product performs, and the one that kept replacing the canvas
-        under the writer.
-      -->
-      <div class="flex items-center justify-between gap-4 px-1">
-        <span class="text-xs" :class="saveState === 'failed' || saveState === 'conflict' ? 'text-error' : 'text-muted'">{{ saveLabel }}</span>
-        <UButton label="Save" :loading="saveState === 'saving'" :disabled="!contentDirty || saveState === 'conflict'" @click="saveArticle" />
-      </div>
-        <EditorNavigationList :groups="settingsGroups" :active-item="section" />
       </template>
     </div>
   </DashboardIndexPanel>
+  <DashboardContentPreview v-model:open="previewOpen" title="Article preview" :content-title="post?.title ?? ''" :src="previewUrl" :public-url="publicUrl" :viewport="previewViewport" :error="previewFailure" @update:viewport="changePreviewViewport" @after:leave="restorePreviewFocus" />
 </template>
 
 <script lang="ts">
 import type { Component, ComputedRef, InjectionKey, Reactive, Ref } from 'vue'
 import type { DashboardArticleCategory } from '~/composables/useArticleCategories'
 
-export type SettingsSection = 'category' | 'excerpt' | 'publishing' | 'share'
-export const SETTINGS_SECTIONS: SettingsSection[] = ['category', 'excerpt', 'publishing', 'share']
-export const SETTINGS_LABELS: Record<SettingsSection, string> = {
-  category: 'Category', excerpt: 'Excerpt', publishing: 'Visibility',
-  share: 'Share preview',
-}
+const SETTINGS_SECTIONS = ['category', 'excerpt', 'publishing'] as const
+type SettingsSection = typeof SETTINGS_SECTIONS[number]
 
 /** The post's draft and what its leaves show beside their one field. */
 export interface BlogEditor {
@@ -92,13 +80,12 @@ export interface BlogEditor {
   loadError: Ref<string>
   actionError: Ref<string>
   saving: ComputedRef<boolean>
+  saveDisabled: ComputedRef<boolean>
   collectionOptions: Array<{ label: string; value: ArticleCollection }>
   /** The post's collection's categories, the Category leaf's choices. */
   categories: Ref<DashboardArticleCategory[] | undefined>
   categoriesError: Ref<unknown>
   resolvedExcerpt: ComputedRef<string>
-  resolvedPrimaryImageUrl: ComputedRef<string | null>
-  resolvedPrimaryVideoUrl: ComputedRef<string | null>
   revert: () => void
   save: () => Promise<void>
 }
@@ -108,19 +95,18 @@ export const blogEditorKey = Symbol('blog-editor') as InjectionKey<BlogEditor>
 
 <script setup lang="ts">
 import BlogArticleRenderer from '~/components/blog/BlogArticleRenderer.vue'
-import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
+import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
 import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS } from '~/utils/article-collections'
 import { youTubeVideoId } from '~/shared/youtube-video'
-import type { BlogLifecycleState, BlogPostRepository, BlogPost, BlogEditorBlock, BlogPostUpdateInput } from './types'
+import type { BlogPostRepository, BlogPost, BlogEditorBlock, BlogPostUpdateInput } from './types'
 import { cloneEditorBlocks, generatedExcerpt, initialBlogEditorBlocks } from '~/utils/blog-editor'
 import { getErrorMessage } from '~/utils/errors'
-import { resolveSocialImageUrl } from '~/utils/social-metadata'
 
-const props = withDefaults(defineProps<{ repository: BlogPostRepository; initialPost: BlogPost; postId?: string; organizationId?: string; backUrl?: string; backLabel?: string; panelId?: string; mediaPickerComponent: Component }>(), {
-  postId: undefined, organizationId: '', backUrl: '/dashboard', backLabel: 'Posts', panelId: 'blog-post-editor',
+const props = withDefaults(defineProps<{ repository: BlogPostRepository; initialPost: BlogPost; organizationId: string; panelId?: string; mediaPickerComponent: Component }>(), {
+  panelId: 'blog-post-editor',
 })
 const route = useRoute()
-const postId = computed(() => props.postId || String(route.params.postId || ''))
+const postId = computed(() => String(route.params.postId || ''))
 const post = ref<BlogPost | null>(null)
 const persistedPostId = computed(() => post.value?.id || postId.value)
 const blocks = ref<BlogEditorBlock[]>(initialBlogEditorBlocks())
@@ -129,8 +115,8 @@ const saveState = ref<'saved' | 'saving' | 'failed' | 'conflict'>('saved')
 const actionError = ref('')
 const publishing = ref(false)
 const savingExplicitly = ref(false)
-const contentDirty = ref(false)
-let applyingServerSnapshot = false
+const savedSignature = ref('')
+const contentDirty = computed(() => JSON.stringify(buildSavePayload()) !== savedSignature.value)
 let serverPostUpdatedAt: string | undefined
 
 /** This post's own URL, which its rows hang off. */
@@ -138,10 +124,14 @@ const level = useRouteLevel()
 const postPath = level.path
 const section = computed<SettingsSection | null>(() => {
   const segment = level.child.value
-  return segment && (SETTINGS_SECTIONS as string[]).includes(segment) ? segment as SettingsSection : null
+  return segment && SETTINGS_SECTIONS.some(key => key === segment) ? segment as SettingsSection : null
 })
 
 const form = reactive({ title: '', collection: 'blog' as ArticleCollection, category_id: '', excerpt: '', visibility: 'listed' as 'listed' | 'unlisted' })
+const saving = computed(() => savingExplicitly.value || publishing.value || saveState.value === 'saving')
+const saveDisabled = computed(() => saving.value || Boolean(loadError.value) || !form.title.trim() || saveState.value === 'conflict'
+  || (section.value === 'publishing' && post.value?.status !== 'published' && (!isArticleValid() || !form.category_id))
+  || (!contentDirty.value && !(section.value === 'publishing' && post.value?.status !== 'published')))
 const templateName = computed(() => post.value?.editor_template || 'tenant')
 const collectionOptions = ARTICLE_COLLECTION_SLUGS.map(slug => ({ label: ARTICLE_COLLECTIONS[slug].label, value: slug }))
 if (!props.organizationId) throw new Error('The blog editor needs the organization it edits')
@@ -152,7 +142,7 @@ watch(() => props.initialPost, (loaded) => {
     applyLoadedPost(loaded)
     loadError.value = ''
   } catch (error) {
-    loadError.value = getErrorMessage(error, 'Failed to load post.')
+    loadError.value = getErrorMessage(error, 'Failed to load article.')
   }
 }, { immediate: true })
 const { data: categories, error: categoriesError } = await useArticleCategories(props.organizationId, () => form.collection)
@@ -167,95 +157,26 @@ const editorCanvasStyle = computed(() => {
     '--ui-text': colors.text, '--ui-text-highlighted': colors.text, '--ui-text-muted': colors.muted, '--ui-text-dimmed': colors.muted,
   }
 })
-const statusLabel = computed(() => {
-  if (!post.value) return 'Not published'
-  if (post.value.status === 'draft') return 'Draft'
-  return 'Published'
-})
 const resolvedExcerpt = computed(() => generatedExcerpt(blocks.value))
-/**
- * The post's cover is its leading image block and nothing else. The post's
- * images are one set; the cover is the lead one; the share card derives from
- * it. There is no separate "photo" that could hold the same picture twice.
- */
-const coverMedia = computed(() => {
-  const lead = blocks.value[0]
-  return lead?.type === 'image' ? lead.media?.find(item => item.slot === 'media') ?? null : null
-})
-const resolvedPrimaryImageUrl = computed<string | null>(() =>
-  coverMedia.value?.kind === 'video' ? null : resolveSocialImageUrl(coverMedia.value))
-/**
- * The settings index. Every row states what it currently holds, so the pane is
- * read by scanning values rather than by opening each leaf to find out — which
- * is the whole reason an index beats a stack of collapsed cards.
- *
- * `placeholder` renders the summary as absent rather than as a value, so an
- * empty Category reads as "Not set" in italics instead of looking like content.
- */
-const settingsGroups = computed<EditorNavigationGroup[]>(() => {
-  const unset = (value: string | null | undefined) => !value || !String(value).trim()
-  const row = (id: SettingsSection, label: string, value: string | null | undefined, fallback = 'Not set') => ({
-    id,
-    label,
-    to: `${postPath.value}/${id}`,
-    summary: unset(value) ? fallback : String(value),
-    placeholder: unset(value),
-  })
-  return [
-    {
-      id: 'about',
-      label: 'About this post',
-      items: [
-        { ...row('category', `${ARTICLE_COLLECTIONS[form.collection].label} · Category`, categories.value?.find(category => category.id === form.category_id)?.name), icon: 'i-lucide-folder' },
-        {
-          id: 'excerpt',
-          label: 'Excerpt',
-          to: `${postPath.value}/excerpt`,
-          summary: form.excerpt.trim() || resolvedExcerpt.value,
-          placeholder: !form.excerpt.trim(),
-        },
-      ],
-    },
-    {
-      id: 'publishing',
-      label: 'Publishing',
-      items: [
-        { id: 'publishing', to: `${postPath.value}/publishing`, label: 'Visibility', icon: 'i-lucide-eye', summary: publishingSummary.value },
-      ],
-    },
-    {
-      id: 'sharing',
-      label: 'Sharing',
-      items: [
-        {
-          id: 'share',
-          label: 'Share preview',
-          lead: { image: resolvedPrimaryImageUrl.value, icon: 'i-lucide-share-2' },
-          to: `${postPath.value}/share`,
-          summary: resolvedPrimaryImageUrl.value || resolvedPrimaryVideoUrl.value ? 'Set' : 'No image yet',
-          placeholder: !resolvedPrimaryImageUrl.value && !resolvedPrimaryVideoUrl.value,
-        },
-      ],
-    },
-  ]
-})
-
-const publishingSummary = computed(() => {
-  const visibility = form.visibility === 'unlisted' ? 'Unlisted' : 'Listed'
-  if (post.value?.status === 'published') return `Published · ${visibility}`
-  return `${statusLabel.value} · ${visibility}`
-})
-
-
-const resolvedPrimaryVideoUrl = computed<string | null>(() => {
-  const candidate = coverMedia.value?.kind === 'video' ? coverMedia.value.public_url : null
-  return typeof candidate === 'string' && candidate ? candidate : null
-})
+const settingsActions = computed(() => [
+  { label: `Category · ${categories.value?.find(category => category.id === form.category_id)?.name ?? 'Not set'}`, icon: 'i-lucide-folder', to: `${postPath.value}/category` },
+  { label: 'Excerpt', icon: 'i-lucide-text', to: `${postPath.value}/excerpt` },
+  { label: `Visibility · ${post.value?.status === 'published' ? form.visibility === 'listed' ? 'Published' : 'Unlisted' : 'Draft'}`, icon: 'i-lucide-eye', to: `${postPath.value}/publishing` },
+])
+const dashboard = useDashboardOrganization()
+const publicUrl = computed(() => post.value?.public_url && dashboard.organization.value?.public_url
+  ? new URL(post.value.public_url, dashboard.organization.value.public_url).toString() : null)
+const previewUrl = computed(() => publicUrl.value || (post.value?.preview_url && dashboard.organization.value?.public_url
+  ? new URL(post.value.preview_url, dashboard.organization.value.public_url).toString() : null))
+const { previewButton, previewPath, previewOpen, previewViewport, previewFailure, changePreviewViewport, restorePreviewFocus } = useDashboardContentPreview(
+  computed(() => loadError.value || (!previewUrl.value ? 'The saved article could not be loaded for preview.' : '')),
+)
 const saveLabel = computed(() => {
   if (saveState.value === 'saving') return 'Saving…'
   if (saveState.value === 'failed') return 'Save failed'
   if (saveState.value === 'conflict') return 'Conflict — reload to reconcile'
-  return contentDirty.value ? 'Unsaved changes' : 'Saved'
+  // Pending media remains on the canvas, outside the saved document.
+  return contentDirty.value || blocks.value.some(block => !isSavable(block)) ? 'Unsaved changes' : 'Saved'
 })
 type InserterBlockType = 'image' | 'video' | 'faq' | 'how_to' | 'cta' | 'divider'
 
@@ -264,28 +185,28 @@ type InserterBlockType = 'image' | 'video' | 'faq' | 'how_to' | 'cta' | 'divider
  * cannot know: the server's copy of the post and the ids of blocks saved for
  * the first time.
  */
-async function saveArticle() {
+async function saveArticle(): Promise<BlogPost | null> {
   if (!post.value || !contentDirty.value) return post.value
-  // A started video block is written with the rest, so it has to be finished first:
-  // the server refuses the whole document for one video without a link or a title.
-  assertVideosComplete()
   actionError.value = ''
-  saveState.value = 'saving'
-  const payload = buildSavePayload()
   try {
+    // A started video block is written with the rest, so it has to be finished first:
+    // the server refuses the whole document for one video without a link or a title.
+    assertVideosComplete()
+    const payload = buildSavePayload()
+    saveState.value = 'saving'
     const updated = await props.repository.update(persistedPostId.value, { ...payload, expected_updated_at: serverPostUpdatedAt })
     syncServerVersion(updated)
-    applyingServerSnapshot = true
     post.value = updated
-    if (updated.content_document?.blocks) adoptServerBlockIds(payload.content_blocks ?? [], updated.content_document.blocks)
-    contentDirty.value = false
+    if (!updated.content_document) throw new Error('The saved article content document is missing.')
+    adoptServerBlockIds(payload.content_blocks ?? [], updated.content_document.blocks)
+    savedSignature.value = JSON.stringify(payload)
     saveState.value = 'saved'
-    void nextTick(() => { applyingServerSnapshot = false })
     return updated
   } catch (error: unknown) {
     const status = Number((error as { statusCode?: number; status?: number })?.statusCode ?? (error as { status?: number })?.status)
     saveState.value = status === 409 ? 'conflict' : 'failed'
-    throw error
+    actionError.value = getErrorMessage(error, 'Failed to save the article.')
+    return null
   }
 }
 
@@ -298,10 +219,15 @@ async function saveArticle() {
  * waiting for its picture, a video for its link) are left exactly as they are.
  */
 function adoptServerBlockIds(sent: BlogEditorBlock[], saved: BlogEditorBlock[]) {
-  if (sent.length !== saved.length) return
+  if (sent.length !== saved.length) throw new Error('The saved article blocks do not match the submitted article.')
   const unsentIds = new Map<number, string>()
   for (const [index, block] of sent.entries()) {
-    if (!block.id && saved[index]?.id) unsentIds.set(index, saved[index]!.id)
+    const id = saved[index]?.id
+    if (!id || (block.id && block.id !== id)) throw new Error('The saved article block identity does not match the submitted article.')
+    if (!block.id) {
+      block.id = id
+      unsentIds.set(index, id)
+    }
   }
   if (!unsentIds.size) return
   let sentIndex = 0
@@ -313,30 +239,15 @@ function adoptServerBlockIds(sent: BlogEditorBlock[], saved: BlogEditorBlock[]) 
   }
 }
 
-// The headline and the body are the canvas; typing into either marks the
-// article unsaved. A settings leaf marks itself when its Save is pressed.
-watch([() => form.title, blocks], () => {
-  if (applyingServerSnapshot) return
-  markContentDirty()
-}, { deep: true, flush: 'sync' })
-
 function applyLoadedPost(loaded: BlogPost) {
-  applyingServerSnapshot = true
-  try {
-    if (!loaded.content_document) throw new Error('Blog content document is missing')
-    syncServerVersion(loaded)
-    post.value = loaded
-    Object.assign(form, { title: loaded.title, collection: loaded.collection ?? 'blog', category_id: loaded.category?.id ?? '', excerpt: loaded.excerpt || '', visibility: loaded.visibility || 'listed' })
-    blocks.value = cloneEditorBlocks(loaded.content_document.blocks || [])
-    ensureTrailingTextBlock()
-    contentDirty.value = false
-  } finally {
-    void nextTick(() => { applyingServerSnapshot = false })
-  }
-}
-function markContentDirty() {
-  if (saveState.value === 'conflict') return
-  contentDirty.value = true
+  if (!loaded.content_document) throw new Error('Blog content document is missing')
+  syncServerVersion(loaded)
+  post.value = loaded
+  Object.assign(form, { title: loaded.title, collection: loaded.collection ?? 'blog', category_id: loaded.category?.id ?? '', excerpt: loaded.excerpt || '', visibility: loaded.visibility || 'listed' })
+  blocks.value = cloneEditorBlocks(loaded.content_document.blocks || [])
+  ensureTrailingTextBlock()
+  savedSignature.value = JSON.stringify(buildSavePayload())
+  saveState.value = 'saved'
 }
 /** Opens the article with an empty image block; choosing its picture makes it the cover. */
 function addCover() {
@@ -352,8 +263,6 @@ function assertVideosComplete() {
     && Object.values(block.data).some(value => String(value ?? '').trim())
     && (!youTubeVideoId(block.data.url) || !String(block.data.title ?? '').trim()))
   if (!incomplete) return
-  actionError.value = INCOMPLETE_VIDEO
-  saveState.value = 'failed'
   throw new Error(INCOMPLETE_VIDEO)
 }
 function savedBlocks() {
@@ -366,26 +275,6 @@ function lifecycleVersionInput() {
   if (!serverPostUpdatedAt) throw new Error('Blog lifecycle version is unavailable. Reload the editor.')
   return { expected_updated_at: serverPostUpdatedAt }
 }
-function applyLifecycle(lifecycle: BlogLifecycleState) {
-  if (!post.value?.content_document) throw new Error('Blog content document is missing')
-  applyingServerSnapshot = true
-  post.value = {
-    ...post.value,
-    status: lifecycle.status,
-    published_at: lifecycle.published_at,
-    first_published_at: post.value.first_published_at ?? lifecycle.published_at,
-    updated_at: lifecycle.updated_at,
-    content_document: {
-      ...post.value.content_document,
-      document: {
-        ...post.value.content_document.document,
-        updated_at: lifecycle.updated_at,
-      },
-    },
-  }
-  serverPostUpdatedAt = lifecycle.updated_at
-  applyingServerSnapshot = false
-}
 function recordLifecycleError(error: unknown) {
   const status = Number((error as { statusCode?: number; status?: number })?.statusCode ?? (error as { status?: number })?.status)
   saveState.value = status === 409 ? 'conflict' : 'failed'
@@ -396,10 +285,7 @@ async function saveSection() {
   actionError.value = ''
   savingExplicitly.value = true
   try {
-    // A settings leaf is not watched, so nothing has marked the draft dirty.
-    // Saying so here is what lets `saveArticle` write it.
-    markContentDirty()
-    await saveArticle()
+    if (!await saveArticle()) return
     // The publishing leaf's Save is what publishes. A post that is already
     // live has nothing left to publish, so only a draft goes through it.
     if (section.value === 'publishing' && post.value.status !== 'published') {
@@ -422,9 +308,10 @@ async function publish() {
     assertVideosComplete()
     // Publish what is on the canvas: an unsaved article is written first, so
     // the lifecycle token it hands over is the one the save produced.
-    await saveArticle()
-    const lifecycle = await props.repository.publish(persistedPostId.value, lifecycleVersionInput())
-    applyLifecycle(lifecycle)
+    if (!await saveArticle()) return
+    const published = await props.repository.publish(persistedPostId.value, lifecycleVersionInput())
+    syncServerVersion(published)
+    post.value = published
     saveState.value = 'saved'
   } catch (error: unknown) {
     recordLifecycleError(error)
@@ -532,15 +419,20 @@ provide(blogEditorKey, {
   post,
   loadError,
   actionError,
-  saving: computed(() => savingExplicitly.value || publishing.value),
+  saving,
+  saveDisabled,
   collectionOptions,
   categories,
   categoriesError,
   resolvedExcerpt,
-  resolvedPrimaryImageUrl,
-  resolvedPrimaryVideoUrl,
-  // A cancelled leaf puts the loaded post back before it closes.
-  revert: () => { if (post.value) applyLoadedPost(post.value) },
+  // Cancel discards this metadata concern, leaving the pending article intact.
+  revert: () => {
+    const saved = post.value
+    if (!saved) return
+    if (section.value === 'category') Object.assign(form, { collection: saved.collection ?? 'blog', category_id: saved.category?.id ?? '' })
+    else if (section.value === 'excerpt') form.excerpt = saved.excerpt || ''
+    else if (section.value === 'publishing') form.visibility = saved.visibility || 'listed'
+  },
   save: saveSection,
 })
 </script>

@@ -19,16 +19,18 @@ test('an article created from a direct action prepares a Facebook draft without 
   await page.setViewportSize({ width: 900, height: 900 })
   let articleId: string | null = null
   let postId: string | null = null
-  const title = `E2E Today article ${Date.now()}`
+  const createdTitle = `E2E Today article ${Date.now()}`
+  const title = `${createdTitle} revised`
   const excerpt = 'An article prepared for a deliberate Facebook review.'
+  const body = 'An authored article body for the Today action journey.'
   try {
     expect((await page.goto(blogCreatePath(orgSlug)))?.status()).toBe(200)
     await waitForNuxtHydration(page)
     const headline = page.locator('#dashboard-panel-organization-blog-new-headline')
-    await expect(headline.getByRole('button', { name: 'Create post', exact: true })).toBeDisabled()
-    await headline.getByRole('textbox', { name: 'Headline*', exact: true }).fill(title)
+    await expect(headline.getByRole('button', { name: 'Create article', exact: true })).toBeDisabled()
+    await headline.getByRole('textbox', { name: 'Headline*', exact: true }).fill(createdTitle)
     const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/blog/posts` && response.request().method() === 'POST')
-    await headline.getByRole('button', { name: 'Create post', exact: true }).click()
+    await headline.getByRole('button', { name: 'Create article', exact: true }).click()
     const createResponse = await created
     expect(createResponse.status(), await createResponse.text()).toBe(200)
     articleId = (await createResponse.json() as { id: string }).id
@@ -37,7 +39,78 @@ test('an article created from a direct action prepares a Facebook draft without 
     const draftRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
     expect(draftRead.status()).toBe(200)
     const article = mcpData<{ post: { title: string; status: string; updated_at: string } }>(await draftRead.json()).post
-    expect(article).toMatchObject({ title, status: 'draft' })
+    expect(article).toMatchObject({ title: createdTitle, status: 'draft' })
+
+    const articlePanel = page.locator('#dashboard-panel-organization-blog-post')
+    const canvasTitle = articlePanel.getByRole('textbox', { name: 'Post title', exact: true })
+    const saveArticle = articlePanel.getByRole('button', { name: 'Save', exact: true })
+    const articleSettings = articlePanel.getByRole('button', { name: 'Article settings', exact: true })
+    const translations = articlePanel.getByTestId('localize-resource')
+    await expect(canvasTitle).toHaveValue(createdTitle)
+    await expect(saveArticle).toBeDisabled()
+    await canvasTitle.fill(title)
+    await expect(saveArticle).toBeEnabled()
+    await canvasTitle.fill(createdTitle)
+    await expect(saveArticle).toBeDisabled()
+    await canvasTitle.fill(title)
+    const canvasBody = articlePanel.locator('.blog-article [contenteditable="true"]')
+    await expect(canvasBody).toHaveCount(1)
+    await canvasBody.fill(body)
+    await articleSettings.click()
+    await page.getByRole('menuitem', { name: 'Excerpt', exact: true }).click()
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/excerpt`)
+    const excerptPanel = page.locator('#dashboard-panel-organization-blog-post-excerpt')
+    await excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true }).fill('Discard this excerpt edit')
+    await excerptPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}`)
+    await expect(canvasTitle).toHaveValue(title)
+    await expect(canvasBody).toHaveText(body)
+    await expect(saveArticle).toBeEnabled()
+    await articlePanel.getByRole('button', { name: 'Add a cover photo', exact: true }).click()
+    const pendingCover = articlePanel.locator('[data-block-index="0"]')
+    const pendingCaption = 'A caption waiting for its cover photo.'
+    await pendingCover.getByPlaceholder('Caption', { exact: true }).fill(pendingCaption)
+
+    const articlePath = `${editor}/blog/${articleId}`
+    const interceptArticle = (url: URL) => url.pathname === articlePath
+    let releaseWrite: (() => void) | undefined
+    const writeReleased = new Promise<void>((resolve) => { releaseWrite = resolve })
+    await page.route(interceptArticle, async route => {
+      if (route.request().method() === 'PATCH') await writeReleased
+      await route.continue()
+    })
+    const saveRequested = page.waitForRequest(request => new URL(request.url()).pathname === articlePath && request.method() === 'PATCH')
+    const saveResponse = page.waitForResponse(response => new URL(response.url()).pathname === articlePath && response.request().method() === 'PATCH')
+    let requestStarted = false
+    try {
+      await saveArticle.click()
+      await saveRequested
+      requestStarted = true
+      await expect(saveArticle).toBeDisabled()
+      await expect(articleSettings).toBeDisabled()
+      await expect(translations).toHaveAttribute('aria-disabled', 'true')
+    } finally {
+      releaseWrite?.()
+      if (requestStarted) await saveResponse
+      await page.unroute(interceptArticle)
+    }
+    const saved = await saveResponse
+    expect(saved.status(), await saved.text()).toBe(200)
+    await expect(articleSettings).toBeEnabled()
+    await expect(translations).not.toHaveAttribute('aria-disabled', 'true')
+    await expect(saveArticle).toBeDisabled()
+    await expect(articlePanel.getByRole('status')).toHaveText('Unsaved changes')
+    await expect(pendingCover.getByPlaceholder('Caption', { exact: true })).toHaveValue(pendingCaption)
+    const savedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
+    expect(savedRead.status()).toBe(200)
+    const savedArticle = mcpData<{ post: { title: string; excerpt: string | null; status: string; updated_at: string; content_blocks: Array<{ type: string; data: { markdown?: string } }> } }>(await savedRead.json()).post
+    expect(savedArticle).toMatchObject({ title, excerpt: null, status: 'draft' })
+    expect(savedArticle.content_blocks.map(block => block.type)).toEqual(['markdown'])
+    expect(savedArticle.content_blocks.filter(block => block.type === 'markdown').map(block => block.data.markdown)).toEqual([body])
+    await pendingCover.focus()
+    await pendingCover.press('Delete')
+    await expect(articlePanel.getByRole('status')).toHaveText('Saved')
+    await expect(saveArticle).toBeDisabled()
     const categoriesRead = await page.request.get(`${editor}/blog/categories`, { params: { collection: 'blog' } })
     expect(categoriesRead.status(), await categoriesRead.text()).toBe(200)
     const kitchen = (await categoriesRead.json() as { categories: Array<{ id: string; name: string }> }).categories.filter(category => category.name === 'Kitchen')
@@ -45,23 +118,72 @@ test('an article created from a direct action prepares a Facebook draft without 
     // Continue the author's real workflow: choose the blog's real category,
     // write its body, and publish explicitly before preparing a social post.
     const update = await page.request.patch(`${editor}/blog/${articleId}`, { data: {
-      excerpt, category_id: kitchen[0]!.id, expected_updated_at: article.updated_at,
-      content_blocks: [{ type: 'markdown', data: { markdown: 'An authored article body for the Today action journey.', editor_mode: 'rich' } }],
+      excerpt, category_id: kitchen[0]!.id, expected_updated_at: savedArticle.updated_at,
+      content_blocks: [{ type: 'markdown', data: { markdown: body, editor_mode: 'rich' } }],
     } })
     expect(update.status(), await update.text()).toBe(200)
-    const updated = (await update.json() as { post: { updated_at: string } }).post
-    const published = await page.request.post(`${editor}/blog/${articleId}/publish`, { data: { expected_updated_at: updated.updated_at } })
+    // This editor still holds the earlier revision. A failed save keeps its
+    // metadata leaf open and cannot continue into navigation or publication.
+    await articleSettings.click()
+    await page.getByRole('menuitem', { name: 'Excerpt', exact: true }).click()
+    const staleExcerpt = 'A stale excerpt that must not replace the saved article.'
+    await excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true }).fill(staleExcerpt)
+    const staleSaveResponse = page.waitForResponse(response => new URL(response.url()).pathname === articlePath && response.request().method() === 'PATCH')
+    await excerptPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    const refusedSave = await staleSaveResponse
+    expect(refusedSave.status(), await refusedSave.text()).toBe(409)
+    expect(refusedSave.request().postDataJSON().expected_updated_at).toBe(savedArticle.updated_at)
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/excerpt`)
+    await expect(excerptPanel).toContainText('Content document was updated by another writer')
+    await expect(excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true })).toHaveValue(staleExcerpt)
+    await expect(excerptPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    const refusedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
+    expect(refusedRead.status()).toBe(200)
+    expect(mcpData<{ post: { title: string; excerpt: string; status: string } }>(await refusedRead.json()).post).toMatchObject({ title, excerpt, status: 'draft' })
+    await page.reload()
+    await waitForNuxtHydration(page)
+    await expect(excerptPanel.getByRole('textbox', { name: 'Excerpt', exact: true })).toHaveValue(excerpt)
+    await excerptPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await articlePanel.getByRole('button', { name: 'Add a cover photo', exact: true }).click()
+    await pendingCover.getByPlaceholder('Caption', { exact: true }).fill(pendingCaption)
+    await expect(articlePanel.getByRole('status')).toHaveText('Unsaved changes')
+    await expect(saveArticle).toBeDisabled()
+    await articleSettings.click()
+    await page.getByRole('menuitem', { name: 'Visibility · Draft', exact: true }).click()
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}/publishing`)
+    const publishingPanel = page.locator('#dashboard-panel-organization-blog-post-publishing')
+    const publishResponse = page.waitForResponse(response => new URL(response.url()).pathname === `${articlePath}/publish` && response.request().method() === 'POST')
+    await publishingPanel.getByRole('button', { name: 'Publish', exact: true }).click()
+    const published = await publishResponse
     expect(published.status(), await published.text()).toBe(200)
-
-    const sourceRead = await page.request.get(`${editor}/blog/${articleId}`)
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/blog/${articleId}`)
+    await expect(articlePanel.getByRole('status')).toHaveText('Unsaved changes')
+    await expect(saveArticle).toBeDisabled()
+    await expect(pendingCover.getByPlaceholder('Caption', { exact: true })).toHaveValue(pendingCaption)
+    // Publication refreshes the canonical preview projection in this editor;
+    // opening it immediately offers the public address without another reload.
+    await articlePanel.getByTestId('article-preview').click()
+    const articlePreview = page.getByRole('dialog', { name: 'Article preview', exact: true })
+    await expect(articlePreview.getByTestId('preview-share')).toBeVisible()
+    await expect(articlePreview.getByTestId('preview-private')).toHaveCount(0)
+    const sourceRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_blog_post', args: { organization_id: organizationId, post_id: articleId } })
     expect(sourceRead.status()).toBe(200)
-    const source = (await sourceRead.json() as { post: { status: string; public_path: string; category: { id: string; name: string } | null } }).post
-    expect(source.status).toBe('published')
+    const source = mcpData<{ post: { title: string; excerpt: string; status: string; public_path: string; category: { id: string; name: string } | null; content_blocks: Array<{ type: string; data: { markdown?: string } }> } }>(await sourceRead.json()).post
+    expect(source).toMatchObject({ title, excerpt, status: 'published' })
+    expect(source.content_blocks.map(block => block.type)).toEqual(['markdown'])
+    expect(source.content_blocks.filter(block => block.type === 'markdown').map(block => block.data.markdown)).toEqual([body])
     expect(source.category).toMatchObject({ id: kitchen[0]!.id, name: 'Kitchen' })
     const contextRead = await page.request.get('/api/dashboard/context', { params: { org: orgSlug } })
     expect(contextRead.status()).toBe(200)
     const context = await contextRead.json() as { organization: { public_url: string } }
     const articleUrl = new URL(source.public_path, context.organization.public_url).toString()
+    await expect(articlePreview.getByTestId('content-preview-frame')).toHaveAttribute('src', articleUrl)
+    await articlePreview.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(articlePreview).toHaveCount(0)
+    await pendingCover.focus()
+    await pendingCover.press('Delete')
+    await expect(articlePanel.getByRole('status')).toHaveText('Saved')
+    await expect(saveArticle).toBeDisabled()
     const postWrites: string[] = []
     page.on('request', request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith(`${editor}/posts`)) postWrites.push(new URL(request.url()).pathname)

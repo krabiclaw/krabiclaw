@@ -160,28 +160,32 @@ def shot(name):
     return f"{S}/{name}_s.png"
 
 
-_recorder = None
-
-
 def start(name):
     """Record the window to clips/<name>.mov with winrec (built next to this file)."""
-    global _recorder
     binary = f"{HERE}/winrec"
     if not os.path.exists(binary):
         subprocess.run(["swiftc", "-O", f"{HERE}/winrec.swift", "-o", binary], check=True)
     log = open(f"{S}/clips/{name}.log", "w")
-    _recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov"], stdout=log, stderr=subprocess.STDOUT)
+    recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov"], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    with open(f"{S}/rec.pid", "w") as f:
+        f.write(str(recorder.pid))  # stop() may run in a later process
     end = time.time() + 6
     while time.time() < end:
         out = open(f"{S}/clips/{name}.log").read()
         if "recording" in out:
             time.sleep(0.5); return
-        if _recorder.poll() is not None:
+        if recorder.poll() is not None:
             raise RuntimeError(out)
         time.sleep(0.2)
     raise RuntimeError("winrec did not start")
 
 
 def stop():
-    _recorder.send_signal(signal.SIGINT)
-    _recorder.wait()
+    pid = int(open(f"{S}/rec.pid").read())
+    os.kill(pid, signal.SIGINT)
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.3)

@@ -133,7 +133,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 
   // The first save needs both answers and creates the organization through
   // Better Auth and its pending site before the pane has anything to frame.
-  await step('currency').getByRole('button', { name: 'Show popup', exact: true }).click()
+  await step('currency').getByRole('button', { name: 'Currency*', exact: true }).click()
   await page.getByRole('option', { name: 'Thai Baht (THB)', exact: true }).click()
   await expect(step('contact')).toBeVisible()
 
@@ -583,34 +583,55 @@ test('a paid plan adds a location past the included ones and counts it', async (
 
 // NCLS has one of the two locations its plan includes. Adding one walks the
 // location record's own create level: Name, then Hours, then Create location,
-// which opens the location it made.
-test('a location is created by walking its own record', async ({ page, baseURL }) => {
+// which opens the new location's first Photos section on a desktop.
+test('a location is created by walking its own record', async ({ page, baseURL, playwright }) => {
   await dismissPreviewToolbar(page)
   await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
   const org = 'north-carolina-legal-services'
-  await page.goto(`/dashboard/${org}/locations/new`)
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/new/name$`))
-  await expect(page.getByRole('heading', { name: 'New location' })).toBeVisible()
-  await page.getByRole('textbox', { name: 'Name' }).fill('Raleigh Annex')
-  await page.getByRole('button', { name: 'Next: Hours', exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/new/hours/timezone$`))
-  await page.getByRole('button', { name: 'Time zone', exact: true }).click()
-  await page.getByPlaceholder('Search by city, e.g. Bangkok').fill('America/New_York')
-  await page.getByRole('option').first().click()
-  await page.getByRole('button', { name: 'Create location', exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/raleigh-annex$`))
+  const cleanupRequest = await playwright.request.newContext({ baseURL, storageState: await page.request.storageState() })
+  let createdLocationId: string | undefined
+  try {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.goto(`/dashboard/${org}/locations/new`)
+    await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/new/name$`))
+    await expect(page.getByRole('heading', { name: 'New location' })).toBeVisible()
+    await page.getByRole('textbox', { name: 'Name' }).fill('Raleigh Annex')
+    await page.getByRole('button', { name: 'Next: Hours', exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/new/hours/timezone$`))
+    await page.getByRole('button', { name: 'Time zone', exact: true }).click()
+    await page.getByPlaceholder('Search by city, e.g. Bangkok').fill('America/New_York')
+    await page.getByRole('option').first().click()
+    const creation = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/dashboard/locations')
+    await page.getByRole('button', { name: 'Create location', exact: true }).click()
+    const response = await creation
+    expect(response.status(), await response.text()).toBe(201)
+    const location = (await response.json() as { location: { id: string; slug: string } }).location
+    createdLocationId = location.id
+    expect(location.slug).toBe('raleigh-annex')
+    await expect(page).toHaveURL(`/dashboard/${org}/locations/raleigh-annex/photos`)
+    await expect(page.locator('#dashboard-panel-location-photos').getByRole('heading', { name: 'Photos', exact: true, level: 1 })).toBeVisible()
 
-  const created = await page.request.get(`/api/dashboard/locations?org=${org}`)
-  expect(created.status(), await created.text()).toBe(200)
-  const listed = ((await created.json()) as { locations: Array<{ id: string; slug: string }> }).locations
-    .find(candidate => candidate.slug === 'raleigh-annex')
-  expect(listed).toBeDefined()
-  const read = await page.request.get(`/api/dashboard/locations/${listed!.id}`)
-  expect(read.status(), await read.text()).toBe(200)
-  expect(((await read.json()) as { location: { title: string; timezone: string } }).location)
-    .toMatchObject({ title: 'Raleigh Annex', timezone: 'America/New_York' })
-  const deleted = await page.request.delete(`/api/organizations/org-ncls-blawby/locations/${listed!.id}`)
-  expect(deleted.status(), await deleted.text()).toBe(200)
+    const created = await page.request.get(`/api/dashboard/locations?org=${org}`)
+    expect(created.status(), await created.text()).toBe(200)
+    const listed = ((await created.json()) as { locations: Array<{ id: string; slug: string }> }).locations
+      .find(candidate => candidate.slug === 'raleigh-annex')
+    expect(listed).toMatchObject({ id: createdLocationId, slug: 'raleigh-annex' })
+    const read = await page.request.get(`/api/dashboard/locations/${listed!.id}`)
+    expect(read.status(), await read.text()).toBe(200)
+    expect(((await read.json()) as { location: { title: string; timezone: string } }).location)
+      .toMatchObject({ title: 'Raleigh Annex', timezone: 'America/New_York' })
+  } finally {
+    try {
+      if (createdLocationId) {
+        const deleted = await cleanupRequest.delete(`/api/organizations/org-ncls-blawby/locations/${createdLocationId}`)
+        expect(deleted.status(), await deleted.text()).toBe(200)
+        const removed = await cleanupRequest.get(`/api/dashboard/locations/${createdLocationId}`)
+        expect(removed.status(), await removed.text()).toBe(404)
+      }
+    } finally {
+      await cleanupRequest.dispose()
+    }
+  }
 })
 
 // A location made by its own record has no place yet; Settings → Google Maps

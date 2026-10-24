@@ -21,7 +21,7 @@ import { renderNotificationEmail } from '~/server/emails/render'
 import { bookingChangeProposalMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain } from '~/server/utils/dashboard-notification-links'
-import { updateThreadProjection } from './repository'
+import { updateThreadProjectionIfLatestEntry } from './repository'
 import { getGuestRequest, getThreadOperationalRecord, requestSummary, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import type { GuestThreadRow } from './types'
 
@@ -321,8 +321,6 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   const after = fieldsSchema.parse(afterInput)
   const before = await loadSource(db, thread)
   const summary = await sourceSummary(db, thread)
-  if (!['pending', 'confirmed'].includes(before.status)) throw new HTTPError({ statusCode: 409, message: 'This reservation or booking can no longer be changed' })
-  if (before.endsAt <= new Date().toISOString()) throw new HTTPError({statusCode:409,message:'This visit has ended and cannot be rescheduled'})
   const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actorUserId })
   if (!membership) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
   // Both the current and the proposed location must be within reach, so a
@@ -336,7 +334,15 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   if (entry) {
     const previous = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
     if (JSON.stringify(previous.after) !== JSON.stringify(after) || previous.updatedAt !== meta.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'Request key was reused for different changes' })
+    const decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+    if (decision) {
+      if (decision.event_name === 'booking_change.accepted') return { changeStatus: 'accepted' as const }
+      if (decision.event_name === 'booking_change.declined') return { changeStatus: 'declined' as const }
+      throw new HTTPError({ statusCode: 500, message: 'Booking change decision is invalid' })
+    }
   } else {
+    if (!['pending', 'confirmed'].includes(before.status)) throw new HTTPError({ statusCode: 409, message: 'This reservation or booking can no longer be changed' })
+    if (before.endsAt <= new Date().toISOString()) throw new HTTPError({statusCode:409,message:'This visit has ended and cannot be rescheduled'})
     if (before.updatedAt !== meta.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'The reservation changed. Reload before sending a request.' })
     const destination = await validateDestination(db, thread, before, after)
     // Moving a reservation to another branch at the same time for the same
@@ -363,7 +369,14 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
   const noun = await bookingNoun(db, thread)
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
   await deliverEmail(db, env, thread, entry.id, 'requested', proposal, noun)
-  await updateThreadProjection(db, thread.id, { conversationState: 'waiting_on_guest' })
+  await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+  const decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
+  if (decision) {
+    if (decision.event_name === 'booking_change.accepted') return { changeStatus: 'accepted' as const }
+    if (decision.event_name === 'booking_change.declined') return { changeStatus: 'declined' as const }
+    throw new HTTPError({ statusCode: 500, message: 'Booking change decision is invalid' })
+  }
+  return { changeStatus: 'awaiting_guest_acceptance' as const }
 }
 
 /** GET only reads the immutable proposal. POST records one idempotent guest decision. */
@@ -450,7 +463,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
   if (result && input.decision) {
     const accepted = result.event_name === 'booking_change.accepted'
     await deliverEmail(db, env, thread as GuestThreadRow, result.id, accepted ? 'accepted' : 'declined', proposal, noun)
-    await updateThreadProjection(db, thread.id, { conversationState: 'resolved' })
+    await updateThreadProjectionIfLatestEntry(db, thread.id, result.id, { conversationState: 'resolved' })
     if (!result.payload_json) throw new Error('A booking change answer has no recorded payload')
     const answered = JSON.parse(result.payload_json) as { operational_booking_id?: unknown }
     if (thread.kind === 'booking' && typeof answered.operational_booking_id === 'string') {

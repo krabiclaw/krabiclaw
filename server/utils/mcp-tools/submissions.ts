@@ -25,6 +25,10 @@ const conversationResult = { type: 'object', properties: { conversation: { type:
     attachments: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, url: { type: 'string' }, alt: nullableString, width: { type: ['integer', 'null'] }, height: { type: ['integer', 'null'] } }, required: ['id', 'url', 'alt', 'width', 'height'] } },
   }, required: ['id', 'kind', 'actor', 'channel', 'body', 'event', 'occurred_at', 'provider_timestamp', 'deliveries', 'attachments'] } },
 }, required: ['request_id', 'type', 'state', 'archived', 'updated_at', 'participant_label', 'reply_channel', 'guest', 'operational_record', 'entries'] } }, required: ['conversation'] }
+const conversationMutationResult = { type: 'object', properties: {
+  outcome: { type: 'object', properties: { ok: { const: true } }, required: ['ok'] },
+  conversation: { type: 'object', properties: { request_id: { type: 'string' }, state: nullableString, archived: { type: 'boolean' }, updated_at: { type: 'string' } }, required: ['request_id', 'state', 'archived', 'updated_at'], additionalProperties: false },
+}, required: ['outcome', 'conversation'], additionalProperties: false }
 
 async function readConversation(ctx: McpExecutorContext, requestId: string) {
   const { db, organizationId } = ctx.organization
@@ -45,14 +49,14 @@ export const SUBMISSIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'get_guest_conversation', domain: 'submissions', minimumRole: 'member', description: 'Read the entire guest conversation, including messages, booking/reservation, proposals, attachments and delivery receipts. Requires request_id from the inbox or booking read.',
     inputSchema: { request_id: { type: 'string' } }, required: ['request_id'], outputSchema: conversationResult,
   }),
-  organizationTool({ name: 'reply_to_guest', domain: 'submissions', minimumRole: 'member', description: 'Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A pending or uncertain Airbnb send needs review and is never resent automatically.',
-    inputSchema: { request_id: { type: 'string' }, message: { type: 'string', minLength: 1, description: 'Reply text; required when no photo is attached.' }, file: { ...chatgptFileInput, description: 'Photo attachment; required when no reply text is supplied.' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['request_id', 'idempotency_key'], fileParams: ['file'], outputSchema: conversationResult,
+  organizationTool({ name: 'reply_to_guest', domain: 'submissions', minimumRole: 'member', description: 'Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text; email replies accept text, a photo or both. A stay guest without an email is reached in their KrabiClaw inbox once they accept the host’s invite link; until then the reply is refused with GUEST_INVITE_REQUIRED and the host shares an invite from the KrabiClaw app. Reuse the same key for an identical retry. A pending or uncertain Airbnb send needs review and is never resent automatically. Returns saved conversation state; use get_guest_conversation for history and delivery receipts.',
+    inputSchema: { anyOf: [{ required: ['message'] }, { required: ['file'] }], request_id: { type: 'string', description: 'Conversation request_id from list_guest_conversations or a booking read.' }, message: { type: 'string', minLength: 1, pattern: '\\S', description: 'Reply text; required when no photo is attached.' }, file: { ...chatgptFileInput, description: 'Photo attachment; required when no reply text is supplied.' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['request_id', 'idempotency_key'], fileParams: ['file'], outputSchema: conversationMutationResult,
   }),
-  organizationTool({ name: 'set_guest_conversation_archived', domain: 'submissions', minimumRole: 'admin', description: 'Archive or restore this inbox conversation. Does not cancel a booking or reservation and does not send the guest a message.',
-    inputSchema: { request_id: { type: 'string' }, archived: { type: 'boolean' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['request_id', 'archived', 'idempotency_key'], outputSchema: conversationResult,
+  organizationTool({ name: 'set_guest_conversation_archived', domain: 'submissions', minimumRole: 'admin', description: 'Archive or restore the inbox conversation identified by request_id from list_guest_conversations or a booking read. Returns its saved archive state without conversation history. Does not cancel a booking or reservation and does not send the guest a message.',
+    inputSchema: { request_id: { type: 'string', description: 'Conversation request_id from list_guest_conversations or a booking read.' }, archived: { type: 'boolean' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['request_id', 'archived', 'idempotency_key'], outputSchema: conversationMutationResult,
   }),
   organizationTool({
-      name: 'list_reservation_inquiries',
+      name: 'list_table_reservations',
       description: "Read table reservations for the selected site, optionally filtered by location and creation window of up to 90 days. Returns guest contact details, reservation details and status counts. Use list_product_bookings to read product session bookings and consultations.",
       domain: 'submissions',
       minimumRole: 'admin',
@@ -112,9 +116,10 @@ export async function handleSubmissionsTools(ctx: McpExecutorContext): Promise<u
         } } } : {}),
         actorUserId: organization.userId, idempotencyKey: requiredString(args, 'idempotency_key'), env: organization.env, financialWritesAllowed: false })
       if (outcome.ok || outcome.reason === 'delivery_failed') await publishGuestInboxThreadEvent(organization.env, organization.db, { threadId: requestId, type: 'thread.changed' })
-      return renderStructuredResponse({ outcome: outcome.ok ? { ok: true } : outcome, conversation: await readConversation(ctx, requestId) }, undefined, undefined, !outcome.ok)
+      const saved = await readConversation(ctx, requestId)
+      return renderStructuredResponse({ outcome: outcome.ok ? { ok: true } : outcome, conversation: { request_id: saved.request_id, state: saved.state, archived: saved.archived, updated_at: saved.updated_at } }, undefined, undefined, !outcome.ok)
     }
-    case "list_reservation_inquiries": {
+    case "list_table_reservations": {
       const reservationFilter = {
         locationId: optionalString(args, "location_id") ?? null,
         sinceDays: optionalDaysWindow(args, "days"),
