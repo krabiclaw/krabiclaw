@@ -91,10 +91,14 @@ if (inventoryFile) {
     groups.set(entry.tenant, urls)
   }
 
-  for (const [tenant, urls] of groups) {
+  const batches = [...groups].flatMap(([tenant, urls]) => Array.from(
+    { length: Math.ceil(urls.length / 30) },
+    (_, index) => ({ tenant, offset: index * 30, urls: urls.slice(index * 30, index * 30 + 30) }),
+  ))
+  for (const { tenant, offset, urls } of batches) {
     const target = targets.get(tenant)!
     for (const width of [1440, 390]) {
-      test(`published route inventory: ${tenant} at ${width}px`, async ({ page, request }, testInfo) => {
+      test(`published route inventory: ${tenant} at ${width}px, routes ${offset + 1}–${offset + urls.length}`, async ({ page, request }, testInfo) => {
         test.setTimeout(urls.length * 60_000 + 30_000)
         await page.setViewportSize({ width, height: 900 })
         const errors: string[] = []
