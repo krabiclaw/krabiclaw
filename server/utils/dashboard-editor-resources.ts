@@ -28,7 +28,7 @@ interface EditorLocationRow {
   id: string
   slug: string
   title: string
-  status: 'active' | 'inactive' | 'sync_error'
+  status: 'active' | 'inactive'
 }
 
 export async function loadDashboardEditorContext(event: H3Event, organizationId: string) {

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d1d05d499dd2603a055f038b94307c9e1b66e950cfa83a28dc666834c7b03136",
-  "documentationFingerprint": "sha256:3af813081a0f2cbb1adb38c2ddd43e4c3019037a5c3323e71c26c359ccebf12a",
+  "fingerprint": "sha256:af4d4df16d2ee3ea7990622a901b6903a35599778e9b252fdaede9e55ea11c6a",
+  "documentationFingerprint": "sha256:8a5317ce66ce9c8e851930256360fbba0fe4d9f5a2f3c1b8e8a93673a71a0deb",
   "tools": [
     {
       "name": "add_organization_language",
@@ -18803,7 +18803,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status draft takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business's one subscription, billed at the end of the period for the active locations at that time. Draft locations and the locations of places to stay are not counted. Basic refuses a third active location.",
+      "description": "Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status inactive takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business's one subscription, billed at the end of the period for the active locations at that time. Inactive locations and the locations of places to stay are not counted. Basic refuses a third active location.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -19105,7 +19105,7 @@
                 "type": "array"
               }
             ],
-            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure covering a date wins over dated hours on that date. Closures may overlap; a second dated-hours entry for the same date is rejected. Omitted, null and [] all mean no special hours."
+            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected. Omitted, null and [] all mean no special hours."
           },
           "timezone": {
             "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
@@ -107595,13 +107595,11 @@
                 "type": "array"
               }
             ],
-            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure covering a date wins over dated hours on that date. Closures may overlap; a second dated-hours entry for the same date is rejected."
+            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected."
           },
           "status": {
-            "description": "published/active keeps the location on the website; draft/inactive takes the location off the website and frees its plan slot.",
+            "description": "active keeps the location on the website; inactive takes it off the website and frees its plan slot.",
             "enum": [
-              "published",
-              "draft",
               "active",
               "inactive"
             ],
