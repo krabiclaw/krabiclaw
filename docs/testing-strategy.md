@@ -36,7 +36,7 @@ For the shared public changes identified by the release contract, the existing
 `tenant-rendering.spec.ts` accepts a fresh runtime inventory through
 `PLAYWRIGHT_TENANT_ROUTE_INVENTORY`. Its JSON format is a nonempty array of
 `{ "tenant": "Kikuzuki", "url": "https://kikuzuki-krabi-thailand-staging.krabiclaw.com/menu" }`.
-Supported tenant names are `Pottery House`, `Kikuzuki`, `NCLS`, and staging's
+Supported tenant names are `KrabiClaw`, `Pottery House`, `Kikuzuki`, `NCLS`, and staging's
 `Saltleaf`; destinations must match their canonical environment hosts.
 
 Build that inventory from the actual complete sitemap and published native

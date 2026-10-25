@@ -59,15 +59,17 @@ const tenants: Tenant[] = [
 const inventoryFile = process.env.PLAYWRIGHT_TENANT_ROUTE_INVENTORY
 if (inventoryFile) {
   if (!process.env.PLAYWRIGHT_PREVIEW_URL) throw new Error('A published route inventory requires PLAYWRIGHT_PREVIEW_URL')
-  const targets = new Map([
-    ['Pottery House', { origin: new URL(potteryHouseBaseURL).origin, identity: /Pottery House/i }],
-    ['Kikuzuki', { origin: new URL(kikuzukiTestBaseUrl()).origin, identity: /Kikuzuki/i }],
-    ['NCLS', { origin: new URL(blawbyBaseURL).origin, identity: /North Carolina Legal Services/i }],
-  ])
   const platform = new URL(testBaseUrl())
+  const targets = new Map([
+    ['KrabiClaw', { origin: platform.origin, identity: /KrabiClaw/i, shell: '.platform-layout' }],
+    ['Pottery House', { origin: new URL(potteryHouseBaseURL).origin, identity: /Pottery House/i, shell: '.tenant-layout' }],
+    ['Kikuzuki', { origin: new URL(kikuzukiTestBaseUrl()).origin, identity: /Kikuzuki/i, shell: '.tenant-layout' }],
+    ['NCLS', { origin: new URL(blawbyBaseURL).origin, identity: /North Carolina Legal Services/i, shell: '.tenant-layout' }],
+  ])
   if (platform.hostname === 'staging.krabiclaw.com') targets.set('Saltleaf', {
     origin: `https://${environmentTenantAliasHostname(platform.hostname, 'saltleaf-stays-demo')}`,
     identity: /Saltleaf Stays/i,
+    shell: '.tenant-layout',
   })
   const inventory: unknown = JSON.parse(readFileSync(inventoryFile, 'utf8'))
   if (!Array.isArray(inventory) || !inventory.length) throw new Error('The published route inventory must be a nonempty array')
@@ -123,7 +125,7 @@ if (inventoryFile) {
               const response = await openTenantPage(page, url.href, {})
               expect(response?.status()).toBe(200)
               await expect(page).toHaveURL(url.href)
-              await expect(page.locator('.tenant-layout')).toBeVisible()
+              await expect(page.locator(target.shell)).toBeVisible()
               const locale = await page.locator('html').getAttribute('lang')
               expect(locale).toMatch(/\S/)
               const shellRead = await request.get(`${url.origin}/api/public/shell`, { params: { locale: locale! } })
@@ -211,6 +213,12 @@ if (inventoryFile) {
               })
               for (const video of await page.locator('video:visible').all()) {
                 await video.scrollIntoViewIfNeeded()
+                // Native controlled videos deliberately preload nothing. Exercise
+                // playback before requiring a decoded frame from that resource.
+                await video.evaluate(async element => {
+                  const media = element as HTMLVideoElement
+                  if (media.paused) await media.play()
+                })
                 await expect.poll(() => video.evaluate(element => {
                   const media = element as HTMLVideoElement
                   return {
