@@ -10,7 +10,7 @@ import { resolveGuestThreadMailbox } from '../../server/domain/guest-threads/mai
 import { claimReservation, requireLocationReservationConfig, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { CapacityUnavailableError, claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
 import { buildCanonicalNotificationInsert } from '../../server/utils/notification-center.ts'
-import { acknowledgeNotification } from '../../server/utils/notification-acknowledgement.ts'
+import { acknowledgeNotification, acknowledgeThreadNotifications } from '../../server/utils/notification-acknowledgement.ts'
 
 const ORG = 'org-proof'
 const LOCATION = 'location-proof'
@@ -154,8 +154,11 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     const notification = buildCanonicalNotificationInsert({ scope: 'organization', organizationId: ORG, title: 'Reply', template: 'guest.reply', sourceEntryId: entryId }, 'notification-proof')
     await db.prepare(notification.query).bind(...notification.params).run()
     const visibility = { userId: ACTOR, whereSql: 'n.organization_id = ?', whereParams: [ORG] }
-    assert.equal(await acknowledgeNotification(db, visibility, notification.id), true)
-    assert.equal(await acknowledgeNotification(db, { ...visibility, whereParams: ['another-org'] }, notification.id), false)
+    assert.deepEqual(await acknowledgeNotification(db, visibility, notification.id), { newlyRead: true })
+    assert.equal(await acknowledgeNotification(db, { ...visibility, whereParams: ['another-org'] }, notification.id), null)
+    // Reading it again reads nothing new, so nothing announces a read.
+    assert.deepEqual(await acknowledgeNotification(db, visibility, notification.id), { newlyRead: false })
+    assert.equal(await acknowledgeThreadNotifications(db, visibility, winner), 0)
     assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE kind='acknowledgement' AND parent_id=? AND actor_user_id=?").bind(notification.id, ACTOR).first('count(*)'), 1)
 
     // An audit entry belongs to the organization it describes and goes with it.

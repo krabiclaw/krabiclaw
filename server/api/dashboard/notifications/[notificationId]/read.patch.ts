@@ -10,10 +10,9 @@ export default defineHandler(async (event) => {
   if (!notificationId) return jsonResponse({ error: 'Notification id is required' }, { status: 400 })
 
   const access = await getNotificationAccess(event)
-  if (!await acknowledgeNotification(access.db, access, notificationId)) {
-    return jsonResponse({ error: 'Notification not found' }, { status: 404 })
-  }
-  if (access.organization) {
+  const read = await acknowledgeNotification(access.db, access, notificationId)
+  if (!read) return jsonResponse({ error: 'Notification not found' }, { status: 404 })
+  if (read.newlyRead && access.organization) {
     await publishNotificationInvalidation(access.env, {
       type: 'notification.read',
       organizationId: access.organization.id,
