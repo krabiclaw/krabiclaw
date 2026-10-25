@@ -160,6 +160,7 @@ class FakeMeta {
     if (method === 'POST' && path === `${IG}/media_publish`) {
       const container = this.igContainers.get(body.creation_id!)
       if (!container || container.status !== 'FINISHED') return json({ error: { message: 'Media not ready', code: 9007 } }, 400)
+      if (this.publishNotReady > 0) { this.publishNotReady -= 1; return json({ error: { message: 'Media ID is not available', code: 9007, error_subcode: 2207027 } }, 400) }
       container.status = 'PUBLISHED'
       const id = this.id('ig-media-')
       this.igMedia.set(id, { container: body.creation_id! })
@@ -188,6 +189,8 @@ class FakeMeta {
   igInsights: Record<string, number> = {}
   igMediaInsights = new Map<string, Record<string, number>>()
   reelProcessingReads = 0
+  /** media_publish answers Meta's "media not ready" this many more times on a FINISHED container. */
+  publishNotReady = 0
   expireNewContainers = false
 }
 
@@ -493,6 +496,15 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(meta.sent(request => request.method === 'GET' && Boolean(request.query.get('fields')?.includes('status_code')) && meta.igContainers.get(request.path.split('/').at(-1)!)?.kind === 'REELS').length, 3)
     meta.reelProcessingReads = 0
     await publishedOnMeta(reel.post.id, 'instagram')
+
+    // Meta answering media_publish "not ready" (9007/2207027) on a FINISHED container is waited out by the same call.
+    meta.publishNotReady = 2
+    const notReadyYet = await create('key-not-ready', { media: [{ asset_id: 'a1', slot: 'cover' }] })
+    const publishesBeforeWait = meta.sent(request => request.path.endsWith('media_publish')).length
+    assert.equal((await publishPost(env, 'org-a', notReadyYet.post.id, { expectedUpdatedAt: notReadyYet.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
+    assert.equal(meta.sent(request => request.path.endsWith('media_publish')).length, publishesBeforeWait + 3)
+    assert.equal(meta.publishNotReady, 0)
+    await publishedOnMeta(notReadyYet.post.id, 'instagram')
 
     // An expired container is a definite non-publication; the next call prepares new ones.
     const expiring = await create('key-expire', { media: [{ asset_id: 'a2', slot: 'cover' }] })
