@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:4a72b69207ce60010b4c3e926c716ef4f94861b8c78f9c943c6e0ead8d559dbf",
-  "documentationFingerprint": "sha256:d1d30b638d72c32e8df1f111a328886b20304d1ceb6d1c7192533942bd2973d0",
+  "fingerprint": "sha256:d1d05d499dd2603a055f038b94307c9e1b66e950cfa83a28dc666834c7b03136",
+  "documentationFingerprint": "sha256:3af813081a0f2cbb1adb38c2ddd43e4c3019037a5c3323e71c26c359ccebf12a",
   "tools": [
     {
       "name": "add_organization_language",
@@ -7397,6 +7397,67 @@
             "type": "boolean"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "entity": {
@@ -11535,6 +11596,7 @@
             "type": "array"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
             "properties": {
               "location_id": {
                 "type": [
@@ -12023,6 +12085,11 @@
                 ]
               },
               "status": {
+                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "enum": [
+                  "active",
+                  "inactive"
+                ],
                 "type": "string"
               },
               "stay_map_sharing": {
@@ -18736,7 +18803,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add a location to the selected business website. Every plan includes 2 locations. Growth and Business include 2 locations, then $49 per additional location per month, billed at the end of the period; Basic refuses a third location. Repeat the same idempotency key with the same details on retry.",
+      "description": "Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status draft takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business's one subscription, billed at the end of the period for the active locations at that time. Draft locations and the locations of places to stay are not counted. Basic refuses a third active location.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -18795,6 +18862,7 @@
             "type": "string"
           },
           "idempotency_key": {
+            "description": "One key per new location, kept by this business and never expired. Retrying with the same key and details returns the location it created. The same key with different details fails with IDEMPOTENCY_CONFLICT; if that location has been deleted it fails with LOCATION_DELETED and nothing is created.",
             "maxLength": 200,
             "minLength": 1,
             "pattern": "\\S",
@@ -18913,7 +18981,7 @@
                 "type": "object"
               }
             ],
-            "description": "Canonical weekly endpoint periods. Days use Sunday=0. Null means unknown; periods [] means closed. Sunday 00:00 without a close means always open."
+            "description": "Canonical weekly endpoint periods. Days use Sunday=0. Null means unknown; periods [] means closed. Sunday 00:00 without a close means always open. Omitted is the same as null."
           },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
@@ -19037,7 +19105,7 @@
                 "type": "array"
               }
             ],
-            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date."
+            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure covering a date wins over dated hours on that date. Closures may overlap; a second dated-hours entry for the same date is rejected. Omitted, null and [] all mean no special hours."
           },
           "timezone": {
             "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
@@ -19067,6 +19135,67 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "location": {
@@ -19482,6 +19611,11 @@
                 ]
               },
               "status": {
+                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "enum": [
+                  "active",
+                  "inactive"
+                ],
                 "type": "string"
               },
               "stay_map_sharing": {
@@ -19939,6 +20073,67 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "ok": {
@@ -40220,6 +40415,67 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "deleted": {
@@ -44494,6 +44750,67 @@
             "type": "array"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "items": {
@@ -46020,6 +46337,11 @@
                 ]
               },
               "status": {
+                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "enum": [
+                  "active",
+                  "inactive"
+                ],
                 "type": "string"
               },
               "stay_map_sharing": {
@@ -62530,6 +62852,7 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
             "properties": {
               "location_id": {
                 "type": [
@@ -68571,6 +68894,7 @@
             "type": "array"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
             "properties": {
               "location_id": {
                 "type": [
@@ -69059,6 +69383,11 @@
                 ]
               },
               "status": {
+                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "enum": [
+                  "active",
+                  "inactive"
+                ],
                 "type": "string"
               },
               "stay_map_sharing": {
@@ -73259,6 +73588,7 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
             "properties": {
               "location_id": {
                 "type": [
@@ -79749,6 +80079,67 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "localization": {
@@ -87066,6 +87457,67 @@
             "type": "boolean"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "entity": {
@@ -88431,6 +88883,67 @@
             "type": "boolean"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "entity": {
@@ -95490,6 +96003,67 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "locale": {
@@ -98081,6 +98655,67 @@
             "type": "boolean"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "entity": {
@@ -99840,6 +100475,7 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
             "properties": {
               "location_id": {
                 "type": [
@@ -106959,7 +107595,7 @@
                 "type": "array"
               }
             ],
-            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date."
+            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure covering a date wins over dated hours on that date. Closures may overlap; a second dated-hours entry for the same date is rejected."
           },
           "status": {
             "description": "published/active keeps the location on the website; draft/inactive takes the location off the website and frees its plan slot.",
@@ -107007,6 +107643,7 @@
             "type": "array"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
             "properties": {
               "location_id": {
                 "type": [
@@ -107495,6 +108132,11 @@
                 ]
               },
               "status": {
+                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "enum": [
+                  "active",
+                  "inactive"
+                ],
                 "type": "string"
               },
               "stay_map_sharing": {
@@ -111524,6 +112166,67 @@
             "type": "array"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "contrast_warnings": {
@@ -111729,6 +112432,67 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "ok": {
@@ -116656,6 +117420,67 @@
             "type": "array"
           },
           "context": {
+            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
+            "properties": {
+              "location_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "location_title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_public_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_slug": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "organization_subdomain": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "organization_id",
+              "organization_name",
+              "organization_slug",
+              "organization_subdomain",
+              "organization_public_url",
+              "location_id",
+              "location_slug",
+              "location_title"
+            ],
             "type": "object"
           },
           "entity": {
@@ -124856,7 +125681,7 @@
       "toolContracts": {
         "create_product": "sha256:3e9393aed7b679691324ae80726eab0405c60d0a0f1ef0ec32738753e6b74029",
         "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "list_collections": "sha256:48902175cc81e038f9e191dee455e9befd9995c538c83d9e787bf5f1db977cd5",
         "list_location_products": "sha256:c8f03bb72de1ce359c0aa574724f6475046b29e3643739feb311bf00cbae5fc2",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
@@ -124888,7 +125713,7 @@
         "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
       },
       "toolContracts": {
-        "create_post": "sha256:e3c2701bb920fadd2b0bff26925c13f4bdf7045c7471d37777c5b6166fed9846",
+        "create_post": "sha256:77c09d39d70b06ba241411ba7a41e456bb8b6d7cd92bffbb601a1b4c2e370cdf",
         "get_social_connections": "sha256:36c3ebab535891b42ad3449c21123684e158817b6ba27526b59eda85f4d168cd",
         "publish_post": "sha256:58f8905fe25459178581a8b47f51706e96ac0d93742ec099ee9fc92f576751d5",
         "reconcile_post_publication": "sha256:b238f6086d0fdbbf0574ba9927511cceec758dd96937642cca7aa3392113ef1e"
@@ -124909,10 +125734,10 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:3d10393438ba444756ca1709c23080ca27854a4405fca1f4c7451b0ab31fd450",
+        "attach_media": "sha256:e40e54dceaa1b70ef0c18a2e88b89f355d70b69d4fb4a3ed47f13fcd2824400f",
         "create_product": "sha256:3e9393aed7b679691324ae80726eab0405c60d0a0f1ef0ec32738753e6b74029",
         "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
         "list_product_booking_sessions": "sha256:d83b2e5cca9bf0fed8d402b5e04074988598a9ed745f61c48024d3849b826b73",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
@@ -124934,7 +125759,7 @@
         "get_guest_conversation": "sha256:74b41ebb885766ddf605efbbc63148e2028c4fb63512a75b950b96f9c8330941",
         "get_product_booking": "sha256:2d113f750fa03eceae5c3baba37fbaf24dddcec13ed6421571e505cec9b4032e",
         "get_team_conversation": "sha256:c32b5fb7f436d2ab93a67a0b79a181f7a1072520d9bfb39368bf4f7a3b714b20",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "list_guest_conversations": "sha256:ddf04afce74f786a28bd5a72f31eb9d14c0279e8ce20bfbbee6cb2e8a2b1a3bb",
         "list_location_reviews": "sha256:ec8fb6190fed407a665400c18cb5dcf59fdbc8d952aa729c304e091bdb327568",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
@@ -124958,14 +125783,14 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and list_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Check if hero media, brand logo, favicon, and bookable offerings (such as places to stay or menu items via product_grid) are present, and ask the user for any missing brand assets. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:3d10393438ba444756ca1709c23080ca27854a4405fca1f4c7451b0ab31fd450",
+        "attach_media": "sha256:e40e54dceaa1b70ef0c18a2e88b89f355d70b69d4fb4a3ed47f13fcd2824400f",
         "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "list_media_assets": "sha256:baf61a4e5e669943d219b28e0309d131ae3b38e6168c8092b7bac50ac9e218be",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
-        "remove_media": "sha256:91e68cbe8c30b6a3be6a69d44e62ec12adc9100f7c56887b340406e65e75e8a5",
-        "reorder_media": "sha256:fd3b87789e0a5d1d6f73675304c416067d761b2e9480e4525a3394e744e6ea10",
-        "set_media": "sha256:e3d4681eb033e3f7c7f472c3e470b835724475a6e096e87168c2f0145e00a0f2",
+        "remove_media": "sha256:e269ed721bd2fc809e64ca11eb372de5fc3df8a36942cc558a9f33322e1ceafe",
+        "reorder_media": "sha256:f1a185b51a08db016333089ffc43321c1b3c62f70e539247da3e76abbbe1c21e",
+        "set_media": "sha256:249fc9db615cadf3f8a77b1e8cb956fb5df84011b2a32b00698bb7b6de3de965",
         "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
       }
     },
@@ -124978,14 +125803,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:3d10393438ba444756ca1709c23080ca27854a4405fca1f4c7451b0ab31fd450",
-        "get_location": "sha256:1aca413612e5d5a38f6799d1f8c6293783c35f449c2a6daab57bb9a50184f5df",
+        "attach_media": "sha256:e40e54dceaa1b70ef0c18a2e88b89f355d70b69d4fb4a3ed47f13fcd2824400f",
+        "get_location": "sha256:997354e40501e6182c1fa9514f7aa19f307dcc840c706503ded44b208db7c36a",
         "get_post": "sha256:90a66e74e4c1bd71f9898112b21121f2ae6e2ebc9bfdca6fbd1edf74f4014bec",
         "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
         "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "save_media_attachment": "sha256:420c7df571df0cd02f519a706d231efe51544183d79b66def3b90fc08d9b1bef",
-        "set_media": "sha256:e3d4681eb033e3f7c7f472c3e470b835724475a6e096e87168c2f0145e00a0f2"
+        "set_media": "sha256:249fc9db615cadf3f8a77b1e8cb956fb5df84011b2a32b00698bb7b6de3de965"
       }
     },
     {
@@ -125001,15 +125826,15 @@
         "get_organization": "sha256:7ebc3f74bcada2b704d555b6f1b3380a16b39ee6f9694f1a74ab1d5579879063",
         "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
         "get_website_draft": "sha256:ba4ac466ac8155b67b570e373c132ed877f24a5769b5d33c48dde59fd83e69e3",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
         "list_organizations": "sha256:a4a05425a7b910a81efe4a7fdf2b0a7e3d458cb90495753de26a829ba0b8ce8e",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
-        "publish_website": "sha256:551ce05b37fe76c1b6620e4f09d6bdb6ea35e4cf319bca8fcf0a25b10d648211",
+        "publish_website": "sha256:eafbb6cd72cd62ae0b0d631decf6837e43ef6845af6a86f4a2bdebe697d8108b",
         "save_website_draft": "sha256:b492a71234d030ddcf7a065ec5af65900f6c879ba98b28c6a73c95c358dd8fc4",
         "update_menu": "sha256:75e154739d430569aebfd9ccb2251cc96aba483d7d44616495c29777baa5887e",
-        "update_organization_settings": "sha256:7476c3c5cbb2c97f2d3c3a25b71f2d961779ab35706bc125665fbfd1a12d2475",
+        "update_organization_settings": "sha256:75a59a9e5e26d65d4360538f841d2c2857982166528307be7c3616fc7cf46bc0",
         "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
       }
     },
@@ -125022,17 +125847,17 @@
         "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:1aca413612e5d5a38f6799d1f8c6293783c35f449c2a6daab57bb9a50184f5df",
+        "get_location": "sha256:997354e40501e6182c1fa9514f7aa19f307dcc840c706503ded44b208db7c36a",
         "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
         "get_reservation_policy": "sha256:4045310c41d2fc80d5a07e206d3b6f9d4726bb5b6697f4941332034e1474980b",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
         "list_product_booking_sessions": "sha256:d83b2e5cca9bf0fed8d402b5e04074988598a9ed745f61c48024d3849b826b73",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "replace_product_weekly_schedule": "sha256:f2882dc99a1da0d407f05dd05e807f26501faf2697c8a270504c63c52c158c69",
         "set_product_booking_config": "sha256:e536617c2cd6082ed184e772ee67f57c790db259bba741dfaccb7d99ff64b867",
         "update_product": "sha256:e121fabe90363aab507722a5992b5438d3383f32426a800f8ac1e5b3511fd938",
-        "update_reservation_policy": "sha256:1704f7adb7b780ff9ea397b791cb7a09d316e7741894a22c630e50e018b06409"
+        "update_reservation_policy": "sha256:a393ee737d82cc7934a2b08960f50aac7782e8e2a89c60aee68250eb01426e6f"
       }
     },
     {
@@ -125044,13 +125869,13 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, list_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language: high-impact hero image or video, logo and favicon, brand colors, offerings showcase on the homepage, and host story with portrait on the about page. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:3d10393438ba444756ca1709c23080ca27854a4405fca1f4c7451b0ab31fd450",
+        "attach_media": "sha256:e40e54dceaa1b70ef0c18a2e88b89f355d70b69d4fb4a3ed47f13fcd2824400f",
         "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "list_media_assets": "sha256:baf61a4e5e669943d219b28e0309d131ae3b38e6168c8092b7bac50ac9e218be",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
-        "set_media": "sha256:e3d4681eb033e3f7c7f472c3e470b835724475a6e096e87168c2f0145e00a0f2",
+        "set_media": "sha256:249fc9db615cadf3f8a77b1e8cb956fb5df84011b2a32b00698bb7b6de3de965",
         "update_product": "sha256:e121fabe90363aab507722a5992b5438d3383f32426a800f8ac1e5b3511fd938",
         "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
       }
@@ -125064,11 +125889,11 @@
         "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
-        "create_post": "sha256:e3c2701bb920fadd2b0bff26925c13f4bdf7045c7471d37777c5b6166fed9846",
+        "create_post": "sha256:77c09d39d70b06ba241411ba7a41e456bb8b6d7cd92bffbb601a1b4c2e370cdf",
         "get_guest_conversation": "sha256:74b41ebb885766ddf605efbbc63148e2028c4fb63512a75b950b96f9c8330941",
         "get_organization_analytics": "sha256:069948b51c35d21c56d9db36f9e1f2f42702911af83649e4775792be47f5f950",
         "get_product": "sha256:3ab8e42796842b118e42eea0ef2ad0328b2bd15d4b39f0ec1a21c72c03e74cc5",
-        "get_workspace_context": "sha256:f6d71d103997e587280b7f949f1474eff90c6b76cc90f7c30f693134ae22e530",
+        "get_workspace_context": "sha256:ef83c72fa047d785dc9f6aa8623e8b34368217ab3db8a311b71e11bb3596b193",
         "list_guest_conversations": "sha256:ddf04afce74f786a28bd5a72f31eb9d14c0279e8ce20bfbbee6cb2e8a2b1a3bb",
         "list_product_booking_sessions": "sha256:d83b2e5cca9bf0fed8d402b5e04074988598a9ed745f61c48024d3849b826b73",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",

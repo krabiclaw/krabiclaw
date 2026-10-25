@@ -1,6 +1,6 @@
 import type { McpToolDefinition } from './shared'
 import { calendarDateSchema, addLocalDays, assertCalendarDate, localNow, timezoneSchema } from '~/utils/timezone'
-import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, organizationTool, specialHoursInputSchema, PHONE_FORMAT } from './shared'
+import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, organizationTool, specialHoursInputSchema, PHONE_FORMAT, workspaceContextObject } from './shared'
 import { HTTPError } from 'nitro'
 import { STAY_MAP_SHARING_MODES } from '~/shared/stay-listing'
 import type { McpExecutorContext } from './execution'
@@ -30,25 +30,25 @@ const calendarMutation = { ...locationMutation, properties: { ...locationMutatio
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'create_location',
-      description: 'Add a location to the selected business website. Every plan includes 2 locations. Growth and Business include 2 locations, then $49 per additional location per month, billed at the end of the period; Basic refuses a third location. Repeat the same idempotency key with the same details on retry.',
+      description: 'Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status draft takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business\'s one subscription, billed at the end of the period for the active locations at that time. Draft locations and the locations of places to stay are not counted. Basic refuses a third active location.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
         title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
-        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
+        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'One key per new location, kept by this business and never expired. Retrying with the same key and details returns the location it created. The same key with different details fails with IDEMPOTENCY_CONFLICT; if that location has been deleted it fails with LOCATION_DELETED and nothing is created.' },
         address: postalAddressSchema,
         phone: { type: 'string', description: PHONE_FORMAT },
         email: { type: 'string', format: 'email' },
         website_url: { type: 'string', format: 'uri' },
         description: { type: 'string' },
         timezone: timezoneSchema,
-        opening_hours: openingHoursInputSchema,
-        special_hours: specialHoursInputSchema,
+        opening_hours: { ...openingHoursInputSchema, description: `${openingHoursInputSchema.description} Omitted is the same as null.` },
+        special_hours: { ...specialHoursInputSchema, description: `${specialHoursInputSchema.description} Omitted, null and [] all mean no special hours.` },
       },
       required: ['title', 'idempotency_key', 'timezone'],
       outputSchema: {
         type: 'object',
-        properties: { location: locationObject, context: { type: 'object' } },
+        properties: { location: locationObject, context: workspaceContextObject },
         required: ['location', 'context'],
       },
     }),
@@ -124,7 +124,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
           items: { type: 'array', items: agendaItem },
           available_kinds: { type: 'array', items: { type: 'string' } },
           unavailable_dates: { type: 'array', items: { type: 'object', properties: { date: text, location_id: text, reason: { type: 'string', enum: ['inactive', 'closure', 'dated_hours', 'regular_hours'] }, note: nullableText }, required: ['date', 'location_id', 'reason'] } },
-          context: { type: 'object' },
+          context: workspaceContextObject,
         },
         required: ['items', 'available_kinds', 'unavailable_dates'],
       },
