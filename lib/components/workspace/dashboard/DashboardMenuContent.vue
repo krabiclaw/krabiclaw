@@ -39,6 +39,7 @@
 import { NuxtLink } from '#components'
 import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
 import { dashboardFetch } from '~/composables/dashboardFetch'
+import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import { earningsFigure, isEarningsSummary, type EarningsSummary } from '~/shared/earnings-display'
 import { formatCalendarDate } from '~/utils/timezone'
 import { isAccountActivityResponse, type AccountActivityResponse } from '~/shared/account-activity'
@@ -47,7 +48,6 @@ import { isAccountActivityResponse, type AccountActivityResponse } from '~/share
 // model, so the two surfaces cannot show different menus.
 const { scopeModel, logOut, personal, organization } = useDashboardMenu()
 // The shell's organization, whichever route it is drawn on — Account settings included.
-const dashboardApi = useDashboardApi(computed(() => organization.value ? { orgSlug: organization.value.slug } : null))
 const orgBase = computed(() => organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : null)
 const inOrganization = computed(() => Boolean(orgBase.value))
 const monthLabel = formatCalendarDate(new Date().toISOString().slice(0, 10), 'en', { month: 'long', year: 'numeric' })
@@ -79,11 +79,16 @@ const currentEarnings = computed(() => {
   return permissions?.payments && loaded?.organizationId === permissions.organizationId && loaded?.userId === permissions.userId ? loaded : null
 })
 // The pictures in the cards' corners: the organization's places, or the visits the account has made.
-type LocationPhotos = { success: true; locations: Array<{ id: string; imageUrl: string | null }> }
-const isLocationPhotos = (value: unknown): value is LocationPhotos => isRecord(value) && value.success === true && Array.isArray(value.locations) && value.locations.every(row => isRecord(row) && typeof row.id === 'string' && (row.imageUrl === null || typeof row.imageUrl === 'string'))
+type LocationPhotos = { success: true; locations: DashboardLocation[] }
+const isLocationPhotos = (value: unknown): value is LocationPhotos => isRecord(value) && value.success === true && Array.isArray(value.locations) && value.locations.every(row => isRecord(row) && typeof row.id === 'string' && (row.picture_url === null || typeof row.picture_url === 'string'))
 const { data: places, error: placesError } = await useAsyncData(
   () => `menu-places:${orgBase.value}`,
-  async () => inOrganization.value ? await dashboardApi<LocationPhotos>('/api/dashboard/locations', { validate: isLocationPhotos }) : null,
+  async (_app, { signal }) => {
+    const target = organization.value
+    if (!target) return null
+    const response = await dashboardFetch<LocationPhotos>('/api/dashboard/locations', { orgSlug: target.slug }, { query: { organization: 'true' }, signal, validate: isLocationPhotos })
+    return { ...response, organizationId: target.id }
+  },
 )
 const { data: activity, error: activityError } = await useAsyncData(
   () => `menu-activity:${personal.value}`,
@@ -94,7 +99,7 @@ const cardsError = computed(() => {
   const error = organizationSettings.error.value ?? earningsError.value ?? placesError.value ?? activityError.value
   return error ? getErrorMessage(error, 'The Menu could not be loaded.') : null
 })
-const placePhotos = computed(() => (places.value?.locations ?? []).map(row => row.imageUrl).filter((url): url is string => !!url))
+const placePhotos = computed(() => places.value?.organizationId === organization.value?.id ? places.value?.locations.map(row => row.picture_url).filter((url): url is string => !!url) ?? [] : [])
 const visitPhotos = computed(() => (activity.value?.activities ?? []).filter(item => item.imageUrl && (item.status === 'cancelled' || (item.endsAt && Date.parse(item.endsAt) < Date.now()) || item.kind === 'order' || item.kind === 'payment')).map(item => item.imageUrl as string))
 const cards = computed(() => personal.value
   ? [
