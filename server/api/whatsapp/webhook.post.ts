@@ -13,7 +13,7 @@ import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { notifyGuestThreadReply } from '~/server/utils/notifications'
 import { findSubmissionByPhone } from '~/server/utils/submission-messages'
-import { isAuthorizedWhatsAppRecipient, resolveMemberId, resolveOrganizationMembership } from '~/server/utils/member-access'
+import { isAuthorizedWhatsAppRecipient, isOrganizationWideRole, resolveMemberId, resolveOrganizationMembership } from '~/server/utils/member-access'
 import { findVerifiedAuthUserByPhone } from '~/server/utils/auth'
 import {
   PROMPT_QUOTE_NOTIFICATION_MESSAGE, REPLY_SENT_CONFIRMATION, buildCollectReplyPrompt, buildConfirmSendPrompt, buildDisambiguationPrompt, buildReplyFailedMessage, decideWhatsAppReplyRouting, maskEmailForDisplay, type DisambiguationCandidate, type PendingWhatsAppReplyState, } from '~/server/utils/whatsapp-reply-routing'
@@ -178,18 +178,20 @@ async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord,
     FROM guest_thread_deliveries d
     JOIN activity_entries e ON e.id = d.entry_id
     JOIN requests gt ON gt.id = e.request_id
+    JOIN member m ON m.organizationId = gt.organization_id AND m.userId = ?
     WHERE d.channel = 'whatsapp' AND d.created_at > ?
     GROUP BY gt.id
     ORDER BY createdAt DESC
     LIMIT 25
-  `, [sinceIso])
+  `, [userId, sinceIso])
 
   const authorizedRows = (await Promise.all((rows ?? []).map(async (row) => {
     const membership = await resolveOrganizationMembership(env as CloudflareEnv, {
       organizationId: row.organizationId,
       userId,
     })
-    return membership ? row : null
+    // Only the roles WhatsApp replies are authorized for see a thread's guest.
+    return membership && isOrganizationWideRole(membership.role) ? row : null
   }))).filter((row): row is NonNullable<typeof row> => Boolean(row)).slice(0, 5)
   return authorizedRows.map((r) => ({
     threadId: r.threadId, organizationId: r.organizationId, locationId: r.locationId, label: `${submissionTypeLabel(r.submissionType)} from ${r.guestName}`, }))

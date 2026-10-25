@@ -9,7 +9,6 @@ interface LocationRow {
   slug: string
   title: string
   address: string | null
-  city: string | null
   phone: string | null
   website_url: string | null
   maps_url: string | null
