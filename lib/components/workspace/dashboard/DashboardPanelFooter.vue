@@ -3,7 +3,10 @@
   <div class="flex w-full items-center justify-between gap-4">
     <!-- Cancel reads as text; Save is the only filled control on screen. -->
     <UButton color="neutral" variant="link" :label="cancelLabel" :disabled="loading" class="px-0 font-semibold text-highlighted underline-offset-4 hover:underline" :class="leaf && !desktopCancel ? 'lg:invisible' : undefined" @click="$emit('cancel')" />
-    <UButton :label="saveLabel || 'Save'" size="xl" :loading="loading" :disabled="disabled" @click="$emit('save')" />
+    <div class="flex items-center gap-3">
+      <slot name="secondary" />
+      <UButton :label="saveLabel || 'Save'" size="xl" :loading="loading" :disabled="disabled" @click="$emit('save')" />
+    </div>
   </div>
 </template>
 

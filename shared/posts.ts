@@ -7,7 +7,10 @@
  * There is no topic discriminator. Event dates, offers and coupon terms are the
  * post's own words; bookable occurrences belong to the catalog.
  */
-export class PostValidationError extends Error { statusCode = 400 }
+export class PostValidationError extends Error {
+  statusCode = 400
+  data?: { mutation_applied: false }
+}
 
 export const POST_TITLE_MAX = 200
 export const POST_BODY_MAX = 5000
