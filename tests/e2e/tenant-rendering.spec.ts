@@ -633,7 +633,14 @@ test('KrabiClaw social viewer keyboard navigation changes the visible media', as
     await expect(visibleMedia).toHaveJSProperty('controls', true)
     const initialTime = await visibleMedia.evaluate(element => (element as HTMLVideoElement).currentTime)
     await visibleMedia.press('Space')
-    await expect.poll(() => visibleMedia.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(initialTime)
+    await expect(visibleMedia).toHaveJSProperty('paused', false)
+    await expect.poll(() => visibleMedia.evaluate((element, start) => {
+      const video = element as HTMLVideoElement
+      return video.currentTime > start && !video.paused ? 'playing' : {
+        time: video.currentTime, paused: video.paused, readyState: video.readyState,
+        networkState: video.networkState, error: video.error?.message ?? null, src: video.currentSrc,
+      }
+    }, initialTime)).toBe('playing')
   }
   await expect.poll(() => visibleMedia.evaluate(element => element instanceof HTMLVideoElement ? element.videoWidth : (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   await close.press('ArrowUp')
@@ -1058,9 +1065,8 @@ test.describe('NCLS representative journeys', () => {
     expect(tracked.status(), await tracked.text()).toBe(200)
     expect(await tracked.json()).toMatchObject({ ok: true })
     await loginAs(request, testBaseUrl(), process.env.PLAYWRIGHT_PREVIEW_URL ? undefined : 'user-e2e-ncls-owner')
-    const today = new Date().toISOString().slice(0, 10)
     const analytics = await mcpRequest(request, testBaseUrl(), { method: 'tools/call', toolName: 'query_organization_analytics', args: {
-      organization_id: 'org-ncls-blawby', mode: 'events', start_date: today, end_date: today,
+      organization_id: 'org-ncls-blawby', mode: 'events',
       sort: 'occurred_at_desc', limit: 200, filters: { kind: 'pageview', page_path: officePath, location_id: office.id },
     } })
     expect(analytics.status()).toBe(200)
