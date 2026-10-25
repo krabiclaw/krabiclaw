@@ -639,6 +639,10 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
   expect(source).toBeTruthy()
   const previews = page.locator('[data-media-gallery] video')
   await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1)
+  const playingIndex = await previews.evaluateAll(elements => elements.findIndex(element => !(element as HTMLVideoElement).paused))
+  const playingPreview = previews.nth(playingIndex)
+  const previewTime = await playingPreview.evaluate(element => (element as HTMLVideoElement).currentTime)
+  await expect.poll(() => playingPreview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(previewTime)
   await trigger.click()
   const viewer = page.getByRole('dialog')
   await expect(viewer).toBeVisible()
@@ -656,6 +660,9 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
   await viewer.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
   await expect(viewer).toHaveCount(0)
   await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1)
+  await expect.poll(() => playingPreview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
+  const resumedTime = await playingPreview.evaluate(element => (element as HTMLVideoElement).currentTime)
+  await expect.poll(() => playingPreview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(resumedTime)
 })
 
 for (const tenant of tenants) {
