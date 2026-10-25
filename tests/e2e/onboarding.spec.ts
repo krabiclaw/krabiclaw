@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { dismissPreviewToolbar } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
+import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { tenantHostIsAddressable, testBaseUrl } from './test-env'
 import { environmentTenantAliasSlug } from '../../server/utils/tenant-hosts'
@@ -553,29 +554,65 @@ test('the business search API refuses what the picker would never send', async (
 // Ember & Slice is on Business with the 2 included locations in use. A paid
 // plan refuses no location: a third is made by the createLocation every surface
 // shares, counted in the plan's usage, and billed at the end of the period.
-test('a paid plan adds a location past the included ones and counts it', async ({ page, baseURL }) => {
-  await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
+test('a paid plan adds a location past the included ones and counts it', async ({ page, baseURL }, testInfo) => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'This local fixture journey creates and deletes a billable location.')
+  const release = await acquireTenantMutationLock(testInfo, 'org-demo')
+  const failures: unknown[] = []
+  let createdLocationId: string | undefined
   const status = async () => {
     const response = await page.request.get('/api/billing/status?organizationId=org-demo')
     expect(response.status(), await response.text()).toBe(200)
     return (await response.json() as { billing: { plan: string; usage: { locations: number } } }).billing
   }
-  const before = await status()
-  expect(before.plan).toBe('business')
-  expect(before.usage.locations).toBe(2)
+  try {
+    await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
+    const before = await status()
+    expect(before.plan).toBe('business')
+    expect(before.usage.locations).toBe(2)
 
-  // The new location's own level walks its sections; nothing asks to extend the plan first.
-  await page.goto('/dashboard/ember-slice-demo/locations/new')
-  await expect(page).toHaveURL(/\/dashboard\/ember-slice-demo\/locations\/new\/name$/)
-  await expect(page.locator('[data-location-limit]')).toHaveCount(0)
+    // The new location's own level walks its sections; nothing asks to extend the plan first.
+    await page.goto('/dashboard/ember-slice-demo/locations/new')
+    await expect(page).toHaveURL(/\/dashboard\/ember-slice-demo\/locations\/new\/name$/)
+    await expect(page.locator('[data-location-limit]')).toHaveCount(0)
 
-  const created = await page.request.post('/api/dashboard/locations?org=ember-slice-demo', { data: { title: 'Third branch', timezone: 'America/New_York' } })
-  expect(created.status(), await created.text()).toBe(201)
-  const location = (await created.json() as { location: { id: string } }).location
-  expect((await status()).usage.locations).toBe(3)
-  const deleted = await page.request.delete(`/api/organizations/org-demo/locations/${location.id}`)
-  expect(deleted.status(), await deleted.text()).toBe(200)
-  expect((await status()).usage.locations).toBe(2)
+    const args = { organization_id: 'org-demo', title: 'Third branch', timezone: 'America/New_York', idempotency_key: crypto.randomUUID() }
+    const created = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'create_location', args })
+    expect(created.status(), await created.text()).toBe(200)
+    const receipt = mcpData<{ location: { id: string; slug: string; title: string; status: string; timezone: string; updated_at: string }; context: { organization_id: string; location_id: string; location_slug: string; location_title: string } }>(await created.json())
+    createdLocationId = receipt.location.id
+    expect(Object.keys(receipt).sort()).toEqual(['context', 'location'])
+    expect(Object.keys(receipt.location).sort()).toEqual(['id', 'slug', 'status', 'timezone', 'title', 'updated_at'])
+    expect(receipt.location).toMatchObject({ title: args.title, status: 'active', timezone: args.timezone })
+    expect(receipt.location.updated_at).toEqual(expect.any(String))
+    expect(receipt.context).toMatchObject({ organization_id: args.organization_id, location_id: createdLocationId, location_slug: receipt.location.slug, location_title: args.title })
+    const nativeRead = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
+    expect(nativeRead.status(), await nativeRead.text()).toBe(200)
+    const saved = await nativeRead.json()
+    expect(saved.location).toMatchObject(receipt.location)
+    expect((await status()).usage.locations).toBe(3)
+
+    const replay = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'create_location', args })
+    expect(replay.status(), await replay.text()).toBe(200)
+    expect(mcpData(await replay.json())).toEqual(receipt)
+    const nativeReplayRead = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
+    expect(nativeReplayRead.status(), await nativeReplayRead.text()).toBe(200)
+    expect(await nativeReplayRead.json()).toEqual(saved)
+    expect((await status()).usage.locations).toBe(3)
+  } catch (error) { failures.push(error) }
+  finally {
+    if (createdLocationId) {
+      try {
+        const deleted = await page.request.delete(`/api/organizations/org-demo/locations/${createdLocationId}`)
+        expect(deleted.status(), await deleted.text()).toBe(200)
+        const absent = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
+        expect(absent.status(), await absent.text()).toBe(404)
+        expect((await status()).usage.locations).toBe(2)
+      } catch (error) { failures.push(error) }
+    }
+    try { await release() }
+    catch (error) { failures.push(error) }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Location creation or cleanup failed')
 })
 
 // NCLS has one of the two locations its plan includes. Adding one walks the

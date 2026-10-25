@@ -58,7 +58,7 @@ export async function listPublicResourceLocaleRepresentations(
 ): Promise<PublicLocaleRepresentation[]> {
   return listPublicLocaleRepresentations(env, db, {
     ...input,
-    sourcePath: await resolvePublicLocalizationSourcePath(db, input.organizationId, input.resource),
+    sourcePath: `${await resolvePublicLocalizationSourcePath(db, input.organizationId, input.resource)}${input.resource.routeSuffix ?? ''}`,
   })
 }
 

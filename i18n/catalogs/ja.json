@@ -557,6 +557,7 @@
   "stay.receipt_missing_description": "ご宿泊の詳細は確認メールに記載されています。予約時のメールアドレスでKrabiClawアカウントを作成すると、アカウントでも確認できます。",
   "site.photos.close_gallery": "写真と動画を閉じる",
   "site.photos.gallery_title": "写真と動画",
+  "site.photos.video_failed": "動画を読み込めませんでした。",
   "site.photos.show_all": "写真{count}枚をすべて表示",
   "stay.additional_photos": "その他の写真",
   "stay.back_to_photo_tour": "フォトツアーに戻る",

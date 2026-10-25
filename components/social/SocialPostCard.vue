@@ -4,9 +4,7 @@
       <SocialPostChannels :publications="post.publications" :linked="false" item-class="inline-flex items-center gap-2 text-sm font-semibold [&_.size-4]:size-6" />
     </span>
     <span v-if="post.media[0]" class="relative block aspect-[4/5] overflow-hidden rounded-[var(--ui-radius)] bg-elevated">
-      <video v-if="post.media[0].kind === 'video' && !post.media[0].thumbnail_url" :src="post.media[0].public_url" muted playsinline preload="metadata" class="size-full object-contain" />
-      <img v-else :src="post.media[0].kind === 'video' ? post.media[0].thumbnail_url! : post.media[0].public_url" :alt="post.media[0].alt_text ?? ''" loading="lazy" decoding="async" class="size-full object-contain">
-      <UIcon v-if="post.media[0].kind === 'video'" name="i-lucide-play" class="absolute bottom-4 end-4 size-8 rounded-full bg-black/60 p-1 text-white" />
+      <MediaPreview :item="{ url: post.media[0].public_url, kind: post.media[0].kind, poster: post.media[0].thumbnail_url ?? undefined, alt: post.media[0].alt_text ?? '' }" fit="contain" loading="lazy" />
     </span>
     <span class="block p-5 sm:p-6">
       <span v-if="post.title" class="mb-2 block text-lg font-semibold">{{ post.title }}</span>
@@ -15,6 +13,7 @@
   </button>
 </template>
 <script setup lang="ts">
+import MediaPreview from '~/components/MediaPreview.vue'
 import SocialPostChannels from '~/components/social/SocialPostChannels.vue'
 import type { PublicSocialPost } from '~/server/utils/post-management'
 defineProps<{ post: PublicSocialPost }>()

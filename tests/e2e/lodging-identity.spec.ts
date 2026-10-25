@@ -174,6 +174,20 @@ test.describe('lodging identity boundary', () => {
       const replyMessage = (await reply.json() as { message: TeamMessage }).message
       const latest = await teamCall<{ messages: TeamMessage[]; hasMore: boolean }>('get_team_conversation', { thread_id: threadId, limit: 1 })
       expect(latest).toEqual({ messages: [replyMessage], hasMore: true })
+      const beforeInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
+      expect(beforeInvalidCursor.status, await beforeInvalidCursor.text()).toBe(200)
+      const messagesBeforeInvalidCursor = await beforeInvalidCursor.json()
+      for (const cursor of [{ before: replyMessage.createdAt }, { before_id: replyMessage.id }]) {
+        const invalidCursor = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_team_conversation', args: { organization_id: organization.id, thread_id: threadId, ...cursor } })
+        expect(invalidCursor.status(), await invalidCursor.text()).toBe(200)
+        const invalidCursorResult = (await invalidCursor.json()).result
+        expect(invalidCursorResult.isError).toBe(true)
+        expect(invalidCursorResult.structuredContent).toBeUndefined()
+        expect(invalidCursorResult.content[0].text).toContain('Invalid arguments for tool get_team_conversation')
+      }
+      const afterInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
+      expect(afterInvalidCursor.status, await afterInvalidCursor.text()).toBe(200)
+      expect(await afterInvalidCursor.json()).toEqual(messagesBeforeInvalidCursor)
       const earlier = await teamCall<{ messages: TeamMessage[]; hasMore: boolean }>('get_team_conversation', { thread_id: threadId, limit: 1, before: replyMessage.createdAt, before_id: replyMessage.id })
       expect(earlier).toEqual({ messages: [sent.message], hasMore: false })
       const ownerUnread = await api.get(`/api/dashboard/team/threads?org=${slug}`, { headers: bearer })

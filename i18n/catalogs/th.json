@@ -557,6 +557,7 @@
   "stay.receipt_missing_description": "รายละเอียดการเข้าพักของคุณอยู่ในอีเมลยืนยัน และในบัญชี KrabiClaw ของคุณเมื่อคุณสร้างบัญชีด้วยอีเมลที่ใช้จอง",
   "site.photos.close_gallery": "ปิดรูปถ่ายและวิดีโอ",
   "site.photos.gallery_title": "รูปถ่ายและวิดีโอ",
+  "site.photos.video_failed": "ไม่สามารถโหลดวิดีโอได้",
   "site.photos.show_all": "แสดงรูปถ่ายทั้งหมด {count} รูป",
   "stay.additional_photos": "รูปถ่ายเพิ่มเติม",
   "stay.back_to_photo_tour": "กลับไปยังทัวร์รูปถ่าย",
