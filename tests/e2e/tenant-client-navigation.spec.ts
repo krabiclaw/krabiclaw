@@ -84,7 +84,13 @@ test('Kikuzuki home → menu → menu item and published experience branch', asy
     await preview.scrollIntoViewIfNeeded()
     await expect(preview).toHaveAttribute('poster', /\S/)
     await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
-    await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
+    await expect.poll(() => preview.evaluate(element => {
+      const video = element as HTMLVideoElement
+      return video.currentTime > 0 && !video.paused ? 'playing' : {
+        src: video.currentSrc, time: video.currentTime, paused: video.paused,
+        readyState: video.readyState, networkState: video.networkState, error: video.error?.message ?? null,
+      }
+    }), { message: `${path} must advance its selected preview` }).toBe('playing')
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
     await page.emulateMedia({ reducedMotion: 'no-preference' })
