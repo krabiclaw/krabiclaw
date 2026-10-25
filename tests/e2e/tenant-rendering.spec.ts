@@ -59,12 +59,13 @@ const tenants: Tenant[] = [
 const inventoryFile = process.env.PLAYWRIGHT_TENANT_ROUTE_INVENTORY
 if (inventoryFile) {
   if (!process.env.PLAYWRIGHT_PREVIEW_URL) throw new Error('A published route inventory requires PLAYWRIGHT_PREVIEW_URL')
+  const platform = new URL(testBaseUrl())
   const targets = new Map([
+    ['KrabiClaw', { origin: platform.origin, identity: /KrabiClaw/i }],
     ['Pottery House', { origin: new URL(potteryHouseBaseURL).origin, identity: /Pottery House/i }],
     ['Kikuzuki', { origin: new URL(kikuzukiTestBaseUrl()).origin, identity: /Kikuzuki/i }],
     ['NCLS', { origin: new URL(blawbyBaseURL).origin, identity: /North Carolina Legal Services/i }],
   ])
-  const platform = new URL(testBaseUrl())
   if (platform.hostname === 'staging.krabiclaw.com') targets.set('Saltleaf', {
     origin: `https://${environmentTenantAliasHostname(platform.hostname, 'saltleaf-stays-demo')}`,
     identity: /Saltleaf Stays/i,
