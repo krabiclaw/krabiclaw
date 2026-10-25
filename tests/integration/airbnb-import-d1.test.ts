@@ -87,6 +87,10 @@ class FakeChannex {
     check_in_time_start: '16', check_in_time_end: '21', check_out_time: 10,
     guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: true, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: 1 },
   }
+  /** Airbnb's `property_type_category` for the listing. */
+  category = 'townhouse'
+  /** The properties Channex was asked to create. */
+  properties: Array<Record<string, unknown>> = []
   /** The room types Channex was asked to create. */
   roomTypes: Array<Record<string, unknown>> = []
   /** The listing settings writes Channex received, in order. */
@@ -115,6 +119,7 @@ class FakeChannex {
     if (method === 'POST' && path === '/groups') return json({ data: { id: 'grp-1', type: 'group', attributes: {} } })
     if (method === 'POST' && path === '/properties') {
       if (body!.property.title === 'KrabiClaw connection setup') return json({ data: { id: 'setup-1', type: 'property', attributes: {} } })
+      this.properties.push(body!.property as Record<string, unknown>)
       const id = `prop-${++this.ids}`
       return json({ data: { id, type: 'property', attributes: {} } })
     }
@@ -142,7 +147,7 @@ class FakeChannex {
         check_in_option: { category: 'smartlock', instruction: 'Door code 0126' },
         quiet_hours: [{ start_time: '23', end_time: '7' }],
       } : { rooms: [] }
-      return json({ data: { listing: { id: listingId, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: 'holiday_home', booking_settings: this.booking, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
+      return json({ data: { listing: { id: listingId, name: 'Cliff Cabin', person_capacity: 4, lat: 38.5733, lng: -109.5498, country_code: 'US', state: 'UT', city: 'Moab', street: '1 Cliff Rd', zipcode: '84532', property_type_category: this.category, booking_settings: this.booking, pricing_settings: { listing_currency: this.currency, guests_included: 2, default_daily_price: 189.5 }, ...content } } })
     }
     if (method === 'GET' && path === '/channels/chan-1/action/get_listing_calendar') {
       const from = url.searchParams.get('date_from')!
@@ -277,6 +282,13 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     // Children and infants are not asked: Airbnb counts neither.
     assert.deepEqual(details.missingFields, ['email', 'phone'])
     assert.deepEqual({ timezone: details.fields.timezone, checkIn: details.checkInTime, checkInEnd: details.checkInEndTime, checkOut: details.checkOutTime }, { timezone: TZ, checkIn: '16:00', checkInEnd: '21:00', checkOut: '10:00' })
+    // Airbnb's category is not a Channex property type: a townhouse or house is Channex's holiday home, and a category with no mapping stops the import.
+    assert.equal(details.fields.propertyType, 'holiday_home')
+    channex.category = 'house'
+    assert.equal((await connection.details(LISTING)).fields.propertyType, 'holiday_home')
+    channex.category = 'treehouse'
+    await assert.rejects(connection.details(LISTING), { status: 422, data: { code: 'UNSUPPORTED_PROPERTY_TYPE' } })
+    channex.category = 'townhouse'
 
     const started = await connection.prepare(LISTING, form)
     assert.equal(started.stage, 'property')
@@ -341,6 +353,8 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       if (result.stage === 'complete') break
     }
     assert.deepEqual(stages, ['room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'activated', 'activate', 'reservations', 'messages', 'complete'])
+    // The Channex property carries the mapped type, never Airbnb's category.
+    assert.deepEqual(channex.properties.filter(property => property.title === 'Cliff Cabin').map(property => property.property_type), ['holiday_home'])
     // The full sync is one restrictions and one availability call, each logged with Channex's task.
     assert.deepEqual((await db.prepare("SELECT kind, status, task_id FROM channel_sync_log WHERE direction = 'outbound' AND product_id = ? ORDER BY created_at, rowid").bind(productId).all()).results,
       [{ kind: 'restrictions', status: 'pushed', task_id: 'task-restrictions' }, { kind: 'availability', status: 'pushed', task_id: 'task-availability' }])
