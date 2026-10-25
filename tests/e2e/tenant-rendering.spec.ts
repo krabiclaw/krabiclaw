@@ -267,7 +267,7 @@ if (inventoryFile) {
                       return { element: 'img', src: image.src, current_src: image.currentSrc, natural_width: image.naturalWidth, natural_height: image.naturalHeight }
                     }
                     const video = [...document.querySelectorAll('video')].find(video => video.getClientRects().length
-                      && (video.poster === value || video.currentSrc === value) && successful.includes(value)
+                      && video.currentSrc === value && successful.includes(value)
                       && video.error === null && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
                       && video.videoWidth > 0 && video.videoHeight > 0)
                     return video ? { element: 'video', poster: video.poster, current_src: video.currentSrc, ready_state: video.readyState, video_width: video.videoWidth, video_height: video.videoHeight, error: null } : null
@@ -1023,7 +1023,7 @@ test.describe('NCLS representative journeys', () => {
     }
     const shellResponse = await request.get(`${blawbyBaseURL}/api/public/shell`, { headers: blawbyExtraHeaders })
     expect(shellResponse.status()).toBe(200)
-    const shell = await shellResponse.json() as { locations: Array<{ slug: string; title: string }> }
+    const shell = await shellResponse.json() as { locations: Array<{ id: string; slug: string; title: string }> }
     expect(shell.locations.length).toBeGreaterThan(0)
     const office = shell.locations[0]!
     const officePath = `/locations/${office.slug}`
@@ -1036,5 +1036,15 @@ test.describe('NCLS representative journeys', () => {
     const tracked = await pageview
     expect(tracked.status(), await tracked.text()).toBe(200)
     expect(await tracked.json()).toMatchObject({ ok: true })
+    await loginAs(request, testBaseUrl(), process.env.PLAYWRIGHT_PREVIEW_URL ? undefined : 'user-e2e-ncls-owner')
+    const today = new Date().toISOString().slice(0, 10)
+    const analytics = await mcpRequest(request, testBaseUrl(), { method: 'tools/call', toolName: 'query_organization_analytics', args: {
+      organization_id: 'org-ncls-blawby', mode: 'breakdown', start_date: today, end_date: today,
+      dimensions: ['page_path', 'location_id'], metrics: ['events'], filters: { kind: 'pageview', page_path: officePath },
+    } })
+    expect(analytics.status()).toBe(200)
+    const recorded = mcpData<{ rows: Array<{ dimensions: Record<string, string>; metrics: { events: number } }> }>(await analytics.json())
+    expect(recorded.rows).toContainEqual({ dimensions: { page_path: officePath, location_id: office.id }, metrics: { events: expect.any(Number) } })
+    expect(recorded.rows.find(row => row.dimensions.page_path === officePath && row.dimensions.location_id === office.id)!.metrics.events).toBeGreaterThan(0)
   })
 })
