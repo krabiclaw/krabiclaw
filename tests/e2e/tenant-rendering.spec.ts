@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { expect, test, type Page, type Request } from '@playwright/test'
+import { devices, expect, test, type Page, type Request } from '@playwright/test'
 import {
   blawbyBaseURL, blawbyExtraHeaders,
   openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
@@ -59,6 +59,9 @@ const tenants: Tenant[] = [
 const inventoryFile = process.env.PLAYWRIGHT_TENANT_ROUTE_INVENTORY
 if (inventoryFile) {
   if (!process.env.PLAYWRIGHT_PREVIEW_URL) throw new Error('A published route inventory requires PLAYWRIGHT_PREVIEW_URL')
+  // This exhaustive crawler must not generate thousands of customer analytics
+  // events. Ordinary representative journeys retain their human browser agent.
+  test.use({ userAgent: `${devices['Desktop Chrome']!.userAgent} KrabiClawRouteVerificationBot/1.0` })
   const platform = new URL(testBaseUrl())
   const targets = new Map([
     ['KrabiClaw', { origin: platform.origin, identity: /KrabiClaw/i, shell: '.platform-layout' }],
