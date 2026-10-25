@@ -8,7 +8,7 @@
       :poster="item.poster || undefined"
       :controls="controls"
       :aria-label="controls ? item.alt : undefined"
-      preload="none"
+      preload="metadata"
       muted
       :loop="!controls"
       playsinline
