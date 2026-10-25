@@ -140,7 +140,7 @@
       <template v-else-if="block.type === 'callout'">
         <aside v-if="text(block.data.title) || text(block.data.body)" class="my-10 rounded-2xl border border-primary/30 bg-primary/5 p-6">
           <h2 v-if="text(block.data.title)" class="text-xl font-semibold">{{ text(block.data.title) }}</h2>
-          <div v-if="text(block.data.body)" class="prose mt-2 max-w-none whitespace-pre-wrap text-muted">{{ sanitize(text(block.data.body)) }}</div>
+          <div v-if="text(block.data.body)" class="prose mt-2 max-w-none whitespace-pre-wrap text-muted">{{ text(block.data.body) }}</div>
           <div v-if="buttons(block).length" class="mt-5 flex flex-wrap gap-3">
             <TenantPageButton v-for="button in buttons(block)" :key="button.url + button.label" :label="button.label" :url="button.url" />
           </div>
@@ -234,10 +234,6 @@ const platformHome = computed(() => template.value === 'platform' && props.page.
 function presentationOf(block: TenantPageBlock): Component | null {
   return tenantPageBlockPresentation(template.value, block.type)
 }
-import { loadDomPurify } from '~/utils/dom-purify-loader'
-import { sanitizeHtmlForSsr } from '~/utils/markdown'
-
-const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 const { t } = useI18n()
 /**
  * The page's blocks, in the order the page carries them — less the one the
@@ -284,10 +280,6 @@ type GridItem = { id?: string; title?: string; description?: string; address?: s
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function sanitize(value: string): string {
-  return DOMPurify.sanitize(value)
 }
 
 /**

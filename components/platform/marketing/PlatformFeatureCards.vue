@@ -108,7 +108,7 @@
       </div>
       <div v-if="item.url && item.linkLabel" class="pt-4 border-t border-default/50">
         <NuxtLink
-          :to="item.url"
+          :to="route(item.url)"
           class="inline-flex items-center gap-1 text-[13px] font-semibold text-primary hover:text-primary/80 transition-colors no-underline group/link"
         >
           {{ item.linkLabel }}
