@@ -85,7 +85,7 @@ function scopeLabel(collection: Collection) {
   return location.status === 'active' ? location.title : `${location.title} · Location inactive`
 }
 function sectionPath(collection: Collection) {
-  return router.resolve({ path: '/dashboard/' + String(route.params.orgSlug) + '/products/menu/' + collection.id, query: { location_id: collection.location_id ?? undefined, kind: route.query.kind === 'dish' ? 'dish' : undefined } }).fullPath
+  return router.resolve({ path: '/dashboard/' + String(route.params.orgSlug) + '/products/menu/' + collection.id, query: { location_id: collection.location_id ?? undefined, kind: p.product.value?.kind === 'dish' ? 'dish' : undefined } }).fullPath
 }
 
 const addOpen = ref(false)
