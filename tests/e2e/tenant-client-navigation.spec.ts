@@ -90,7 +90,7 @@ test('Kikuzuki home → menu → menu item and published experience branch', asy
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
     if (path === '/reservations') {
-      const reservationButton = page.locator('article').filter({ has: preview }).getByRole('button', { name: 'Request Reservation', exact: true })
+      const reservationButton = preview.locator('xpath=ancestor::article[1]').getByRole('button', { name: 'Request Reservation', exact: true })
       await reservationButton.scrollIntoViewIfNeeded()
       await expect(preview).toBeInViewport()
       await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
