@@ -362,7 +362,7 @@ test('KrabiClaw social viewer keyboard navigation changes the visible media', as
   for (const channelMark of await channelMarks.all()) await expect(channelMark).toHaveText(/\S/)
   await expect(socialCard.locator('time, a')).toHaveCount(0)
   await expect(firstCard.locator('time, a')).toHaveCount(0)
-  // Autoplay may advance during page load; select the first card through the carousel.
+  // Select the first card through the carousel.
   await page.locator('[data-social-posts=block]').getByRole('tab', { name: 'Go to slide 1', exact: true }).click()
   // The viewer opens on the card that was clicked; the first card puts the first picture at the top.
   await firstCard.click()
@@ -411,9 +411,12 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
   const trigger = page.getByRole('button', { name: /^Play video,/ }).first()
   const source = await trigger.locator('video').getAttribute('src')
   expect(source).toBeTruthy()
+  const previews = page.locator('[data-media-gallery] video')
+  await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1)
   await trigger.click()
   const viewer = page.getByRole('dialog')
   await expect(viewer).toBeVisible()
+  await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(0)
   const video = viewer.locator(`video[src=${JSON.stringify(source)}]`)
   await expect(video).toHaveAttribute('tabindex', '0')
   await video.focus()
@@ -426,6 +429,7 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
   await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
   await viewer.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
   await expect(viewer).toHaveCount(0)
+  await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1)
 })
 
 for (const tenant of tenants) {
