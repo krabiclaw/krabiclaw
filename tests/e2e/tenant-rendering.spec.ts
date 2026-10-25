@@ -628,7 +628,14 @@ test('KrabiClaw social viewer keyboard navigation changes the visible media', as
   const close = viewer.getByRole('button', { name: 'Close photos and videos', exact: true })
   await close.press('ArrowDown')
   await expect.poll(() => pictures.nth(1).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(0)
-  await expect.poll(() => pictures.nth(1).locator('img:not([aria-hidden]), video').evaluate(element => element instanceof HTMLVideoElement ? element.videoWidth : (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  const visibleMedia = pictures.nth(1).locator('img:not([aria-hidden]), video')
+  if (await visibleMedia.evaluate(element => element instanceof HTMLVideoElement)) {
+    await expect(visibleMedia).toHaveJSProperty('controls', true)
+    const initialTime = await visibleMedia.evaluate(element => (element as HTMLVideoElement).currentTime)
+    await visibleMedia.press('Space')
+    await expect.poll(() => visibleMedia.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(initialTime)
+  }
+  await expect.poll(() => visibleMedia.evaluate(element => element instanceof HTMLVideoElement ? element.videoWidth : (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   await close.press('ArrowUp')
   await expect.poll(() => pictures.nth(0).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(0)
   await close.click()
