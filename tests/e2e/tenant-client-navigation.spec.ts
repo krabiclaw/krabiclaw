@@ -33,6 +33,7 @@ test('Pottery home → experiences → experience detail', async ({ page }) => {
 })
 
 test('Kikuzuki home → menu → menu item and published experience branch', async ({ page, request }) => {
+  test.setTimeout(90_000)
   const baseURL = kikuzukiTestBaseUrl()
   const headers = kikuzukiTestExtraHeaders()
   await clientJourney(page, {
@@ -76,6 +77,20 @@ test('Kikuzuki home → menu → menu item and published experience branch', asy
   await expect(page.locator('[data-hydrated]')).toHaveAttribute('data-hydrated', 'true')
   await expect(page.getByRole('heading', { name: 'Teppanyaki Experience', exact: true })).toBeVisible()
   await expect(page.getByText(/Welcome to the newest, most electrifying dining experience in Ao Nang/i)).toBeVisible()
+
+  for (const path of ['/locations', '/locations/kikuzuki-japanese-robatayaki-izakaya', '/reservations']) {
+    expect((await openTenantPage(page, `${baseURL}${path}`, headers))?.status(), path).toBe(200)
+    const preview = page.locator('main video').first()
+    await preview.scrollIntoViewIfNeeded()
+    await expect(preview).toHaveAttribute('poster', /\S/)
+    await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
+    await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
+    if (path === '/reservations') {
+      await page.getByRole('button', { name: 'Request Reservation', exact: true }).first().click()
+      await expect(page.getByRole('dialog')).toBeVisible()
+    } else await page.locator('footer').scrollIntoViewIfNeeded()
+    await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
+  }
 })
 
 test('NCLS home → services → service detail', async ({ page }) => {

@@ -8,13 +8,11 @@
     data-parity-section="hero"
   >
     <div data-tenant-critical-hero-media class="absolute inset-0 opacity-50">
-      <video
+      <MediaPreview
         v-if="background?.kind === 'video'"
-        :src="background.public_url!"
-        :poster="background.thumbnail_url ?? undefined"
-        autoplay muted loop playsinline
+        :item="{ url: background.public_url!, kind: 'video', poster: background.thumbnail_url || undefined }"
+        :show-play-indicator="false"
         aria-hidden="true"
-        class="absolute inset-0 size-full object-cover object-center"
       />
       <img
         v-else-if="backgroundSrc"
@@ -122,6 +120,7 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockMedia, isInternalRoute, overviewProseBlockId, splitAccent } from '~/utils/tenant-page-block-data'
 import { cfImageSrcset } from '~/utils/cf-image'
 import OnlineConsultationBooking from '~/components/booking/OnlineConsultationBooking.vue'
+import MediaPreview from '~/components/MediaPreview.vue'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const route = useRoute()

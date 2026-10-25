@@ -6,9 +6,10 @@
       ref="video"
       :src="item.url"
       :poster="item.poster || undefined"
+      :controls="controls"
       preload="metadata"
       muted
-      loop
+      :loop="!controls"
       playsinline
       :class="[fill ? 'size-full' : 'w-full max-h-[inherit]', fit === 'contain' ? 'object-contain' : 'object-cover']"
       @loadeddata="ready = true"
@@ -19,7 +20,7 @@
     />
     <img v-else :src="item.url" :alt="item.alt ?? ''" :loading="loading" decoding="async" :class="[fill ? 'size-full' : 'w-full max-h-[inherit]', fit === 'contain' ? 'object-contain' : 'object-cover']">
     <span v-if="item.kind === 'video' && !item.poster && !ready && !failure" class="pointer-events-none absolute inset-0 animate-pulse bg-muted" aria-hidden="true" />
-    <span v-if="item.kind === 'video' && !playing" class="pointer-events-none absolute inset-0 grid place-items-center bg-black/10 text-white" aria-hidden="true">
+    <span v-if="showPlayIndicator && item.kind === 'video' && !playing" class="pointer-events-none absolute inset-0 grid place-items-center bg-black/10 text-white" aria-hidden="true">
       <span class="grid size-12 place-items-center rounded-full bg-black/45 backdrop-blur-sm"><TenantIcon name="play" class="size-5" /></span>
     </span>
     <span v-if="failure" role="status" class="absolute inset-x-2 bottom-2 rounded bg-black/80 p-2 text-xs text-white">{{ failure }}</span>
@@ -60,7 +61,7 @@ export function provideMediaPreviews(paused: Ref<boolean>) {
 <script setup lang="ts">
 import { useDocumentVisibility, useIntersectionObserver } from '@vueuse/core'
 
-withDefaults(defineProps<{ item: MediaPreviewItem; fit?: 'cover' | 'contain'; loading?: 'lazy' | 'eager'; fill?: boolean }>(), { fit: 'cover', loading: 'eager', fill: true })
+const props = withDefaults(defineProps<{ item: MediaPreviewItem; fit?: 'cover' | 'contain'; loading?: 'lazy' | 'eager'; fill?: boolean; showPlayIndicator?: boolean; controls?: boolean }>(), { fit: 'cover', loading: 'eager', fill: true, showPlayIndicator: true, controls: false })
 const { t } = useI18n()
 const group = inject(mediaPreviewsKey)
 if (!group) throw new Error('Media previews require a gallery or feed playback scope')
@@ -70,7 +71,7 @@ const ready = ref(false)
 const playing = ref(false)
 const failure = ref<string | null>(null)
 const documentVisibility = useDocumentVisibility()
-const shouldPlay = computed(() => group.selected.value === id && !group.paused.value && documentVisibility.value === 'visible')
+const shouldPlay = computed(() => !props.controls && group.selected.value === id && !group.paused.value && documentVisibility.value === 'visible')
 
 useIntersectionObserver(video, (entries) => {
   for (const entry of entries) group.visibility.set(id, entry.isIntersecting ? entry.intersectionRatio : 0)

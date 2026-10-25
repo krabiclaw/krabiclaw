@@ -33,16 +33,10 @@
       </div>
 
       <div class="kc-media-feature__media">
-        <video
+        <MediaPreview
           v-if="media?.kind === 'video' && media.public_url"
-          :src="media.public_url"
-          :poster="media.thumbnail_url ?? undefined"
-          :autoplay="reducedMotion !== 'reduce'"
-          muted
-          :loop="reducedMotion !== 'reduce'"
+          :item="{ url: media.public_url, kind: 'video', poster: media.thumbnail_url || undefined, alt: media.alt_text || undefined }"
           :controls="reducedMotion === 'reduce'"
-          playsinline
-          :aria-label="media.alt_text ?? undefined"
         />
         <img
           v-else-if="mediaStillUrl(media)"
@@ -60,6 +54,7 @@
 
 <script setup lang="ts">
 import PlatformProductStory from '~/components/platform/marketing/PlatformProductStory.vue'
+import MediaPreview from '~/components/MediaPreview.vue'
 import { usePreferredReducedMotion } from '@vueuse/core'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
