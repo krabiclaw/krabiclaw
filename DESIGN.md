@@ -586,6 +586,9 @@ radius — and the commit bar's Save is the one `xl` (48px). Body text is 16px
 are neutral: navy in light, white in dark. Coral marks status and selection
 only — the lit tab, today's date, unread dots, the chosen bar. Switches are
 black, as Airbnb's are.
+Enabled secondary buttons use full-contrast text across every neutral variant.
+Muted labels and reduced opacity signal disabled controls, including disabled
+links and buttons waiting for a save. These states belong to the shared theme.
 
 ## Canvas and composition
 

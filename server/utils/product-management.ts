@@ -1405,6 +1405,8 @@ export async function createProduct(db: DbClient, input: {
     try {
       await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Create product', action: 'create it', stay: planned.kind === 'stay' })
     } catch (error) {
+      // A confirmed commit with unfinished billing is retried by the caller.
+      if (HTTPError.isError(error) && error.data !== null && typeof error.data === 'object' && 'committed' in error.data && error.data.committed === true) throw error
       // A competing creation can claim the slug or page before the audit key.
       const concurrent = await replay()
       if (concurrent) return concurrent
