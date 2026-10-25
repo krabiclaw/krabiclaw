@@ -16,7 +16,7 @@ import { publishPost, reconcilePostPublication, type PublishTarget } from '../..
 import { listChannelPosts, getChannelPost, deleteChannelPost } from '../../server/utils/social-channel-posts.ts'
 import { remainingMetaSubjectData } from '../../server/utils/integration-release.ts'
 import { deleteIntegration, listIntegrations, readIntegration, storeIntegration } from '../../server/utils/organization-integrations.ts'
-import { MetaDeadline, MetaGraphError, verifyMetaSignedRequest, configuredMetaApps } from '../../server/utils/meta-graph.ts'
+import { MetaGraphError, verifyMetaSignedRequest, configuredMetaApps } from '../../server/utils/meta-graph.ts'
 import { instagramAccessToken, listMedia, readAccountInsights, readMediaInsights } from '../../server/utils/instagram.ts'
 import { attachMediaPlacement } from '../../server/utils/media-placement.ts'
 import { listLinkedFacebookPages, facebookPageToken } from '../../server/utils/facebook-pages.ts'
@@ -478,16 +478,14 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(meta.fbPosts.has(unclaimedId), false)
     await publishedOnMeta(seventh.post.id, 'facebook')
 
-    // A Reel still processing returns processing, keeps its container, and a later call finishes that same container.
-    meta.reelProcessingReads = 10
+    // A Reel Instagram is still processing is waited for and published by the same call.
+    meta.reelProcessingReads = 2
     const reel = await create('key-reel', { body: 'Reel', media: [{ asset_id: 'v1', slot: 'cover' }] })
-    const processing = await publishPost(env, 'org-a', reel.post.id, { expectedUpdatedAt: reel.post.updated_at, targets: [targets.instagram()] }, 'owner')
-    assert.deepEqual([processing.outcomes[0]!.status, processing.outcomes[0]!.code], ['processing', 'container_processing'])
-    const reelContainers = meta.sent(request => request.body.media_type === 'REELS').length
-    assert.equal(reelContainers, 1)
-    for (const container of meta.igContainers.values()) container.inProgressReads = 0
-    assert.equal((await publishPost(env, 'org-a', reel.post.id, { expectedUpdatedAt: reel.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
+    const reelPublished = await publishPost(env, 'org-a', reel.post.id, { expectedUpdatedAt: reel.post.updated_at, targets: [targets.instagram()] }, 'owner')
+    assert.equal(reelPublished.outcomes[0]!.status, 'published', JSON.stringify(reelPublished.outcomes))
     assert.equal(meta.sent(request => request.body.media_type === 'REELS').length, 1)
+    assert.equal(meta.sent(request => request.method === 'GET' && Boolean(request.query.get('fields')?.includes('status_code')) && meta.igContainers.get(request.path.split('/').at(-1)!)?.kind === 'REELS').length, 3)
+    meta.reelProcessingReads = 0
     await publishedOnMeta(reel.post.id, 'instagram')
 
     // An expired container is a definite non-publication; the next call prepares new ones.
@@ -796,15 +794,14 @@ test('Instagram insights classify malformed provider responses and preserve loca
     await run("UPDATE account SET scope = 'instagram_business_manage_insights' WHERE id = 'ig-account'")
     const range = { startDate: '2026-09-28', endDate: '2026-09-30' }
     const target = { userId: IG, accessToken: 'ig-token' }
-    const deadline = new MetaDeadline(25_000)
     const accountRange = { since: new Date('2026-09-28'), until: new Date('2026-10-01') }
     meta.igFeed = [{ id: 'reel', media_type: 'VIDEO', timestamp: '2026-09-29T03:00:00+0000' }]
     meta.igMediaInsights.set('reel', { views: 40 })
     const malformed: Array<[string, unknown, () => Promise<unknown>, string]> = [
-      [`${IG}/media`, {}, () => listMedia(target, { after: null, limit: 25 }, deadline), 'Meta returned no post inventory'],
-      [`${IG}/media`, { data: [], paging: { next: 'https://graph.instagram.com/next' } }, () => listMedia(target, { after: null, limit: 25 }, deadline), 'Meta returned another page without its cursor'],
-      [`${IG}/insights`, { data: {} }, () => readAccountInsights(target, accountRange, deadline), 'Instagram returned no insights data'],
-      ['reel/insights', {}, () => readMediaInsights(target, 'reel', deadline), 'Instagram returned no insights data'],
+      [`${IG}/media`, {}, () => listMedia(target, { after: null, limit: 25 }), 'Meta returned no post inventory'],
+      [`${IG}/media`, { data: [], paging: { next: 'https://graph.instagram.com/next' } }, () => listMedia(target, { after: null, limit: 25 }), 'Meta returned another page without its cursor'],
+      [`${IG}/insights`, { data: {} }, () => readAccountInsights(target, accountRange), 'Instagram returned no insights data'],
+      ['reel/insights', {}, () => readMediaInsights(target, 'reel'), 'Instagram returned no insights data'],
     ]
     for (const [path, response, read, message] of malformed) {
       meta.igResponses.set(path, response)

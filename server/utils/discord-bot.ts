@@ -1,5 +1,4 @@
 import type { CloudflareEnv } from '~/server/utils/auth'
-import type { MetaDeadline } from '~/server/utils/meta-graph'
 
 /**
  * The one HTTP boundary to Discord's API. An organization connects Discord
@@ -69,10 +68,9 @@ function botToken(env: CloudflareEnv): string {
   return env.DISCORD_BOT_TOKEN
 }
 
-async function discordRequest<T>(path: string, init: { authorization: string; method?: string; body?: BodyInit; query?: Record<string, string>; deadline?: MetaDeadline }): Promise<T | null> {
+async function discordRequest<T>(path: string, init: { authorization: string; method?: string; body?: BodyInit; query?: Record<string, string> }): Promise<T | null> {
   const url = new URL(`${DISCORD_API}${path}`)
   for (const [key, value] of Object.entries(init.query ?? {})) url.searchParams.set(key, value)
-  if (init.deadline && init.deadline.remaining() <= 250) throw new DiscordError('transport', 'The operation ran out of time before the Discord request could be sent')
   let response: Response
   try {
     response = await fetch(url, {
@@ -135,8 +133,8 @@ export async function listMessageChannels(env: CloudflareEnv, guildId: string): 
 }
 
 /** The channel as the bot sees it now; refused when it is no longer an ordinary message channel. */
-export async function readMessageChannel(env: CloudflareEnv, channelId: string, deadline?: MetaDeadline): Promise<DiscordChannel> {
-  const channel = await discordRequest<DiscordChannel>(`/channels/${channelId}`, { authorization: asBot(env), deadline })
+export async function readMessageChannel(env: CloudflareEnv, channelId: string): Promise<DiscordChannel> {
+  const channel = await discordRequest<DiscordChannel>(`/channels/${channelId}`, { authorization: asBot(env) })
   if (!channel?.id || !channel.guild_id) throw new DiscordError('invalid-response', 'Discord answered without the channel')
   if (!MESSAGE_CHANNEL_TYPES.has(channel.type)) throw new DiscordError('rejected', `Discord channel ${channel.name} is not a text or announcement channel`)
   return channel
@@ -158,9 +156,9 @@ export interface DiscordFile { name: string; type: string; bytes: ArrayBuffer; d
  * Create Message as the bot. `nonce` with `enforce_nonce` makes Discord return
  * the message it already created for that nonce instead of a second one, and
  * mentions are never parsed from the content. A 429 is Discord saying nothing
- * was sent, so it is sent again after Discord's delay while the deadline allows.
+ * was sent, so it is sent again after Discord's delay.
  */
-export async function createMessage(env: CloudflareEnv, channelId: string, input: { content: string; files: DiscordFile[]; nonce: string }, deadline: MetaDeadline): Promise<DiscordMessage> {
+export async function createMessage(env: CloudflareEnv, channelId: string, input: { content: string; files: DiscordFile[]; nonce: string }): Promise<DiscordMessage> {
   const payload = {
     content: input.content,
     nonce: input.nonce,
@@ -179,30 +177,29 @@ export async function createMessage(env: CloudflareEnv, channelId: string, input
       body = JSON.stringify(payload)
     }
     try {
-      return messageOf(await discordRequest<DiscordMessage>(`/channels/${channelId}/messages`, { authorization: asBot(env), method: 'POST', body, deadline }))
+      return messageOf(await discordRequest<DiscordMessage>(`/channels/${channelId}/messages`, { authorization: asBot(env), method: 'POST', body }))
     } catch (error) {
       if (!(error instanceof DiscordError) || error.failure !== 'rate_limited' || error.retryAfterMs === null) throw error
-      if (deadline.remaining() - error.retryAfterMs < 10_000) throw error
       await new Promise(resolve => setTimeout(resolve, error.retryAfterMs!))
     }
   }
 }
 
-export async function getMessage(env: CloudflareEnv, channelId: string, messageId: string, deadline?: MetaDeadline): Promise<DiscordMessage> {
-  return messageOf(await discordRequest<DiscordMessage>(`/channels/${channelId}/messages/${messageId}`, { authorization: asBot(env), deadline }))
+export async function getMessage(env: CloudflareEnv, channelId: string, messageId: string): Promise<DiscordMessage> {
+  return messageOf(await discordRequest<DiscordMessage>(`/channels/${channelId}/messages/${messageId}`, { authorization: asBot(env) }))
 }
 
 /** The channel's messages, newest first; `before` pages backwards. */
-export async function listMessages(env: CloudflareEnv, channelId: string, page: { before: string | null; limit: number }, deadline?: MetaDeadline): Promise<DiscordMessage[]> {
+export async function listMessages(env: CloudflareEnv, channelId: string, page: { before: string | null; limit: number }): Promise<DiscordMessage[]> {
   const messages = await discordRequest<DiscordMessage[]>(`/channels/${channelId}/messages`, {
-    authorization: asBot(env), deadline, query: { limit: String(page.limit), ...(page.before ? { before: page.before } : {}) },
+    authorization: asBot(env), query: { limit: String(page.limit), ...(page.before ? { before: page.before } : {}) },
   })
   if (!Array.isArray(messages)) throw new DiscordError('invalid-response', 'Discord answered without the channel messages')
   return messages.map(messageOf)
 }
 
-export async function deleteMessage(env: CloudflareEnv, channelId: string, messageId: string, deadline?: MetaDeadline): Promise<void> {
-  await discordRequest(`/channels/${channelId}/messages/${messageId}`, { authorization: asBot(env), method: 'DELETE', deadline })
+export async function deleteMessage(env: CloudflareEnv, channelId: string, messageId: string): Promise<void> {
+  await discordRequest(`/channels/${channelId}/messages/${messageId}`, { authorization: asBot(env), method: 'DELETE' })
 }
 
 /** Where the message is, for the people who can open that channel. Not a public URL. */

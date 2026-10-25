@@ -3,7 +3,6 @@ import { executeBatch, queryFirst } from '~/server/db'
 import type { CloudflareEnv } from './auth'
 import { deletePageObject, listPagePosts, readPagePostRecord, type FacebookAttachment, type FacebookPagePostRecord } from './facebook-pages'
 import { listMedia, readMedia, type InstagramMediaRecord } from './instagram'
-import { MetaDeadline } from './meta-graph'
 import { organizationEventQuery } from './organization-events'
 import { publicResourceCacheInvalidationQuery } from './public-resource-cache'
 import { connectedSocialTarget, parsePublishTargets, readDiscordMessage, type DiscordConnection, type PublishTarget, type SocialChannel } from './social-publication'
@@ -64,32 +63,30 @@ function instagramPost(record: InstagramMediaRecord, targetId: string, username:
 export async function listChannelPosts(env: CloudflareEnv, organizationId: string, input: ChannelTarget, page: { after: string | null; limit: number }) {
   if (!Number.isInteger(page.limit) || page.limit < 1 || page.limit > 100) throw new HTTPError({ statusCode: 400, statusMessage: 'limit must be an integer between 1 and 100' })
   const connection = await connectedSocialTarget(env, organizationId, input)
-  const deadline = new MetaDeadline(30_000)
   if (connection.channel === 'facebook') {
-    const result = await listPagePosts(connection.target, page, deadline)
+    const result = await listPagePosts(connection.target, page)
     return { posts: result.items.map(item => facebookPost(item, input.target_id)), next_after: result.after }
   }
   if (connection.channel === 'discord') {
     // The channel's messages newest first; only the KrabiClaw bot's are channel posts. `after` is the oldest message id read.
-    const messages = await listMessages(env, connection.target.channelId, { before: page.after, limit: page.limit }, deadline)
+    const messages = await listMessages(env, connection.target.channelId, { before: page.after, limit: page.limit })
     return {
       posts: messages.filter(message => message.author.id === env.DISCORD_CLIENT_ID).map(message => discordPost(message, connection.target)),
       next_after: messages.length === page.limit ? messages.at(-1)!.id : null,
     }
   }
-  const result = await listMedia(connection.target, page, deadline)
+  const result = await listMedia(connection.target, page)
   return { posts: result.items.map(item => instagramPost(item, input.target_id, connection.username)), next_after: result.after }
 }
 
 export async function getChannelPost(env: CloudflareEnv, organizationId: string, input: ChannelTarget, providerPostId: string): Promise<ChannelPost> {
   const connection = await connectedSocialTarget(env, organizationId, input)
-  const deadline = new MetaDeadline(30_000)
   if (connection.channel === 'facebook') {
     if (!providerPostId.startsWith(`${input.target_id}_`)) throw new HTTPError({ statusCode: 400, statusMessage: 'provider_post_id must belong to the explicitly selected Page.' })
-    return facebookPost(await readPagePostRecord(connection.target, providerPostId, deadline), input.target_id)
+    return facebookPost(await readPagePostRecord(connection.target, providerPostId), input.target_id)
   }
-  if (connection.channel === 'discord') return discordPost(await readDiscordMessage(env, connection.target, providerPostId, deadline), connection.target)
-  return instagramPost(await readMedia(connection.target, providerPostId, deadline), input.target_id, connection.username)
+  if (connection.channel === 'discord') return discordPost(await readDiscordMessage(env, connection.target, providerPostId), connection.target)
+  return instagramPost(await readMedia(connection.target, providerPostId), input.target_id, connection.username)
 }
 
 /** Explicit channel deletion retains website content and the publication receipt. */
@@ -103,14 +100,13 @@ export async function deleteChannelPost(env: CloudflareEnv, organizationId: stri
   const previous = await queryFirst<{ id: string; state: string }>(env.DB, receiptQuery, receiptParams)
   if (previous?.state === 'removed') return { channel: input.channel, target_id: input.target_id, provider_post_id: providerPostId, deleted: true, publication: previous }
   if (previous && previous.state !== 'published') throw new HTTPError({ statusCode: 409, statusMessage: 'Resolve the existing publication before deleting its provider post.' })
-  const deadline = new MetaDeadline(30_000)
   if (connection.channel === 'facebook') {
-    facebookPost(await readPagePostRecord(connection.target, providerPostId, deadline), input.target_id)
-    await deletePageObject(connection.target, providerPostId, deadline)
+    facebookPost(await readPagePostRecord(connection.target, providerPostId), input.target_id)
+    await deletePageObject(connection.target, providerPostId)
   } else {
     // Only the bot's own message in the connected channel is read, and only that one is deleted.
-    await readDiscordMessage(env, connection.target, providerPostId, deadline)
-    await deleteMessage(env, connection.target.channelId, providerPostId, deadline)
+    await readDiscordMessage(env, connection.target, providerPostId)
+    await deleteMessage(env, connection.target.channelId, providerPostId)
   }
   const now = new Date().toISOString()
   await executeBatch(env.DB, [

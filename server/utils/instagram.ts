@@ -1,7 +1,6 @@
 import { setTokenUtil } from 'better-auth/oauth2'
 import { createAuth, linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { formBody, MetaGraphError, metaGraphRequest } from './meta-graph'
-import type { MetaDeadline } from './meta-graph'
 
 /**
  * Instagram as its own connection: Instagram Login for professional accounts,
@@ -69,7 +68,7 @@ export interface InstagramTarget {
   accessToken: string
 }
 
-type GraphInit = RequestInit & { deadline?: MetaDeadline }
+type GraphInit = RequestInit
 const withToken = (target: InstagramTarget, init: GraphInit = {}): GraphInit => ({
   ...init, headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${target.accessToken}` },
 })
@@ -82,7 +81,7 @@ export type InstagramContainerInput =
   | { kind: 'carousel'; children: readonly string[]; caption?: string }
 
 /** A media container. Instagram fetches the URL itself; nothing is public until it is published. */
-export async function createMediaContainer(target: InstagramTarget, input: InstagramContainerInput, deadline: MetaDeadline): Promise<string> {
+export async function createMediaContainer(target: InstagramTarget, input: InstagramContainerInput): Promise<string> {
   const fields: Record<string, string | boolean | undefined> = input.kind === 'image'
     ? { image_url: input.url, is_carousel_item: input.carouselItem || undefined, alt_text: input.altText || undefined }
     : input.kind === 'video'
@@ -90,16 +89,16 @@ export async function createMediaContainer(target: InstagramTarget, input: Insta
       ? { media_type: input.carouselItem ? 'VIDEO' : 'REELS', video_url: input.url, is_carousel_item: input.carouselItem || undefined, cover_url: input.carouselItem ? undefined : input.coverUrl || undefined }
       : { media_type: 'CAROUSEL', children: input.children.join(',') }
   if (!('carouselItem' in input && input.carouselItem) && input.caption) fields.caption = input.caption
-  const result = await metaGraphRequest<{ id?: string }>(`${INSTAGRAM_GRAPH}/${target.userId}/media`, withToken(target, { ...formBody(fields), deadline }))
+  const result = await metaGraphRequest<{ id?: string }>(`${INSTAGRAM_GRAPH}/${target.userId}/media`, withToken(target, { ...formBody(fields) }))
   if (!result.id) throw new Error('Instagram created no media container')
   return result.id
 }
 
 export type InstagramContainerStatus = 'EXPIRED' | 'ERROR' | 'FINISHED' | 'IN_PROGRESS' | 'PUBLISHED'
 
-export async function readContainerStatus(target: InstagramTarget, containerId: string, deadline: MetaDeadline): Promise<{ status: InstagramContainerStatus; detail: string | null }> {
+export async function readContainerStatus(target: InstagramTarget, containerId: string): Promise<{ status: InstagramContainerStatus; detail: string | null }> {
   const result = await metaGraphRequest<{ status_code?: string; status?: string }>(
-    `${INSTAGRAM_GRAPH}/${containerId}?fields=status_code,status`, withToken(target, { deadline }))
+    `${INSTAGRAM_GRAPH}/${containerId}?fields=status_code,status`, withToken(target, {}))
   const status = result.status_code
   if (status !== 'EXPIRED' && status !== 'ERROR' && status !== 'FINISHED' && status !== 'IN_PROGRESS' && status !== 'PUBLISHED') {
     throw new Error(`Instagram reported container ${containerId} in an unknown state: ${String(status)}`)
@@ -108,8 +107,8 @@ export async function readContainerStatus(target: InstagramTarget, containerId: 
 }
 
 /** Publishes the saved container. The answer is the published media id. */
-export async function publishContainer(target: InstagramTarget, containerId: string, deadline: MetaDeadline): Promise<string> {
-  const result = await metaGraphRequest<{ id?: string }>(`${INSTAGRAM_GRAPH}/${target.userId}/media_publish`, withToken(target, { ...formBody({ creation_id: containerId }), deadline }))
+export async function publishContainer(target: InstagramTarget, containerId: string): Promise<string> {
+  const result = await metaGraphRequest<{ id?: string }>(`${INSTAGRAM_GRAPH}/${target.userId}/media_publish`, withToken(target, { ...formBody({ creation_id: containerId }) }))
   if (!result.id) throw new Error('Instagram did not return the published media id')
   return result.id
 }
@@ -129,15 +128,15 @@ export interface InstagramMediaRecord {
 
 const MEDIA_FIELDS = 'id,caption,media_type,media_product_type,media_url,thumbnail_url,permalink,timestamp,username,children{id,media_type,media_url,thumbnail_url}'
 
-export async function readMedia(target: InstagramTarget, mediaId: string, deadline: MetaDeadline): Promise<InstagramMediaRecord> {
-  return await metaGraphRequest<InstagramMediaRecord>(`${INSTAGRAM_GRAPH}/${mediaId}?fields=${MEDIA_FIELDS}`, withToken(target, { deadline }))
+export async function readMedia(target: InstagramTarget, mediaId: string): Promise<InstagramMediaRecord> {
+  return await metaGraphRequest<InstagramMediaRecord>(`${INSTAGRAM_GRAPH}/${mediaId}?fields=${MEDIA_FIELDS}`, withToken(target, {}))
 }
 
 /** One page of the account's own media, newest first, with every carousel child, and the cursor for the next. */
-export async function listMedia(target: InstagramTarget, input: { after: string | null; limit: number }, deadline: MetaDeadline): Promise<{ items: InstagramMediaRecord[]; after: string | null }> {
+export async function listMedia(target: InstagramTarget, input: { after: string | null; limit: number }): Promise<{ items: InstagramMediaRecord[]; after: string | null }> {
   const params = new URLSearchParams({ fields: MEDIA_FIELDS, limit: String(input.limit), ...(input.after ? { after: input.after } : {}) })
   const page = await metaGraphRequest<{ data?: InstagramMediaRecord[]; paging?: { cursors?: { after?: string }; next?: string } }>(
-    `${INSTAGRAM_GRAPH}/${target.userId}/media?${params}`, withToken(target, { deadline }))
+    `${INSTAGRAM_GRAPH}/${target.userId}/media?${params}`, withToken(target, {}))
   if (!Array.isArray(page.data)) throw new MetaGraphError('invalid-response', 'Meta returned no post inventory')
   if (page.paging?.next && !page.paging.cursors?.after) throw new MetaGraphError('invalid-response', 'Meta returned another page without its cursor')
   return { items: page.data, after: page.paging?.next ? page.paging.cursors!.after! : null }
@@ -167,17 +166,17 @@ function insightValues<M extends string>(response: InsightValues, metrics: reado
 }
 
 /** The account's totals for [since, until), as Instagram reports them. */
-export async function readAccountInsights(target: InstagramTarget, range: { since: Date; until: Date }, deadline: MetaDeadline): Promise<Partial<Record<AccountInsightMetric, number>>> {
+export async function readAccountInsights(target: InstagramTarget, range: { since: Date; until: Date }): Promise<Partial<Record<AccountInsightMetric, number>>> {
   const params = new URLSearchParams({
     metric: ACCOUNT_INSIGHT_METRICS.join(','), period: 'day', metric_type: 'total_value',
     since: String(Math.floor(range.since.getTime() / 1000)), until: String(Math.floor(range.until.getTime() / 1000)),
   })
-  const response = await metaGraphRequest<InsightValues>(`${INSTAGRAM_GRAPH}/${target.userId}/insights?${params}`, withToken(target, { deadline }))
+  const response = await metaGraphRequest<InsightValues>(`${INSTAGRAM_GRAPH}/${target.userId}/insights?${params}`, withToken(target, {}))
   return insightValues(response, ACCOUNT_INSIGHT_METRICS, entry => entry.total_value?.value)
 }
 
 /** A feed post's or reel's lifetime metrics, as Instagram reports them. */
-export async function readMediaInsights(target: InstagramTarget, mediaId: string, deadline: MetaDeadline): Promise<Partial<Record<MediaInsightMetric, number>>> {
-  const response = await metaGraphRequest<InsightValues>(`${INSTAGRAM_GRAPH}/${mediaId}/insights?metric=${MEDIA_INSIGHT_METRICS.join(',')}`, withToken(target, { deadline }))
+export async function readMediaInsights(target: InstagramTarget, mediaId: string): Promise<Partial<Record<MediaInsightMetric, number>>> {
+  const response = await metaGraphRequest<InsightValues>(`${INSTAGRAM_GRAPH}/${mediaId}/insights?metric=${MEDIA_INSIGHT_METRICS.join(',')}`, withToken(target, {}))
   return insightValues(response, MEDIA_INSIGHT_METRICS, entry => entry.total_value?.value ?? entry.values?.[0]?.value)
 }
