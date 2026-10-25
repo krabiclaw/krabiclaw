@@ -401,7 +401,14 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
       args: { organization_id: organizationId, product_id: created.id, variants: [{ id: small.id, prices: [{ id: smallPrice.id, unit_amount: 550 }] }] },
     })
     expect(edit.status()).toBe(200)
-    expect(mcpData<{ product: Product }>(await edit.json()).product.id).toBe(created.id)
+    const mutationProduct = mcpData<{ product: Product }>(await edit.json()).product
+    expect(mutationProduct.id).toBe(created.id)
+    for (const field of ['created_by', 'updated_by', 'media', 'social_image']) expect(mutationProduct).not.toHaveProperty(field)
+    for (const variant of mutationProduct.variants) {
+      for (const price of variant.prices) {
+        expect(Object.keys(price).sort()).toEqual(['id', 'location_id', 'active', 'currency', 'unit_amount', 'type', 'recurring_interval', 'recurring_interval_count', 'tax_behavior', 'compare_at_unit_amount', 'valid_from_at', 'valid_until_at'].sort())
+      }
+    }
     const readback = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
     expect(readback.status()).toBe(200)
     const edited = (await readback.json() as { product: Product }).product

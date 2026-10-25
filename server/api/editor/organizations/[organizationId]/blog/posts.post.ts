@@ -29,8 +29,8 @@ export default defineHandler(async (event) => {
     console.error("Failed to create blog post:", error);
     const { message, statusCode } = httpErrorDetails(error, "Failed to create blog post");
     return jsonResponse(
-      { error: message }, { status: statusCode }, );
+      { error: message, ...(HTTPError.isError(error) && error.data ? { data: error.data } : {}) }, { status: statusCode }, );
   }
 });
-import { defineHandler } from 'nitro';
+import { defineHandler, HTTPError } from 'nitro';
 import { getRouterParam, readBody  } from 'nitro/h3';

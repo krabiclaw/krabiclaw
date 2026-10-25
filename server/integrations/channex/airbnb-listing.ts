@@ -17,6 +17,18 @@ import { ChannexDataError, integer, object, received, string, type JsonRecord } 
 export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'propertyType'] as const
 export type DetailField = typeof DETAIL_FIELDS[number]
 export const PROPERTY_TYPES = ['apartment', 'holiday_home', 'villa', 'chalet', 'lodge'] as const
+/**
+ * Airbnb's `property_type_category` (as Channex's `listing_details` returns it;
+ * "house" and "townhouse" read live on 2026-10-25) to Channex's `property_type`,
+ * whose vacation-rental values Channex documents as apartment, boat, chalet,
+ * country_house, farm_stay, holiday_home, homestay and villa (Properties API).
+ * Airbnb's apartments group is an apartment; its stand-alone or terraced house
+ * is a holiday home. A category not listed here stops the import for review.
+ */
+const AIRBNB_PROPERTY_TYPES: Readonly<Record<string, typeof PROPERTY_TYPES[number]>> = {
+  apartment: 'apartment', condominium: 'apartment', serviced_apartment: 'apartment', loft: 'apartment',
+  house: 'holiday_home', townhouse: 'holiday_home', villa: 'villa', chalet: 'chalet',
+}
 export const CALENDAR_NIGHTS = 500
 
 export interface ListingDetails {
@@ -126,8 +138,9 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
     const booking = listing.booking_settings === undefined || listing.booking_settings === null ? {} : object(listing.booking_settings, 'Booking settings')
     if (listing.property_type_category !== undefined && listing.property_type_category !== null) {
       const category = string(listing.property_type_category, 'Airbnb property type')
-      if (!(PROPERTY_TYPES as readonly string[]).includes(category)) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified KrabiClaw mapping. Import stopped for review.`)
-      fields.propertyType = category
+      const propertyType = Object.hasOwn(AIRBNB_PROPERTY_TYPES, category) ? AIRBNB_PROPERTY_TYPES[category] : undefined
+      if (!propertyType) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified KrabiClaw mapping. Import stopped for review.`)
+      fields.propertyType = propertyType
     }
     return {
       id: listingId, title: string(listing.name, 'Listing name'), currency: string(pricing.listing_currency, 'Currency'),

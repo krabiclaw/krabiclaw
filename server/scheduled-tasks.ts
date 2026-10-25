@@ -38,6 +38,10 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
   '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
   '0 * * * *': ['review-request-automation', 'social-card-cleanup', 'sessions-materialize'],
+  // Staging only ([env.staging.triggers]): the Channex certification run needs imports, ARI
+  // retries and the revision-feed backup. Each reads only its own Channex queue table.
+  '1-59/2 * * * *': ['airbnb-sync', 'channex-ari-delivery'],
+  '3-59/10 * * * *': ['channex-revision-feed'],
 }
 
 const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {

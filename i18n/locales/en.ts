@@ -520,6 +520,7 @@ export default {
       "title": "Photos from every room.",
       "gallery_title": "Photos and videos",
       "close_gallery": "Close photos and videos",
+      "video_failed": "Video could not be loaded.",
       "show_all": "Show all {count} photos",
       "empty_title": "No photos yet.",
       "empty_desc": "Photos added by the team will appear here.",

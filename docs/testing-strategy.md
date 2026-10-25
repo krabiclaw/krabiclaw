@@ -30,6 +30,57 @@ local migrations and fixtures, a production Nuxt/Nitro build, and
 `.output/server/index.mjs` through local Wrangler. Do not substitute
 `nuxt dev`, component mocks, or a mock server and call it runtime proof.
 
+### Complete published route coverage
+
+For the shared public changes identified by the release contract, the existing
+`tenant-rendering.spec.ts` accepts a fresh runtime inventory through
+`PLAYWRIGHT_TENANT_ROUTE_INVENTORY`. Its JSON format is a nonempty array of
+`{ "tenant": "Kikuzuki", "url": "https://kikuzuki-krabi-thailand-staging.krabiclaw.com/menu" }`.
+Supported tenant names are `KrabiClaw`, `Pottery House`, `Kikuzuki`, `NCLS`, and staging's
+`Saltleaf`; destinations must match their canonical environment hosts.
+
+Build that inventory from the actual complete sitemap and published native
+public API records, using the configured sitemap reader for index traversal.
+Staging and demos intentionally have empty SEO sitemaps: retain production's
+published paths mapped to their existing staging aliases, account explicitly
+for the environment's published locales, and add the current staging inventory.
+Keep source responses, mapping decisions, completeness and hashes with the
+release evidence. Do not check in the private inventory, manufacture routes, or
+treat a representative route list as complete.
+
+Run the existing harness against the deployed build, with bounded concurrency:
+
+```sh
+PLAYWRIGHT_PREVIEW_URL=https://staging.krabiclaw.com \
+PLAYWRIGHT_TENANT_ROUTE_INVENTORY=/absolute/path/route-queue.private.json \
+PLAYWRIGHT_JSON_OUTPUT_FILE=/absolute/path/route-results.private.json \
+PLAYWRIGHT_WORKERS=2 yarn test:e2e:tenant-rendering --grep 'published route inventory:' \
+  --reporter=list,./tests/e2e/progress-reporter.ts,json
+```
+
+Each supplied URL is opened in Chromium at 1440px and 390px, checks its actual
+hydrated tenant content and media, and retains a full-page screenshot. An omitted
+inventory means the ordinary representative suite, not complete route coverage.
+One ordinary test per tenant and viewport walks its URLs in sequential native
+Playwright steps, each with a 60-second budget. That anonymous visitor retains
+normal browser cache and announcement state between routes. The report attaches
+each route's unique full-page capture and the planned and completed URL scope,
+including partial scope on failure. Group results prove full coverage only when
+their completed scopes match the supplied inventory at both widths.
+Keep the JSON reporter output as private release evidence: it retains native
+body attachments, including completed route scope and duplicate-cancellation
+diagnostics from passing tests. List and progress output alone do not retain
+those attachment bodies.
+The normal tracing configuration remains in effect. First-party HTTP, script,
+API, console and page failures remain fatal. A cancelled duplicate image or
+other request is recorded in a per-route diagnostic only when its exact URL
+also returned 200/304 during that route and the current rendered image decoded,
+or its exact video poster belongs to a decoded, error-free video. Every other
+request failure remains fatal; all rendered media checks still run.
+Automated all-route results and independent manual visual/customer journeys
+remain separate release evidence; unreviewed captures are not a claim of manual
+visual inspection.
+
 ## What an assertion has to be
 
 A status code is not an outcome. Every one of these passed a green suite:

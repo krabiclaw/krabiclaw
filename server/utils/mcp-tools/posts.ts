@@ -1,6 +1,6 @@
 import { postMutationJsonSchema, PostValidationError } from '~/shared/posts'
 import type { McpToolDefinition } from './shared'
-import { pageInfoObject, paginationInputSchema, postMutationResultObject, postObject, postPublishResultObject, organizationTool } from './shared'
+import { pageInfoObject, paginationInputSchema, postMutationResultObject, postObject, postPublishResultObject, publishOutcomeObject, organizationTool } from './shared'
 import type { McpExecutorContext } from './execution'
 import { MCP_ERROR, mcpProtocolError } from '~/server/utils/mcp-protocol'
 import { HTTPError } from 'nitro'
@@ -193,8 +193,9 @@ export const POSTS_TOOLS: McpToolDefinition[] = [
     required: ['publication_id'],
     outputSchema: {
       type: 'object',
-      properties: { state: { type: 'string' }, publication: { type: 'object' } },
+      properties: { state: { const: 'published' }, publication: publishOutcomeObject },
       required: ['state', 'publication'],
+      additionalProperties: false,
     },
   }),
   organizationTool({
@@ -223,7 +224,7 @@ async function asMcpValidationError<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work()
   } catch (error) {
-    if (error instanceof PostValidationError) throw mcpProtocolError(MCP_ERROR.invalidParams, error.message)
+    if (error instanceof PostValidationError) throw mcpProtocolError(MCP_ERROR.invalidParams, error.message, error.data)
     throw error
   }
 }

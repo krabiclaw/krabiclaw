@@ -140,7 +140,11 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
         FROM content_documents WHERE id = ? AND organization_id = ? LIMIT 1`, [representation.resource_id, organizationId])
       return { ...base, locale: route.locale, pageId: representation.resource_id, documentId: representation.document_id, pageType: root?.page_type ?? null, recipe: root?.recipe ?? null, productId: null }
     }
-    return { ...base, locale: route.locale, pageId: null, pageType: null, recipe: null, documentId: null, productId: representation.resource_type === 'product' ? representation.resource_id : null }
+    const source = route.locale_representations.find(item => item.source === 'source')
+    if (!source) throw new Error('Published localized resource source route is unavailable')
+    return { ...base, sourcePath: source.route_path,
+      locationId: representation.resource_type === 'business_location' ? representation.resource_id : base.locationId,
+      locale: route.locale, pageId: null, pageType: null, recipe: null, documentId: null, productId: representation.resource_type === 'product' ? representation.resource_id : null }
   }
 
   const sourceLocale = await getSourceLocale(db, organizationId)

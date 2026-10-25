@@ -10,7 +10,7 @@
       add-label="Write a post"
       :removing-id="removingId"
       :reorderable="orderedCollection !== null"
-      :add-to="blogCreatePath(orgSlug)"
+      :add-to="router.resolve({ path: blogCreatePath(orgSlug), query: orderedCollection ? { collection: orderedCollection } : {} }).fullPath"
       @remove="removePost"
       @move="moveArticle"
     >
@@ -60,6 +60,7 @@ import { mediaStillUrl } from '~/shared/media-placement-contract'
 // The blog index. Rendered by `blog.vue`, which owns the frame.
 const dashboardApi = useDashboardApi()
 const route = useRoute()
+const router = useRouter()
 const organizationId = await useDashboardOrganizationId()
 const orgSlug = route.params.orgSlug as string
 const level = useRouteLevel()

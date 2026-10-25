@@ -52,7 +52,7 @@ export default defineAppConfig({
     inputTags: field,
     selectMenu: field,
     button: {
-      slots: { base: 'rounded-[8px]' },
+      slots: { base: 'rounded-[8px] disabled:opacity-50 aria-disabled:opacity-50' },
       variants: {
         size: {
           lg: { base: 'text-base' },
@@ -60,6 +60,9 @@ export default defineAppConfig({
           xl: { base: 'h-12 px-6 text-base' }
         }
       },
+      compoundVariants: [
+        { color: 'neutral', variant: ['outline', 'soft', 'subtle', 'ghost', 'link'], class: { base: 'text-highlighted hover:text-highlighted active:text-highlighted disabled:text-muted aria-disabled:text-muted' } }
+      ],
       defaultVariants: { size: 'lg', color: 'neutral' }
     },
     // A yes/no setting. Black when on, as Airbnb's toggle is; off is the 3:1

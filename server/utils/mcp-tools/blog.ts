@@ -46,6 +46,17 @@ const articleCategoryListResult = {
   additionalProperties: false,
 } as const
 
+const publicationFields = ['id', 'title', 'collection', 'visibility', 'status', 'published', 'published_at', 'updated_at', 'public_url'] as const
+const articlePublicationResult = {
+  type: 'object',
+  properties: {
+    post: { type: 'object', properties: Object.fromEntries(publicationFields.map(field => [field, blogPostSummaryObject.properties[field]])), required: [...publicationFields], additionalProperties: false },
+    changed: { type: 'boolean' },
+  },
+  required: ['post', 'changed'],
+  additionalProperties: false,
+} as const
+
 export const BLOG_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'list_blog_posts',
@@ -115,13 +126,13 @@ export const BLOG_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'publish_blog_post',
-      description: "Publish the selected draft blog or documentation article when publication is requested. Requires expected_updated_at from the latest read. An already published article is unchanged, including its date and announcement. Returns the article and website URL; this does not publish to Facebook or Instagram.",
+      description: "Publish the selected draft blog or documentation article when publication is requested. Requires expected_updated_at from the latest read. An already published article is unchanged, including its date and announcement. Returns its publication state, revision and website URL; this does not publish to Facebook or Instagram.",
       domain: 'blog', minimumRole: 'admin', inputSchema: {
         post_id: { type: 'string', description: 'Post id or slug.' },
         expected_updated_at: { type: 'string', description: 'Exact post.updated_at concurrency token from the latest get_blog_post or successful blog mutation.' },
       },
       required: ['post_id', 'expected_updated_at'],
-      outputSchema: blogPostMutationResultObject,
+      outputSchema: articlePublicationResult,
     }),
   organizationTool({
       name: 'reorder_blog_posts',
@@ -428,8 +439,9 @@ export async function handleBlogTools(ctx: McpExecutorContext): Promise<unknown>
         expected_updated_at: requiredString(args, 'expected_updated_at'),
       }, organization.organizationId)
       const result = await getBlogPost(organization.db, postId, organization.organizationId, organization.env)
+      const summary = toBlogPostSummary(result, organization)
       return renderStructuredResponse(
-        { post: projectBlogPostForMcp(result, organization) },
+        { post: Object.fromEntries(publicationFields.map(field => [field, summary[field]])), changed: lifecycle.changed },
         lifecycle.changed ? `Published blog article "${result.title}".` : `Blog article "${result.title}" was already published; nothing changed.`,
       )
     }

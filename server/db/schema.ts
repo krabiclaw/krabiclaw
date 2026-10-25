@@ -332,8 +332,9 @@ export const member = sqliteTable("member", {
 	role: text().default("member").notNull(),
 	createdAt: integer({ mode: "timestamp" }).default(sql`(unixepoch())`).notNull(),
 }, (table) => [
-	// Better Auth's organization adapter resolves membership by userId and organizationId.
-	index("member_userId_organizationId_idx").on(table.userId, table.organizationId),
+	// Better Auth's organization adapter resolves membership by userId and organizationId;
+	// a user is one member of an organization, so a second row for the pair is refused.
+	uniqueIndex("member_userId_organizationId_unique").on(table.userId, table.organizationId),
 	index("member_organizationId_idx").on(table.organizationId),
 	uniqueIndex("member_id_organizationId_unique").on(table.id, table.organizationId),
 ]);

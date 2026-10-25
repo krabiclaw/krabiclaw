@@ -106,7 +106,8 @@ const planLine = computed(() => {
     // A change already set for the period's end is what happens; only without one does the card decide.
     if (status.cancelAtPeriodEnd) parts.push(`${planName.value} ends with the trial`)
     else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
-    else if (!card.value) parts.push(TRIAL_WITHOUT_CARD[trial.withoutPaymentMethod](planName.value))
+    // Only a card list that loaded can say there is no card; a failed load shows its own error above.
+    else if (methods.value && !methodsError.value && !card.value) parts.push(TRIAL_WITHOUT_CARD[trial.withoutPaymentMethod](planName.value))
   } else if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
   else if (scheduledPlan.value) parts.push(`Changes to ${nameOf(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
   else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)

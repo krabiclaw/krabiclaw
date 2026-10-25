@@ -9,7 +9,7 @@
         <NuxtLink v-if="view.callToAction" :to="route(view.callToAction.url)" class="inline-flex items-center gap-2 text-sm font-semibold text-highlighted no-underline hover:underline">{{ view.callToAction.label }}<span aria-hidden="true">→</span></NuxtLink>
       </div>
 
-      <UCarousel v-if="block" :items="view.posts" loop dots align="start" :autoplay="reducedMotion === 'reduce' || viewerOpen ? false : { delay: 4500, stopOnMouseEnter: true, stopOnFocusIn: true, stopOnInteraction: false }" :ui="{ item: 'basis-[85%] ps-6 sm:basis-1/2 lg:basis-1/3', container: '-ms-6 items-start', dots: 'gap-2', dot: 'gallery-dot' }">
+      <UCarousel v-if="block" :items="view.posts" loop dots align="start" :ui="{ item: 'basis-[85%] ps-6 sm:basis-1/2 lg:basis-1/3', container: '-ms-6 items-start', dots: 'gap-2', dot: 'gallery-dot' }">
         <template #default="{ item }"><SocialPostCard :post="item" @open="openPost(item.id)" /></template>
       </UCarousel>
       <div v-else class="mx-auto flex max-w-2xl flex-col gap-10 sm:gap-12">
@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { usePreferredReducedMotion } from '@vueuse/core'
+import { provideMediaPreviews } from '~/components/MediaPreview.vue'
 import SocialPostCard from '~/components/social/SocialPostCard.vue'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { PublicSocialPost } from '~/server/utils/post-management'
@@ -39,8 +39,8 @@ const props = defineProps<{
 const { t, localePath } = useI18n()
 const view = computed(() => props.block ? socialPostsBlockView(props.block) : { title: null, description: null, callToAction: null, posts: props.posts ?? [] })
 const gallery = computed(() => view.value.posts.flatMap(post => post.media.map(media => ({ url: media.public_url, kind: media.kind, alt: media.alt_text ?? '', poster: media.thumbnail_url ?? undefined, description: post.body ?? undefined }))))
-const reducedMotion = usePreferredReducedMotion()
 const viewerOpen = ref(false)
+provideMediaPreviews(viewerOpen)
 const viewerIndex = ref(0)
 function openPost(postId: string) {
   const post = view.value.posts.find(item => item.id === postId)
