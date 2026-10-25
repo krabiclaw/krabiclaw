@@ -4,8 +4,8 @@ import { createHmac } from 'node:crypto'
 import { formatViolation } from '../../server/utils/social-publication.ts'
 import { verifyMetaSignedRequest } from '../../server/utils/meta-graph.ts'
 
-const image = (id: string, mime = 'image/jpeg', size = 1000) => ({ asset_id: id, mime_type: mime, file_size: size, duration: null, kind: 'image' as const, public_url: `https://images.example.test/${id}` })
-const video = (id: string, duration: number | null) => ({ asset_id: id, mime_type: 'video/mp4', file_size: 1000, duration, kind: 'video' as const, public_url: `https://media.example.test/${id}.mp4` })
+const image = (id: string, mime = 'image/jpeg', size = 1000, jpegUrl: string | null = mime === 'image/jpeg' ? `https://images.example.test/${id}` : null) => ({ asset_id: id, mime_type: mime, file_size: size, duration: null, kind: 'image' as const, public_url: `https://images.example.test/${id}`, alt_text: null, jpeg_url: jpegUrl })
+const video = (id: string, duration: number | null) => ({ asset_id: id, mime_type: 'video/mp4', file_size: 1000, duration, kind: 'video' as const, public_url: `https://media.example.test/${id}.mp4`, alt_text: null, jpeg_url: null })
 
 test('each channel refuses the first format rule a post breaks, with the limit it breaks', () => {
   assert.equal(formatViolation('facebook', 'Just words', []), null)
@@ -16,7 +16,9 @@ test('each channel refuses the first format rule a post breaks, with the limit i
   assert.equal(formatViolation('instagram', 'caption only', [])?.code, 'media_required')
   assert.equal(formatViolation('instagram', '', [image('a')]), null)
   assert.equal(formatViolation('instagram', '', [image('a'), video('v', 20)]), null)
-  assert.match(formatViolation('instagram', '', [image('p', 'image/png')])!.message, /JPEG images only; asset p is image\/png/)
+  assert.match(formatViolation('instagram', '', [image('p', 'image/png')])!.message, /JPEG images only; asset p is image\/png and has no JPEG rendition/)
+  // A PNG that Cloudflare Images renders as JPEG is sent as that rendition.
+  assert.equal(formatViolation('instagram', '', [image('r', 'image/png', 1000, 'https://imagedelivery.net/h/r/format=jpeg')]), null)
   assert.match(formatViolation('instagram', '', Array.from({ length: 11 }, (_, index) => image(`i${index}`)))!.message, /at most 10 items; this post has 11/)
   assert.match(formatViolation('instagram', '', [image('a'), video('v', 90)])!.message, /carousel videos run 3–60 seconds; asset v is 90 seconds/)
   assert.equal(formatViolation('instagram', '', [video('reel', 90)]), null)

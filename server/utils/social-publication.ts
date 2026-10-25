@@ -7,6 +7,7 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
 import { getPost, postPayloadFingerprint, type Post, type PostMedia } from '~/server/utils/post-management'
 import { providerCaption } from '~/shared/posts'
 import { MetaGraphError } from '~/server/utils/meta-graph'
+import { buildImageUrl } from '~/server/utils/cloudflare-images'
 import {
   createUnpublishedPhoto, createVideo, deletePageObject, facebookPageToken, finishReel, isFacebookReel, listLinkedFacebookPages,
   publishPagePost, readPagePost, readVideo, startReel, uploadReelFromUrl, type FacebookPageTarget,
@@ -225,14 +226,25 @@ export async function connectedSocialTarget(env: CloudflareEnv, organizationId: 
 
 // ── Payload validation ────────────────────────────────────────────────────
 
-interface AssetFacts { asset_id: string; mime_type: string | null; file_size: number | null; duration: number | null; kind: 'image' | 'video'; public_url: string; alt_text: string | null }
+interface AssetFacts {
+  asset_id: string; mime_type: string | null; file_size: number | null; duration: number | null; kind: 'image' | 'video'; public_url: string; alt_text: string | null
+  /** Where this image is served as a JPEG: itself, or its Cloudflare Images rendition; null when nothing serves one. */
+  jpeg_url: string | null
+}
 
-async function assetFacts(db: DbClient, organizationId: string, media: PostMedia[]): Promise<AssetFacts[]> {
+async function assetFacts(db: DbClient, env: CloudflareEnv, organizationId: string, media: PostMedia[]): Promise<AssetFacts[]> {
   if (!media.length) return []
-  const rows = await queryAll<{ id: string; file_size: number | null }>(db, 'SELECT id, file_size FROM media_assets WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))',
+  const rows = await queryAll<{ id: string; file_size: number | null; cloudflare_image_id: string | null }>(db,
+    'SELECT id, file_size, cloudflare_image_id FROM media_assets WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))',
     [organizationId, d1JsonStringSet(media.map(item => item.asset_id))])
-  const sizes = new Map(rows.map(row => [row.id, row.file_size]))
-  return media.map(item => ({ asset_id: item.asset_id, mime_type: item.mime_type, file_size: sizes.get(item.asset_id) ?? null, duration: item.duration, kind: item.kind, public_url: item.public_url, alt_text: item.alt_text }))
+  const stored = new Map(rows.map(row => [row.id, row]))
+  return media.map((item) => {
+    const row = stored.get(item.asset_id)
+    const jpegUrl = item.kind !== 'image' ? null
+      : item.mime_type === 'image/jpeg' ? item.public_url
+        : row?.cloudflare_image_id ? buildImageUrl(env, row.cloudflare_image_id, 'format=jpeg') : null
+    return { asset_id: item.asset_id, mime_type: item.mime_type, file_size: row?.file_size ?? null, duration: item.duration, kind: item.kind, public_url: item.public_url, alt_text: item.alt_text, jpeg_url: jpegUrl }
+  })
 }
 
 const hashtagCount = (text: string) => (text.match(/(^|\s)#[\p{L}\p{N}_]+/gu) ?? []).length
@@ -274,8 +286,8 @@ export function formatViolation(channel: SocialChannel, caption: string, assets:
   if (caption.length > 2200) return { code: 'caption_too_long', message: `Instagram captions are limited to 2200 characters; this is ${caption.length}` }
   if (hashtagCount(caption) > 30) return { code: 'too_many_hashtags', message: `Instagram allows 30 hashtags; this caption has ${hashtagCount(caption)}` }
   if (mentionCount(caption) > 20) return { code: 'too_many_mentions', message: `Instagram allows 20 @mentions; this caption has ${mentionCount(caption)}` }
-  const image = images.find(asset => asset.mime_type !== 'image/jpeg')
-  if (image) return { code: 'unsupported_media_type', message: `Instagram accepts JPEG images only; asset ${image.asset_id} is ${image.mime_type ?? 'of unknown type'}` }
+  const image = images.find(asset => !asset.jpeg_url)
+  if (image) return { code: 'unsupported_media_type', message: `Instagram accepts JPEG images only; asset ${image.asset_id} is ${image.mime_type ?? 'of unknown type'} and has no JPEG rendition` }
   const largeImage = images.find(asset => (asset.file_size ?? 0) > 8 * 1024 * 1024)
   if (largeImage) return { code: 'media_too_large', message: `Instagram images are limited to 8 MB; asset ${largeImage.asset_id} is ${Math.ceil((largeImage.file_size ?? 0) / 1024 / 1024)} MB` }
   const video = videos.find(asset => !['video/mp4', 'video/quicktime'].includes(asset.mime_type ?? ''))
@@ -384,6 +396,7 @@ interface ChannelContext {
   publication: PublicationRecord
   attemptId: string
   handles: Handles
+  assets: AssetFacts[]
 }
 
 type ChannelResult = PublishOutcome
@@ -504,13 +517,15 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
     await fence.failed(status === 'EXPIRED' ? 'container_expired' : 'provider_processing_failed', `Instagram reported the media container ${status}`, {})
     return outcome(context, 'failed', { code: status === 'EXPIRED' ? 'container_expired' : 'provider_processing_failed', message: `Instagram reported the media container ${status}; publish again to prepare new ones` })
   }
+  // Instagram fetches images as JPEG; validation refused any image without a JPEG URL.
+  const jpegUrl = (assetId: string) => context.assets.find(asset => asset.asset_id === assetId)!.jpeg_url!
   const carousel = post.media.length > 1
   if (carousel) {
     handles.children ??= []
     for (const [index, item] of post.media.entries()) {
       if (handles.children[index]) continue
       handles.children[index] = await createMediaContainer(target, item.kind === 'image'
-        ? { kind: 'image', url: item.public_url, carouselItem: true, altText: item.alt_text }
+        ? { kind: 'image', url: jpegUrl(item.asset_id), carouselItem: true, altText: item.alt_text }
         : { kind: 'video', url: item.public_url, carouselItem: true })
       await fence.saveHandles(handles)
     }
@@ -524,7 +539,7 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
     handles.container_id = await createMediaContainer(target, carousel
       ? { kind: 'carousel', children: handles.children!, caption: context.caption }
       : only.kind === 'image'
-        ? { kind: 'image', url: only.public_url, caption: context.caption, carouselItem: false, altText: only.alt_text }
+        ? { kind: 'image', url: jpegUrl(only.asset_id), caption: context.caption, carouselItem: false, altText: only.alt_text }
         : { kind: 'video', url: only.public_url, caption: context.caption, carouselItem: false, coverUrl: only.thumbnail_url })
     await fence.saveHandles(handles)
   }
@@ -746,7 +761,7 @@ async function claimPublication(
 }
 
 async function publishExternal(
-  db: DbClient, env: CloudflareEnv, organizationId: string, post: Post,
+  db: DbClient, env: CloudflareEnv, organizationId: string, post: Post, assets: AssetFacts[],
   target: Extract<PublishTarget, { channel: SocialChannel }>,
 ): Promise<PublishOutcome> {
   const connection = await readConnection(env, organizationId, target.channel)
@@ -759,7 +774,7 @@ async function publishExternal(
   if (!('attemptId' in claim)) return claim
   const context: ChannelContext = {
     db, env, organizationId, post, caption: providerCaption(post.body, post.call_to_action), publication: claim.publication,
-    attemptId: claim.attemptId, handles: JSON.parse(claim.publication.provider_handles_json) as Handles,
+    attemptId: claim.attemptId, handles: JSON.parse(claim.publication.provider_handles_json) as Handles, assets,
   }
   const fence = claimed(db, claim.publication.id, claim.attemptId)
   try {
@@ -816,7 +831,7 @@ export async function publishPost(
   const stale = post.updated_at !== input.expectedUpdatedAt
   const staleOutcome = (channel: PublishOutcome['channel'], targetId: string): PublishOutcome => ({ channel, target_id: targetId, status: 'failed', code: 'stale_revision',
     message: `The post changed since it was read (now ${post.updated_at}); read it again and publish with the current expected_updated_at` })
-  const assets = await assetFacts(db, organizationId, post.media)
+  const assets = await assetFacts(db, env, organizationId, post.media)
   const caption = providerCaption(post.body, post.call_to_action)
   const entitled = await hasOrganizationEntitlement(env, organizationId, 'managed_service')
   const outcomes: PublishOutcome[] = []
@@ -891,7 +906,7 @@ export async function publishPost(
       outcomes.push(staleOutcome('organization', organizationId))
     }
   }
-  for (const target of external) outcomes.push(await publishExternal(db, env, organizationId, post, target))
+  for (const target of external) outcomes.push(await publishExternal(db, env, organizationId, post, assets, target))
 
   const order = input.targets.map(target => target.channel)
   outcomes.sort((a, b) => order.indexOf(a.channel) - order.indexOf(b.channel))
