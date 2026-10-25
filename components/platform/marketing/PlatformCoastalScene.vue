@@ -55,12 +55,12 @@ const secondaryUrl = computed(() => text(props.block.data.secondary_url))
 .kc-product-scene--screenshots .kc-product-scene__actions { justify-content: flex-start; }
 .kc-product-scene--lodging .kc-product-scene__primary { background: #ff7768; border-color: #ff7768; color: #171920; border-radius: 999px; }
 .kc-product-scene--lodging .kc-product-scene__secondary { background: transparent; border-color: #f8f7f380; color: #f8f7f3; border-radius: 999px; }
-.kc-product-scene__screenshots { position: relative; min-width: 0; height: 37rem; }
+.kc-product-scene__screenshots { position: relative; min-width: 0; height: 37rem; margin-bottom: 3rem; }
 .kc-product-scene__screenshots figure { position: absolute; width: 78%; right: 0; bottom: 2.5rem; margin: 0; border: 1px solid #ffffff30; border-radius: 1.1rem; overflow: hidden; box-shadow: 0 1.5rem 4rem #0006; }
 .kc-product-scene__screenshots figure:first-child { width: 90%; top: 0; bottom: auto; right: 0; }
 .kc-product-scene__screenshots figure.kc-product-scene__screenshot--portrait { width: 46%; max-width: 17rem; right: auto; left: 0; border: .45rem solid #252936; border-radius: 2rem; }
 .kc-product-scene__screenshots img { display: block; width: 100%; height: auto; }
-.kc-product-scene .kc-product-scene__caption { position: absolute; bottom: 0; right: 0; margin: 0; font-size: .8rem; color: #e4e4ec; }
+.kc-product-scene .kc-product-scene__caption { position: absolute; top: 100%; right: 0; margin: 1rem 0 0; font-size: .8rem; color: #e4e4ec; }
 .kc-product-scene--closing .kc-product-scene__art { object-position: 50% bottom; }
 .kc-product-scene--closing { min-height: clamp(25rem, 40vw, 40rem); }
 .kc-product-scene--closing .kc-product-scene__copy { padding-top: clamp(5rem, 8vw, 8rem); }

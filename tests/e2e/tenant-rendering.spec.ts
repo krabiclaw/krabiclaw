@@ -213,6 +213,12 @@ if (inventoryFile) {
               })
               for (const video of await page.locator('video:visible').all()) {
                 await video.scrollIntoViewIfNeeded()
+                // Native controlled videos deliberately preload nothing. Exercise
+                // playback before requiring a decoded frame from that resource.
+                await video.evaluate(async element => {
+                  const media = element as HTMLVideoElement
+                  if (media.paused) await media.play()
+                })
                 await expect.poll(() => video.evaluate(element => {
                   const media = element as HTMLVideoElement
                   return {
