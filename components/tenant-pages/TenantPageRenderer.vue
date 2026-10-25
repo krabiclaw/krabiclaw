@@ -32,7 +32,7 @@
         <figure v-if="blockMedia(block, 'media')" class="my-12">
           <MediaPreview
             v-if="blockMedia(block, 'media')?.kind === 'video'"
-            :item="{ url: blockMedia(block, 'media')!.public_url!, kind: 'video', poster: blockMedia(block, 'media')!.thumbnail_url ?? undefined }"
+            :item="{ url: blockMedia(block, 'media')!.public_url!, kind: 'video', poster: blockMedia(block, 'media')!.thumbnail_url ?? undefined, alt: blockMedia(block, 'media')!.alt_text ?? undefined }"
             :fill="false"
             :controls="reducedMotion === 'reduce'"
             class="rounded-2xl shadow-lg"

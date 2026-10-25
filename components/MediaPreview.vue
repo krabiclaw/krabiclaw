@@ -8,7 +8,7 @@
       :poster="item.poster || undefined"
       :controls="controls"
       :aria-label="controls ? item.alt : undefined"
-      preload="metadata"
+      preload="none"
       muted
       :loop="!controls"
       playsinline
@@ -85,7 +85,7 @@ watch(video, () => {
   playing.value = false
   failure.value = null
 }, { flush: 'sync' })
-watch([video, shouldPlay], async ([element, play], _previous, onCleanup) => {
+watch([video, shouldPlay, group.selected, group.paused, documentVisibility, () => (group.visibility.get(id) ?? 0) > 0], async ([element, play], _previous, onCleanup) => {
   if (!element) return
   let cancelled = false
   onCleanup(() => { cancelled = true; element.pause() })
