@@ -557,6 +557,7 @@
   "stay.receipt_missing_description": "Thông tin kỳ lưu trú có trong email xác nhận của bạn và trong tài khoản KrabiClaw khi bạn tạo tài khoản bằng email đã dùng để đặt.",
   "site.photos.close_gallery": "Đóng ảnh và video",
   "site.photos.gallery_title": "Ảnh và video",
+  "site.photos.video_failed": "Không thể tải video.",
   "site.photos.show_all": "Hiển thị tất cả {count} ảnh",
   "stay.additional_photos": "Ảnh bổ sung",
   "stay.back_to_photo_tour": "Quay lại tham quan qua ảnh",
