@@ -349,7 +349,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
       page.waitForResponse(response => response.url().includes(`/stays/${stay.data!.stay.id}/payments`) && response.request().method() === 'POST'),
       page.getByRole('button', { name: 'Record payment', exact: true }).click(),
     ])
-    await expectStatus(offlineRefund, 200)
+    await expectStatus(offlineRefund, 201)
     await expect(page.getByRole('listitem').filter({ hasText: 'Offline refund after cancellation' })).toBeVisible()
     const refunded = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
     expect(refunded.error).toBeNull()
