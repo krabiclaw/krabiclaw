@@ -156,6 +156,11 @@ export async function resolveMcpWorkspace(
     const domain = await queryFirst<{ organization_id: string }>(db, "SELECT organization_id FROM organization_domains WHERE domain = ? AND status = 'active' LIMIT 1", [requestedOrganizationId])
     organization = organizations.find(entry => entry.id === domain?.organization_id) ?? null
   }
+  // A named organization that does not resolve is refused, never answered as
+  // an empty workspace that reads like a business with no locations.
+  if (requestedOrganizationId && !organization) {
+    throw new Error(`Organization ${requestedOrganizationId} is not one you can access. Call list_organizations for organization IDs.`)
+  }
 
   if (!requestedOrganizationId) {
     if (preferredOrganizationId) {

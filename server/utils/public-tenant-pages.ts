@@ -264,7 +264,7 @@ async function hydrateBlocks(
   // link to the contact page rather than to location pages they do not have.
   const legalPractice = isLegalPracticeSite({ themeId: organizationRow.theme_id, vertical: organizationRow.vertical })
   const defaultServices = pagePath === '/services' && legalPractice && blocks.length === 1 && blocks[0]?.type === 'hero'
-  const defaultLocationGrid = pagePath === '/' && template.slug !== 'platform' && !blocks.some(block => block.type === 'location_grid')
+  const defaultLocationGrid = pagePath === '/' && template.slug !== 'platform' && organizationRow.vertical !== 'lodging' && !blocks.some(block => block.type === 'location_grid')
   const addressVisible = !legalPractice || organizationRow.address_visibility === 'visible'
   // Each grid gets the products it named, and only those. Keyed by collection
   // rather than flattened into one list: two grids on a page name two different
@@ -300,7 +300,7 @@ async function hydrateBlocks(
   const defaultMenuGrid = homepageMenu && blocks.some(block => block.type === 'product_grid'
     && !(Array.isArray(block.data.product_ids) && block.data.product_ids.length) && !block.data.collection_id)
   for (const product of homepageDishes) if (defaultMenuGrid || product.details.featured === true) productIds.add(product.id)
-  if (homepage) for (const product of productCatalog!.products) if (product.kind === 'experience' || product.details.featured === true) productIds.add(product.id)
+  if (homepage) for (const product of productCatalog!.products) if (product.kind === 'experience' || product.details.featured === true || (organizationRow.vertical === 'lodging' && product.kind === 'stay')) productIds.add(product.id)
   // Null on a template that sells nothing; its pages carry no product grid.
   if ((collectionIds.size || productIds.size) && !currency) {
     throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page site has no currency' })
@@ -320,11 +320,14 @@ async function hydrateBlocks(
         ? (productsByCollection.get(String(block.data.collection_id)) ?? []).map(product => product.id)
         : homepageMenu ? defaultMenuProducts.map(product => product.id) : []))
   if (homepage) {
-    const missing = [...productById.values()].filter(product => product.featured && product.kind !== 'experience' && !displayed.has(product.id))
+    const missing = [...productById.values()].filter(product => (product.featured || (organizationRow.vertical === 'lodging' && product.kind === 'stay')) && product.kind !== 'experience' && !displayed.has(product.id))
     if (missing.length) blocks = [...blocks, {
       id: 'homepage-featured-products', type: 'product_grid',
       position: Math.max(-1, ...blocks.map(block => block.position)) + 1,
-      data: { product_ids: missing.map(product => product.id) }, media: [],
+      data: {
+        title: organizationRow.vertical === 'lodging' ? getVerticalCopy(organizationRow.vertical, locale).staysPageTitle : undefined,
+        product_ids: missing.map(product => product.id),
+      }, media: [],
     }]
   }
   const missingExperiences = homepage ? [...productById.values()].filter(product => product.kind === 'experience' && !displayed.has(product.id)) : []
@@ -476,7 +479,9 @@ async function hydrateBlocks(
         // placements are read slot-ordered, so a product with a `gallery` asset
         // handed the card that asset rather than its cover, and a gallery video
         // put an .mp4 in the card's <img src>.
-        media: product.media.filter(item => item.slot === 'image'),
+        media: product.media.filter(item => item.slot === 'image').length
+          ? product.media.filter(item => item.slot === 'image')
+          : product.media.filter(item => item.slot === 'gallery').slice(0, 1),
       }))
     }
     if (block.type === 'location_grid' && Array.isArray(data.location_ids)) {

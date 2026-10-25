@@ -23,6 +23,7 @@
                   <button v-for="(photo, at) in message.attachments" :key="photo.id" type="button" :aria-label="`Open photo ${at + 1} from ${senderName(message)}`" class="overflow-hidden rounded-2xl bg-elevated focus-visible:ring-2 focus-visible:ring-primary" @click="viewer = { photos: message.attachments, at }"><img :src="photo.url" :width="photo.width ?? undefined" :height="photo.height ?? undefined" alt="" class="size-full max-h-80 object-cover" :class="message.attachments.length > 1 ? 'aspect-square' : undefined" loading="lazy"></button>
                 </div>
                 <p v-if="message.body" class="whitespace-pre-wrap break-words rounded-2xl bg-elevated px-4 py-3 text-base leading-normal">{{ message.body }}</p>
+                <UButton v-if="message.senderId !== userId" color="neutral" variant="link" size="xs" class="mt-1 p-0 text-muted" @click="reportError = null; reporting = message">Report</UButton>
                 <div v-if="failedPushes(message).length" class="mt-1 text-xs text-error" data-team-push-failure>
                   <p>Message saved. {{ failedPushes(message).length === 1 ? 'A push notification failed.' : `${failedPushes(message).length} push notifications failed.` }}</p>
                   <UCollapsible v-if="failedPushes(message).some(delivery => delivery.error)">
@@ -43,6 +44,7 @@
         <UButton v-if="readError" class="mb-3" color="neutral" variant="ghost" @click="markRead">Retry read receipt</UButton>
         <MessageComposer v-model="draft" v-model:photos="photos" :disabled="Boolean(error || threadError)" :sending="sending" placeholder="Message your team" @send="send" />
         <MessagePhotoViewer v-model="viewer" />
+        <ReportDialog :open="reporting !== null" title="Report this message" :description="reporting ? `Tell KrabiClaw what is wrong with ${senderName(reporting)}'s message.` : ''" confirm-label="Report" :saving="reportSaving" :error="reportError" @submit="report" @close="reporting = null" />
       </div>
     </template>
   </div>
@@ -56,6 +58,7 @@ import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashb
 import { isTeamMessagesResponse, isTeamMessageResponse, type TeamThread, type TeamMessage } from './team-thread-client'
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
+import ReportDialog from './ReportDialog.vue'
 const props = defineProps<{ threadId: string; thread: TeamThread | null; threadError?: unknown }>()
 const api = useDashboardApi()
 const dashboard = useDashboardOrganization()
@@ -116,6 +119,27 @@ async function loadMore() {
   } catch (cause) { loadedCount = previousCount; pageError.value = error.value ? '' : getErrorMessage(cause, 'Earlier messages could not be loaded') }
   finally { loadingMore.value = false }
 }
+// A report keeps one key per message until it is filed, so a retry is the same report.
+const reporting = ref<TeamMessage | null>(null)
+const reportSaving = ref(false)
+const reportError = ref<string | null>(null)
+const reportKeys = new Map<string, string>()
+async function report(reason: string) {
+  const message = reporting.value
+  if (!message) return
+  if (!reportKeys.has(message.id)) reportKeys.set(message.id, crypto.randomUUID())
+  reportSaving.value = true
+  reportError.value = null
+  try {
+    await api(`${path.value}/messages/${encodeURIComponent(message.id)}/report`, { method: 'POST', body: { reason, idempotencyKey: reportKeys.get(message.id) }, validate: isReportResponse })
+    reportKeys.delete(message.id)
+    reporting.value = null
+  } catch (error) { reportError.value = getErrorMessage(error, 'The report could not be sent') } finally { reportSaving.value = false }
+}
+function isReportResponse(value: unknown): value is { report: { id: string; status: 'open' } } {
+  return isRecord(value) && isRecord(value.report) && typeof value.report.id === 'string' && value.report.status === 'open'
+}
+
 async function send() {
   const body = draft.value.trim()
   const selected = photos.value

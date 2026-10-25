@@ -13,6 +13,7 @@ import {
   stayCancelledMessage,
   domainUpdateMessage,
   onboardingCompletedMessage,
+  contentReportedMessage,
   guestReplyMessage,
   reservationCancelledMessage,
   reservationCreatedMessage,
@@ -259,6 +260,17 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
       organizationName: studio, ownerName: 'Priya Shah', ownerEmail: 'priya@example.com',
       siteUrl: 'https://pottery-house.krabiclaw.com/',
       viewCustomerUrl: 'https://krabiclaw.com/dashboard/krabiclaw/platform-accounts?user=preview-user&organization=preview-organization',
+    }),
+  },
+
+  {
+    id: 'content-reported',
+    audience: 'owner',
+    title: 'Operator — a member reported or blocked someone',
+    message: contentReportedMessage({
+      organizationName: 'Pinecone Stays', reporter: 'Priya Shah (priya@example.com)', subject: 'guest_thread', blocked: true,
+      reason: 'Harassing messages', excerpt: 'You will regret this. I know where you live.',
+      reviewUrl: 'https://krabiclaw.com/dashboard/krabiclaw/platform-reports',
     }),
   },
 
