@@ -1036,7 +1036,7 @@ test('a host previews the saved guest page around an unsaved draft without recor
     const url = new URL(outgoing.url())
     if (outgoing.frame() !== page.mainFrame() && ['/api/analytics/track', '/api/analytics/interactions', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
   })
-  const previewURL = await test.step('the preview shows the saved description, settings and safety', async () => {
+  const previewURL = await test.step('the listing preview shows marketing details without post-booking rules and safety', async () => {
     await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
     await previewLink.click()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/name`) && url.searchParams.get('location_id') === location.id && url.searchParams.get('editMode') === 'preview' && url.searchParams.get('previewViewport') === 'desktop')
@@ -1052,7 +1052,7 @@ test('a host previews the saved guest page around an unsaved draft without recor
     }
     await expect(preview.locator('article')).toContainText('6 guests')
     await expect(preview.locator('article')).toContainText('Flexible cancellation policy')
-    await expect(preview.locator('article')).toContainText('Firm Long Term: Full refund up to 30 days before check-in.')
+    await expect(preview.locator('#things-to-know')).toHaveCount(0)
     const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
     await expectStatus(publicRead, 200)
     const publicProduct = (await publicRead.json() as { product: { details: Record<string, unknown> } }).product
@@ -1062,14 +1062,11 @@ test('a host previews the saved guest page around an unsaved draft without recor
       cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
     } })
     expect(publicProduct.details).toEqual(pageSeed.data!.product.details)
-    const guestSafety = preview.getByRole('heading', { name: 'Safety & property', exact: true }).locator('..').getByRole('listitem')
-    await expect(guestSafety).toHaveText(['Carbon monoxide alarm not reported', 'Smoke alarm', ...authoredSafetyLines])
-    for (const line of authoredSafetyLines) await expect(preview.getByText(line, { exact: true })).toHaveCount(1)
+    await expect(preview.getByRole('heading', { name: 'Safety & property', exact: true })).toHaveCount(0)
+    for (const line of authoredSafetyLines) await expect(preview.getByText(line, { exact: true })).toHaveCount(0)
     await expect(preview.getByText('This draft camera detail must be cleared by No.', { exact: true })).toHaveCount(0)
     for (const key of ['pets_allowed', 'events_allowed', 'smoking_allowed', 'quiet_hours', 'commercial_photography_allowed', 'quiet_hours_start', 'quiet_hours_end', 'house_rules']) expect(publicProduct.details).not.toHaveProperty(key)
-    // With no rules set, House rules holds only the home's own times and party, as Airbnb's does.
-    const houseRules = preview.getByRole('heading', { name: 'House rules', exact: true }).locator('xpath=..').getByRole('listitem')
-    await expect(houseRules).toHaveText(['Check-in after 4:00 PM', 'Checkout before 10:00 AM', '6 guests maximum'])
+    await expect(preview.getByRole('heading', { name: 'House rules', exact: true })).toHaveCount(0)
     return previewURL
   })
   const mobilePreviewRoute = await test.step('device modes and closing keep the URL-owned mode and the unsaved draft', async () => {
@@ -1473,8 +1470,8 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   const productWritePath = `/api/editor/organizations/${organizationId}/products/${productId}`
   const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
   await previewLink.click()
-  const publicSafety = preview.getByRole('heading', { name: 'Safety & property', exact: true }).locator('..').getByRole('listitem')
-  await expect(publicSafety).toHaveText(['Carbon monoxide alarm not reported', 'Smoke alarm not reported'])
+  const publicSafety = preview.getByRole('heading', { name: 'Safety & property', exact: true })
+  await expect(publicSafety).toHaveCount(0)
   const publicURL = new URL((await previewIframe.getAttribute('src'))!, baseURL!)
   publicURL.pathname = publicURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
   await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
@@ -1520,7 +1517,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   expect(absent.data!.product.stay!.amenities).toEqual([])
   await expect(page).toHaveURL(`${baseURL}${root}/guest-safety${locationQuery}`)
   await previewLink.click()
-  await expect(publicSafety).toHaveText(['Carbon monoxide alarm not reported', 'Smoke alarm not installed'])
+  await expect(publicSafety).toHaveCount(0)
   const absentPublic = await request.get(publicURL.href)
   await expectStatus(absentPublic, 200)
   expect((await absentPublic.json() as { product: Product }).product.stay!.amenity_answers).toEqual([{ code: 'smoke_detector', available: false }])
@@ -1587,7 +1584,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   expect(unknown.data!.product.details).not.toHaveProperty('smoke_detector_details')
   await expect(page).toHaveURL(`${baseURL}${root}/guest-safety${locationQuery}`)
   await previewLink.click()
-  await expect(publicSafety).toHaveText(['Carbon monoxide alarm not reported', 'Smoke alarm not reported'])
+  await expect(publicSafety).toHaveCount(0)
   await expect(preview.getByText(alarmDescription, { exact: true })).toHaveCount(0)
   const unknownSchema = JSON.parse((await preview.locator('script[type="application/ld+json"]').textContent())!) as { '@graph': Array<Record<string, unknown>> }
   expect(unknownSchema['@graph'].find(node => node['@type'] === 'Accommodation')).not.toHaveProperty('amenityFeature')
@@ -3195,7 +3192,8 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const pendingRulesPreview = page.getByRole('dialog', { name: 'Listing preview', exact: true })
       const savedGuestRules = pendingRulesPreview.locator('iframe[title="Listing preview"]').contentFrame()
       await expect(savedGuestRules.getByRole('heading', { name: 'Assigned Cabin', exact: true, level: 1 })).toBeVisible()
-      await expect(savedGuestRules.getByText(houseRules, { exact: true })).toBeVisible()
+      await expect(savedGuestRules.getByText(houseRules, { exact: true })).toHaveCount(0)
+      await expect(savedGuestRules.locator('#things-to-know')).toHaveCount(0)
       await expect(savedGuestRules.locator('article')).toContainText('4 guests')
       await expect(savedGuestRules.getByText('No pets', { exact: true })).toHaveCount(0)
       await expect(savedGuestRules.getByText('Events allowed', { exact: true })).toHaveCount(0)
@@ -3332,7 +3330,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(checkoutOverview).toBeVisible()
 
       // The private View remains on the authenticated dashboard. The public
-      // preview and its API contain the house rules and none of the private guide.
+      // listing omits post-booking rules while its API preserves the saved data.
       const privateView = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
       const privateURL = new URL((await privateView.getAttribute('href'))!, baseURL!)
       expect(privateURL.pathname).toBe(new URL(page.url()).pathname)
@@ -3387,12 +3385,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const publicPreview = publicIframe.contentFrame()
       await expect(publicPreviewModal).toBeVisible()
       await expect(publicPreview.getByRole('heading', { name: 'Assigned Cabin', level: 1, exact: true })).toBeVisible()
-      await expect(publicPreview.getByText(houseRules, { exact: true })).toBeVisible()
-      const guestRules = publicPreview.getByRole('heading', { name: 'House rules', exact: true }).locator('..')
-      for (const line of houseRuleLines) {
-        await expect(guestRules.getByText(line, { exact: true })).toHaveCount(1)
-        await expect(publicPreview.getByText(line, { exact: true })).toHaveCount(1)
-      }
+      await expect(publicPreview.locator('#things-to-know')).toHaveCount(0)
+      await expect(publicPreview.getByRole('heading', { name: 'House rules', exact: true })).toHaveCount(0)
+      for (const line of [houseRules, ...houseRuleLines]) await expect(publicPreview.getByText(line, { exact: true })).toHaveCount(0)
       await expect(publicPreview.getByText(sharedGarden, { exact: true })).toHaveCount(1)
       for (const line of ['Pets allowed', 'No events', 'No quiet hours', 'No smoking, vaping or e-cigarettes', 'Smoking, vaping and e-cigarettes allowed']) await expect(publicPreview.getByText(line, { exact: true })).toHaveCount(0)
       const publicURL = new URL((await publicIframe.getAttribute('src'))!, baseURL!)
@@ -3402,7 +3397,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const publicPayload = await publicResponse.json() as { product: { details: Record<string, unknown>; stay: Record<string, unknown> } }
       expect(publicPayload.product.details).toEqual(publicRules.data!.product.details)
       for (const key of STAY_SAFETY_DETAIL_KEYS) expect(publicPayload.product.details).not.toHaveProperty(key)
-      await expect(publicPreview.getByRole('heading', { name: 'Safety & property', exact: true }).locator('..').getByRole('listitem')).toHaveText(['Carbon monoxide alarm not reported', 'Smoke alarm not reported'])
+      await expect(publicPreview.getByRole('heading', { name: 'Safety & property', exact: true })).toHaveCount(0)
       expect(publicPayload.product.stay).toMatchObject({ check_in_time: '16:00', check_out_time: '10:00', max_guests: 5 })
       expect(publicPayload.product.stay).toMatchObject({ listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null })
       for (const label of ['Listing type', 'Floors in building', 'Listing floor', 'Year built', 'Property size']) await expect(publicPreview.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) })).toHaveCount(0)

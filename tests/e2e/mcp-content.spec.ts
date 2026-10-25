@@ -852,6 +852,26 @@ test.describe('stateless MCP server', () => {
       expect(unlisted.visibility).toBe('unlisted')
       expect(unlisted.public_url).toBe(published.public_url)
       expect(unlisted.published_at).toBe(published.published_at)
+      // Publish existing library media through the article's native block writer,
+      // then exercise the reader's playback rather than just its saved placement.
+      const videoBlock = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'append_content_block', args: {
+        organization_id: organizationId, document_id: postId, type: 'image', data: { caption: 'Kitchen video' },
+        media: [{ asset_id: 'media-demo-margherita-video', slot: 'media' }],
+      } })
+      expect(videoBlock.status()).toBe(200)
+      expect(mcpData<{ blocks: unknown[] }>(await videoBlock.json()).blocks).toHaveLength(1)
+      const article = await openTenantPage(page, `${tenantBaseURL}${new URL(unlisted.public_url).pathname}`, tenantExtraHeaders)
+      expect(article?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const preview = page.locator('.blog-article video')
+      await expect(preview).toHaveCount(1)
+      await preview.scrollIntoViewIfNeeded()
+      const initialTime = await preview.evaluate(element => (element as HTMLVideoElement).currentTime)
+      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(initialTime)
+      await page.setViewportSize({ width: 1280, height: 480 })
+      await page.evaluate(() => scrollTo(0, 0))
+      await expect.poll(() => preview.evaluate(element => element.getBoundingClientRect().top >= innerHeight)).toBe(true)
+      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
     } finally {
       if (postId) {
         const cleanup = await mcpRequest(request, baseURL!, {

@@ -1,5 +1,5 @@
 <template>
-  <span class="relative block size-full overflow-hidden">
+  <span :class="['relative block overflow-hidden', fill ? 'size-full' : 'w-full']">
     <video
       v-if="item.kind === 'video'"
       :key="item.url"
@@ -10,14 +10,14 @@
       muted
       loop
       playsinline
-      :class="['size-full', fit === 'contain' ? 'object-contain' : 'object-cover']"
+      :class="[fill ? 'size-full' : 'w-full max-h-[inherit]', fit === 'contain' ? 'object-contain' : 'object-cover']"
       @loadeddata="ready = true"
       @playing="ready = true; playing = true"
       @pause="playing = false"
       @waiting="playing = false"
       @error="playing = false; failure = video?.error?.message || t('site.photos.video_failed')"
     />
-    <img v-else :src="item.url" :alt="item.alt ?? ''" :loading="loading" decoding="async" :class="['size-full', fit === 'contain' ? 'object-contain' : 'object-cover']">
+    <img v-else :src="item.url" :alt="item.alt ?? ''" :loading="loading" decoding="async" :class="[fill ? 'size-full' : 'w-full max-h-[inherit]', fit === 'contain' ? 'object-contain' : 'object-cover']">
     <span v-if="item.kind === 'video' && !item.poster && !ready && !failure" class="pointer-events-none absolute inset-0 animate-pulse bg-muted" aria-hidden="true" />
     <span v-if="item.kind === 'video' && !playing" class="pointer-events-none absolute inset-0 grid place-items-center bg-black/10 text-white" aria-hidden="true">
       <span class="grid size-12 place-items-center rounded-full bg-black/45 backdrop-blur-sm"><TenantIcon name="play" class="size-5" /></span>
@@ -60,7 +60,7 @@ export function provideMediaPreviews(paused: Ref<boolean>) {
 <script setup lang="ts">
 import { useDocumentVisibility, useIntersectionObserver } from '@vueuse/core'
 
-withDefaults(defineProps<{ item: MediaPreviewItem; fit?: 'cover' | 'contain'; loading?: 'lazy' | 'eager' }>(), { fit: 'cover', loading: 'eager' })
+withDefaults(defineProps<{ item: MediaPreviewItem; fit?: 'cover' | 'contain'; loading?: 'lazy' | 'eager'; fill?: boolean }>(), { fit: 'cover', loading: 'eager', fill: true })
 const { t } = useI18n()
 const group = inject(mediaPreviewsKey)
 if (!group) throw new Error('Media previews require a gallery or feed playback scope')

@@ -29,9 +29,9 @@
             <img v-if="handoff.image_url" :src="handoff.image_url" alt="" class="size-24 shrink-0 rounded-xl object-cover">
             <h2 class="min-w-0 text-lg font-semibold leading-snug text-highlighted">{{ handoff.title }}</h2>
           </div>
-          <p v-if="policySummary" class="text-sm text-default">
-            <span class="line-clamp-3">{{ policySummary }}</span>
-            <NuxtLink v-if="termsPath" :to="termsPath" class="font-semibold underline">{{ t('payment.full_policy') }}</NuxtLink>
+          <p v-if="policySummary" id="booking-policy" class="scroll-mt-8 text-sm text-default">
+            <span :class="handoff.stay ? undefined : 'line-clamp-3'">{{ policySummary }}</span>
+            <NuxtLink v-if="termsPath && !handoff.stay" :to="termsPath" class="font-semibold underline">{{ t('payment.full_policy') }}</NuxtLink>
           </p>
 
           <!-- Airbnb's Change goes back to what was picked; here that is the offering's own page. -->
@@ -221,8 +221,8 @@ const offeringPath = computed(() => {
   if (value.kind !== 'experience' && value.kind !== 'stay' && !value.location_slug) return ''
   return localePath(presentationForProduct({ kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
 })
-// A stay's booked policy is always among its things to know; any other offering states its terms on its page.
-const termsPath = computed(() => !offeringPath.value ? '' : handoff.value?.stay ? `${offeringPath.value}#things-to-know` : offeringPath.value)
+// A stay's accepted policy is shown here; other offerings state their terms on their page.
+const termsPath = computed(() => handoff.value?.stay ? '#booking-policy' : offeringPath.value)
 
 // Airbnb's "Choose when to pay": now with any method, or later with the method that pays in installments.
 const LATER_TYPES = ['klarna', 'affirm', 'afterpay_clearpay']
