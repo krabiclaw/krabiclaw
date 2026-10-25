@@ -6,7 +6,7 @@ import { organizationEventQuery } from '~/server/utils/organization-events'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getPost, postPayloadFingerprint, type Post, type PostMedia } from '~/server/utils/post-management'
 import { providerCaption } from '~/shared/posts'
-import { MetaDeadline, MetaGraphError } from '~/server/utils/meta-graph'
+import { MetaGraphError } from '~/server/utils/meta-graph'
 import {
   createUnpublishedPhoto, createVideo, deletePageObject, facebookPageToken, finishReel, isFacebookReel, listLinkedFacebookPages,
   publishPagePost, readPagePost, readVideo, startReel, uploadReelFromUrl, type FacebookPageTarget,
@@ -43,7 +43,6 @@ import {
  * publication's nonce makes a repeated create return that same message.
  */
 
-export const PUBLISH_BUDGET_MS = 30_000
 /** A preparation claim older than this belongs to an invocation that is gone. */
 export const CLAIM_STALE_MS = 60_000
 
@@ -138,9 +137,9 @@ export interface DiscordConnection { channelId: string; guildId: string }
  * longer see, or that stopped being a text or announcement channel, needs a
  * new connection; nothing is sent until then.
  */
-async function discordTargetFor(env: CloudflareEnv, connection: ConnectionRead, deadline?: MetaDeadline): Promise<DiscordConnection> {
+async function discordTargetFor(env: CloudflareEnv, connection: ConnectionRead): Promise<DiscordConnection> {
   if (connection.channel !== 'discord' || !connection.connected || !connection.targetId) throw new Error('The Discord connection is incomplete. Connect Discord again.')
-  const channel = await readMessageChannel(env, connection.targetId, deadline)
+  const channel = await readMessageChannel(env, connection.targetId)
   return { channelId: channel.id, guildId: channel.guild_id }
 }
 
@@ -385,7 +384,6 @@ interface ChannelContext {
   publication: PublicationRecord
   attemptId: string
   handles: Handles
-  deadline: MetaDeadline
 }
 
 type ChannelResult = PublishOutcome
@@ -398,18 +396,6 @@ async function facebookTargetFor(env: CloudflareEnv, connection: ConnectionRead)
 async function instagramTargetFor(env: CloudflareEnv, connection: ConnectionRead): Promise<InstagramTarget> {
   if (connection.channel !== 'instagram' || !connection.connected || !connection.targetId || !connection.accountId) throw new Error('The Instagram connection is incomplete. Connect Instagram again.')
   return { userId: connection.targetId, accessToken: await instagramAccessToken(env, connection.accountId) }
-}
-
-/**
- * The final call starts only with time left for it and its read-back; with
- * less, the saved preparation is handed to the next call instead, so a budget
- * that ran out is `processing`, never an `unknown` the owner has to resolve.
- */
-const FINAL_RESERVE_MS = 15_000
-async function deferFinalWithoutTime(context: ChannelContext, fence: ReturnType<typeof claimed>): Promise<ChannelResult | null> {
-  if (context.deadline.remaining() >= FINAL_RESERVE_MS) return null
-  await fence.release()
-  return outcome(context, 'processing', { code: 'budget_exhausted', message: `${context.publication.channel} is prepared; call publish_post again to publish this same post.` })
 }
 
 function outcome(context: ChannelContext, status: PublishOutcomeStatus, extra: Partial<PublishOutcome> = {}): ChannelResult {
@@ -432,7 +418,7 @@ export function failureOf(error: unknown): { code: string; message: string } {
 const providerRefused = (error: unknown) => (error instanceof MetaGraphError || error instanceof DiscordError) && error.failure !== 'transport'
 
 async function publishToFacebook(context: ChannelContext, target: FacebookPageTarget): Promise<ChannelResult> {
-  const { post, handles, deadline } = context
+  const { post, handles } = context
   const fence = claimed(context.db, context.publication.id, context.attemptId)
   const video = post.media.find(item => item.kind === 'video')
   if (video) return await publishVideoToFacebook(context, target, fence, video)
@@ -441,7 +427,7 @@ async function publishToFacebook(context: ChannelContext, target: FacebookPageTa
   // them as `attached_media` afterwards — so the real post gets new ones.
   if (handles.post_id) {
     try {
-      await deletePageObject(target, handles.post_id, deadline)
+      await deletePageObject(target, handles.post_id)
     } catch (error) {
       // Already gone is the state this wants.
       if (!(error instanceof MetaGraphError && error.objectMissing)) throw error
@@ -454,21 +440,19 @@ async function publishToFacebook(context: ChannelContext, target: FacebookPageTa
   handles.photo_ids ??= []
   for (const [index, image] of images.entries()) {
     if (handles.photo_ids[index]) continue
-    handles.photo_ids[index] = await createUnpublishedPhoto(target, { url: image.public_url, altText: image.alt_text }, deadline)
+    handles.photo_ids[index] = await createUnpublishedPhoto(target, { url: image.public_url, altText: image.alt_text })
     await fence.saveHandles(handles)
   }
-  const deferred = await deferFinalWithoutTime(context, fence)
-  if (deferred) return deferred
   await fence.beginFinal()
   const link = post.call_to_action && /^https?:/.test(post.call_to_action.url) ? post.call_to_action.url : null
   let postId: string | null = null
   return await finalize(context, async () => {
-    postId = await publishPagePost(target, { message: context.caption, link, photoIds: handles.photo_ids! }, deadline)
+    postId = await publishPagePost(target, { message: context.caption, link, photoIds: handles.photo_ids! })
     return postId
   }, async () => {
     // Without the answer there is no id to read: what happened is unknown.
     if (!postId) throw new Error('Facebook did not answer with the post it created')
-    const read = await readPagePost(target, postId, deadline)
+    const read = await readPagePost(target, postId)
     // Calling again would create a second post: a created post is never sent again.
     return { published: read.isPublished, providerPostId: read.id, permalink: read.permalink, publishedAt: read.createdTime, retryable: false, createsAnother: true }
   })
@@ -481,44 +465,41 @@ async function publishToFacebook(context: ChannelContext, target: FacebookPageTa
  * an earlier call left unfinished is never public; each call runs its own.
  */
 async function publishVideoToFacebook(context: ChannelContext, target: FacebookPageTarget, fence: ReturnType<typeof claimed>, video: PostMedia): Promise<ChannelResult> {
-  const { post, handles, deadline } = context
-  const deferred = await deferFinalWithoutTime(context, fence)
-  if (deferred) return deferred
+  const { post, handles } = context
   if (isFacebookReel(video)) {
-    handles.video_id = await startReel(target, deadline)
-    await uploadReelFromUrl(target, handles.video_id, video.public_url, deadline)
+    handles.video_id = await startReel(target)
+    await uploadReelFromUrl(target, handles.video_id, video.public_url)
     await fence.saveHandles(handles)
     await fence.beginFinal()
-    const { postId } = await finishReel(target, handles.video_id, { description: context.caption, title: post.title }, deadline)
+    const { postId } = await finishReel(target, handles.video_id, { description: context.caption, title: post.title })
     await fence.published({ providerPostId: postId ?? handles.video_id, permalink: null, publishedAt: nowIso(), handles })
     return outcome(context, 'published', { public_url: null })
   }
   await fence.beginFinal()
-  handles.video_id = await createVideo(target, { fileUrl: video.public_url, description: context.caption, title: post.title }, deadline)
+  handles.video_id = await createVideo(target, { fileUrl: video.public_url, description: context.caption, title: post.title })
   await fence.published({ providerPostId: handles.video_id, permalink: null, publishedAt: nowIso(), handles })
   return outcome(context, 'published', { public_url: null })
 }
 
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-/** Waits for a container Instagram is still processing, within the invocation's budget. */
-async function containerReady(target: InstagramTarget, containerId: string, deadline: MetaDeadline): Promise<'FINISHED' | 'IN_PROGRESS' | 'EXPIRED' | 'ERROR' | 'PUBLISHED'> {
+/**
+ * Waits until Instagram finishes processing a container. Each poll renews this
+ * invocation's claim, so the claim lasts exactly as long as the wait.
+ */
+async function containerReady(target: InstagramTarget, containerId: string, fence: ReturnType<typeof claimed>, handles: Handles): Promise<'FINISHED' | 'EXPIRED' | 'ERROR' | 'PUBLISHED'> {
   for (;;) {
-    const { status } = await readContainerStatus(target, containerId, deadline)
+    const { status } = await readContainerStatus(target, containerId)
     if (status !== 'IN_PROGRESS') return status
-    if (deadline.remaining() < 8_000) return 'IN_PROGRESS'
+    await fence.saveHandles(handles)
     await pause(3_000)
   }
 }
 
 async function publishToInstagram(context: ChannelContext, target: InstagramTarget): Promise<ChannelResult> {
-  const { post, handles, deadline } = context
+  const { post, handles } = context
   const fence = claimed(context.db, context.publication.id, context.attemptId)
-  const notReady = async (status: string) => {
-    if (status === 'IN_PROGRESS') {
-      await fence.release()
-      return outcome(context, 'processing', { code: 'container_processing', message: 'Instagram is still processing the media. Call publish_post again to finish it; it will publish these same containers.' })
-    }
+  const notReady = async (status: 'EXPIRED' | 'ERROR' | 'PUBLISHED') => {
     // Instagram itself reports these containers as not published and unusable.
     await fence.failed(status === 'EXPIRED' ? 'container_expired' : 'provider_processing_failed', `Instagram reported the media container ${status}`, {})
     return outcome(context, 'failed', { code: status === 'EXPIRED' ? 'container_expired' : 'provider_processing_failed', message: `Instagram reported the media container ${status}; publish again to prepare new ones` })
@@ -530,11 +511,11 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
       if (handles.children[index]) continue
       handles.children[index] = await createMediaContainer(target, item.kind === 'image'
         ? { kind: 'image', url: item.public_url, carouselItem: true, altText: item.alt_text }
-        : { kind: 'video', url: item.public_url, carouselItem: true }, deadline)
+        : { kind: 'video', url: item.public_url, carouselItem: true })
       await fence.saveHandles(handles)
     }
     for (const child of handles.children) {
-      const status = await containerReady(target, child, deadline)
+      const status = await containerReady(target, child, fence, handles)
       if (status !== 'FINISHED') return await notReady(status)
     }
   }
@@ -544,26 +525,24 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
       ? { kind: 'carousel', children: handles.children!, caption: context.caption }
       : only.kind === 'image'
         ? { kind: 'image', url: only.public_url, caption: context.caption, carouselItem: false, altText: only.alt_text }
-        : { kind: 'video', url: only.public_url, caption: context.caption, carouselItem: false, coverUrl: only.thumbnail_url }, deadline)
+        : { kind: 'video', url: only.public_url, caption: context.caption, carouselItem: false, coverUrl: only.thumbnail_url })
     await fence.saveHandles(handles)
   }
-  const status = await containerReady(target, handles.container_id, deadline)
+  const status = await containerReady(target, handles.container_id, fence, handles)
   if (status === 'PUBLISHED') {
     // Only a container this publication saved can report its own publication.
     await fence.published({ providerPostId: null, permalink: null, publishedAt: nowIso(), handles })
     return outcome(context, 'published', { public_url: null })
   }
   if (status !== 'FINISHED') return await notReady(status)
-  const deferred = await deferFinalWithoutTime(context, fence)
-  if (deferred) return deferred
   await fence.beginFinal()
   let mediaId: string | null = null
-  return await finalize(context, async () => { mediaId = await publishContainer(target, handles.container_id!, deadline); return mediaId }, async () => {
+  return await finalize(context, async () => { mediaId = await publishContainer(target, handles.container_id!); return mediaId }, async () => {
     if (mediaId) {
-      const media = await readMedia(target, mediaId, deadline)
+      const media = await readMedia(target, mediaId)
       return { published: true, providerPostId: media.id, permalink: media.permalink ?? null, publishedAt: media.timestamp }
     }
-    const read = await readContainerStatus(target, handles.container_id!, deadline)
+    const read = await readContainerStatus(target, handles.container_id!)
     return { published: read.status === 'PUBLISHED', providerPostId: null, permalink: null, retryable: read.status === 'FINISHED' }
   })
 }
@@ -573,12 +552,10 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
  * against what Discord accepts by the bytes actually fetched rather than by
  * what was recorded about the asset.
  */
-async function discordFiles(post: Post, deadline: MetaDeadline): Promise<DiscordFile[] | { code: string; message: string }> {
+async function discordFiles(post: Post): Promise<DiscordFile[] | { code: string; message: string }> {
   const files: DiscordFile[] = []
   let total = 0
   for (const [index, item] of post.media.entries()) {
-    const remaining = deadline.remaining()
-    if (remaining <= 250) throw new DiscordError('transport', 'The operation ran out of time while reading the post media')
     const response = await fetch(item.public_url, { redirect: 'follow' })
     if (!response.ok) throw new Error(`Asset ${item.asset_id} could not be read from ${item.public_url}: HTTP ${response.status}`)
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
@@ -617,19 +594,17 @@ function discordMessageMismatch(env: CloudflareEnv, message: DiscordMessage, cha
 const discordNonce = (publicationId: string) => publicationId.replaceAll('-', '').slice(0, 25)
 
 async function publishToDiscord(context: ChannelContext, target: DiscordConnection): Promise<ChannelResult> {
-  const { env, deadline } = context
+  const { env } = context
   const fence = claimed(context.db, context.publication.id, context.attemptId)
-  const files = await discordFiles(context.post, deadline)
+  const files = await discordFiles(context.post)
   if (!Array.isArray(files)) {
     await fence.failed(files.code, files.message, {})
     return outcome(context, 'failed', files)
   }
-  const deferred = await deferFinalWithoutTime(context, fence)
-  if (deferred) return deferred
   await fence.beginFinal()
   let message: DiscordMessage
   try {
-    message = await createMessage(env, target.channelId, { content: context.caption, files, nonce: discordNonce(context.publication.id) }, deadline)
+    message = await createMessage(env, target.channelId, { content: context.caption, files, nonce: discordNonce(context.publication.id) })
   } catch (error) {
     if (error instanceof DiscordError && error.failure === 'rate_limited') {
       // Discord's 429 says nothing was sent: the publication is ready to send again.
@@ -702,7 +677,7 @@ async function finalize(
       await fence.unknown('final_unconfirmed', message)
       return outcome(context, 'unknown', { code: 'final_unconfirmed', message })
     }
-    if (!state.retryable || context.deadline.remaining() < 5_000) break
+    if (!state.retryable) break
   }
   // Not published, and not refused: the same object is still ready for its final call.
   await fence.release(['publishing'])
@@ -710,7 +685,7 @@ async function finalize(
 }
 
 /** Unpublished objects this publication created for a payload it no longer sends. */
-async function discardPreparation(env: CloudflareEnv, organizationId: string, publication: PublicationRecord, deadline: MetaDeadline): Promise<void> {
+async function discardPreparation(env: CloudflareEnv, organizationId: string, publication: PublicationRecord): Promise<void> {
   const handles = JSON.parse(publication.provider_handles_json) as Handles
   // Instagram expires an unpublished container itself and offers no delete; Discord prepares nothing.
   if (publication.channel !== 'facebook') return
@@ -719,7 +694,7 @@ async function discardPreparation(env: CloudflareEnv, organizationId: string, pu
   const connection = await readConnection(env, organizationId, 'facebook')
   if (connection.targetId !== publication.provider_target_id) throw new Error('The Facebook Page that owns this preparation is no longer connected.')
   const target = await facebookTargetFor(env, connection)
-  for (const id of ids) await deletePageObject(target, id, deadline)
+  for (const id of ids) await deletePageObject(target, id)
 }
 
 /** The provider application a publication is made through: Meta's app, or KrabiClaw's Discord application. */
@@ -732,7 +707,7 @@ function providerAppId(env: CloudflareEnv, channel: SocialChannel): string {
 /** Claims the publication row for this invocation, or says why it cannot. */
 async function claimPublication(
   db: DbClient, env: CloudflareEnv, organizationId: string, post: Post,
-  target: Extract<PublishTarget, { channel: SocialChannel }>, identity: { appId: string; subjectId: string }, payloadHash: string, deadline: MetaDeadline,
+  target: Extract<PublishTarget, { channel: SocialChannel }>, identity: { appId: string; subjectId: string }, payloadHash: string,
 ): Promise<{ publication: PublicationRecord; attemptId: string } | PublishOutcome> {
   const attemptId = crypto.randomUUID()
   const existing = await readPublication(db, organizationId, { postId: post.id, channel: target.channel })
@@ -754,7 +729,7 @@ async function claimPublication(
   const staleBefore = new Date(Date.now() - CLAIM_STALE_MS).toISOString()
   if (existing.state === 'failed' && existing.payload_hash !== payloadHash) {
     // What was prepared belongs to a payload this call no longer sends.
-    try { await discardPreparation(env, organizationId, existing, deadline) } catch (error) {
+    try { await discardPreparation(env, organizationId, existing) } catch (error) {
       return { channel: target.channel, target_id: target.target_id, status: 'failed', publication_id: existing.id, code: 'cleanup_failed',
         message: `The unpublished objects of the earlier attempt could not be removed, so nothing new was prepared: ${messageOf(error)}` }
     }
@@ -772,7 +747,7 @@ async function claimPublication(
 
 async function publishExternal(
   db: DbClient, env: CloudflareEnv, organizationId: string, post: Post,
-  target: Extract<PublishTarget, { channel: SocialChannel }>, deadline: MetaDeadline,
+  target: Extract<PublishTarget, { channel: SocialChannel }>,
 ): Promise<PublishOutcome> {
   const connection = await readConnection(env, organizationId, target.channel)
   if (!connection.connected || connection.targetId !== target.target_id || connection.revision !== target.connection_revision) return { channel: target.channel, target_id: target.target_id, status: 'failed', code: 'connection_changed', message: 'The channel connection changed; read get_social_connections again.' }
@@ -780,16 +755,16 @@ async function publishExternal(
   if (!account) return { channel: target.channel, target_id: target.target_id, status: 'skipped', code: 'account_unlinked', message: `The ${target.channel} account behind this connection is no longer linked. Connect it again.` }
   const appId = providerAppId(env, target.channel)
   const payloadHash = await postPayloadFingerprint(post, { channel: target.channel, target_id: target.target_id })
-  const claim = await claimPublication(db, env, organizationId, post, target, { appId, subjectId: account.accountId }, payloadHash, deadline)
+  const claim = await claimPublication(db, env, organizationId, post, target, { appId, subjectId: account.accountId }, payloadHash)
   if (!('attemptId' in claim)) return claim
   const context: ChannelContext = {
     db, env, organizationId, post, caption: providerCaption(post.body, post.call_to_action), publication: claim.publication,
-    attemptId: claim.attemptId, handles: JSON.parse(claim.publication.provider_handles_json) as Handles, deadline,
+    attemptId: claim.attemptId, handles: JSON.parse(claim.publication.provider_handles_json) as Handles,
   }
   const fence = claimed(db, claim.publication.id, claim.attemptId)
   try {
     if (target.channel === 'facebook') return await publishToFacebook(context, await facebookTargetFor(env, connection))
-    if (target.channel === 'discord') return await publishToDiscord(context, await discordTargetFor(env, connection, deadline))
+    if (target.channel === 'discord') return await publishToDiscord(context, await discordTargetFor(env, connection))
     return await publishToInstagram(context, await instagramTargetFor(env, connection))
   } catch (error) {
     if (error instanceof ClaimLost) return outcome(context, 'processing', { code: 'claim_lost', message: error.message })
@@ -836,7 +811,6 @@ export async function publishPost(
   actorId: string | null,
 ): Promise<PublishResult> {
   const db = env.DB as DbClient
-  const deadline = new MetaDeadline(PUBLISH_BUDGET_MS)
   const post = await getPost(db, env, organizationId, postId)
   if (!post) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
   const stale = post.updated_at !== input.expectedUpdatedAt
@@ -917,7 +891,7 @@ export async function publishPost(
       outcomes.push(staleOutcome('organization', organizationId))
     }
   }
-  for (const target of external) outcomes.push(await publishExternal(db, env, organizationId, post, target, deadline))
+  for (const target of external) outcomes.push(await publishExternal(db, env, organizationId, post, target))
 
   const order = input.targets.map(target => target.channel)
   outcomes.sort((a, b) => order.indexOf(a.channel) - order.indexOf(b.channel))
@@ -953,7 +927,6 @@ export async function reconcilePostPublication(env: CloudflareEnv, organizationI
     throw new HTTPError({ statusCode: 409, statusMessage: `Reconciling needs the ${publication.channel} connection that made this publication (target ${publication.provider_target_id}); it is not connected now` })
   }
   if (publication.channel === 'discord') return await reconcileDiscordPublication(env, organizationId, publication, await discordTargetFor(env, connection), providerPostId)
-  const deadline = new MetaDeadline(PUBLISH_BUDGET_MS)
   const handles = JSON.parse(publication.provider_handles_json) as Handles
   const record = async (state: 'published' | 'preparing' | 'failed', fields: { providerPostId?: string | null; permalink?: string | null; publishedAt?: string | null; code?: string; message?: string }) => {
     const result = await execute(db, `UPDATE post_publications SET state = ?, attempt_id = NULL, provider_post_id = COALESCE(?, provider_post_id),
@@ -969,12 +942,12 @@ export async function reconcilePostPublication(env: CloudflareEnv, organizationI
     const postId = providerPostId ?? publication.provider_post_id ?? handles.post_id ?? null
     if (postId && postId !== handles.video_id) {
       if (!postId.startsWith(`${target.pageId}_`)) throw new HTTPError({ statusCode: 409, statusMessage: `${postId} is not a post of the Page ${target.pageId}` })
-      const read = await readPagePost(target, postId, deadline)
+      const read = await readPagePost(target, postId)
       if (read.isPublished) await record('published', { providerPostId: read.id, permalink: read.permalink, publishedAt: read.createdTime })
       else if (publication.state === 'failed') await record('failed', { providerPostId: read.id, code: publication.error_code ?? undefined, message: publication.error_message ?? undefined })
       else await record('preparing', { providerPostId: read.id })
     } else if (handles.video_id) {
-      const read = await readVideo(target, handles.video_id, deadline)
+      const read = await readVideo(target, handles.video_id)
       if (read.published) await record('published', { providerPostId: read.postId ?? handles.video_id, permalink: read.permalink })
       else if (read.processing === 'error') await record('failed', { code: 'provider_processing_failed', message: read.error ?? undefined })
       else await record('preparing', {})
@@ -983,12 +956,12 @@ export async function reconcilePostPublication(env: CloudflareEnv, organizationI
     const target = await instagramTargetFor(env, connection)
     const mediaId = providerPostId ?? publication.provider_post_id
     if (mediaId) {
-      const media = await readMedia(target, mediaId, deadline)
+      const media = await readMedia(target, mediaId)
       const username = connection.targetName?.slice(1) ?? null
       if (!username || media.username !== username) throw new HTTPError({ statusCode: 409, statusMessage: `${media.id} belongs to @${media.username ?? 'another account'}, not @${username}` })
       await record('published', { providerPostId: media.id, permalink: media.permalink ?? null, publishedAt: media.timestamp })
     } else if (handles.container_id) {
-      const { status } = await readContainerStatus(target, handles.container_id, deadline)
+      const { status } = await readContainerStatus(target, handles.container_id)
       if (status === 'PUBLISHED') await record('published', {})
       else if (status === 'FINISHED' || status === 'IN_PROGRESS') await record('preparing', {})
       else await record('failed', { code: status === 'EXPIRED' ? 'container_expired' : 'provider_processing_failed', message: `Instagram reported the media container ${status}` })
@@ -1011,11 +984,10 @@ async function reconcileDiscordPublication(env: CloudflareEnv, organizationId: s
   if (publication.state !== 'unknown' && publication.state !== 'published') {
     throw new HTTPError({ statusCode: 409, statusMessage: `This Discord publication is ${publication.state}; only an unknown or published one is reconciled` })
   }
-  const deadline = new MetaDeadline(PUBLISH_BUDGET_MS)
   const messageId = providerPostId ?? publication.provider_post_id
   let message: DiscordMessage | null
   if (messageId) {
-    message = await readDiscordMessage(env, target, messageId, deadline)
+    message = await readDiscordMessage(env, target, messageId)
   } else {
     const post = publication.post_id ? await getPost(db, env, organizationId, publication.post_id) : null
     if (!post || await postPayloadFingerprint(post, { channel: 'discord', target_id: publication.provider_target_id }) !== publication.payload_hash) {
@@ -1029,18 +1001,16 @@ async function reconcileDiscordPublication(env: CloudflareEnv, organizationId: s
     // Newest first, page by page, back to when the publication began.
     const sent: DiscordMessage[] = []
     let before: string | null = null
-    let complete = false
-    while (deadline.remaining() > 5_000) {
-      const page = await listMessages(env, target.channelId, { before, limit: 100 }, deadline)
+    for (;;) {
+      const page = await listMessages(env, target.channelId, { before, limit: 100 })
       sent.push(...page.filter(matches))
-      if (page.length < 100 || Date.parse(page.at(-1)!.timestamp) < since) { complete = true; break }
+      if (page.length < 100 || Date.parse(page.at(-1)!.timestamp) < since) break
       before = page.at(-1)!.id
     }
-    message = complete && sent.length === 1 ? sent[0]! : null
+    message = sent.length === 1 ? sent[0]! : null
     if (!message) {
-      return { publication: receipt(publication), state: publication.state, message: !complete
-        ? 'The channel has more messages since this attempt than one check can read; check again.'
-        : sent.length ? `${sent.length} messages match this post; supply the Discord message id.` : 'No message of this post is in the channel; it stays unknown.' }
+      return { publication: receipt(publication), state: publication.state, message: sent.length
+        ? `${sent.length} messages match this post; supply the Discord message id.` : 'No message of this post is in the channel; it stays unknown.' }
     }
   }
   const result = await execute(db, `UPDATE post_publications SET state = 'published', attempt_id = NULL, provider_post_id = ?, provider_permalink = ?,
@@ -1054,11 +1024,11 @@ async function reconcileDiscordPublication(env: CloudflareEnv, organizationId: s
 }
 
 /** One message the KrabiClaw bot sent to the connected channel; anything else is refused. */
-export async function readDiscordMessage(env: CloudflareEnv, target: DiscordConnection, messageId: string, deadline: MetaDeadline): Promise<DiscordMessage> {
+export async function readDiscordMessage(env: CloudflareEnv, target: DiscordConnection, messageId: string): Promise<DiscordMessage> {
   if (!/^\d{15,25}$/.test(messageId)) throw new HTTPError({ statusCode: 400, statusMessage: 'A Discord message id is a numeric snowflake.' })
   let message: DiscordMessage
   try {
-    message = await getMessage(env, target.channelId, messageId, deadline)
+    message = await getMessage(env, target.channelId, messageId)
   } catch (error) {
     if (error instanceof DiscordError && error.objectMissing) throw new HTTPError({ statusCode: 404, statusMessage: `The connected Discord channel has no message ${messageId}` })
     throw error

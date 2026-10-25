@@ -46,27 +46,14 @@ export class MetaGraphError extends Error {
 // access problems.
 const AUTHORIZATION_CODES = new Set([102, 190, 10, 200, 294, 368])
 
-/** A deadline shared by every request of one operation. */
-export class MetaDeadline {
-  private readonly endsAt: number
-  constructor(budgetMs: number) { this.endsAt = Date.now() + budgetMs }
-  remaining(): number { return this.endsAt - Date.now() }
-  /** Refuses to start a request the operation no longer has time for. */
-  assertTimeLeft(): void {
-    if (this.remaining() <= 250) throw new MetaGraphError('transport', 'The operation ran out of time before this request could be sent')
-  }
-}
-
 function redact(text: string): string {
   return text.replace(/access_token=[^&\s"]+/g, 'access_token=[redacted]')
 }
 
-export async function metaGraphRequest<T>(url: string, init: RequestInit & { deadline?: MetaDeadline } = {}): Promise<T> {
-  const { deadline, ...request } = init
-  deadline?.assertTimeLeft()
+export async function metaGraphRequest<T>(url: string, init: RequestInit = {}): Promise<T> {
   let response: Response
   try {
-    response = await fetch(url, request)
+    response = await fetch(url, init)
   } catch (error) {
     throw new MetaGraphError('transport', `Meta could not be reached: ${error instanceof Error ? error.message : String(error)}`, undefined, { cause: error })
   }
