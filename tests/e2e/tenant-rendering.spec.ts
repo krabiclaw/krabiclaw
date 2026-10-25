@@ -57,7 +57,7 @@ const tenants: Tenant[] = [
 // Staging intentionally publishes no sitemap; the operator maps the production
 // sitemap and current native public inventory to the existing tenant aliases.
 const inventoryFile = process.env.PLAYWRIGHT_TENANT_ROUTE_INVENTORY
-if (inventoryFile) {
+if (inventoryFile) test.describe('published route inventory', () => {
   if (!process.env.PLAYWRIGHT_PREVIEW_URL) throw new Error('A published route inventory requires PLAYWRIGHT_PREVIEW_URL')
   // This exhaustive crawler must not generate thousands of customer analytics
   // events. Ordinary representative journeys retain their human browser agent.
@@ -297,7 +297,7 @@ if (inventoryFile) {
       })
     }
   }
-}
+})
 
 test('unknown sites render an unbranded 404 while resolved tenant errors retain their identity', async ({ page }) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local tenant header exercises an unresolved host without changing deployed DNS.')
