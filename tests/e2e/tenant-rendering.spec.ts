@@ -784,7 +784,16 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   const money = (minor: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: home.currency }).format(minor / 100)
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  expect((await openTenantPage(page, `${baseURL}${stayPath}`, {}))?.status()).toBe(200)
+  expect((await openTenantPage(page, `${baseURL}/`, {}))?.status()).toBe(200)
+  const homes = page.locator('main section').filter({ has: page.locator(`[data-carousel-item][href="${stayPath}"]`) })
+  const viewAllHomes = homes.getByRole('link', { name: /^View all/ })
+  await expect(viewAllHomes).toHaveAttribute('href', '/stays')
+  await viewAllHomes.click()
+  await expect(page).toHaveURL(`${baseURL}/stays`)
+  const studio = page.locator(`main a[href="${stayPath}"]`).first()
+  await expect(studio).toBeVisible()
+  await studio.click()
+  await expect(page).toHaveURL(`${baseURL}${stayPath}`)
   await waitForNuxtHydration(page)
   const card = page.locator('article')
   // A stay is a reservation: none of an appointment's words.
