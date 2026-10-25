@@ -106,10 +106,13 @@ account.
 1. Disconnect every host while `CHANNEX_BASE_URL` still names staging:
    `disconnect()` calls the current base URL, and staging IDs 404 against
    production.
-2. Set `CHANNEX_BASE_URL` to `https://app.channex.io/api/v1` in
-   `wrangler.toml` (top level and `[env.staging.vars]`).
-3. Set `CHANNEX_API_KEY` and `CHANNEX_WEBHOOK_SECRET` per environment with
-   `wrangler secret put`.
+2. Set `CHANNEX_BASE_URL` to `https://app.channex.io/api/v1` in the top-level
+   `wrangler.toml` vars only. `[env.staging.vars]` keeps
+   `https://staging.channex.io/api/v1`: staging runs on a copy of production
+   data and must never write to production Channex properties.
+3. Set production's `CHANNEX_API_KEY` and `CHANNEX_WEBHOOK_SECRET` to the
+   production account's with `wrangler secret put`. Staging keeps its staging
+   key and secret.
 4. Register the webhook: `corepack yarn channex:webhook --env production --apply`.
 5. Hosts reconnect Airbnb. This creates new properties and mappings and a
    500-day full sync. Re-imported reservations match their stays on
