@@ -1,5 +1,5 @@
 <template>
-  <section class="kc-product-scene" :class="{ 'kc-product-scene--closing': closing, 'kc-product-scene--screenshots': screenshots.length && !closing, 'kc-product-scene--lodging': page.path === '/lodging' || page.path.startsWith('/lodging/') }" :data-parity-section="closing ? 'cta' : 'hero'">
+  <section class="kc-product-scene" :class="{ 'kc-product-scene--closing': closing, 'kc-product-scene--featured': featured && !closing, 'kc-product-scene--compact': block.data.layout === 'compact' }" :data-parity-section="closing ? 'cta' : 'hero'">
     <img v-if="imageUrl" :src="imageUrl" alt="" class="kc-product-scene__art" :loading="closing ? 'lazy' : 'eager'" :fetchpriority="closing ? 'auto' : 'high'" decoding="async">
     <div class="kc-product-scene__content">
     <div class="kc-product-scene__copy">
@@ -8,15 +8,13 @@
       <p>{{ text(closing ? block.data.description : block.data.subtitle) }}</p>
       <div class="kc-product-scene__actions">
         <PlatformAccountCta v-if="label && url" :label="label" :to="url" size="xl" class="kc-product-scene__primary" />
-        <PlatformButton v-if="secondaryLabel && secondaryUrl" :to="secondaryUrl" variant="outline" size="xl" class="kc-product-scene__secondary">{{ secondaryLabel }}</PlatformButton>
+        <PlatformButton v-if="secondaryLabel && secondaryUrl" :to="secondaryUrl" variant="ghost" size="xl" class="kc-product-scene__secondary">{{ secondaryLabel }}</PlatformButton>
       </div>
     </div>
-    <div v-if="screenshots.length && !closing" class="kc-product-scene__screenshots">
-      <figure v-for="(screenshot, index) in screenshots" :key="screenshot.asset_id" :class="{ 'kc-product-scene__screenshot--portrait': screenshot.height && screenshot.width && screenshot.height > screenshot.width }">
-        <img :src="mediaStillUrl(screenshot)!" :alt="screenshot.alt_text || ''" :width="screenshot.width ?? undefined" :height="screenshot.height ?? undefined" :fetchpriority="index === 0 ? 'high' : 'auto'" decoding="async">
-      </figure>
-      <p v-if="screenshotCaption" class="kc-product-scene__caption">{{ screenshotCaption }}</p>
-    </div>
+    <figure v-if="featured && !closing" class="kc-product-scene__featured">
+      <img :src="mediaStillUrl(featured)!" :alt="featured.alt_text || ''" :width="featured.width ?? undefined" :height="featured.height ?? undefined" class="kc-product-capture" :class="['kc-product-capture--' + text(block.data.image_ratio), 'kc-product-capture--' + text(block.data.image_position)]" fetchpriority="high" decoding="async">
+      <figcaption v-if="text(block.data.caption)">{{ text(block.data.caption) }}</figcaption>
+    </figure>
     </div>
   </section>
 </template>
@@ -28,9 +26,7 @@ import { blockMedia, blockText as text } from '~/utils/tenant-page-block-data'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage; closing?: boolean; defaultArt?: string }>()
 const image = computed(() => blockMedia(props.block, 'media')[0])
-const proofStories = computed(() => props.page.path === '/lodging' ? props.page.blocks.filter(block => block.type === 'media_text' && blockMedia(block, 'media').some(media => mediaStillUrl(media))) : [])
-const screenshots = computed(() => proofStories.value.flatMap(block => blockMedia(block, 'media')).filter(media => mediaStillUrl(media)).slice(0, 2))
-const screenshotCaption = computed(() => text(proofStories.value[0]?.data.caption))
+const featured = computed(() => blockMedia(props.block, 'featured').find(media => mediaStillUrl(media)))
 const imageUrl = computed(() => image.value ? mediaStillUrl(image.value) : props.defaultArt)
 const label = computed(() => text(props.closing ? props.block.data.label : props.block.data.cta_label))
 const url = computed(() => text(props.closing ? props.block.data.url : props.block.data.cta_url))
@@ -46,28 +42,36 @@ const secondaryUrl = computed(() => text(props.block.data.secondary_url))
 .kc-product-scene h1, .kc-product-scene h2 { max-width: 64rem; margin: auto; font-size: clamp(2.9rem, 5.5vw, 5.5rem); font-weight: 600; letter-spacing: -.045em; line-height: 1.02; white-space: pre-line; text-wrap: balance; }
 .kc-product-scene p { color: #e4e4ec; font-size: clamp(1.05rem, 1.6vw, 1.55rem); line-height: 1.45; margin: 1.8rem auto; max-width: 40rem; white-space: pre-line; }
 .kc-product-scene__actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 1rem; }
+.kc-product-scene__secondary { border-radius: 0; border-bottom: 1px solid currentColor; padding: .4rem 0; }
 .kc-product-scene .kc-product-scene__eyebrow { margin: 0 0 1.5rem; font-size: .8rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
-.kc-product-scene--screenshots { min-height: 48rem; text-align: left; }
-.kc-product-scene--screenshots .kc-product-scene__content { width: min(86%, 78rem); margin: auto; padding: clamp(5rem, 8vw, 8rem) 0; display: grid; grid-template-columns: .9fr 1.1fr; gap: 3rem; align-items: center; }
-.kc-product-scene--screenshots .kc-product-scene__copy { padding: 0; }
-.kc-product-scene--screenshots h1 { font-size: clamp(3rem, 5.2vw, 5rem); }
-.kc-product-scene--screenshots .kc-product-scene__copy > p:not(.kc-product-scene__eyebrow) { margin: 2rem 0; max-width: 31rem; font-size: clamp(1.05rem, 1.5vw, 1.35rem); }
-.kc-product-scene--screenshots .kc-product-scene__actions { justify-content: flex-start; }
-.kc-product-scene--lodging .kc-product-scene__primary { background: #ff7768; border-color: #ff7768; color: #171920; border-radius: 999px; }
-.kc-product-scene--lodging .kc-product-scene__secondary { background: transparent; border-color: #f8f7f380; color: #f8f7f3; border-radius: 999px; }
-.kc-product-scene__screenshots { position: relative; min-width: 0; height: 37rem; margin-bottom: 3rem; }
-.kc-product-scene__screenshots figure { position: absolute; width: 78%; right: 0; bottom: 2.5rem; margin: 0; border: 1px solid #ffffff30; border-radius: 1.1rem; overflow: hidden; box-shadow: 0 1.5rem 4rem #0006; }
-.kc-product-scene__screenshots figure:first-child { width: 90%; top: 0; bottom: auto; right: 0; }
-.kc-product-scene__screenshots figure.kc-product-scene__screenshot--portrait { width: 46%; max-width: 17rem; right: auto; left: 0; border: .45rem solid #252936; border-radius: 2rem; }
-.kc-product-scene__screenshots img { display: block; width: 100%; height: auto; }
-.kc-product-scene .kc-product-scene__caption { position: absolute; top: 100%; right: 0; margin: 1rem 0 0; font-size: .8rem; color: #e4e4ec; }
+.kc-product-scene--featured { min-height: 0; text-align: left; }
+.kc-product-scene--featured .kc-product-scene__content { width: min(calc(100% - 3rem), 75rem); margin: auto; padding: clamp(3rem, 5vw, 5rem) 0; display: grid; grid-template-columns: 1fr 1fr; gap: clamp(2rem, 5vw, 5rem); align-items: center; }
+.kc-product-scene--featured .kc-product-scene__copy { padding: 0; }
+.kc-product-scene--featured h1 { font-size: clamp(2.6rem, 4.3vw, 4.5rem); }
+.kc-product-scene--featured .kc-product-scene__copy > p:not(.kc-product-scene__eyebrow) { margin: 1.5rem 0; max-width: 31rem; font-size: clamp(1.05rem, 1.5vw, 1.4rem); }
+.kc-product-scene--featured .kc-product-scene__actions { justify-content: flex-start; }
+.kc-product-scene__featured { min-width: 0; width: min(100%, 29rem); justify-self: end; margin: 0; }
+.kc-product-scene__featured img { display: block; width: 100%; border-radius: 1.4rem; box-shadow: 0 1rem 3rem #0004; }
+.kc-product-scene__featured figcaption { margin-top: 1rem; text-align: right; font-size: .8rem; color: #d6d8e2; }
+.kc-product-scene--compact { min-height: 0; text-align: left; }
+.kc-product-scene--compact .kc-product-scene__copy { width: min(calc(100% - 3rem), 75rem); padding: 3rem 0; margin: auto; }
+.kc-product-scene--compact h2 { margin: 0; font-size: clamp(2rem, 3.5vw, 3.5rem); }
+.kc-product-scene--compact p { margin: 1rem 0 1.5rem; font-size: 1.15rem; }
+.kc-product-scene--compact .kc-product-scene__actions { justify-content: flex-start; }
 .kc-product-scene--closing .kc-product-scene__art { object-position: 50% bottom; }
 .kc-product-scene--closing { min-height: clamp(25rem, 40vw, 40rem); }
 .kc-product-scene--closing .kc-product-scene__copy { padding-top: clamp(5rem, 8vw, 8rem); }
-@media (max-width: 767px) { .kc-product-scene__art { object-position: 58% bottom; } .kc-product-scene--closing .kc-product-scene__art { object-position: 92% bottom; } .kc-product-scene { min-height: 37rem; }
-.kc-product-scene--screenshots .kc-product-scene__content { width: calc(100% - 3rem); grid-template-columns: 1fr; gap: 3.5rem; padding: 4rem 0 3rem; }
-.kc-product-scene--screenshots h1 { font-size: clamp(2.8rem, 10vw, 4.5rem); }
-.kc-product-scene__screenshots { height: clamp(24rem, 65vw, 35rem); }
-.kc-product-scene__screenshots figure.kc-product-scene__screenshot--portrait { max-width: 13rem; }
-.kc-product-scene--closing { min-height: 30rem; } }
+.kc-product-scene--closing.kc-product-scene--compact { min-height: 0; }
+.kc-product-scene--closing.kc-product-scene--compact .kc-product-scene__copy { padding: 3rem 0; }
+@media (max-width: 900px) {
+  .kc-product-scene--featured .kc-product-scene__content { grid-template-columns: 1fr; gap: 2.5rem; }
+  .kc-product-scene__featured { width: min(100%, 31rem); justify-self: center; }
+  .kc-product-scene--featured h1 { max-width: 15ch; margin: 0; font-size: clamp(2.8rem, 7vw, 4rem); }
+  .kc-product-scene--featured .kc-product-scene__copy > p:not(.kc-product-scene__eyebrow) { max-width: 36rem; }
+}
+@media (max-width: 767px) {
+  .kc-product-scene__art { object-position: 58% bottom; }
+  .kc-product-scene--closing .kc-product-scene__art { object-position: 92% bottom; }
+  .kc-product-scene:not(.kc-product-scene--featured):not(.kc-product-scene--compact) { min-height: 30rem; }
+}
 </style>

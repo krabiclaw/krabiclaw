@@ -93,7 +93,7 @@ if (inventoryFile) {
 
   for (const [tenant, urls] of groups) {
     const target = targets.get(tenant)!
-    for (const width of [1440, 390]) {
+    for (const width of [1440, 780, 390]) {
       test(`published route inventory: ${tenant} at ${width}px`, async ({ page, request }, testInfo) => {
         test.setTimeout(urls.length * 60_000 + 30_000)
         await page.setViewportSize({ width, height: 900 })
