@@ -18,6 +18,7 @@
       <template v-if="personalScope && home">
         <h2 class="text-2xl font-semibold text-highlighted">{{ home.name }}</h2>
         <p class="mt-1 text-base text-muted">{{ home.organization_name }}</p>
+        <UButton v-if="stay.request_id" :to="`/dashboard/account/messages/${encodeURIComponent(stay.request_id)}`" color="neutral" variant="soft" class="mt-4" :label="t('stay.message_host')" />
       </template>
       <h2 v-else-if="guest.state === 'named'" class="text-2xl font-semibold text-highlighted">{{ guest.name }}</h2>
       <h2 v-else-if="guest.state === 'not-provided'" class="text-2xl font-semibold text-muted">Name not provided by {{ channelName }}</h2>
@@ -36,6 +37,11 @@
         <h2 class="text-xl font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
         <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
         <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('site.experience_detail.open_in_maps')" />
+      </section>
+
+      <section v-if="personalScope && home?.arrival_guide" class="mt-8 border-t border-default pt-8">
+        <h2 class="mb-6 text-xl font-semibold text-highlighted">{{ t('stay.arrival_guide') }}</h2>
+        <StayArrivalGuideView :guide="home.arrival_guide" :rules="home.house_rules" :safety="home.safety" />
       </section>
 
       <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
@@ -106,6 +112,8 @@
 
 <script setup lang="ts">
 import { formatPhone } from '~/utils/phone'
+import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
+import { isGuestStay } from '~/shared/stay-arrival'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import type { GuestStay, StayDetail, StayPaymentMethod } from '~/server/domain/stays'
@@ -131,8 +139,6 @@ const realtime = useDashboardInvalidations()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
-const isGuestStay = (value: unknown): value is GuestStay => isStay(value) && isRecord((value as Record<string, unknown>).home) && 'cancellation' in value
-  && ((value as GuestStay).home.location === null || isRecord((value as GuestStay).home.location))
 const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : 'dashboard'}-stay:${props.stayId}`, (): Promise<{ stay: StayDetail; manage?: boolean } | GuestStay> => props.personalScope
   ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
   : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isStay }))

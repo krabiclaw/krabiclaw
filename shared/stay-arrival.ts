@@ -1,4 +1,4 @@
-import type { StayHome } from '~/server/domain/stays'
+import type { GuestStay, StayHome } from '~/server/domain/stays'
 import { isRecord } from '~/utils/api-clients'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayCheckInMethod, type StayCheckoutTask } from './stay-listing'
 
@@ -37,4 +37,13 @@ export function isStayArrivalGuide(value: unknown): value is StayArrivalGuide {
     seen.add(entry.task)
     return true
   })
+}
+
+export function isGuestStay(value: unknown): value is GuestStay {
+  if (!isRecord(value) || typeof value.organization_id !== 'string' || !isRecord(value.stay) || typeof value.stay.id !== 'string' || !isRecord(value.home)) return false
+  const home = value.home
+  return typeof home.name === 'string' && (home.location === null || isRecord(home.location))
+    && (home.arrival_guide === null || isStayArrivalGuide(home.arrival_guide))
+    && [home.house_rules, home.safety].every(lines => Array.isArray(lines) && lines.every(line => typeof line === 'string'))
+    && 'cancellation' in value
 }

@@ -111,7 +111,9 @@
         </component>
         <!-- The leading image block is the article's cover: same footprint as the old hero, and the share card derives from it. -->
         <figure v-else-if="block.type === 'image'" class="space-y-3" :data-cover="index === 0 ? '' : undefined">
-          <video v-if="blockMedia(block)[0]?.kind === 'video' && blockMedia(block)[0]?.public_url" :src="String(blockMedia(block)[0]?.public_url)" :poster="blockMedia(block)[0]?.thumbnail_url || undefined" autoplay muted loop playsinline :class="index === 0 ? 'aspect-video w-full rounded-2xl object-cover' : 'max-h-[70vh] w-full object-cover'" />
+          <div v-if="blockMedia(block)[0]?.kind === 'video' && blockMedia(block)[0]?.public_url" :class="index === 0 ? 'aspect-video w-full overflow-hidden rounded-2xl' : 'max-h-[70vh]'">
+            <MediaPreview :item="{ url: String(blockMedia(block)[0]?.public_url), kind: 'video', poster: blockMedia(block)[0]?.thumbnail_url || undefined }" :fill="index === 0" :class="index === 0 ? undefined : 'max-h-[70vh]'" />
+          </div>
           <img v-else-if="blockMedia(block)[0]?.public_url" :src="String(blockMedia(block)[0]?.public_url)" :alt="String(blockMedia(block)[0]?.alt_text ?? '')" :class="index === 0 ? 'aspect-video w-full rounded-2xl object-cover' : 'max-h-[70vh] w-full object-cover'">
           <div v-else class="flex min-h-48 items-center justify-center bg-black/5 text-sm opacity-70">{{ index === 0 ? 'Choose a cover photo' : 'Choose an image' }}</div>
           <figcaption v-if="block.data.caption" class="text-center text-sm opacity-70">{{ block.data.caption }}</figcaption>
@@ -199,6 +201,7 @@
 import type { BlogEditorBlock } from '~/lib/components/workspace/blog/types'
 import ContentAiAssistanceSection from '~/components/content/ContentAiAssistanceSection.vue'
 import ContentVideoEmbed from '~/components/content/ContentVideoEmbed.vue'
+import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
 import { youTubeVideoId } from '~/shared/youtube-video'
 import { headingAnchor, renderMarkdownToHtml, sanitizeHtmlForSsr } from '~/utils/markdown'
 import { sanitizeUrl } from '~/utils/sanitize'
@@ -225,6 +228,7 @@ const props = withDefaults(defineProps<{
 })
 const emit = defineEmits<{ 'update:title': [value: string]; 'update:block': [index: number, block: BlogEditorBlock]; 'insert-block': [index: number, cursorPosition: number]; 'insert-block-type': [index: number, type: string]; 'move-block': [index: number, delta: -1 | 1]; 'merge-block': [index: number, direction: 'back' | 'forward']; 'split-insert': [index: number, payload: { after: string; blockType: 'image' | 'faq' | 'how_to'; editorMode: 'rich' | 'source' }] }>()
 const authorInitials = computed(() => String(props.authorName || props.organizationName || 'A').split(/\s+/).map(part => part[0]).join('').slice(0, 2).toUpperCase())
+provideMediaPreviews(ref(false))
 const hasCover = computed(() => props.blocks[0]?.type === 'image')
 const { t, locale } = useI18n()
 function formatDate(value: string) { return formatTimestamp(value, locale.value, 'UTC', { dateStyle: 'medium' }) }

@@ -26,64 +26,15 @@
         markup below is the presentation. See utils/tenant-page-presentation.ts.
       -->
       <component :is="presentationOf(block)" v-if="presentationOf(block)" :block="block" :page="page" />
-      <!--
-        A picture and the words beside it. It is one block; it used to be three
-        (`story.title`, `story.image`, `story.body`) that this renderer
-        re-assembled at display time, in the alphabetical order of the field
-        names the migration wrote.
-      -->
-      <template v-else-if="block.type === 'media_text'">
-        <div class="my-16 grid max-w-5xl gap-10 md:grid-cols-2 md:items-center">
-          <video
-            v-if="blockMedia(block, 'media')?.kind === 'video'"
-            :src="blockMedia(block, 'media')!.public_url!"
-            :poster="blockMedia(block, 'media')!.thumbnail_url ?? undefined"
-            autoplay muted loop playsinline
-            class="aspect-4/3 w-full object-cover"
-          />
-          <img
-            v-else-if="blockMedia(block, 'media')"
-            :src="blockMedia(block, 'media')!.public_url!"
-            :alt="blockMedia(block, 'media')!.alt_text ?? ''"
-            class="aspect-4/3 w-full object-cover"
-          >
-          <div>
-            <h2 v-if="text(block.data.title)" class="text-3xl font-semibold tracking-tight">{{ text(block.data.title) }}</h2>
-            <p v-if="text(block.data.body)" class="mt-6 whitespace-pre-line leading-8 text-muted">{{ text(block.data.body) }}</p>
-            <TenantPageButton v-if="text(block.data.label) && text(block.data.url)" class="mt-8" :label="text(block.data.label)" :url="text(block.data.url)" />
-          </div>
-        </div>
-      </template>
-
-      <template v-else-if="block.type === 'hero'">
-        <div class="py-12 sm:py-20">
-          <p v-if="text(block.data.eyebrow)" class="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-primary">{{ text(block.data.eyebrow) }}</p>
-          <h1 v-if="text(block.data.title)" class="text-4xl font-bold tracking-tight sm:text-6xl">{{ text(block.data.title) }}</h1>
-          <p v-if="text(block.data.subtitle)" class="mx-auto mt-6 max-w-3xl text-lg leading-8 text-muted">
-            {{ text(block.data.subtitle) }}
-          </p>
-          <TenantPageButton v-if="text(block.data.cta_label) && text(block.data.cta_url)" class="mt-8" :label="text(block.data.cta_label)" :url="text(block.data.cta_url)" />
-          <video
-            v-if="blockMedia(block, 'media')?.kind === 'video'"
-            :src="blockMedia(block, 'media')!.public_url!"
-            :poster="blockMedia(block, 'media')!.thumbnail_url ?? undefined"
-            autoplay muted loop playsinline
-            class="mx-auto mt-10 max-h-[34rem] w-full rounded-3xl object-cover shadow-xl"
-          />
-          <img v-else-if="blockMedia(block, 'media')" :src="blockMedia(block, 'media')!.public_url!" :alt="blockMedia(block, 'media')!.alt_text ?? ''" class="mx-auto mt-10 max-h-[34rem] w-full rounded-3xl object-cover shadow-xl">
-        </div>
-      </template>
-
       <TenantPageRichTextBlock v-else-if="block.type === 'heading' || block.type === 'markdown'" :block="block" />
 
       <template v-else-if="block.type === 'image'">
         <figure v-if="blockMedia(block, 'media')" class="my-12">
-          <video
+          <MediaPreview
             v-if="blockMedia(block, 'media')?.kind === 'video'"
-            :src="blockMedia(block, 'media')!.public_url!"
-            :poster="blockMedia(block, 'media')!.thumbnail_url ?? undefined"
-            autoplay muted loop playsinline
-            class="w-full rounded-2xl object-cover shadow-lg"
+            :item="{ url: blockMedia(block, 'media')!.public_url!, kind: 'video', poster: blockMedia(block, 'media')!.thumbnail_url ?? undefined }"
+            :fill="false"
+            class="rounded-2xl shadow-lg"
           />
           <img v-else :src="blockMedia(block, 'media')!.public_url!" :alt="blockMedia(block, 'media')!.alt_text ?? ''" class="w-full rounded-2xl object-cover shadow-lg">
           <figcaption v-if="text(block.data.caption)" class="mt-3 text-center text-sm text-muted">{{ text(block.data.caption) }}</figcaption>
@@ -99,13 +50,9 @@
         <p v-if="text(block.data.caption)" class="mb-4 text-center text-sm text-muted">{{ text(block.data.caption) }}</p>
         <div v-if="galleryImages(block).length" class="my-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <figure v-for="image in galleryImages(block)" :key="image.id || image.url">
-            <video
-              v-if="image.kind === 'video'"
-              :src="image.url"
-              :poster="image.thumbnailUrl ?? undefined"
-              autoplay muted loop playsinline
-              class="aspect-[4/3] w-full rounded-2xl object-cover"
-            />
+            <div v-if="image.kind === 'video'" class="aspect-4/3 w-full overflow-hidden rounded-2xl">
+              <MediaPreview :item="{ url: image.url, kind: 'video', poster: image.thumbnailUrl ?? undefined, alt: image.alt }" />
+            </div>
             <img v-else :src="image.url" :alt="image.alt ?? ''" class="aspect-[4/3] w-full rounded-2xl object-cover">
             <figcaption v-if="image.caption" class="mt-2 text-sm text-muted">{{ image.caption }}</figcaption>
           </figure>
@@ -224,8 +171,10 @@ import { tenantPageBlockPresentation } from '~/utils/tenant-page-presentation'
 import { overviewProseBlockId } from '~/utils/tenant-page-block-data'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import ContentVideoEmbed from '~/components/content/ContentVideoEmbed.vue'
+import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
 
 const props = defineProps<{ page: PublicTenantPage }>()
+provideMediaPreviews(ref(false))
 
 const { template: resolvedTemplate } = useTenantOrganization().organization
 const template = computed<PublicTemplateSlug>(() => resolvedTemplate.slug)

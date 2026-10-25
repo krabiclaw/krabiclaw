@@ -1,5 +1,6 @@
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isOrganizationWideRole, listUserOrganizations, resolveUserOrganization } from '~/server/utils/member-access'
+import { buyerActivities } from '~/server/domain/payments/buyer'
 
 export type PostLoginDestination = `/dashboard/${string}`
 
@@ -47,7 +48,10 @@ export async function resolvePostLoginRoute(
   }
 
   const organizations = await listUserOrganizations(env, userId)
-  if (organizations.length === 0) return { kind: 'onboard', destination: '/dashboard/onboarding' }
+  if (organizations.length === 0) {
+    if ((await buyerActivities(env.DB, userId)).activities.length) return { kind: 'enter', destination: '/dashboard/account' }
+    return { kind: 'onboard', destination: '/dashboard/onboarding' }
+  }
   if (organizations.length > 1) return { kind: 'choose', destination: '/dashboard/select-organization' }
 
   const only = organizations[0]!

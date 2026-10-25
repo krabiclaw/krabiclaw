@@ -7,23 +7,17 @@
     <div :class="['grid gap-8', items.length > 1 ? 'md:grid-cols-2' : '']">
       <component
         :is="item.url ? NuxtLink : 'div'"
-        v-for="(item, index) in items"
+        v-for="item in items"
         :key="item.id"
-        :ref="(el: Element | { $el?: Element } | null) => { const node = el && ('$el' in el ? el.$el : el); locCardRefs[index] = (node as HTMLElement) ?? null }"
         :to="item.url ? localePath(item.url) : undefined"
         class="group block overflow-hidden rounded-2xl border border-default bg-elevated text-default no-underline transition hover:border-muted shadow-sm"
       >
         <div class="aspect-video overflow-hidden bg-muted">
-          <template v-if="item.media?.kind === 'video' && item.media.public_url && visibleLocCards.has(index)">
-            <ClientOnly>
-              <video
-                :src="item.media.public_url ?? undefined"
-                :poster="item.media.thumbnail_url || undefined"
-                autoplay muted loop playsinline preload="none"
-                class="aspect-video w-full object-contain"
-              />
-            </ClientOnly>
-          </template>
+          <MediaPreview
+            v-if="item.media?.kind === 'video' && item.media.public_url"
+            :item="{ url: item.media.public_url, kind: 'video', poster: item.media.thumbnail_url || undefined, alt: item.media.alt_text || item.title }"
+            fit="contain"
+          />
           <img
             v-else-if="mediaStillUrl(item.media)"
             :src="mediaStillUrl(item.media) || undefined"
@@ -58,10 +52,12 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockRecords } from '~/utils/tenant-page-block-data'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { getVerticalCopy } from '~/utils/vertical-copy'
+import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
 
 import { NuxtLink } from '#components'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
+provideMediaPreviews(ref(false))
 const { localePath, locale, t } = useI18n()
 const { organization } = useTenantOrganization()
 
@@ -89,27 +85,4 @@ const heading = computed(() => blockText(props.block.data.title) || homeCopy.val
 const kicker = computed(() => blockText(props.block.data.description) || homeCopy.value.findUsKicker)
 const visitLocationCta = computed(() => homeCopy.value.visitLocationCta)
 
-const locCardRefs: (HTMLElement | null)[] = []
-const visibleLocCards = ref(new Set<number>())
-
-onMounted(() => {
-  if (!('IntersectionObserver' in window)) return
-  const observer = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue
-      const index = locCardRefs.indexOf(entry.target as HTMLElement)
-      if (index >= 0) {
-        visibleLocCards.value = new Set([...visibleLocCards.value, index])
-        observer.unobserve(entry.target)
-      }
-    }
-  }, { rootMargin: '200px' })
-
-  watch(() => items.value.map(item => item.id).join('|'), () => {
-    visibleLocCards.value = new Set()
-    observer.disconnect()
-    nextTick(() => locCardRefs.forEach(el => el && observer.observe(el)))
-  }, { immediate: true })
-  onUnmounted(() => observer.disconnect())
-})
 </script>
