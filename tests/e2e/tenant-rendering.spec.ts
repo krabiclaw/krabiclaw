@@ -114,7 +114,7 @@ if (inventoryFile) {
         page.on('response', response => {
           if (!firstParty(response.url())) return
           if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`)
-          else if (response.status() === 200 || response.status() === 304) successfulResponses.set(response.url(), response.status())
+          else if ([200, 206, 304].includes(response.status())) successfulResponses.set(response.url(), response.status())
         })
 
         const completed: string[] = []
@@ -125,7 +125,10 @@ if (inventoryFile) {
               const response = await openTenantPage(page, url.href, {})
               expect(response?.status()).toBe(200)
               await expect(page).toHaveURL(url.href)
-              await expect(page.locator(target.shell)).toBeVisible()
+              // Help owns a standalone conversation viewport and its header;
+              // it deliberately has neither the marketing shell nor footer.
+              const supportConversation = tenant === 'KrabiClaw' && url.pathname === '/help'
+              await expect(page.locator(supportConversation ? 'main' : target.shell)).toBeVisible()
               const locale = await page.locator('html').getAttribute('lang')
               expect(locale).toMatch(/\S/)
               const shellRead = await request.get(`${url.origin}/api/public/shell`, { params: { locale: locale! } })
@@ -191,8 +194,11 @@ if (inventoryFile) {
                   await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
                 }
               })
-              await expect(page.locator('footer').last()).toBeVisible()
-              await expect(page.locator('footer').last()).not.toBeEmpty()
+              if (supportConversation) await expect(page.getByRole('textbox', { name: 'Ask ChowBot anything...' })).toBeVisible()
+              else {
+                await expect(page.locator('footer').last()).toBeVisible()
+                await expect(page.locator('footer').last()).not.toBeEmpty()
+              }
               await page.evaluate(async () => {
                 const scrollers = [...document.querySelectorAll<HTMLElement>('*')]
                   .filter(element => element.scrollWidth > element.clientWidth && element.clientWidth > 0)
@@ -242,25 +248,28 @@ if (inventoryFile) {
                 const failed = failedRequests.shift()!
                 const error = failed.failure()?.errorText
                 const resourceType = failed.resourceType()
-                const status = successfulResponses.get(failed.url())
-                // A cancelled duplicate is not a missing customer asset when the
-                // exact URL succeeded and its current rendered owner decoded.
+                // Chromium may cancel an image duplicate or a video byte range.
+                // A picture may also replace its fallback with a selected source.
+                // Require the selected resource to succeed and decode in its
+                // rendered owner before accepting cancellation.
                 const owner = failed.method() === 'GET' && error === 'net::ERR_ABORTED'
-                  && (resourceType === 'image' || resourceType === 'other') && status !== undefined
-                  ? await page.evaluate(async value => {
+                  && (resourceType === 'image' || resourceType === 'other' || resourceType === 'media')
+                  ? await page.evaluate(async ({ value, successful }) => {
                     const image = [...document.images].find(image => image.getClientRects().length
-                      && (image.currentSrc || image.src) === value && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
+                      && (image.src === value || image.currentSrc === value) && successful.includes(image.currentSrc || image.src)
+                      && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
                     if (image) {
                       await image.decode()
                       return { element: 'img', src: image.src, current_src: image.currentSrc, natural_width: image.naturalWidth, natural_height: image.naturalHeight }
                     }
                     const video = [...document.querySelectorAll('video')].find(video => video.getClientRects().length
-                      && video.poster === value && video.error === null && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+                      && (video.poster === value || video.currentSrc === value) && successful.includes(value)
+                      && video.error === null && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
                       && video.videoWidth > 0 && video.videoHeight > 0)
                     return video ? { element: 'video', poster: video.poster, current_src: video.currentSrc, ready_state: video.readyState, video_width: video.videoWidth, video_height: video.videoHeight, error: null } : null
-                  }, failed.url())
+                  }, { value: failed.url(), successful: [...successfulResponses.keys()] })
                   : null
-                if (owner) resolvedDuplicateCancellations.push({ url: failed.url(), resource_type: resourceType, error, success_status: status, decoded_owner: owner })
+                if (owner) resolvedDuplicateCancellations.push({ url: failed.url(), resource_type: resourceType, error, successful_responses: Object.fromEntries(successfulResponses), decoded_owner: owner })
                 else errors.push(`${failed.method()} ${failed.url()}: ${error}`)
               }
               if (resolvedDuplicateCancellations.length) await testInfo.attach(`resolved duplicate media cancellations ${index + 1} ${url.pathname}${url.search}`, {
@@ -973,7 +982,7 @@ test.describe('NCLS representative journeys', () => {
 
   // One reader walking the site. Each route is a different page recipe, so the
   // traversal is the coverage; six separate fixtures were not.
-  test('renders every route reachable from the header', async ({ page }) => {
+  test('renders every route reachable from the header', async ({ page, request }) => {
     const journeys = [
       { path: '/pricing', text: /pricing|income|calculator/i },
       { path: '/blog/writing-your-own-will-how-it-works', text: /will|North Carolina/i },
@@ -1008,5 +1017,20 @@ test.describe('NCLS representative journeys', () => {
       const bodyText = (await body.allInnerTexts()).join(' ').trim()
       expect(bodyText.length, `${journey.path} body sections are empty`).toBeGreaterThan(200)
     }
+    const shellResponse = await request.get(`${blawbyBaseURL}/api/public/shell`, { headers: blawbyExtraHeaders })
+    expect(shellResponse.status()).toBe(200)
+    const shell = await shellResponse.json() as { locations: Array<{ slug: string; title: string }> }
+    expect(shell.locations.length).toBeGreaterThan(0)
+    const office = shell.locations[0]!
+    const officePath = `/locations/${office.slug}`
+    const pageview = page.waitForResponse(response => new URL(response.url()).pathname === '/api/analytics/track'
+      && response.request().postDataJSON()?.eventType === 'pageview'
+      && response.request().postDataJSON()?.pagePath === officePath)
+    const response = await openTenantPage(page, `${blawbyBaseURL}${officePath}`, blawbyExtraHeaders)
+    expect(response?.status()).toBe(200)
+    await expect(page.locator('main')).toContainText(office.title)
+    const tracked = await pageview
+    expect(tracked.status(), await tracked.text()).toBe(200)
+    expect(await tracked.json()).toMatchObject({ ok: true })
   })
 })
