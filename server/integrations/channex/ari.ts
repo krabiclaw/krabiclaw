@@ -2,7 +2,7 @@ import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { StayHome, StayNight } from '~/server/domain/stays'
 import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
 import { channexRequest, ChannexError, type ChannexEnv } from './client'
-import { ChannexDataError, object } from './data'
+import { ChannexDataError, object, string } from './data'
 import { HTTPError } from 'nitro'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 
@@ -164,6 +164,33 @@ function refusals(result: Record<string, unknown>, kind: string, dates: readonly
   return refused
 }
 
+/**
+ * The task Channex created for an ARI call: its answer is `data: [{ id, type: 'task' }]`
+ * (docs.channex.io ARI). A call Channex rejected in part may create none and
+ * answer `data: []`; a call it took whole always names its task.
+ */
+export function ariTask(result: Record<string, unknown>, refused: boolean): string | null {
+  if (!Array.isArray(result.data)) {
+    if (refused) return null
+    throw new ChannexDataError(`Channex's ARI answer has no data list: ${JSON.stringify(result).slice(0, 500)}`)
+  }
+  const tasks = result.data.map(entry => object(entry, 'ARI task')).filter(entry => entry.type === 'task')
+  if (tasks.length > 1) throw new ChannexDataError(`Channex's ARI answer names ${tasks.length} tasks for one call`)
+  if (tasks[0]) return string(tasks[0].id, 'ARI task id')
+  if (!refused) throw new ChannexDataError(`Channex reported success for an ARI call without its task: ${JSON.stringify(result).slice(0, 500)}`)
+  return null
+}
+
+/**
+ * One ARI call to a property, as channel_sync_log keeps it: the rate limit
+ * counts these rows, and task_id is the task Channex created, which Channex's
+ * certification and support ask for.
+ */
+export async function logAriCall(db: DbClient, call: { organizationId: string; productId: string; propertyId: string; kind: 'availability' | 'restrictions'; status: 'pushed' | 'needs_review' | 'failed'; detail: string; taskId: string | null }): Promise<void> {
+  await execute(db, `INSERT INTO channel_sync_log (id, organization_id, product_id, provider, direction, kind, external_id, status, detail, task_id)
+    VALUES (?, ?, ?, 'channex', 'outbound', ?, ?, ?, ?, ?)`, [crypto.randomUUID(), call.organizationId, call.productId, call.kind, call.propertyId, call.status, call.detail, call.taskId])
+}
+
 async function connectedMapping(db: DbClient, env: ChannexEnv, organizationId: string, productId: string): Promise<Mapping | null> {
   const mapping = await queryFirst<Mapping>(db, `SELECT property_id, room_type_id, rate_plan_id FROM product_channel_mappings
     WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1`, [organizationId, productId])
@@ -256,8 +283,8 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
     return { row, values, restrictions: RESTRICTION_FIELDS.filter(field => before[field] !== values[field] && values[field] !== null), availability: before.availability !== values.availability }
   })
 
-  const log = async (kind: 'availability' | 'restrictions', status: 'pushed' | 'needs_review' | 'failed', detail: string) => await execute(db, `INSERT INTO channel_sync_log (id, organization_id, product_id, provider, direction, kind, external_id, status, detail)
-    VALUES (?, ?, ?, 'channex', 'outbound', ?, ?, ?, ?)`, [crypto.randomUUID(), organizationId, home.product_id, kind, mapping.property_id, status, detail])
+  const log = async (kind: 'availability' | 'restrictions', status: 'pushed' | 'needs_review' | 'failed', detail: string, taskId: string | null = null) =>
+    await logAriCall(db, { organizationId, productId: home.product_id, propertyId: mapping.property_id, kind, status, detail, taskId })
   const recent = await queryAll<{ kind: 'availability' | 'restrictions'; calls: number; first: string }>(db, `SELECT kind, COUNT(*) AS calls, MIN(created_at) AS first FROM channel_sync_log
     WHERE provider = 'channex' AND direction = 'outbound' AND external_id = ? AND created_at > ? GROUP BY kind`,
   [mapping.property_id, new Date(Date.now() - RATE_WINDOW_MS).toISOString()])
@@ -290,13 +317,15 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
     }
     const span = `${batch[0]!.row.date}..${batch.at(-1)!.row.date}`
     try {
-      const refused = refusals(await send(batch), kind, batch.map(change => change.row.date))
+      const result = await send(batch)
+      const refused = refusals(result, kind, batch.map(change => change.row.date))
+      const task = ariTask(result, refused.size > 0)
       for (const change of batch) {
         const reason = refused.get(change.row.date)
         if (reason) review(change.row.date, reason)
         else take(change)
       }
-      await log(kind, refused.size ? 'needs_review' : 'pushed', refused.size ? [...new Set(refused.values())].join(' ') : span)
+      await log(kind, refused.size ? 'needs_review' : 'pushed', refused.size ? [...new Set(refused.values())].join(' ') : span, task)
     } catch (error) {
       if (!(error instanceof ChannexDataError || error instanceof ChannexError)) throw error
       const limited = error instanceof ChannexError && error.providerStatus === 429

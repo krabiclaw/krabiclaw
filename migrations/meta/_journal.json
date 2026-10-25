@@ -22,6 +22,13 @@
       "when": 1792836768306,
       "tag": "0002_content_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792890037520,
+      "tag": "0003_channex_ari_task_id",
+      "breakpoints": true
     }
   ]
 }

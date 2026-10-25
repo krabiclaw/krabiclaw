@@ -32,7 +32,7 @@ class FakeChannex {
     const method = (init.method ?? 'GET').toUpperCase()
     const path = url.pathname.replace('/api/v1', '')
     const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200 })
-    if (method === 'POST' && (path === '/restrictions' || path === '/availability')) return json({ data: [], meta: { message: 'Success', warnings: [] } })
+    if (method === 'POST' && (path === '/restrictions' || path === '/availability')) return json({ data: [{ id: crypto.randomUUID(), type: 'task' }], meta: { message: 'Success', warnings: [] } })
     let match = path.match(/^\/booking_revisions\/([^/]+)\/ack$/)
     if (method === 'POST' && match) { this.acked.push(match[1]!); return json({ meta: { message: 'Success' } }) }
     if (method === 'GET' && path === '/booking_revisions/feed') {

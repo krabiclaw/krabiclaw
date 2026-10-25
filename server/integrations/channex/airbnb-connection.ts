@@ -20,6 +20,7 @@ import { channexCreate, channexGet, channexRequest, ChannexError, type ChannexEn
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
 import { CALENDAR_NIGHTS, DETAIL_FIELDS, PHOTO_WIDTH, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DescriptionField, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
+import { ariTask, logAriCall } from './ari'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 
 /**
@@ -579,19 +580,35 @@ export class AirbnbConnection {
           const days = calendar ?? await listingCalendar(this.env, channelId, mapping.listing_id, property.timezone)
           if (!calendar) await save({ import_calendar: JSON.stringify(days) })
           await wrote('import_calendar')
-          const results = [
-            await channexRequest(this.env, '/restrictions', 'POST', { values: days.map(day => ({
+          // The full sync: one restrictions and one availability call, each logged with its task like every ARI call.
+          const calls = [
+            ['restrictions', '/restrictions', days.map(day => ({
               property_id: mapping.property_id, rate_plan_id: mapping.rate_plan_id, date: day.date, rate: day.rate, min_stay_arrival: day.minStay,
               max_stay: day.maxStay, closed_to_arrival: day.closedToArrival, closed_to_departure: day.closedToDeparture, stop_sell: day.availability === 0,
-            })) }),
-            await channexRequest(this.env, '/availability', 'POST', { values: days.map(day => ({ property_id: mapping.property_id, room_type_id: mapping.room_type_id, date: day.date, availability: day.availability })) }),
-          ]
-          for (const result of results) {
-            const meta = provided(() => object(result.meta, 'Inventory result'))
-            if (meta.message !== 'Success' || (meta.warnings !== undefined && (!Array.isArray(meta.warnings) || meta.warnings.length > 0))) {
-              fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex rejected part of the calendar. The import needs review before connecting Airbnb.')
+            }))],
+            ['availability', '/availability', days.map(day => ({ property_id: mapping.property_id, room_type_id: mapping.room_type_id, date: day.date, availability: day.availability }))],
+          ] as const
+          let rejected = false
+          for (const [kind, ariPath, values] of calls) {
+            const result = await channexRequest(this.env, ariPath, 'POST', { values })
+            const propertyId = string(mapping.property_id, 'property_id')
+            // The call reached Channex, so it is logged whatever its answer: an unreadable one as failed, then raised.
+            let answer: { refused: boolean; detail: string; task: string | null }
+            try {
+              const meta = object(result.meta, 'Inventory result')
+              const refused = meta.message !== 'Success' || (meta.warnings !== undefined && (!Array.isArray(meta.warnings) || meta.warnings.length > 0))
+              answer = { refused, task: ariTask(result, refused),
+                detail: refused ? `Channex rejected part of the full sync: ${JSON.stringify(meta).slice(0, 500)}` : `full sync ${days[0]!.date}..${days.at(-1)!.date}` }
+            } catch (error) {
+              if (!(error instanceof ChannexDataError)) throw error
+              await logAriCall(this.db, { organizationId: this.organizationId, productId, propertyId, kind, status: 'failed', detail: `Channex's answer to the full sync was not readable: ${error.message}`, taskId: null })
+              fail(502, 'INVALID_PROVIDER_RESPONSE', `Channex returned an invalid response: ${error.message}`)
             }
+            const { refused } = answer
+            await logAriCall(this.db, { organizationId: this.organizationId, productId, propertyId, kind, status: refused ? 'needs_review' : 'pushed', detail: answer.detail, taskId: answer.task })
+            rejected ||= refused
           }
+          if (rejected) fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex rejected part of the calendar. The import needs review before connecting Airbnb.')
           await save({ import_stage: 'verify_inventory' })
           break
         }

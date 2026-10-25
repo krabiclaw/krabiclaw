@@ -164,11 +164,11 @@ class FakeChannex {
     if (method === 'PUT' && /^\/channels\/chan-1\/mappings\/[^/]+\/(availability|pricing)_settings$/.test(path)) { this.settings.push({ [path.split('/').pop()!]: JSON.parse(String(init.body)) }); return json({ data: {} }) }
     if (method === 'POST' && path === '/restrictions') {
       for (const value of body!.values) this.restrictions[value.date] = { rate: value.rate, min_stay_arrival: value.min_stay_arrival, max_stay: value.max_stay, closed_to_arrival: value.closed_to_arrival, closed_to_departure: value.closed_to_departure, stop_sell: value.stop_sell, rate_plan_id: value.rate_plan_id }
-      return json({ meta: { message: 'Success' } })
+      return json({ data: [{ id: 'task-restrictions', type: 'task' }], meta: { message: 'Success', warnings: [] } })
     }
     if (method === 'POST' && path === '/availability') {
       for (const value of body!.values) this.availability[value.date] = value.availability
-      return json({ meta: { message: 'Success' } })
+      return json({ data: [{ id: 'task-availability', type: 'task' }], meta: { message: 'Success', warnings: [] } })
     }
     if (method === 'GET' && path === '/availability') return json({ data: { [Object.keys(this.availability).length ? this.roomType : 'none']: this.availability } })
     if (method === 'GET' && path === '/restrictions') return json({ data: { [this.ratePlan]: Object.fromEntries(Object.entries(this.restrictions).map(([date, rule]) => [date, { ...rule, rate: String(rule.rate) }])) } })
@@ -341,6 +341,9 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       if (result.stage === 'complete') break
     }
     assert.deepEqual(stages, ['room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'activated', 'activate', 'reservations', 'messages', 'complete'])
+    // The full sync is one restrictions and one availability call, each logged with Channex's task.
+    assert.deepEqual((await db.prepare("SELECT kind, status, task_id FROM channel_sync_log WHERE direction = 'outbound' AND product_id = ? ORDER BY created_at, rowid").bind(productId).all()).results,
+      [{ kind: 'restrictions', status: 'pushed', task_id: 'task-restrictions' }, { kind: 'availability', status: 'pushed', task_id: 'task-availability' }])
     // Activating a home past its draft answers where it is, unchanged.
     assert.deepEqual(await connection.activate(productId), { product_id: productId, stage: 'complete', waiting: false })
     const filled = await readStayHome(db, manager, productId)
@@ -931,6 +934,33 @@ test('a failed verification read retains the completed provider write for review
     assert.equal(channex.channel.ratePlans.length, 1, 'the provider applied the write whose verification failed')
     assert.deepEqual(await runAirbnbSyncJobs(env, Date.now() + 1_000, { startReserveMs: 0 }), { stepped: 0, done: 0, failed: 0 })
     assert.equal(mappings, 1)
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a full sync Channex took without naming its task is logged as failed and held for review', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+    const answer = await channex.fetch(input, init)
+    return init.method === 'POST' && url.pathname === '/api/v1/restrictions' ? Response.json({ data: [], meta: { message: 'Success', warnings: [] } }) : answer
+  }
+  try {
+    const connection = await connected(db, env, channex)
+    const { product_id: productId } = await connection.prepare(LISTING, form)
+    let failure: { data?: { code?: string } } | undefined
+    for (let step = 0; step < 6 && !failure; step++) {
+      await track(db, channex, productId)
+      await connection.advance(productId).catch((error: { data?: { code?: string } }) => { failure = error })
+    }
+    assert.equal(failure?.data?.code, 'INVALID_PROVIDER_RESPONSE')
+    assert.deepEqual(await db.prepare("SELECT kind, status, task_id FROM channel_sync_log WHERE direction = 'outbound' AND product_id = ?").bind(productId).all().then(rows => rows.results),
+      [{ kind: 'restrictions', status: 'failed', task_id: null }])
+    assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'needs_review', pending_step: 'import_calendar' })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

@@ -55,7 +55,7 @@ export interface CreateLocationInput {
 }
 
 export interface UpdateLocationInput extends Partial<CreateLocationInput> {
-  status?: "active" | "inactive" | "sync_error";
+  status?: "active" | "inactive";
   /** Public map precision for every home at this location; the street address remains private. */
   stay_map_sharing?: StayMapSharing;
   /** Where the place is on the map, as its owner placed the pin. Both or neither; null clears both. */
@@ -570,6 +570,10 @@ export async function updateLocation(
     "assigned_member_id",
     "assigned_team_id",
   ] as const;
+
+  if (input.status !== undefined && input.status !== 'active' && input.status !== 'inactive') {
+    return { status: 400, data: { error: 'status must be active or inactive.', code: 'INVALID_LOCATION_FIELD', field: 'status' } };
+  }
 
   for (const field of simpleFields) {
     if (input[field] !== undefined) {

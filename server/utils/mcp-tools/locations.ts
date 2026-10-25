@@ -30,7 +30,7 @@ const calendarMutation = { ...locationMutation, properties: { ...locationMutatio
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'create_location',
-      description: 'Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status draft takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business\'s one subscription, billed at the end of the period for the active locations at that time. Draft locations and the locations of places to stay are not counted. Basic refuses a third active location.',
+      description: 'Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status inactive takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business\'s one subscription, billed at the end of the period for the active locations at that time. Inactive locations and the locations of places to stay are not counted. Basic refuses a third active location.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -90,7 +90,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
-        status: { type: 'string', enum: ['published', 'draft', 'active', 'inactive'], description: 'published/active keeps the location on the website; draft/inactive takes the location off the website and frees its plan slot.' },
+        status: { type: 'string', enum: ['active', 'inactive'], description: 'active keeps the location on the website; inactive takes it off the website and frees its plan slot.' },
         stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'Public map precision for every place to stay at this location. General shows the area; specific shows its precise pin. Both keep the street address private until a confirmed booking. Omit to keep the saved choice.' },
         address: postalAddressSchema,
         latitude: { ...locationObject.properties.latitude, description: 'Saved map latitude. Supply longitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.' },
@@ -212,11 +212,6 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
     case "update_location": {
       const locationId = requiredString(args, "location_id");
       const updateFields = omit(args, ["location_id"]) as Record<string, unknown>;
-      if (updateFields.status === 'published') {
-        updateFields.status = 'active';
-      } else if (updateFields.status === 'draft') {
-        updateFields.status = 'inactive';
-      }
       const result = await updateLocation(
         organization.db,
         organization.organizationId,

@@ -76,7 +76,7 @@ export const workspaceContextObject = {
 
 
 export const openingHoursInputSchema = { ...openingHoursSchema, description: 'Canonical weekly endpoint periods. Days use Sunday=0. Null means unknown; periods [] means closed. Sunday 00:00 without a close means always open.' }
-export const specialHoursInputSchema = { ...specialHoursSchema, description: 'Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure covering a date wins over dated hours on that date. Closures may overlap; a second dated-hours entry for the same date is rejected.' }
+export const specialHoursInputSchema = { ...specialHoursSchema, description: 'Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected.' }
 
 /**
  * A postal address as `google.type.PostalAddress`, which is what the Places API
