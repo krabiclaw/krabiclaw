@@ -813,11 +813,18 @@ test.describe('stateless MCP server', () => {
       const scheduleBody = await schedule.json()
       expect(scheduleBody.result?.isError).toBe(true)
       expect(scheduleBody.result?.content?.[0]?.text).toContain('scheduled_for')
+      const beforePublicationRead = await request.get(unchangedDocumentUrl)
+      expect(beforePublicationRead.status()).toBe(200)
+      const beforePublication = (await beforePublicationRead.json()).post
       const publish = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'publish_blog_post',
         args: { organization_id: organizationId, post_id: postId, expected_updated_at: updatedPost.updated_at },
       })
-      const published = mcpData<{ post: { status: string; updated_at: string; public_url: string; published_at: string } }>(await publish.json()).post
+      const publication = mcpData<{ post: { id: string; status: string; updated_at: string; public_url: string; published_at: string }; changed: boolean }>(await publish.json())
+      const published = publication.post
+      expect(publication.changed).toBe(true)
+      expect(Object.keys(published).sort()).toEqual(['id', 'title', 'collection', 'visibility', 'status', 'published', 'published_at', 'updated_at', 'public_url'].sort())
+      expect(published.id).toBe(postId)
       expect(published.status).toBe('published')
       expect(published.public_url).toEqual(expect.any(String))
       expect(published.published_at).toEqual(expect.any(String))
@@ -825,9 +832,17 @@ test.describe('stateless MCP server', () => {
         method: 'tools/call', toolName: 'publish_blog_post',
         args: { organization_id: organizationId, post_id: postId, expected_updated_at: published.updated_at },
       })
-      const republished = mcpData<{ post: { updated_at: string; published_at: string } }>(await republish.json()).post
+      const republication = mcpData<{ post: { updated_at: string; published_at: string }; changed: boolean }>(await republish.json())
+      const republished = republication.post
+      expect(republication.changed).toBe(false)
       expect(republished.published_at).toBe(published.published_at)
       expect(republished.updated_at).toBe(published.updated_at)
+      const afterPublicationRead = await request.get(unchangedDocumentUrl)
+      expect(afterPublicationRead.status()).toBe(200)
+      const afterPublication = (await afterPublicationRead.json()).post
+      const bodyWithoutRevisions = (post: { content_document: { blocks: Array<{ updated_at: string }> } }) => post.content_document.blocks.map(({ updated_at: _updatedAt, ...block }) => block)
+      expect(bodyWithoutRevisions(afterPublication)).toEqual(bodyWithoutRevisions(beforePublication))
+      expect(afterPublication).toMatchObject({ id: published.id, status: 'published', updated_at: published.updated_at, published_at: published.published_at })
       const unlist = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'update_blog_post',
         args: { organization_id: organizationId, post_id: postId, expected_updated_at: published.updated_at, visibility: 'unlisted' },

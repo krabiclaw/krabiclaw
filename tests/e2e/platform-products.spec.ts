@@ -25,7 +25,7 @@ test('Products retains its authored content, media and canonical identity after 
   }
   for (const anchor of [
     { label: 'Build', id: 'products-website-builder', heading: /^Make it\s+yours\.$/ },
-    { label: 'Manage', id: 'products-management', heading: /^Say it\.\s+Change it\.$/ },
+    { label: 'Manage', id: 'products-management', heading: /^Say it\.\s*Change it\.$/ },
     { label: 'Connect', id: 'products-inbox', heading: /^Keep the\s+conversation\s+going\.$/ },
     { label: 'Grow', id: 'products-content-social', heading: /^Show what’s\s+happening\.$/ },
   ]) {

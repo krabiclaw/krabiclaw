@@ -3,6 +3,7 @@ import Ajv from 'ajv'
 import { loginAs } from './helpers/auth'
 import { MCP_VERSION, MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import type { Product as EditorProduct } from '../../server/types/products'
 
 test.describe('stateless MCP server', () => {
   test('ChatGPT session exposes native media upload', async ({ request, baseURL }) => {
@@ -151,25 +152,44 @@ test.describe('stateless MCP server', () => {
   test('product mutation responses preserve the canonical image and gallery', async ({ request, baseURL }, testInfo) => {
     const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
     type MediaItem = { asset_id: string }
-    type Product = { id: string; name: string; image: MediaItem | null; gallery: MediaItem[]; media: MediaItem[] }
+    type Product = { id: string; name: string; image: MediaItem | null; gallery: MediaItem[] }
     const call = async <T>(toolName: string, args: Record<string, unknown>) => mcpData<T>(await (await mcpRequest(request, baseURL!, {
       method: 'tools/call', toolName, args: { organization_id: MCP_ORGANIZATION_ID, ...args },
     })).json())
     // The seeded Margherita carries one image, also its only gallery item.
     const productId = 'mi-1'
     const seededAsset = 'media-demo-margherita'
+    const readEditorProduct = async () => {
+      const response = await request.get(`${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}/products/${productId}`)
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as { product: EditorProduct }).product
+    }
     const expectSeededMedia = (product: Product) => {
       expect(product.image?.asset_id).toBe(seededAsset)
       expect(product.gallery.map(item => item.asset_id)).toEqual([seededAsset])
-      expect(product.media.length).toBeGreaterThan(0)
+      expect(product).not.toHaveProperty('media')
+      expect(product).not.toHaveProperty('social_image')
     }
+    let originalProduct: EditorProduct | undefined
     let originalName: string | undefined
+    const expectSavedProduct = (product: EditorProduct, name: string) => {
+      expect(product.name).toBe(name)
+      for (const field of ['image', 'gallery', 'media'] as const) {
+        expect(product[field]).toEqual(originalProduct![field])
+      }
+    }
     try {
       await loginAs(request, baseURL!)
-      originalName = (await call<{ product: Product }>('get_product', { product_id: productId })).product.name
+      originalProduct = await readEditorProduct()
+      expect(originalProduct.image?.asset_id).toBe(seededAsset)
+      expect(originalProduct.gallery.map(item => item.asset_id)).toEqual([seededAsset])
+      expect(originalProduct.media.length).toBeGreaterThan(0)
+      originalName = originalProduct.name
+      expect((await call<{ product: Product }>('get_product', { product_id: productId })).product.name).toBe(originalName)
       const changed = (await call<{ product: Product }>('update_product', { product_id: productId, name: `${originalName} MCP media check` })).product
       expect(changed.name).toBe(`${originalName} MCP media check`)
       expectSeededMedia(changed)
+      expectSavedProduct(await readEditorProduct(), `${originalName} MCP media check`)
       const saved = (await call<{ product: Product }>('get_product', { product_id: productId })).product
       expect(saved.name).toBe(`${originalName} MCP media check`)
       expectSeededMedia(saved)
@@ -180,6 +200,7 @@ test.describe('stateless MCP server', () => {
           const restored = (await call<{ product: Product }>('get_product', { product_id: productId })).product
           expect(restored.name).toBe(originalName)
           expectSeededMedia(restored)
+          expectSavedProduct(await readEditorProduct(), originalName)
         }
       } finally {
         await releaseTenantMutationLock()

@@ -27,7 +27,7 @@ import {
 import { assertProductKind, validateProductDetails, validateStayAlarmDetails, ProductDetailError, type ProductKind } from '~/shared/product-details'
 import { STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, parseStayAmenityAnswers } from '~/shared/stay-listing'
 import { isRecord } from '~/server/utils/type-guards'
-import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
+import { PUBLIC_LOCATION_SECTIONS, type PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { isLegalPracticeSite } from '~/utils/template-registry'
 
@@ -421,6 +421,48 @@ export async function resolveLocalizedPublicRoute(
         resource: { type: 'product', id: product.id },
       }),
       representation: { kind: 'resource', resource_type: 'product', resource_id: product.id, localization },
+    }
+  }
+
+  // A location's section uses its location's saved representation, just as
+  // the public page loader does. The section has no separate translation row.
+  const locationChild = /^\/locations\/([^/]+)\/([^/]+)$/.exec(routePath.slice(locale.length + 1))
+  if (locationChild) {
+    const section = PUBLIC_LOCATION_SECTIONS.find(value => value === locationChild[2])
+    if (!section && locationChild[2] !== 'contact') localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
+    const { publicLocationSql } = await import('~/server/utils/public-locations')
+    const resource = await queryFirst<ResourceLocalizationRow>(db, `
+      SELECT rl.id, rl.organization_id, rl.resource_type, rl.resource_id, rl.locale, rl.values_json, rl.route_path,
+             rl.created_at, rl.created_by_user_id, rl.updated_at, rl.updated_by_user_id
+        FROM resource_localizations rl
+        JOIN business_locations l ON l.organization_id = rl.organization_id AND l.id = rl.resource_id
+       WHERE rl.organization_id = ? AND rl.locale = ? AND rl.resource_type = 'business_location'
+         AND rl.route_path = ? AND ${publicLocationSql('l')} LIMIT 1
+    `, [organizationId, locale, `/${locale}/locations/${locationChild[1]}`])
+    if (!resource) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
+    if (section) {
+      const { PUBLIC_CATALOG_SECTIONS_SQL, PUBLIC_CONTENT_SECTION_QUERIES, productCatalogRows, publicContentSectionRows, publicSections } = await import('~/server/utils/public-shell-query')
+      const content = publicContentSectionRows(() => [])
+      let catalog: import('~/server/utils/public-shell-query').PublicCatalogRow[] = []
+      if (section === 'menu' || section === 'products') {
+        catalog = await queryAll(db, PUBLIC_CATALOG_SECTIONS_SQL, [organizationId])
+      } else if (section === 'experiences') {
+        const { listOrganizationProducts } = await import('~/server/utils/product-management')
+        catalog = productCatalogRows(await listOrganizationProducts(db, { organizationId, kind: 'experience', publishedOnly: true, env }))
+      } else {
+        content[section] = await queryAll(db, PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])
+      }
+      if (!publicSections(await getOrganizationVertical(db, organizationId), catalog, content, false).location(resource.resource_id)[section]) {
+        localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
+      }
+    }
+    const localization = mapLocalization(resource)
+    return {
+      locale, route_path: routePath, platform_messages: entitlement.platform_messages,
+      locale_representations: await listPublicResourceLocaleRepresentations(env, db, {
+        organizationId, resource: { type: 'business_location', id: resource.resource_id, routeSuffix: `/${locationChild[2]}` },
+      }),
+      representation: { kind: 'resource', resource_type: 'business_location', resource_id: resource.resource_id, localization },
     }
   }
 

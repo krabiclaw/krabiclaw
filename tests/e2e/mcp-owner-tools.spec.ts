@@ -1292,7 +1292,7 @@ test.describe('stateless MCP server', () => {
         { name: `Starters ${stamp}`, items: [item('Edamame', 500), item('Gyoza', 800)] },
         { name: `Desserts ${stamp}`, items: [item('Matcha cake', 900)] },
       ] }
-      type Menu = { sections: Array<{ collection: { id: string; name: string }; products: Array<{ id: string; name: string }> }>; replayed: boolean }
+      type Menu = { sections: Array<{ collection: { id: string; name: string }; products: Product[] }>; replayed: boolean }
       type Scheduling = Awaited<ReturnType<typeof readMemberScheduling>>
       type PublicProfile = Pick<NonNullable<Scheduling>, 'member_id' | 'updated_at' | 'public_name' | 'public_photo_url' | 'public_bio' | 'public_approved'>
       let menu: Menu | null = null
@@ -1304,6 +1304,16 @@ test.describe('stateless MCP server', () => {
       const cleanupRequest = await playwrightRequest.newContext({ baseURL, storageState: await request.storageState() })
       try {
         menu = await call<Menu>('update_menu', args)
+        for (const section of menu.sections) {
+          expect(Object.keys(section.collection).sort()).toEqual(['id', 'organization_id', 'location_id', 'name', 'slug', 'description', 'image', 'sort_order'].sort())
+          for (const product of section.products) {
+            expect(product.kind).toBe('dish')
+            expect(Object.keys(product).sort()).toEqual(['id', 'kind', 'name', 'slug', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'options', 'variants', 'details', 'publications', 'locations', 'collections', 'updated_at'].sort())
+            for (const variant of product.variants) for (const price of variant.prices) {
+              for (const field of ['organization_id', 'product_variant_id', 'created_by', 'updated_by', 'created_at', 'updated_at', 'source']) expect(price).not.toHaveProperty(field)
+            }
+          }
+        }
         const written = menu.sections.filter(section => section.collection.name.endsWith(stamp))
         expect(written.map(section => section.collection.name)).toEqual(args.sections.map(section => section.name))
         expect(written.map(section => section.products.map(product => product.name))).toEqual(args.sections.map(section => section.items.map(product => product.name)))
@@ -1320,6 +1330,22 @@ test.describe('stateless MCP server', () => {
         const starter = written[0]!
         const dessert = written[1]!
         const movedDish = starter.products[0]!
+        const dishEndpoint = `${baseURL}/api/editor/organizations/${organizationId}/products/${movedDish.id}`
+        const beforeInvalidRead = await request.get(dishEndpoint)
+        expect(beforeInvalidRead.status(), await beforeInvalidRead.text()).toBe(200)
+        const beforeInvalid = await beforeInvalidRead.json()
+        const invalidMenu = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_menu', args: {
+          organization_id: organizationId, location_id: locationId, idempotency_key: `${stamp}-invalid`,
+          sections: [{ collection_id: starter.collection.id, name: starter.collection.name, items: [{ product_id: movedDish.id, name: movedDish.name, details: { house_rules: 'This home-only field cannot edit a dish.' } }] }],
+        } })
+        expect(invalidMenu.status(), await invalidMenu.text()).toBe(200)
+        const invalidMenuResult = (await invalidMenu.json()).result
+        expect(invalidMenuResult.isError).toBe(true)
+        expect(invalidMenuResult.structuredContent).toBeUndefined()
+        expect(invalidMenuResult.content[0].text).toContain('Invalid arguments for tool update_menu')
+        const afterInvalidRead = await request.get(dishEndpoint)
+        expect(afterInvalidRead.status(), await afterInvalidRead.text()).toBe(200)
+        expect(await afterInvalidRead.json()).toEqual(beforeInvalid)
         await call<Menu>('update_menu', { location_id: locationId, idempotency_key: crypto.randomUUID(), sections: [
           { collection_id: dessert.collection.id, name: dessert.collection.name, items: [{ product_id: movedDish.id, name: movedDish.name }] },
         ] })

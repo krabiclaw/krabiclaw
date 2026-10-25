@@ -1,14 +1,17 @@
-import { expect, test, type Page } from '@playwright/test'
+import { readFileSync } from 'node:fs'
+import { expect, test, type Page, type Request } from '@playwright/test'
 import {
   blawbyBaseURL, blawbyExtraHeaders,
   openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
 } from './helpers'
-import { testBaseUrl, tenantTestBaseUrl, tenantTestExtraHeaders } from './test-env'
+import { testBaseUrl, tenantTestBaseUrl, tenantTestExtraHeaders, kikuzukiTestBaseUrl } from './test-env'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' with { type: 'json' }
 import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
+import { formatProductMoney, formatProductPriceRange, summarizeProductPrices } from '../../utils/product-money'
+import type { PublicProductDetailPayload } from '../../server/utils/public-products'
 
 // Two tenants stand in for the two verticals' routes this renderer serves:
 // Pottery House a venue and NCLS a legal practice, both on .tenant-layout.
@@ -48,6 +51,229 @@ const tenants: Tenant[] = [
     forbidden: [/Ember & Slice/i, /No services/i],
   },
 ]
+
+// A shared renderer/theme release supplies its fresh, sourced public inventory.
+// The file is release evidence, not a fixture or a list of pages inferred here.
+// Staging intentionally publishes no sitemap; the operator maps the production
+// sitemap and current native public inventory to the existing tenant aliases.
+const inventoryFile = process.env.PLAYWRIGHT_TENANT_ROUTE_INVENTORY
+if (inventoryFile) {
+  if (!process.env.PLAYWRIGHT_PREVIEW_URL) throw new Error('A published route inventory requires PLAYWRIGHT_PREVIEW_URL')
+  const targets = new Map([
+    ['Pottery House', { origin: new URL(potteryHouseBaseURL).origin, identity: /Pottery House/i }],
+    ['Kikuzuki', { origin: new URL(kikuzukiTestBaseUrl()).origin, identity: /Kikuzuki/i }],
+    ['NCLS', { origin: new URL(blawbyBaseURL).origin, identity: /North Carolina Legal Services/i }],
+  ])
+  const platform = new URL(testBaseUrl())
+  if (platform.hostname === 'staging.krabiclaw.com') targets.set('Saltleaf', {
+    origin: `https://${environmentTenantAliasHostname(platform.hostname, 'saltleaf-stays-demo')}`,
+    identity: /Saltleaf Stays/i,
+  })
+  const inventory: unknown = JSON.parse(readFileSync(inventoryFile, 'utf8'))
+  if (!Array.isArray(inventory) || !inventory.length) throw new Error('The published route inventory must be a nonempty array')
+  const seen = new Set<string>()
+  const groups = new Map<string, URL[]>()
+  for (const entry of inventory) {
+    if (!entry || typeof entry !== 'object' || typeof entry.tenant !== 'string' || typeof entry.url !== 'string') {
+      throw new Error('Every published route inventory entry requires tenant and url strings')
+    }
+    const target = targets.get(entry.tenant)
+    const url = new URL(entry.url)
+    if (!target || url.origin !== target.origin || url.username || url.password || url.hash) {
+      throw new Error(`Published route inventory names an unsupported tenant destination: ${entry.tenant} ${entry.url}`)
+    }
+    if (seen.has(url.href)) throw new Error(`Duplicate published route inventory URL: ${url.href}`)
+    seen.add(url.href)
+    const urls = groups.get(entry.tenant) ?? []
+    urls.push(url)
+    groups.set(entry.tenant, urls)
+  }
+
+  for (const [tenant, urls] of groups) {
+    const target = targets.get(tenant)!
+    for (const width of [1440, 390]) {
+      test(`published route inventory: ${tenant} at ${width}px`, async ({ page, request }, testInfo) => {
+        test.setTimeout(urls.length * 60_000 + 30_000)
+        await page.setViewportSize({ width, height: 900 })
+        const errors: string[] = []
+        const failedRequests: Request[] = []
+        const successfulResponses = new Map<string, number>()
+        const firstParty = (value: string) => {
+          const host = new URL(value).hostname
+          return host === new URL(target.origin).hostname || host === 'media.krabiclaw.com' || host === 'imagedelivery.net'
+        }
+        page.on('pageerror', error => errors.push(error.message))
+        page.on('console', message => {
+          if (message.type() === 'error' && (!message.location().url || firstParty(message.location().url))) errors.push(message.text())
+        })
+        page.on('requestfailed', failed => {
+          if (firstParty(failed.url())) failedRequests.push(failed)
+        })
+        page.on('response', response => {
+          if (!firstParty(response.url())) return
+          if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`)
+          else if (response.status() === 200 || response.status() === 304) successfulResponses.set(response.url(), response.status())
+        })
+
+        const completed: string[] = []
+        try {
+          for (const [index, url] of urls.entries()) {
+            await test.step(`${index + 1}/${urls.length} ${url.href}`, async () => {
+              successfulResponses.clear()
+              const response = await openTenantPage(page, url.href, {})
+              expect(response?.status()).toBe(200)
+              await expect(page).toHaveURL(url.href)
+              await expect(page.locator('.tenant-layout')).toBeVisible()
+              const locale = await page.locator('html').getAttribute('lang')
+              expect(locale).toMatch(/\S/)
+              const shellRead = await request.get(`${url.origin}/api/public/shell`, { params: { locale: locale! } })
+              expect(shellRead.status(), await shellRead.text()).toBe(200)
+              const shell = await shellRead.json() as { organization: { name: string } }
+              expect(shell.organization.name).toMatch(/\S/)
+              if (locale === 'en') expect(shell.organization.name).toMatch(target.identity)
+              await expect(page.locator('header').first().getByRole('link', { name: shell.organization.name }).first()).toBeVisible()
+              const main = page.locator('main')
+              // A hero and a short post can intentionally have no heading. Their
+              // actual document title and own visible copy remain the page premise.
+              const title = await page.title()
+              expect(title).toMatch(/\S/)
+              const content = (await main.innerText()).trim()
+              expect(content, 'The tenant route must render its own visible content').toMatch(/\S/)
+              const excerpt = content.split(/\s+/).slice(0, 12).join(' ')
+              expect(await page.content()).not.toContain('[object Object]')
+              const path = url.pathname.replace(new RegExp(`^/${locale}(?=/|$)`), '') || '/'
+              const locationProduct = /^\/locations\/([^/]+)\/(?:menu|products)\/([^/]+)$/.exec(path)
+              const siteProduct = /^\/(experiences|stays)\/([^/]+)$/.exec(path)
+              const cmsServicePage = /^\/services\/[^/]+$/.test(path)
+              let detailPath: string | null = null
+              const query = new URLSearchParams({ locale: locale! })
+              if (url.searchParams.has('location_id')) query.set('location_id', url.searchParams.get('location_id')!)
+              if (locationProduct) detailPath = `/api/public/locations/${locationProduct[1]}/products/${locationProduct[2]}`
+              else if (siteProduct) detailPath = `/api/public/${siteProduct[1]}/${siteProduct[2]}`
+              else if (cmsServicePage) {
+                detailPath = '/api/public/pages/product'
+                query.set('path', path)
+              }
+              let product: PublicProductDetailPayload | null = null
+              let prices: string[] = []
+              if (detailPath) {
+                const source = await request.get(`${url.origin}${detailPath}?${query}`)
+                expect(source.status(), await source.text()).toBe(200)
+                product = await source.json() as PublicProductDetailPayload | null
+                // A CMS practice-area page can have no Product binding; the native
+                // page-product endpoint deliberately returns null for that case.
+                if (!cmsServicePage) expect(product, 'The named public offering must exist independently of its rendered page').not.toBeNull()
+                if (product) {
+                  expect(product.product.name).toMatch(/\S/)
+                  await expect(main).toContainText(product.product.name)
+                  const selections = [{ currency: product.currency, location_id: product.location?.id ?? null, at: new Date().toISOString() }]
+                  const variants = product.product.variants.filter(variant => variant.active)
+                  const summary = summarizeProductPrices(variants, selections)
+                  prices = (product.product.kind === 'dish'
+                    ? variants.map(variant => formatProductPriceRange(summarizeProductPrices([variant], selections), locale!))
+                    : [product.vertical === 'service' && variants.length === 1 && summary.lowest?.unit_amount === 0 ? 'Free' : formatProductMoney(summary.lowest)])
+                    .filter((price): price is string => price !== null)
+                  for (const price of prices) await expect(main).toContainText(price)
+                  if (!prices.length && typeof product.product.details.pricing_note === 'string') await expect(main).toContainText(product.product.details.pricing_note)
+                  if (product.product.description) await expect(main).toContainText(product.product.description.slice(0, 80))
+                  const photos = [product.product.image, ...product.product.gallery].flatMap(media => media?.kind === 'image' ? [media.public_url, media.thumbnail_url].filter((value): value is string => Boolean(value)) : [])
+                  if (photos.length) await expect.poll(() => main.locator('img:visible').evaluateAll((images, sources) => images.some(image => image instanceof HTMLImageElement && (sources.includes(image.currentSrc) || sources.includes(image.src))), photos), { message: 'The offering must show its own saved photograph' }).toBe(true)
+                }
+              }
+
+              // Visit the complete document so native lazy media loads before checking
+              // it and retaining the full-page composition. No fixed wait or mocked data.
+              await page.evaluate(async () => {
+                for (let top = 0; top < document.documentElement.scrollHeight; top += window.innerHeight) {
+                  window.scrollTo(0, top)
+                  await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+                }
+              })
+              await expect(page.locator('footer').last()).toBeVisible()
+              await expect(page.locator('footer').last()).not.toBeEmpty()
+              await page.evaluate(async () => {
+                const scrollers = [...document.querySelectorAll<HTMLElement>('*')]
+                  .filter(element => element.scrollWidth > element.clientWidth && element.clientWidth > 0)
+                  .map(element => ({ element, left: element.scrollLeft, top: element.scrollTop }))
+                try {
+                  for (const image of [...document.querySelectorAll('img')].filter(image => image.getClientRects().length
+                    && [location.hostname, 'media.krabiclaw.com', 'imagedelivery.net'].includes(new URL(image.currentSrc || image.src).hostname))) {
+                    // Native scrolling visits clipped horizontal carousel cards too;
+                    // their intentional lazy loading is not a broken-image premise.
+                    image.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' })
+                    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+                    await image.decode()
+                    if (image.naturalWidth === 0 || image.naturalHeight === 0) throw new Error(`The rendered image did not decode: ${image.currentSrc || image.src}`)
+                  }
+                } finally {
+                  for (const { element, left, top } of scrollers) element.scrollTo({ left, top, behavior: 'instant' })
+                }
+              })
+              for (const video of await page.locator('video:visible').all()) {
+                await video.scrollIntoViewIfNeeded()
+                await expect.poll(() => video.evaluate(element => {
+                  const media = element as HTMLVideoElement
+                  return {
+                    error: media.error?.message ?? null,
+                    decoded: media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && media.videoWidth > 0 && media.videoHeight > 0,
+                  }
+                }), { message: 'The rendered video must decode its own current frame without a media error' }).toEqual({ error: null, decoded: true })
+              }
+              expect(await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth))).toBeLessThanOrEqual(width)
+              await page.evaluate(() => window.scrollTo(0, 0))
+              await expect(page).toHaveTitle(title)
+              await expect.poll(async () => (await main.innerText()).trim().split(/\s+/).join(' ')).toContain(excerpt)
+              if (product) await expect(main).toContainText(product.product.name)
+              for (const price of prices) await expect(main).toContainText(price)
+              const screenshot = testInfo.outputPath(`full-page-${String(index + 1).padStart(4, '0')}.png`)
+              await page.screenshot({ path: screenshot, fullPage: true, animations: 'disabled' })
+              await testInfo.attach(`full-page ${index + 1} ${url.pathname}${url.search}`, { path: screenshot, contentType: 'image/png' })
+              await expect(page).toHaveURL(url.href)
+              const resolvedDuplicateCancellations = []
+              while (failedRequests.length) {
+                const failed = failedRequests.shift()!
+                const error = failed.failure()?.errorText
+                const resourceType = failed.resourceType()
+                const status = successfulResponses.get(failed.url())
+                // A cancelled duplicate is not a missing customer asset when the
+                // exact URL succeeded and its current rendered owner decoded.
+                const owner = failed.method() === 'GET' && error === 'net::ERR_ABORTED'
+                  && (resourceType === 'image' || resourceType === 'other') && status !== undefined
+                  ? await page.evaluate(async value => {
+                    const image = [...document.images].find(image => image.getClientRects().length
+                      && (image.currentSrc || image.src) === value && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
+                    if (image) {
+                      await image.decode()
+                      return { element: 'img', src: image.src, current_src: image.currentSrc, natural_width: image.naturalWidth, natural_height: image.naturalHeight }
+                    }
+                    const video = [...document.querySelectorAll('video')].find(video => video.getClientRects().length
+                      && video.poster === value && video.error === null && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+                      && video.videoWidth > 0 && video.videoHeight > 0)
+                    return video ? { element: 'video', poster: video.poster, current_src: video.currentSrc, ready_state: video.readyState, video_width: video.videoWidth, video_height: video.videoHeight, error: null } : null
+                  }, failed.url())
+                  : null
+                if (owner) resolvedDuplicateCancellations.push({ url: failed.url(), resource_type: resourceType, error, success_status: status, decoded_owner: owner })
+                else errors.push(`${failed.method()} ${failed.url()}: ${error}`)
+              }
+              if (resolvedDuplicateCancellations.length) await testInfo.attach(`resolved duplicate media cancellations ${index + 1} ${url.pathname}${url.search}`, {
+                body: JSON.stringify({ route: url.href, cancellations: resolvedDuplicateCancellations }, null, 2),
+                contentType: 'application/json',
+              })
+              expect(failedRequests.map(failed => `${failed.method()} ${failed.url()}: ${failed.failure()?.errorText}`), 'No observed request failure may remain unprocessed at the route boundary').toEqual([])
+              expect(errors).toEqual([])
+            }, { timeout: 60_000 })
+            completed.push(url.href)
+          }
+        } finally {
+          await testInfo.attach('completed-route-scope', {
+            body: JSON.stringify({ tenant, width, planned_count: urls.length, completed_count: completed.length, planned_urls: urls.map(url => url.href), completed_urls: completed }, null, 2),
+            contentType: 'application/json',
+          })
+        }
+      })
+    }
+  }
+}
 
 test('unknown sites render an unbranded 404 while resolved tenant errors retain their identity', async ({ page }) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local tenant header exercises an unresolved host without changing deployed DNS.')
@@ -562,7 +788,16 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   const money = (minor: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: home.currency }).format(minor / 100)
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  expect((await openTenantPage(page, `${baseURL}${stayPath}`, {}))?.status()).toBe(200)
+  expect((await openTenantPage(page, `${baseURL}/`, {}))?.status()).toBe(200)
+  const homes = page.locator('main section').filter({ has: page.locator(`[data-carousel-item][href="${stayPath}"]`) })
+  const viewAllHomes = homes.getByRole('link', { name: /^View all/ })
+  await expect(viewAllHomes).toHaveAttribute('href', '/stays')
+  await viewAllHomes.click()
+  await expect(page).toHaveURL(`${baseURL}/stays`)
+  const studio = page.locator(`main a[href="${stayPath}"]`).first()
+  await expect(studio).toBeVisible()
+  await studio.click()
+  await expect(page).toHaveURL(`${baseURL}${stayPath}`)
   await waitForNuxtHydration(page)
   const card = page.locator('article')
   // A stay is a reservation: none of an appointment's words.
