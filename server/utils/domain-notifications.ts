@@ -29,7 +29,7 @@ function safeDashboardUrl(raw: string): string {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Unsupported dashboard URL protocol')
   }
-  return encodeURI(parsed.toString())
+  return parsed.toString()
 }
 
 /**

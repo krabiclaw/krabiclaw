@@ -7,7 +7,7 @@ import { uploadImageBuffer, deleteImage } from "~/server/utils/cloudflare-images
 import { uploadToR2, buildR2Key, deleteFromR2 } from "~/server/utils/cloudflare-r2";
 import { executeBatch } from "~/server/db";
 import { publicResourceCacheInvalidationQuery } from "~/server/utils/public-resource-cache";
-import { assertNotPinnedByPublication, createMediaAsset, getMediaAsset, publicationPinGuardQuery, type MediaAsset } from "~/server/utils/media-asset-manager";
+import { assertNotPinnedByPublication, createMediaAsset, getMediaAsset, getMediaStorageReferenceState, publicationPinGuardQuery, type MediaAsset } from "~/server/utils/media-asset-manager";
 import { fastStartMp4, readMp4Metadata } from "~/server/utils/video-metadata";
 import { R2_IMAGE_MIME_TYPES } from "~/server/utils/media-mime";
 
@@ -302,6 +302,9 @@ export async function replaceR2ImageFile(input: {
     throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${input.assetId} changed while its file was replaced`, data: { code: 'MEDIA_CHANGED', field: 'asset_id' } })
   }
   input.onSwitched?.()
+  // Another asset can name the same file; it stays until nothing does.
+  const references = await getMediaStorageReferenceState(input.db, { assetId: input.assetId, r2Key: asset.r2_key, cloudflareImageId: null })
+  if (references.r2ReferencedElsewhere) return
   try {
     await deleteFromR2(input.env, asset.r2_key)
   } catch (error) {

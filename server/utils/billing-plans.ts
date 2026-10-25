@@ -324,15 +324,6 @@ function plansCacheKey(buildId: string | undefined): string {
   return `stripe-plans:v9:${buildId}`
 }
 
-// Single-instance in-flight guard — prevents a cache stampede where multiple
-// concurrent Worker requests all miss the KV cache simultaneously and each
-// fire a separate Stripe paginated fetch. Workers run in a single isolate per
-// request within one instance, but warm instances handle multiple requests in
-// the same event loop tick, so a shared module-level promise is the correct
-// primitive here (unlike multi-process servers where you'd need a distributed
-// lock).
-let _inflight: Promise<Plan[]> | null = null
-
 export async function getCachedPlans(env: EnvWithOrganizationCache, buildId: string | undefined): Promise<Plan[]> {
   try {
     const kv = env.ORGANIZATION_CACHE
@@ -351,25 +342,11 @@ export async function getCachedPlans(env: EnvWithOrganizationCache, buildId: str
       }
     }
 
-    // Coalesce concurrent cache misses: if the canonical Stripe fetch is
-    // already in progress, wait for it rather than firing a duplicate.
-    if (_inflight) return await _inflight
-
-    _inflight = (async () => {
-      const plans = await fetchStripeProducts(env)
-      if (kv) {
-        await kv.put(cacheKey, JSON.stringify(plans), {
-          expirationTtl: PLANS_CACHE_TTL_SECONDS,
-        })
-      }
-      return plans
-    })()
-
-    try {
-      return await _inflight
-    } finally {
-      _inflight = null
-    }
+    // Each request fetches its own miss: Workers refuse to let one request
+    // await I/O that another request started.
+    const plans = await fetchStripeProducts(env)
+    if (kv) await kv.put(cacheKey, JSON.stringify(plans), { expirationTtl: PLANS_CACHE_TTL_SECONDS })
+    return plans
   } catch (error) {
     if (error instanceof BillingPlansError) throw error
     throw new BillingPlansError(
