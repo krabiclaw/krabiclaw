@@ -18,7 +18,7 @@
       @error="playing = false; failure = video?.error?.message || t('site.photos.video_failed')"
     />
     <img v-else :src="item.url" :alt="item.alt ?? ''" :loading="loading" decoding="async" :class="['size-full', fit === 'contain' ? 'object-contain' : 'object-cover']">
-    <span v-if="item.kind === 'video' && !ready && !failure" class="pointer-events-none absolute inset-0 animate-pulse bg-muted" aria-hidden="true" />
+    <span v-if="item.kind === 'video' && !item.poster && !ready && !failure" class="pointer-events-none absolute inset-0 animate-pulse bg-muted" aria-hidden="true" />
     <span v-if="item.kind === 'video' && !playing" class="pointer-events-none absolute inset-0 grid place-items-center bg-black/10 text-white" aria-hidden="true">
       <span class="grid size-12 place-items-center rounded-full bg-black/45 backdrop-blur-sm"><TenantIcon name="play" class="size-5" /></span>
     </span>
