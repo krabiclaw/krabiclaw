@@ -23,7 +23,7 @@ interface TrackedPage {
   pageviewReady: Promise<boolean>
 }
 
-const isTracked = (path: string) => isTrackablePath(path) && !path.startsWith('/dev')
+const isTracked = (path: string) => isTrackablePath(path) && path !== '/dev' && !path.startsWith('/dev/')
 
 // The pages observed so far, by path, so an action names the visit it happened on even when it was
 // captured before the collector registered or after the visitor moved on.
