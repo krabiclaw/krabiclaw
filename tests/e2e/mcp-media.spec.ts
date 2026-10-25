@@ -184,8 +184,8 @@ test.describe('stateless MCP server', () => {
       expect(originalProduct.image?.asset_id).toBe(seededAsset)
       expect(originalProduct.gallery.map(item => item.asset_id)).toEqual([seededAsset])
       expect(originalProduct.media.length).toBeGreaterThan(0)
-      originalName = (await call<{ product: Product }>('get_product', { product_id: productId })).product.name
-      expect(originalProduct.name).toBe(originalName)
+      originalName = originalProduct.name
+      expect((await call<{ product: Product }>('get_product', { product_id: productId })).product.name).toBe(originalName)
       const changed = (await call<{ product: Product }>('update_product', { product_id: productId, name: `${originalName} MCP media check` })).product
       expect(changed.name).toBe(`${originalName} MCP media check`)
       expectSeededMedia(changed)
