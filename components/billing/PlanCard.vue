@@ -121,7 +121,6 @@ import { additionalHomePrice, additionalLocationPrice, INCLUDED_HOMES, INCLUDED_
 
 const props = defineProps<{
   plan: Plan
-  highlighted?: boolean
   photo?: boolean
   frontImage?: string
   sequence?: number
@@ -152,7 +151,7 @@ useEventListener(computed(() => import.meta.client ? document : undefined), 'vis
 
 const { displayPrice } = await usePlans()
 
-const isHighlighted = computed(() => props.highlighted ?? props.plan.highlighted)
+const isHighlighted = computed(() => props.plan.highlighted)
 
 const currentPrice = computed(() => displayPrice(props.plan))
 
