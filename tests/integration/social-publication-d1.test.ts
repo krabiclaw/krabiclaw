@@ -402,7 +402,13 @@ test('publication: one result, one external post per target, and no blind resend
     const refused = await publishPost(env, 'org-a', second.post.id, { expectedUpdatedAt: (await getPost(db, env, 'org-a', second.post.id))!.updated_at, targets: [targets.instagram(), { ...targets.facebook(), connection_revision: 'old' } as PublishTarget] }, 'owner')
     assert.deepEqual(refused.outcomes.map(outcome => outcome.code), ['media_required', 'connection_changed'])
     const png = await create('key-png', { media: [{ asset_id: 'a3', slot: 'cover' }] })
-    assert.match((await publishPost(env, 'org-a', png.post.id, { expectedUpdatedAt: png.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.message!, /JPEG images only; asset a3 is image\/png/)
+    assert.match((await publishPost(env, 'org-a', png.post.id, { expectedUpdatedAt: png.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.message!, /JPEG images only; asset a3 is image\/png and has no JPEG rendition/)
+    // A PNG held in Cloudflare Images is sent to Instagram as its JPEG rendition.
+    await asset('a4', 'image/png')
+    await run(`UPDATE media_assets SET cloudflare_image_id = 'cf-a4' WHERE id = 'a4'`)
+    const rendered = await create('key-png-rendition', { media: [{ asset_id: 'a4', slot: 'cover' }] })
+    assert.equal((await publishPost(env, 'org-a', rendered.post.id, { expectedUpdatedAt: rendered.post.updated_at, targets: [targets.instagram()] }, 'owner')).outcomes[0]!.status, 'published')
+    assert.equal(meta.sent(request => request.method === 'POST' && request.path.endsWith('/media') && Boolean(request.body.image_url)).at(-1)!.body.image_url, 'https://imagedelivery.example.test/hash/cf-a4/format=jpeg')
     // Stale content for a new target.
     const stale = await publishPost(env, 'org-a', second.post.id, { expectedUpdatedAt: second.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.equal(stale.outcomes[0]!.code, 'stale_revision')
