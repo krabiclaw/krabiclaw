@@ -1405,10 +1405,9 @@ export async function createProduct(db: DbClient, input: {
     try {
       await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Create product', action: 'create it', stay: planned.kind === 'stay' })
     } catch (error) {
-      if (isUniqueDedupeConflict(error)) {
-        const concurrent = await replay()
-        if (concurrent) return concurrent
-      }
+      // A competing creation can claim the slug or page before the audit key.
+      const concurrent = await replay()
+      if (concurrent) return concurrent
       if (isProductPageConflict(error)) conflict('Product already has a canonical page')
       if (input.booking) {
         const { bookingConfigurationWriteError } = await import('~/server/utils/availability')
@@ -1424,10 +1423,14 @@ export async function createProduct(db: DbClient, input: {
     await publishStayProducts(env, [created])
     return created
   } catch (error) {
-    if (!writeStarted && HTTPError.isError(error)) throw new HTTPError({
-      cause: error, body: error.body,
-      data: { ...(error.data !== null && typeof error.data === 'object' && !Array.isArray(error.data) ? error.data : {}), mutation_applied: false },
-    })
+    if (!writeStarted && HTTPError.isError(error)) {
+      const concurrent = await replay()
+      if (concurrent) return concurrent
+      throw new HTTPError({
+        cause: error, body: error.body,
+        data: { ...(error.data !== null && typeof error.data === 'object' && !Array.isArray(error.data) ? error.data : {}), mutation_applied: false },
+      })
+    }
     throw error
   }
 }

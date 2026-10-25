@@ -341,10 +341,17 @@ export async function createPost(
   createdBy: string,
 ): Promise<{ post: Post; replayed: boolean }> {
   const key = input.idempotencyKey.trim()
-  if (!key || key.length > 200) throw new PostValidationError('idempotency_key must be 1 to 200 characters')
-  const data = parsePostInput(input.post, 'create')
-  const requestHash = await creationRequestHash(data)
   const dedupeKey = creationDedupeKey('social_post', organizationId, key)
+  let data: PostMutation
+  try {
+    if (!key || key.length > 200) throw new PostValidationError('idempotency_key must be 1 to 200 characters')
+    data = parsePostInput(input.post, 'create')
+  } catch (error) {
+    // Rejected input may still name a key whose earlier request committed.
+    if (error instanceof PostValidationError && !await readCreationRecord(db, dedupeKey)) error.data = { mutation_applied: false }
+    throw error
+  }
+  const requestHash = await creationRequestHash(data)
   const replay = async () => {
     const record = await readCreationRecord(db, dedupeKey)
     if (!record) return null

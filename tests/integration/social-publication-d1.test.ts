@@ -27,6 +27,7 @@ import deletionStatus from '../../server/api/integrations/meta/data-deletion.get
 import { createBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
 import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
+import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -392,6 +393,9 @@ test('publication: one result, one external post per target, and no blind resend
     }
 
     // Creation is idempotent by key, and a reused key for other words conflicts.
+    await assert.rejects(create('   ', { body: 'A draft' }), { statusCode: 400, data: { mutation_applied: false } })
+    await assert.rejects(create('x'.repeat(201), { body: 'A draft' }), { statusCode: 400, data: { mutation_applied: false } })
+    await assert.rejects(create('invalid-payload', { title: 'x'.repeat(POST_TITLE_MAX + 1) }), { statusCode: 400, data: { mutation_applied: false } })
     await assert.rejects(create('invalid-location', { body: 'A draft', location_id: 'missing-location' }), { statusCode: 400, data: { mutation_applied: false } })
     await assert.rejects(create('invalid-photo', { body: 'A draft', media: [{ asset_id: 'missing-asset', slot: 'cover' }] }), { status: 400, data: { mutation_applied: false } })
     assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE kind = 'social_post'").first('count(*)'), 0)
@@ -401,6 +405,7 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(first.post.slug, 'pizza-night-friday')
     assert.match(first.post.preview_url ?? '', /^https:\/\/org-a\.krabiclaw\.test\/posts\/pizza-night-friday\?preview_token=/)
     assert.equal((await create('key-1', { body: 'Pizza night Friday', media: [{ asset_id: 'a1', slot: 'cover' }, { asset_id: 'a2', slot: 'gallery' }], call_to_action: { label: 'Book', url: 'https://example.test/book' } })).post.id, first.post.id)
+    await assert.rejects(create('key-1', { title: 'x'.repeat(POST_TITLE_MAX + 1) }), (error: unknown) => error instanceof PostValidationError && error.statusCode === 400 && error.data === undefined)
     await assert.rejects(create('key-1', { body: 'Something else' }), (error: unknown) => HTTPError.isError(error) && error.status === 409 && /different post/.test(error.message) && !(error.data && typeof error.data === 'object' && 'mutation_applied' in error.data))
     assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE kind = 'social_post'").first('count(*)'), 1)
     // An empty draft exists and has a generated route, and cannot be published.

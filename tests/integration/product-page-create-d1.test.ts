@@ -124,6 +124,21 @@ test('a service, its default variant, its page and their binding commit together
     assert.deepEqual(await db.prepare('SELECT id, path, title FROM content_documents WHERE product_id = ?').bind(created.id).first(),
       { id: created.page!.id, path: '/services/family-law-2', title: 'Family Law' })
     assert.deepEqual(await counts(db), before)
+
+    // An exact path may be claimed after the other caller's first replay read.
+    // Both requests still resolve the same creation, rather than calling its
+    // key unused when the second planner or write sees the first one's page.
+    const concurrent = await Promise.all([0, 1].map(() => createProduct(db, {
+      organizationId: ORG, actor: ACTOR, env, product: { kind: 'service', name: 'Concurrent Family Law' },
+      publication: { published: false }, page: { data: { ...SERVICE_PAGE, title: 'Concurrent Family Law', path: '/services/concurrent-family-law' }, env }, idempotencyKey: 'create-concurrent-family-law',
+    })))
+    assert.equal(concurrent[0]!.id, concurrent[1]!.id)
+    assert.deepEqual(concurrent[0]!.page, concurrent[1]!.page)
+    assert.deepEqual((await db.prepare(`SELECT p.id, d.id AS page_id, d.path FROM products p
+      JOIN content_documents d ON d.product_id = p.id AND d.organization_id = p.organization_id
+      WHERE p.organization_id = ? AND p.name = 'Concurrent Family Law'`).bind(ORG).all()).results,
+    [{ id: concurrent[0]!.id, page_id: concurrent[0]!.page!.id, path: '/services/concurrent-family-law' }])
+    assert.deepEqual(await counts(db), { products: before.products + 1, variants: before.variants + 1, pages: before.pages + 1 })
   } finally {
     await runtime.dispose()
   }
