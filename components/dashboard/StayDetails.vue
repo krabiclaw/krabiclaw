@@ -74,7 +74,7 @@
       </template>
       <template v-else-if="stay.owner === 'app'">
         <h2 class="mt-8 text-xl font-semibold text-highlighted">Payments</h2>
-        <p class="mt-1 text-sm text-muted">Money you received outside KrabiClaw. Recording it moves no money.</p>
+        <p class="mt-1 text-sm text-muted">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
         <ul v-if="stay.payments.length" class="mt-4 divide-y divide-default border-y border-default">
           <li v-for="payment in stay.payments" :key="payment.id" class="flex items-center gap-4 py-3">
             <span class="min-w-0 flex-1">
@@ -86,7 +86,7 @@
         </ul>
         <p v-else class="mt-4 text-base text-muted">No payments recorded.</p>
 
-        <UForm v-if="manage && stay.status !== 'cancelled'" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
+        <UForm v-if="manage" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
           <div class="grid gap-4 sm:grid-cols-2">
             <UFormField :label="`Amount (${stay.currency})`" name="amount" description="Negative for a refund." required>
               <UInput v-model="draft.amount" inputmode="decimal" class="w-full" />

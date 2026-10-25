@@ -343,6 +343,19 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     expect(cancelled.data!.stay.status).toBe('cancelled')
     expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
 
+    await page.getByLabel('Amount (THB)', { exact: true }).fill('-100')
+    await page.getByLabel('Reference', { exact: true }).fill('Offline refund after cancellation')
+    const [offlineRefund] = await Promise.all([
+      page.waitForResponse(response => response.url().includes(`/stays/${stay.data!.stay.id}/payments`) && response.request().method() === 'POST'),
+      page.getByRole('button', { name: 'Record payment', exact: true }).click(),
+    ])
+    await expectStatus(offlineRefund, 200)
+    await expect(page.getByRole('listitem').filter({ hasText: 'Offline refund after cancellation' })).toBeVisible()
+    const refunded = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+    expect(refunded.error).toBeNull()
+    expect(refunded.data!.stay).toMatchObject({ status: 'cancelled', paid_minor: 0 })
+    expect(refunded.data!.stay.payments.find(payment => payment.reference === 'Offline refund after cancellation')).toMatchObject({ amount_minor: -10000 })
+
     // Cancellation withdraws the exact location from both independent reads
     // and from the receipt and account screens that previously displayed it.
     for (const response of await Promise.all([guest.request.get(accountApi), guest.request.get(receiptApi, { headers: receiptHeaders })])) {
