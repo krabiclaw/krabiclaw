@@ -521,9 +521,11 @@ const itemsByDay = computed(() => {
   const groups = new Map<string, CalendarItem[]>()
   for (const block of monthData.value.values()) {
     for (const item of block.items) {
-      const days = item.kind === 'stay' && item.endsAt
-        ? monthDays.value.filter(day => day >= item.dayKey && day <= localNow(item.timeZone, new Date(item.endsAt!)).date)
-        : [item.dayKey]
+      const days = [item.dayKey]
+      if (item.kind === 'stay' && item.endsAt) {
+        const last = localNow(item.timeZone, new Date(item.endsAt)).date
+        for (let day = parseDate(item.dayKey).add({ days: 1 }); day.toString() <= last; day = day.add({ days: 1 })) days.push(day.toString())
+      }
       for (const day of days) {
         const rows = groups.get(day) ?? []
         if (!rows.some(row => row.id === item.id)) groups.set(day, [...rows, item])
