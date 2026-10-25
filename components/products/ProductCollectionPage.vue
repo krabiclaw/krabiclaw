@@ -208,20 +208,35 @@
                   :text="t('site.menu_page.unavailable')"
                 />
               </div>
-              <div class="mt-5">
+              <div v-if="product.stay" class="mt-4 space-y-1">
+                <div class="flex items-baseline justify-between gap-2">
+                  <h3 class="font-semibold text-base text-default transition-colors group-hover:text-primary leading-snug">{{ product.name }}</h3>
+                </div>
+                <p v-if="placeName(product.stay.location_id)" class="text-xs text-muted">
+                  {{ placeName(product.stay.location_id) }}
+                </p>
+                <p v-if="staySpecLabels(product.stay, t).length" class="text-xs text-muted">
+                  {{ staySpecLabels(product.stay, t).join(' · ') }}
+                </p>
+                <p v-if="product.description" class="line-clamp-2 text-xs leading-relaxed text-muted pt-0.5">
+                  {{ product.description }}
+                </p>
+                <p v-if="priceLabel(product, group.location_id)" class="pt-1.5 text-sm text-default">
+                  <span class="font-semibold">{{ priceLabel(product, group.location_id) }}</span>
+                  <span class="text-muted text-xs"> {{ t('stay.price_per_night', { price: '' }).trim() }}</span>
+                </p>
+              </div>
+
+              <div v-else class="mt-5">
                 <h3 class="text-lg font-semibold transition-colors group-hover:text-primary">{{ product.name }}</h3>
-                <p v-if="product.stay && placeName(product.stay.location_id)" class="mt-1 text-xs font-medium uppercase tracking-wide text-muted">{{ placeName(product.stay.location_id) }}</p>
-                <p v-else-if="!product.stay && showLocations && productLocationId(product, group.location_id)" class="mt-1 text-xs font-medium uppercase tracking-wide text-muted">{{ locationTitle(productLocationId(product, group.location_id)!) }}</p>
+                <p v-if="showLocations && productLocationId(product, group.location_id)" class="mt-1 text-xs font-medium uppercase tracking-wide text-muted">{{ locationTitle(productLocationId(product, group.location_id)!) }}</p>
                 <p v-if="product.description" class="mt-1 line-clamp-2 text-sm leading-6 text-muted">{{ product.description }}</p>
 
                 <div class="mt-4 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-muted">
                   <span v-if="priceLabel(product, group.location_id)" class="flex items-center gap-1">
                     <TenantIcon name="banknotes" class="size-3.5" />
-                    {{ product.stay ? t('stay.price_per_night', { price: priceLabel(product, group.location_id) }) : priceLabel(product, group.location_id) }}
+                    {{ priceLabel(product, group.location_id) }}
                   </span>
-                  <template v-if="product.stay">
-                    <span v-for="spec in staySpecLabels(product.stay, t)" :key="spec">{{ spec }}</span>
-                  </template>
                   <span v-if="product.booking?.duration_minutes" class="flex items-center gap-1">
                     <TenantIcon name="clock" class="size-3.5" />
                     {{ durationLabel(product.booking.duration_minutes) }}
@@ -233,7 +248,7 @@
                 </div>
 
                 <div v-if="productHref(product, group.location_id)" class="mt-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-primary">
-                  {{ product.stay ? t(productCtaKey(product.kind)) : verticalCopy.viewExperienceCta }}
+                  {{ verticalCopy.viewExperienceCta }}
                   <TenantIcon name="arrow-right" class="size-3.5 transition-transform group-hover:translate-x-1" />
                 </div>
               </div>
@@ -252,7 +267,7 @@ import type { CurrencyCode } from '~/shared/currencies'
 import { formatProductMoney, formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
 import { minorAmountToMajor, type Price } from '~/shared/prices'
 import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
-import { groupProductsByCollection, productCtaKey, productLocationCollectionPath, staySpecLabels } from '~/utils/product-presentation'
+import { groupProductsByCollection, productLocationCollectionPath, staySpecLabels } from '~/utils/product-presentation'
 import { addressPlaceName, type PostalAddress } from '~/utils/postal-address'
 import type { PublicLocationArea } from '~/types/public-location'
 import { mediaStillUrl } from '~/shared/media-placement-contract'

@@ -317,6 +317,7 @@ export default {
     "reject": "Reject",
     "switch_to_dark_mode": "Switch to dark mode",
     "switch_to_light_mode": "Switch to light mode",
+    "acceptable_use": "Acceptable Use",
     "terms": "Terms"
   },
   "social_posts": {

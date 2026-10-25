@@ -53,6 +53,7 @@ export default defineHandler(async (event) => {
     actorUserId: session.user.id,
     financialWritesAllowed: await roleAllows({ ...organization.membership, permissions: { payments: ['refund'] } }),
     body: field('body'),
+    reason: field('reason'),
     photos,
     idempotencyKey,
     env,

@@ -1,6 +1,6 @@
 import { CONTENT_DOCUMENT_KINDS, LOCALIZED_RESOURCE_TYPES } from '~/shared/content-registries'
 import type { McpToolDefinition } from './shared'
-import { contentBlockObject, organizationTool } from './shared'
+import { contentBlockObject, organizationTool, workspaceContextObject } from './shared'
 import { TENANT_PAGE_BLOCKS_SCHEMA } from './content'
 import { localizedResourceValuesSchema } from '~/server/utils/localization-registry'
 import { PRODUCT_KINDS, productDetailsSchema } from '~/shared/product-details'
@@ -124,7 +124,7 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
       ],
     },
     required: ['resource_type', 'resource_id', 'locale', 'values'],
-    outputSchema: { type: 'object', properties: { localization: localizationObject, context: { type: 'object' } }, required: ['localization'], additionalProperties: false },
+    outputSchema: { type: 'object', properties: { localization: localizationObject, context: workspaceContextObject }, required: ['localization'], additionalProperties: false },
   }),
   organizationTool({
     name: 'delete_resource_localization',
@@ -137,7 +137,7 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
       locale: { type: 'string' },
     },
     required: ['resource_type', 'resource_id', 'locale'],
-    outputSchema: { type: 'object', properties: { deleted: { type: 'boolean' }, resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES, 'content_document'] }, resource_id: { type: 'string' }, locale: { type: 'string' }, context: { type: 'object' } }, required: ['deleted', 'resource_type', 'resource_id', 'locale'], additionalProperties: false },
+    outputSchema: { type: 'object', properties: { deleted: { type: 'boolean' }, resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES, 'content_document'] }, resource_id: { type: 'string' }, locale: { type: 'string' }, context: workspaceContextObject }, required: ['deleted', 'resource_type', 'resource_id', 'locale'], additionalProperties: false },
   }),
   organizationTool({
     name: 'get_product_catalog_localization',
@@ -184,7 +184,7 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
       })),
     },
     required: ['resource_type', 'locale', 'items'],
-    outputSchema: { type: 'object', properties: { locale: { type: 'string' }, resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES] }, updated_resource_ids: { type: 'array', items: { type: 'string' } }, context: { type: 'object' } }, required: ['locale', 'resource_type', 'updated_resource_ids'], additionalProperties: false },
+    outputSchema: { type: 'object', properties: { locale: { type: 'string' }, resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES] }, updated_resource_ids: { type: 'array', items: { type: 'string' } }, context: workspaceContextObject }, required: ['locale', 'resource_type', 'updated_resource_ids'], additionalProperties: false },
   }),
 ]
 

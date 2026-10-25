@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "975838f6-ebe7-44c9-b4ab-2ca683e5c9a2",
+  "id": "3f4ab06a-38f5-459e-b22a-893cc9e441c4",
   "prevId": "30db8a66-797e-48e7-9399-2a2451814e6b",
   "tables": {
     "account": {
@@ -2156,13 +2156,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "task_id": {
-          "name": "task_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -3531,6 +3524,234 @@
         "content_documents_social_source_check": {
           "name": "content_documents_social_source_check",
           "value": "kind <> 'social_post' OR row_role <> 'root' OR (source IN ('manual','template')) IS 1"
+        }
+      }
+    },
+    "content_reports": {
+      "name": "content_reports",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reporter_user_id": {
+          "name": "reporter_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "team_message_id": {
+          "name": "team_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "author_user_id": {
+          "name": "author_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "excerpt": {
+          "name": "excerpt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "blocked": {
+          "name": "blocked",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolved_by_user_id": {
+          "name": "resolved_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "content_reports_status_created_idx": {
+          "name": "content_reports_status_created_idx",
+          "columns": [
+            "status",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "content_reports_request_idx": {
+          "name": "content_reports_request_idx",
+          "columns": [
+            "request_id"
+          ],
+          "isUnique": false
+        },
+        "content_reports_team_message_idx": {
+          "name": "content_reports_team_message_idx",
+          "columns": [
+            "team_message_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "content_reports_organization_id_organization_id_fk": {
+          "name": "content_reports_organization_id_organization_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "content_reports_reporter_user_id_user_id_fk": {
+          "name": "content_reports_reporter_user_id_user_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "user",
+          "columnsFrom": [
+            "reporter_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "content_reports_request_id_requests_id_fk": {
+          "name": "content_reports_request_id_requests_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "requests",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "content_reports_team_message_id_team_messages_id_fk": {
+          "name": "content_reports_team_message_id_team_messages_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "team_messages",
+          "columnsFrom": [
+            "team_message_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "content_reports_author_user_id_user_id_fk": {
+          "name": "content_reports_author_user_id_user_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "user",
+          "columnsFrom": [
+            "author_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "content_reports_resolved_by_user_id_user_id_fk": {
+          "name": "content_reports_resolved_by_user_id_user_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "user",
+          "columnsFrom": [
+            "resolved_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "content_reports_subject_check": {
+          "name": "content_reports_subject_check",
+          "value": "(subject = 'guest_thread' AND team_message_id IS NULL) OR (subject = 'team_message' AND request_id IS NULL AND blocked = 0)"
+        },
+        "content_reports_reason_check": {
+          "name": "content_reports_reason_check",
+          "value": "length(reason) BETWEEN 1 AND 1000 AND reason = trim(reason)"
+        },
+        "content_reports_resolution_check": {
+          "name": "content_reports_resolution_check",
+          "value": "(status = 'open') = (resolved_at IS NULL)"
+        },
+        "content_reports_instants_check": {
+          "name": "content_reports_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (resolved_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', resolved_at, '+0 days') IS resolved_at)"
         }
       }
     },
@@ -14094,6 +14315,13 @@
         },
         "archived_by_user_id": {
           "name": "archived_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "blocked_at": {
+          "name": "blocked_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

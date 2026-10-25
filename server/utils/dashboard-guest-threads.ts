@@ -70,7 +70,7 @@ export function parseGuestThreadListQuery(query: Record<string, unknown>): Dashb
     type: filter<GuestThreadSubmissionType>('type', ['contact', 'reservation', 'booking', 'stay']),
     conversationState: filter<ConversationState>('conversation_state', ['needs_attention', 'waiting_on_guest', 'resolved']),
     unreadOnly: unread === '1' || unread === 'true',
-    mailbox: filter<GuestThreadMailbox>('mailbox', ['current', 'past']),
+    mailbox: filter<GuestThreadMailbox>('mailbox', ['current', 'past', 'blocked']),
   }
 }
 

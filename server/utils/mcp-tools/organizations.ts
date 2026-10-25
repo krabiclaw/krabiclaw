@@ -309,7 +309,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
           address_visibility: { type: 'string', enum: ['visible', 'hidden'] },
           contrast_warnings: { type: 'array', items: { type: 'object', properties: { mode: { type: 'string' }, pair: { type: 'string' }, ratio: { type: 'number' }, minimum: { type: 'number' } }, required: ['mode', 'pair', 'ratio', 'minimum'] } },
           updated_at: { type: 'string' },
-          context: { type: 'object' },
+          context: workspaceContextObject,
         },
         required: ['ok', 'entity', 'id', 'changed_fields', 'saved_fields'],
       },

@@ -178,7 +178,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
  */
 test('a thread is Current until its occurrence ends or a member archives it', () => {
   const dinner = { ends_at: '2026-09-11T21:00:00.000Z' } // 19:00–21:00
-  const live = { archived_at: null }
+  const live = { archived_at: null, blocked_at: null }
   const at = (now: string) => resolveGuestThreadMailbox(live, dinner, now)
   assert.equal(at('2026-09-11T18:59:00.000Z').mailbox, 'current', 'before it starts')
   assert.equal(at('2026-09-11T19:01:00.000Z').mailbox, 'current', 'once it has started')
@@ -192,11 +192,18 @@ test('a thread is Current until its occurrence ends or a member archives it', ()
   assert.equal(resolveGuestThreadMailbox(live, session, '2026-09-12T08:00:00.000Z').mailbox, 'current')
   assert.equal(resolveGuestThreadMailbox(live, session, '2026-09-12T09:00:01.000Z').mailbox, 'past')
 
+  // A blocked guest's thread is Blocked, archived or not, until unblocked; the guest never sees it.
+  const blocked = { archived_at: null, blocked_at: '2026-09-11T10:00:00.000Z' }
+  assert.deepEqual(resolveGuestThreadMailbox(blocked, dinner, '2026-09-11T18:00:00.000Z'), {
+    mailbox: 'blocked', manuallyArchived: false, occurrenceEnded: false, canArchive: false, canUnarchive: false,
+  })
+  assert.equal(resolveGuestThreadMailbox(blocked, dinner, '2026-09-11T18:00:00.000Z', 'buyer').mailbox, 'current')
+
   // A direct message has no occurrence and is Current until archived.
   assert.deepEqual(resolveGuestThreadMailbox(live, null, '2126-01-01T00:00:00.000Z'), {
     mailbox: 'current', manuallyArchived: false, occurrenceEnded: false, canArchive: true, canUnarchive: false,
   })
-  const archived = { archived_at: '2026-09-11T10:00:00.000Z' }
+  const archived = { archived_at: '2026-09-11T10:00:00.000Z', blocked_at: null }
   assert.deepEqual(resolveGuestThreadMailbox(archived, null, '2026-09-11T11:00:00.000Z'), {
     mailbox: 'past', manuallyArchived: true, occurrenceEnded: false, canArchive: false, canUnarchive: true,
   })
