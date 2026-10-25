@@ -1,12 +1,13 @@
 <template>
   <!-- The article is the writing canvas; its metadata opens from its header. -->
-  <DashboardIndexPanel :id="panelId" title="Article">
+  <DashboardIndexPanel :id="panelId" :title="newArticle ? 'New article' : 'Article'">
     <template #right>
-      <UButton label="Save" :loading="saveState === 'saving'" :disabled="saving || !contentDirty || !form.title.trim() || saveState === 'conflict'" @click="saveArticle" />
-      <UTooltip text="Preview">
+      <UButton :label="newArticle ? 'Save draft' : 'Save'" :variant="newArticle ? 'ghost' : 'solid'" :loading="saveState === 'saving' && !publishing" :disabled="saving || (!contentDirty && !newArticle) || !form.title.trim() || saveState === 'conflict'" @click="saveDraft" />
+      <UButton v-if="newArticle" label="Publish" :loading="publishing" :disabled="saving || !isArticleValid() || !form.category_id || !!categoriesError || saveState === 'conflict'" @click="publish" />
+      <UTooltip v-if="post" text="Preview">
         <UButton ref="previewButton" color="neutral" variant="ghost" icon="i-lucide-eye" aria-label="Preview" :to="previewPath" :disabled="saving || !previewUrl" class="size-10 rounded-full" data-testid="article-preview" />
       </UTooltip>
-      <UDropdownMenu :items="settingsActions" :disabled="saving">
+      <UDropdownMenu v-if="!newArticle" :items="settingsActions" :disabled="saving">
         <UButton color="neutral" variant="ghost" icon="i-lucide-ellipsis" aria-label="Article settings" :disabled="saving" class="size-10 rounded-full" />
       </UDropdownMenu>
       <slot v-if="post" name="actions" :post="post" :saving="saving" />
@@ -15,11 +16,20 @@
     <!-- Inert while a write is in flight: the ids that come back are matched to the blocks that were sent. -->
     <div class="space-y-8" :inert="saving">
       <p v-if="actionError" role="alert" class="rounded-lg border border-error/30 bg-error/10 px-4 py-2 text-sm text-error">{{ actionError }}</p>
+      <UAlert v-if="unconfirmedCreation && !saving" color="warning" title="Confirm this draft before editing" description="The last save has not been confirmed. Retry Save draft to recover the same article." />
 
       <UAlert v-if="loadError" color="error" variant="soft" :description="loadError" />
       <template v-else>
       <p class="text-xs" :class="saveState === 'failed' || saveState === 'conflict' ? 'text-error' : 'text-muted'" role="status">{{ saveLabel }}</p>
-      <div class="overflow-hidden rounded-lg bg-[var(--editor-canvas,#fff)] text-[var(--editor-ink,#1f2937)]" :style="editorCanvasStyle">
+      <UFormField v-if="newArticle" label="Collection">
+        <USelect v-model="form.collection" :items="collectionOptions" :disabled="saving || unconfirmedCreation" class="w-full" />
+      </UFormField>
+      <UFormField v-if="newArticle" label="Category" description="Choose a category before publishing.">
+        <USelect v-model="form.category_id" :items="categoryOptions" :disabled="saving || unconfirmedCreation || !!categoriesError" :placeholder="categories?.length === 0 ? 'No categories yet' : 'Choose a category'" class="w-full" />
+        <template #hint><ULink :to="{ path: categoriesPath, query: { collection: form.collection } }" target="_blank" aria-label="Manage categories (opens in a new tab)" class="inline-flex items-center gap-1 text-sm">Manage categories <UIcon name="i-lucide-external-link" class="size-3" /></ULink></template>
+        <p v-if="categoriesError" role="alert" class="mt-2 text-sm text-error">{{ getErrorMessage(categoriesError, 'Categories could not be loaded') }}</p>
+      </UFormField>
+      <div class="overflow-hidden rounded-lg bg-[var(--editor-canvas,#fff)] text-[var(--editor-ink,#1f2937)]" :style="editorCanvasStyle" :inert="unconfirmedCreation || undefined">
         <div class="mx-auto max-w-4xl px-4 py-10 sm:px-6 sm:py-14 lg:px-8">
           <BlogArticleRenderer
             v-model:title="form.title"
@@ -85,6 +95,7 @@ export interface BlogEditor {
   /** The post's collection's categories, the Category leaf's choices. */
   categories: Ref<DashboardArticleCategory[] | undefined>
   categoriesError: Ref<unknown>
+  categoryOptions: ComputedRef<Array<{ label: string; value: string }>>
   resolvedExcerpt: ComputedRef<string>
   revert: () => void
   save: () => Promise<void>
@@ -96,20 +107,33 @@ export const blogEditorKey = Symbol('blog-editor') as InjectionKey<BlogEditor>
 <script setup lang="ts">
 import BlogArticleRenderer from '~/components/blog/BlogArticleRenderer.vue'
 import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
-import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS } from '~/utils/article-collections'
+import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, isArticleCollection } from '~/utils/article-collections'
 import { youTubeVideoId } from '~/shared/youtube-video'
 import type { BlogPostRepository, BlogPost, BlogEditorBlock, BlogPostUpdateInput } from './types'
 import { cloneEditorBlocks, generatedExcerpt, initialBlogEditorBlocks } from '~/utils/blog-editor'
 import { getErrorMessage } from '~/utils/errors'
+import { isNavigationFailure, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
+import { useEventListener } from '@vueuse/core'
 
-const props = withDefaults(defineProps<{ repository: BlogPostRepository; initialPost: BlogPost; organizationId: string; panelId?: string; mediaPickerComponent: Component }>(), {
+const props = withDefaults(defineProps<{ repository: BlogPostRepository; initialPost: BlogPost | null; organizationId: string; panelId?: string; mediaPickerComponent: Component }>(), {
   panelId: 'blog-post-editor',
 })
 const route = useRoute()
 const postId = computed(() => String(route.params.postId || ''))
+const newArticle = postId.value === 'new'
 const post = ref<BlogPost | null>(null)
 const persistedPostId = computed(() => post.value?.id || postId.value)
-const blocks = ref<BlogEditorBlock[]>(initialBlogEditorBlocks())
+if (newArticle && route.query.collection !== undefined && !isArticleCollection(route.query.collection)) throw createError({ statusCode: 400, statusMessage: 'Choose an article collection' })
+const initialCollection = isArticleCollection(route.query.collection) ? route.query.collection : 'blog'
+const draftKey = `blog-create:${props.organizationId}:${initialCollection}`
+const blankDraft = () => ({
+  form: { title: '', collection: initialCollection as ArticleCollection, category_id: '', excerpt: '', visibility: 'listed' as 'listed' | 'unlisted' },
+  blocks: initialBlogEditorBlocks() as BlogEditorBlock[],
+  idempotency_key: crypto.randomUUID(),
+    submitted: false,
+})
+const draft = newArticle ? useState(draftKey, blankDraft) : ref(blankDraft())
+const blocks = toRef(draft.value, 'blocks')
 const loadError = ref('')
 const saveState = ref<'saved' | 'saving' | 'failed' | 'conflict'>('saved')
 const actionError = ref('')
@@ -127,8 +151,14 @@ const section = computed<SettingsSection | null>(() => {
   return segment && SETTINGS_SECTIONS.some(key => key === segment) ? segment as SettingsSection : null
 })
 
-const form = reactive({ title: '', collection: 'blog' as ArticleCollection, category_id: '', excerpt: '', visibility: 'listed' as 'listed' | 'unlisted' })
+const form = reactive(draft.value.form)
 const saving = computed(() => savingExplicitly.value || publishing.value || saveState.value === 'saving')
+const unconfirmedCreation = computed(() => newArticle && draft.value.submitted && !post.value)
+if (newArticle) {
+  onBeforeRouteLeave(to => !saving.value || Boolean(post.value && to.path === props.repository.editUrl(post.value.id)))
+  onBeforeRouteUpdate(to => !saving.value || (to.path === route.path && to.query.collection === route.query.collection) || Boolean(post.value && to.path === props.repository.editUrl(post.value.id)))
+  onUnmounted(() => { if (!draft.value.submitted || post.value) clearNuxtState(draftKey) })
+}
 const saveDisabled = computed(() => saving.value || Boolean(loadError.value) || !form.title.trim() || saveState.value === 'conflict'
   || (section.value === 'publishing' && post.value?.status !== 'published' && (!isArticleValid() || !form.category_id))
   || (!contentDirty.value && !(section.value === 'publishing' && post.value?.status !== 'published')))
@@ -139,13 +169,30 @@ if (!props.organizationId) throw new Error('The blog editor needs the organizati
 // before its collection's categories are read.
 watch(() => props.initialPost, (loaded) => {
   try {
-    applyLoadedPost(loaded)
+    if (loaded) applyLoadedPost(loaded)
+    else if (!newArticle) throw new Error('The article is missing.')
     loadError.value = ''
   } catch (error) {
     loadError.value = getErrorMessage(error, 'Failed to load article.')
   }
 }, { immediate: true })
-const { data: categories, error: categoriesError } = await useArticleCategories(props.organizationId, () => form.collection)
+const { data: categories, error: categoriesError, refresh: refreshCategories } = await useArticleCategories(props.organizationId, () => form.collection)
+// Category management opens its existing owner in another tab, leaving this
+// unsaved canvas intact. Returning reads any category created there.
+if (newArticle) useEventListener(import.meta.client ? window : undefined, 'focus', () => refreshCategories())
+const categoriesPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/website/blog/categories`)
+const categoryOptions = computed(() => {
+  const all = categories.value ?? []
+  const byId = new Map(all.map(category => [category.id, category]))
+  const trail = (id: string | null): string[] => {
+    const category = id ? byId.get(id) : undefined
+    return category ? [...trail(category.parent_id), category.name] : []
+  }
+  return all.map(category => ({ label: trail(category.id).join(' › '), value: category.id }))
+})
+watch(categories, (loaded) => {
+  if (!unconfirmedCreation.value && loaded && form.category_id && !loaded.some(category => category.id === form.category_id)) form.category_id = ''
+})
 // The canvas wears the site's light palette. Dashboard controls read Nuxt UI
 // tokens, so they are bridged to it while the canvas is active.
 const editorCanvasStyle = computed(() => {
@@ -175,6 +222,7 @@ const saveLabel = computed(() => {
   if (saveState.value === 'saving') return 'Saving…'
   if (saveState.value === 'failed') return 'Save failed'
   if (saveState.value === 'conflict') return 'Conflict — reload to reconcile'
+  if (!post.value) return 'Draft not saved'
   // Pending media remains on the canvas, outside the saved document.
   return contentDirty.value || blocks.value.some(block => !isSavable(block)) ? 'Unsaved changes' : 'Saved'
 })
@@ -186,7 +234,7 @@ type InserterBlockType = 'image' | 'video' | 'faq' | 'how_to' | 'cta' | 'divider
  * the first time.
  */
 async function saveArticle(): Promise<BlogPost | null> {
-  if (!post.value || !contentDirty.value) return post.value
+  if (post.value && !contentDirty.value) return post.value
   actionError.value = ''
   try {
     // A started video block is written with the rest, so it has to be finished first:
@@ -194,7 +242,10 @@ async function saveArticle(): Promise<BlogPost | null> {
     assertVideosComplete()
     const payload = buildSavePayload()
     saveState.value = 'saving'
-    const updated = await props.repository.update(persistedPostId.value, { ...payload, expected_updated_at: serverPostUpdatedAt })
+    if (!post.value) draft.value.submitted = true
+    const updated = post.value
+      ? await props.repository.update(persistedPostId.value, { ...payload, expected_updated_at: serverPostUpdatedAt })
+      : await props.repository.create({ ...payload, title: form.title.trim(), content_blocks: payload.content_blocks ?? [], idempotency_key: draft.value.idempotency_key })
     syncServerVersion(updated)
     post.value = updated
     if (!updated.content_document) throw new Error('The saved article content document is missing.')
@@ -203,10 +254,28 @@ async function saveArticle(): Promise<BlogPost | null> {
     saveState.value = 'saved'
     return updated
   } catch (error: unknown) {
+    const response = error && typeof error === 'object' && 'data' in error ? error.data : null
+    const details = isRecord(response) && isRecord(response.data) ? response.data : response
+    if (!post.value && isRecord(details) && details.mutation_applied === false) draft.value.submitted = false
     const status = Number((error as { statusCode?: number; status?: number })?.statusCode ?? (error as { status?: number })?.status)
     saveState.value = status === 409 ? 'conflict' : 'failed'
     actionError.value = getErrorMessage(error, 'Failed to save the article.')
     return null
+  }
+}
+
+async function finishCreation() {
+  if (!newArticle || !post.value) return
+  const navigation = await navigateTo(props.repository.editUrl(post.value.id), { replace: true })
+  if (isNavigationFailure(navigation)) throw navigation
+}
+
+async function saveDraft() {
+  if (!await saveArticle()) return
+  try {
+    await finishCreation()
+  } catch (error) {
+    actionError.value = getErrorMessage(error, 'The saved article could not be opened.')
   }
 }
 
@@ -266,7 +335,7 @@ function assertVideosComplete() {
   throw new Error(INCOMPLETE_VIDEO)
 }
 function savedBlocks() {
-  return cloneEditorBlocks(toRaw(blocks.value)).filter(isSavable)
+  return cloneEditorBlocks(blocks.value).filter(isSavable)
 }
 function buildSavePayload(): BlogPostUpdateInput {
   return { title: form.title, collection: form.collection, category_id: form.category_id || undefined, excerpt: form.excerpt || null, visibility: form.visibility, content_blocks: savedBlocks() }
@@ -313,6 +382,7 @@ async function publish() {
     syncServerVersion(published)
     post.value = published
     saveState.value = 'saved'
+    await finishCreation()
   } catch (error: unknown) {
     recordLifecycleError(error)
   } finally {
@@ -320,7 +390,7 @@ async function publish() {
   }
 }
 function isArticleValid() { return Boolean(form.title.trim() && serializeBody().trim()) }
-function serializeBody() { return blocks.value.map(block => block.type === 'heading' ? `${'#'.repeat(Math.max(2, Math.min(6, block.level || 2)))} ${String(block.data.text || '')}` : block.type === 'markdown' ? String(block.data.markdown || '') : block.type === 'divider' ? '---' : `{{component type="${block.type}"}}`).filter(Boolean).join('\n\n') }
+function serializeBody() { return savedBlocks().map(block => block.type === 'heading' ? `${'#'.repeat(Math.max(2, Math.min(6, block.level || 2)))} ${String(block.data.text || '')}` : block.type === 'markdown' ? String(block.data.markdown || '') : block.type === 'divider' ? '---' : `{{component type="${block.type}"}}`).filter(Boolean).join('\n\n') }
 function updateBlock(index: number, block: BlogEditorBlock) { blocks.value[index] = block }
 function setBlockData(index: number, key: string, value: unknown) { blocks.value[index] = { ...blocks.value[index]!, data: { ...blocks.value[index]!.data, [key]: value } } }
 function handleInsertBlock(index: number, _cursorPosition: number) {
@@ -424,6 +494,7 @@ provide(blogEditorKey, {
   collectionOptions,
   categories,
   categoriesError,
+  categoryOptions,
   resolvedExcerpt,
   // Cancel discards this metadata concern, leaving the pending article intact.
   revert: () => {

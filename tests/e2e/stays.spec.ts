@@ -41,7 +41,7 @@ async function expectStatus(response: Pick<APIResponse, 'status' | 'text'>, stat
   expect(response.status(), response.status() === status ? undefined : await response.text()).toBe(status)
 }
 
-async function createStayHome(page: Page, baseURL: string) {
+async function createStayHome(page: Page, baseURL: string, selectDifferentLocation = false) {
   const request = page.request
   await loginAs(request, baseURL, 'user-e2e-lodging-host')
   const headers = authRequestHeaders(baseURL)
@@ -54,25 +54,34 @@ async function createStayHome(page: Page, baseURL: string) {
   expect((await request.post(`${baseURL}/api/auth/organization/set-active`, { headers, data: { organizationId } })).status()).toBe(200)
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(request, baseURL, organizationId, name, args)
   const locations = await call<{ locations: Array<{ id: string; title: string }> }>('list_locations', {})
-  const location = locations.data!.locations[0]!
-  expect(location).toBeTruthy()
+  const entryLocation = locations.data!.locations[0]!
+  expect(entryLocation).toBeTruthy()
+  let location = entryLocation
+  if (selectDifferentLocation) {
+    const createdLocation = await call<{ location: { id: string; title: string } }>('create_location', { title: 'Cliff Cabin location', timezone: TIME_ZONE, idempotency_key: `${slug}-home-location` })
+    expect(createdLocation.error).toBeNull()
+    location = createdLocation.data!.location
+    expect(location.id).not.toBe(entryLocation.id)
+  }
   const placed = await call<{ location: { address: { regionCode: string; addressLines: string[]; locality?: string; administrativeArea?: string; postalCode?: string } | null } }>('get_location', { location_id: location.id })
   expect(placed.error).toBeNull()
   // The home reads its location's address in the shape a home is added with.
   const postal = placed.data!.location.address
   const homeAddress = postal && { address: postal.addressLines.join(', '), city: postal.locality ?? null, state: postal.administrativeArea ?? null, country: postal.regionCode, zip_code: postal.postalCode ?? null }
 
-  // The one Product editor walks a place to stay through its stay settings.
-  await page.goto(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(location.id)}`)
-  // The kind is given, so the walk opens on its first outstanding step.
-  await expect(page).toHaveURL(/\/products\/new\/name\?/)
-  await page.getByRole('textbox', { name: 'Name' }).fill('Cliff Cabin')
-  await page.getByRole('button', { name: 'Next: Stay settings', exact: true }).click()
-  await expect(page).toHaveURL(/\/products\/new\/stay/)
+  // The one Product form keeps the home's title and required stay facts together.
+  await page.goto(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(entryLocation.id)}`)
+  await expect(page).toHaveURL(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(entryLocation.id)}`)
+  if (selectDifferentLocation) {
+    await page.getByRole('combobox', { name: 'Location*', exact: true }).click()
+    await page.getByRole('option', { name: location.title, exact: true }).click()
+  }
+  await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Cliff Cabin')
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
-  await page.locator('#dashboard-panel-product-stay').getByRole('button', { name: 'Create place to stay', exact: true }).click()
+  await page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create place to stay', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
+  expect(new URL(page.url()).searchParams.get('location_id')).toBe(location.id)
   const productId = new URL(page.url()).pathname.split('/')[4]!
   expect(productId).toMatch(/^[0-9a-f-]{36}$/)
   const unknownPropertyFacts = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
@@ -94,7 +103,7 @@ function previewLocators(page: Page) {
 test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!)
+  const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!, true)
   await page.setViewportSize({ width: 390, height: 844 })
 
   const exactAddress: PostalAddress = { regionCode: 'TH', addressLines: ['24 Guest Road'], sublocality: 'Ao Nang', locality: 'Krabi Town', administrativeArea: 'Krabi', postalCode: '81180' }

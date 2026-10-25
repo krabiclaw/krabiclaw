@@ -351,48 +351,65 @@ export async function createPost(
     if (record.requestHash !== requestHash) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency_key was already used for a different post' })
     const post = await getPost(db, env, organizationId, record.entityId)
     if (!post) throw new HTTPError({ statusCode: 410, statusMessage: 'The post this idempotency_key created has been deleted; it is not created again' })
-    return { post, replayed: true }
+    await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: post.id }, actorId: createdBy })
+    const completed = await getPost(db, env, organizationId, post.id)
+    if (!completed) throw new Error(`Post ${post.id} is missing after creation recovery`)
+    return { post: completed, replayed: true }
   }
   const earlier = await replay()
   if (earlier) return earlier
 
-  await validatePostLocation(db, organizationId, data.location_id ?? null)
-  const media: PostMediaRef[] = data.media ?? []
-  await hydrateMediaAssetRefs(db, { organizationId, refs: media.map(item => ({ asset_id: item.asset_id })), allowedKinds: ['image', 'video'], fieldName: 'media' })
-  const id = crypto.randomUUID()
-  const now = new Date().toISOString()
-  const cover = media.filter(item => item.slot === 'cover')
-  const gallery = media.filter(item => item.slot === 'gallery')
-  for (let attempt = 0; ; attempt += 1) {
-    const slug = await allocatePostSlug(db, organizationId, id, data.slug ?? null, data.title ?? null, data.body ?? null)
-    try {
-      await createContentDocumentWithBlocks(db, {
-        id, rowRole: 'root', kind: 'social_post', locale: await getSourceLocale(db, organizationId), organizationId,
-        locationId: data.location_id ?? null, slug, title: data.title ?? null, summary: data.body ?? null,
-        status: 'draft', visibility: data.visibility ?? 'listed', source: 'manual', createdBy, updatedBy: createdBy,
-        metadata: data.call_to_action ? { call_to_action: data.call_to_action } : {},
-      }, [], { additionalQueriesAfter: [
-        ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'content_document', owner_id: id, slot: 'cover' }, media: cover, now }),
-        ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'content_document', owner_id: id, slot: 'gallery' }, media: gallery, now }),
-        organizationEventQuery({
-          organizationId, locationId: data.location_id ?? null, actorId: createdBy, eventType: 'post.created',
-          entityType: 'post', entityId: id, metadata: { request_hash: requestHash }, dedupeKey,
-        }),
-      ] })
-      break
-    } catch (error) {
-      if (isUniqueDedupeConflict(error)) {
-        const concurrent = await replay()
-        if (concurrent) return concurrent
+  let writeStarted = false
+  try {
+    await validatePostLocation(db, organizationId, data.location_id ?? null)
+    const media: PostMediaRef[] = data.media ?? []
+    await hydrateMediaAssetRefs(db, { organizationId, refs: media.map(item => ({ asset_id: item.asset_id })), allowedKinds: ['image', 'video'], fieldName: 'media' })
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const cover = media.filter(item => item.slot === 'cover')
+    const gallery = media.filter(item => item.slot === 'gallery')
+    for (let attempt = 0; ; attempt += 1) {
+      const slug = await allocatePostSlug(db, organizationId, id, data.slug ?? null, data.title ?? null, data.body ?? null)
+      try {
+        writeStarted = true
+        await createContentDocumentWithBlocks(db, {
+          id, rowRole: 'root', kind: 'social_post', locale: await getSourceLocale(db, organizationId), organizationId,
+          locationId: data.location_id ?? null, slug, title: data.title ?? null, summary: data.body ?? null,
+          status: 'draft', visibility: data.visibility ?? 'listed', source: 'manual', createdBy, updatedBy: createdBy,
+          metadata: data.call_to_action ? { call_to_action: data.call_to_action } : {},
+        }, [], { additionalQueriesAfter: [
+          ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'content_document', owner_id: id, slot: 'cover' }, media: cover, now }),
+          ...insertInitialMediaPlacements({ organizationId, placement: { owner_type: 'content_document', owner_id: id, slot: 'gallery' }, media: gallery, now }),
+          organizationEventQuery({
+            organizationId, locationId: data.location_id ?? null, actorId: createdBy, eventType: 'post.created',
+            entityType: 'post', entityId: id, metadata: { request_hash: requestHash }, dedupeKey,
+          }),
+        ] })
+        break
+      } catch (error) {
+        if (isUniqueDedupeConflict(error)) {
+          const concurrent = await replay()
+          if (concurrent) return concurrent
+        }
+        if (!data.slug && attempt < 2 && isSlugConflict(error)) continue
+        throw error
       }
-      if (!data.slug && attempt < 2 && isSlugConflict(error)) continue
+    }
+    await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: id }, actorId: createdBy })
+    const created = await getPost(db, env, organizationId, id)
+    if (!created) throw new Error(`Post ${id} is missing after creation`)
+    return { post: created, replayed: false }
+  } catch (error) {
+    if (!writeStarted && error instanceof PostValidationError) {
+      error.data = { mutation_applied: false }
       throw error
     }
+    if (!writeStarted && HTTPError.isError(error)) throw new HTTPError({
+      cause: error, body: error.body,
+      data: { ...(error.data !== null && typeof error.data === 'object' && !Array.isArray(error.data) ? error.data : {}), mutation_applied: false },
+    })
+    throw error
   }
-  const created = await getPost(db, env, organizationId, id)
-  if (!created) throw new Error(`Post ${id} is missing after creation`)
-  await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: id }, actorId: createdBy })
-  return { post: created, replayed: false }
 }
 
 /**
@@ -415,11 +432,15 @@ export async function updatePost(
   if (data.slug !== undefined && data.slug !== existing.slug) throw new PostValidationError('A post keeps its saved slug')
   delete data.slug
   if (!Object.keys(data).length) throw new PostValidationError('Name at least one field to change')
+  const refreshCard = data.title !== undefined || data.body !== undefined || data.location_id !== undefined
   // A field sent with its existing value does not wait on a publication.
   if (data.title !== undefined && data.title === existing.title) delete data.title
   if (data.body !== undefined && data.body === existing.body) delete data.body
   if (data.call_to_action !== undefined && JSON.stringify(data.call_to_action) === JSON.stringify(callToActionOf(existing.metadata_json))) delete data.call_to_action
-  if (!Object.keys(data).length) return await getPost(db, env, organizationId, postId)
+  if (!Object.keys(data).length) {
+    if (refreshCard) await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: postId }, actorId: updatedBy })
+    return await getPost(db, env, organizationId, postId)
+  }
   if (data.location_id !== undefined) await validatePostLocation(db, organizationId, data.location_id)
   const contentChanged = data.title !== undefined || data.body !== undefined || data.call_to_action !== undefined
   const payloadChanged = data.body !== undefined || data.call_to_action !== undefined
@@ -442,7 +463,7 @@ export async function updatePost(
     ],
   })
   // The card draws the title, the words and the location's name.
-  if (data.title !== undefined || data.body !== undefined || data.location_id !== undefined) {
+  if (refreshCard) {
     await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: postId }, actorId: updatedBy })
   }
   return await getPost(db, env, organizationId, postId)

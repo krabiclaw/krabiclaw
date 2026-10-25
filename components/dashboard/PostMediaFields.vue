@@ -2,30 +2,36 @@
   <div class="space-y-6">
     <!-- The cover, then the rest a guest swipes through. -->
     <template v-if="organizationId">
-      <UFormField label="Photo">
+      <UFormField label="Photos and video">
         <DashboardCoverPhotoField
           :organization-id="organizationId"
           :model-value="coverMediaId"
           :preview-url="coverPreviewUrl"
           preview-alt="Post photo"
           accept="any"
-          title="Select post photo"
+          title="Select post media"
+          empty-label="Add a photo or video"
           @update:model-value="coverMediaId = $event"
           @change="setCover"
         />
       </UFormField>
 
-      <UFormField label="More photos and videos" help="Guests swipe through these after the cover.">
+      <UFormField label="More photos and videos">
         <DashboardMediaGalleryField
           :items="galleryItems"
           :organization-id="organizationId"
           :cover-first="false"
-          @add="addGalleryItem"
           @remove="(index: number) => removeGalleryItem(index)"
           @move="(index: number, direction: -1 | 1) => moveGalleryItem(index, direction)"
           @reorder="(from: number, to: number) => reorderGalleryItem(from, to)"
           @asset-change="(index: number, asset) => setGalleryAsset(index, asset)"
-        />
+        >
+          <template #add>
+            <MediaPicker :organization-id="organizationId" accept="any" title="Select post media" @change="addGalleryAsset">
+              <UButton as="span" color="neutral" variant="soft" icon="i-lucide-plus" label="Add media" />
+            </MediaPicker>
+          </template>
+        </DashboardMediaGalleryField>
       </UFormField>
     </template>
   </div>
@@ -34,6 +40,8 @@
 <script setup lang="ts">
 import DashboardCoverPhotoField from '~/components/dashboard/DashboardCoverPhotoField.vue'
 import DashboardMediaGalleryField from '~/components/dashboard/DashboardMediaGalleryField.vue'
+import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
+import { mediaStillUrl } from '~/shared/media-placement-contract'
 
 const media = defineModel<PostMediaItem[]>('media', { default: () => [] })
 
@@ -50,7 +58,7 @@ const coverMediaId = computed({
     media.value = media.value.filter(item => item.slot !== 'cover')
   },
 })
-const coverPreviewUrl = computed(() => coverMedia.value?.public_url ?? coverMedia.value?.thumbnail_url ?? null)
+const coverPreviewUrl = computed(() => coverMedia.value ? mediaStillUrl(coverMedia.value) : null)
 
 const galleryMedia = computed({
   get: () => media.value.filter(item => item.slot === 'gallery'),
@@ -90,11 +98,9 @@ function setCover(asset: MediaAsset | null) {
   ]
 }
 
-function addGalleryItem() {
-  galleryMedia.value = [
-    ...galleryMedia.value,
-    { asset_id: '', slot: 'gallery', alt_text: '', public_url: null, thumbnail_url: null, kind: 'image' },
-  ]
+function addGalleryAsset(asset: MediaAsset | null) {
+  if (!asset) return
+  galleryMedia.value = [...galleryMedia.value, { ...asset, slot: 'gallery', alt_text: '' }]
 }
 
 function removeGalleryItem(index: number) {

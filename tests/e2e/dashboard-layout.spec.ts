@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type BrowserContext, type Page, type Request } from '@playwright/test'
+import sharp from 'sharp'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
@@ -2084,22 +2085,151 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(savedTitle)
   })
 
-  // Making a record is its steps, at every width: a phone lands on the first
-  // one rather than on a list with a button, and dismissing it leaves the making.
-  test('a phone opens a new record on its first step and dismissing it returns to Catalog', async ({ page }) => {
+  test('a phone opens the complete creation form and cancelling returns to Catalog', async ({ page }) => {
     await page.setViewportSize(PHONE)
     await open(page, `${ORG}/products/new`)
-    await expect(page).toHaveURL(`${ORG}/products/new/kind`)
-    await expect(page.getByRole('dialog', { name: 'Type', exact: true })).toBeVisible()
-    // The level behind the sheet is hidden from assistive technology while the sheet is open.
-    await expect(page.locator('#dashboard-panel-product h1')).toHaveText('New product')
-    await page.locator('#dashboard-panel-product-kind').getByTestId('dashboard-navbar-close').click()
+    await expect(page).toHaveURL(`${ORG}/products/new`)
+    const creation = page.locator('#dashboard-panel-product')
+    await expect(creation.getByTestId('product-create-form')).toBeVisible()
+    await expect(creation.getByRole('radio', { name: 'Food or drink', exact: true })).toBeVisible()
+    await creation.getByText('Food or drink', { exact: true }).click()
+    await expect(creation.getByRole('radio', { name: 'Food or drink', exact: true })).toBeChecked()
+    await expect(creation.getByRole('textbox', { name: 'Name', exact: true })).toBeVisible()
+    await expect(creation.getByRole('textbox', { name: 'Description', exact: true })).toBeVisible()
+    await expect(creation.getByTestId('product-create-photo')).toBeVisible()
+    await expect(creation.getByTestId('product-create-price')).toBeVisible()
+    await creation.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${ORG}/products`)
     await expect(page.getByRole('dialog')).toHaveCount(0)
   })
 
+  test('a dish creation retains its photo, price and menu context when a placement is retried', async ({ page, baseURL }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creation and media writes require isolated local D1.')
+    const organizationId = 'org-demo'
+    const endpoint = `/api/editor/organizations/${organizationId}`
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    let productId: string | null = null
+    let assetId: string | null = null
+    const photoName = `dish-creation-${Date.now()}.avif`
+    const name = `E2E Dish ${Date.now().toString(36)}`
+    const description = 'An authored dish description supplied with its first photo and price.'
+    const placementPath = `${endpoint}/media/placements`
+    const interceptPlacement = (url: URL) => url.pathname === placementPath
+    const productWrites: string[] = []
+    page.on('request', request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname === `${endpoint}/products`) productWrites.push(new URL(request.url()).pathname)
+    })
+    try {
+      await page.context().clearCookies()
+      await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
+      const [productsRead, collectionsRead, contextRead] = await Promise.all([
+        page.request.get(`${endpoint}/products`), page.request.get(`${endpoint}/collections`),
+        page.request.get('/api/dashboard/context', { params: { org: 'ember-slice-demo' } }),
+      ])
+      for (const response of [productsRead, collectionsRead, contextRead]) expect(response.status(), await response.text()).toBe(200)
+      const { products } = await productsRead.json() as { products: Product[] }
+      const { collections } = await collectionsRead.json() as { collections: Collection[] }
+      const currency = (await contextRead.json() as { organization: { default_currency: string } }).organization.default_currency
+      expect(new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits, 'the demo price is authored in a two-decimal currency').toBe(2)
+      const section = collections.find(collection => collection.location_id && products.some(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === collection.id)))
+      expect(section, 'The demo has an authored location-owned dish section').toBeDefined()
+      const originalMembers = products.filter(product => product.collections.some(membership => membership.collection_id === section!.id))
+        .sort((a, b) => a.collections.find(row => row.collection_id === section!.id)!.sort_order - b.collections.find(row => row.collection_id === section!.id)!.sort_order).map(product => product.id)
+      await page.setViewportSize(WIDE)
+      for (const [locationId, collectionId, message] of [
+        [section!.location_id!, `missing-section-${crypto.randomUUID()}`, 'This section no longer exists.'],
+        [`missing-location-${crypto.randomUUID()}`, section!.id, 'Location not found'],
+      ] as const) {
+        await open(page, `${ORG}/products/new?kind=dish&location_id=${encodeURIComponent(locationId)}&collection_id=${encodeURIComponent(collectionId)}`)
+        const refusedCreation = page.locator('#dashboard-panel-product')
+        await refusedCreation.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
+        await refusedCreation.getByRole('button', { name: 'Create dish', exact: true }).click()
+        await expect(refusedCreation).toContainText(message)
+        await expect(refusedCreation.getByRole('textbox', { name: 'Name', exact: true })).toBeEnabled()
+        expect(productWrites).toEqual([])
+      }
+      const afterRefusedScopes = await page.request.get(`${endpoint}/products`)
+      expect(afterRefusedScopes.status(), await afterRefusedScopes.text()).toBe(200)
+      expect((await afterRefusedScopes.json() as { products: Product[] }).products.map(product => product.id).sort()).toEqual(products.map(product => product.id).sort())
+      await open(page, `${ORG}/products/menu/${section!.id}?location_id=${encodeURIComponent(section!.location_id!)}&kind=dish`)
+      await page.locator('#dashboard-panel-menu-section').getByRole('button', { name: 'Add dish', exact: true }).click()
+      await page.getByRole('dialog', { name: 'Add dishes', exact: true }).getByRole('link', { name: 'Create new dish', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === `${ORG}/products/new` && url.searchParams.get('kind') === 'dish' && url.searchParams.get('collection_id') === section!.id && url.searchParams.get('location_id') === section!.location_id)
+      const creation = page.locator('#dashboard-panel-product')
+      await expect(creation.getByRole('radio')).toHaveCount(0)
+      await creation.getByRole('textbox', { name: 'Name', exact: true }).fill(name)
+      await creation.getByRole('textbox', { name: 'Description', exact: true }).fill(description)
+      await creation.getByTestId('product-create-price').fill('215.50')
+      await creation.getByTestId('product-create-photo').click()
+      const picker = page.getByRole('dialog', { name: 'Dish photo', exact: true })
+      const uploaded = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/media/upload` && response.request().method() === 'POST')
+      await picker.locator('input[type="file"]').setInputFiles({ name: photoName, mimeType: 'image/avif', buffer: await sharp({ create: { width: 120, height: 80, channels: 3, background: '#ea580c' } }).avif().toBuffer() })
+      const uploadResponse = await uploaded
+      expect(uploadResponse.status(), await uploadResponse.text()).toBe(200)
+      const photo = await uploadResponse.json() as { asset_id: string; public_url: string; kind: string; status: string }
+      assetId = photo.asset_id
+      expect(photo).toMatchObject({ kind: 'image', status: 'active' })
+      await picker.getByRole('button', { name: 'Done', exact: true }).click()
+      await expect(picker).not.toBeVisible()
+      expect(productWrites).toEqual([])
+
+      let refused = false
+      await page.route(interceptPlacement, async route => {
+        const body = route.request().method() === 'PUT' ? route.request().postDataJSON() as { placement?: { owner_type?: string }; asset_id?: string } : null
+        if (!refused && body?.placement?.owner_type === 'product' && body.asset_id === assetId) {
+          refused = true
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Creation photo placement failed for retry verification' }) })
+        } else await route.continue()
+      })
+      const created = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/products` && response.request().method() === 'POST')
+      await creation.getByRole('button', { name: 'Create dish', exact: true }).click()
+      const createResponse = await created
+      expect(createResponse.status(), await createResponse.text()).toBe(201)
+      productId = (await createResponse.json() as { product: Product }).product.id
+      expect(createResponse.request().postDataJSON().idempotency_key).toEqual(expect.any(String))
+      await expect(creation).toContainText('Creation photo placement failed for retry verification')
+      await expect(creation.getByRole('textbox', { name: 'Name', exact: true })).toBeDisabled()
+      await expect(creation.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue(name)
+      await expect(page).toHaveURL(url => url.pathname === `${ORG}/products/new`)
+      expect(refused).toBe(true)
+      const beforeRetry = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: organizationId, product_id: productId } })
+      expect(beforeRetry.status(), await beforeRetry.text()).toBe(200)
+      expect(mcpData<{ product: Product }>(await beforeRetry.json()).product).toMatchObject({ id: productId, name, description, image: null })
+
+      await creation.getByRole('button', { name: 'Finish creating dish', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === `${ORG}/products/${productId}/photo`)
+      expect(productWrites).toEqual([`${endpoint}/products`])
+      const completed = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: organizationId, product_id: productId } })
+      expect(completed.status(), await completed.text()).toBe(200)
+      const product = mcpData<{ product: Product }>(await completed.json()).product
+      expect(product).toMatchObject({ id: productId, kind: 'dish', name, description, image: { asset_id: assetId }, locations: [{ location_id: section!.location_id, active: true, published: false }], collections: [{ collection_id: section!.id }] })
+      expect(product.variants).toHaveLength(1)
+      expect(product.variants[0]!.prices).toEqual([expect.objectContaining({ unit_amount: 21550, currency, location_id: section!.location_id })])
+      const catalogRead = await page.request.get(`${endpoint}/products`)
+      expect(catalogRead.status(), await catalogRead.text()).toBe(200)
+      const catalog = (await catalogRead.json() as { products: Product[] }).products
+      expect(catalog.filter(row => row.name === name).map(row => row.id)).toEqual([productId])
+      expect(catalog.filter(row => row.collections.some(membership => membership.collection_id === section!.id))
+        .sort((a, b) => a.collections.find(row => row.collection_id === section!.id)!.sort_order - b.collections.find(row => row.collection_id === section!.id)!.sort_order).map(row => row.id)).toEqual([...originalMembers, productId])
+    } finally {
+      try {
+        await page.unroute(interceptPlacement)
+        if (productId) {
+          const removed = await page.request.delete(`${endpoint}/products/${productId}`)
+          expect(removed.status(), await removed.text()).toBe(200)
+          expect((await page.request.get(`${endpoint}/products/${productId}`)).status()).toBe(404)
+        }
+        if (assetId) {
+          const removed = await page.request.delete(`${endpoint}/media/${assetId}`)
+          expect(removed.status(), await removed.text()).toBe(200)
+          expect(await removed.json()).toEqual({ deleted: true })
+        }
+      } finally { await release() }
+    }
+  })
+
   // A service is a Product and the page that shows it: Catalog's Add opens the
-  // shared create walk, and Create writes both, bound, through one request.
+  // shared creation form, and Create writes both, bound, through one request.
   test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL, playwright }) => {
     const services = '/dashboard/north-carolina-legal-services'
     const editor = '/api/editor/organizations/org-ncls-blawby'
@@ -2114,19 +2244,20 @@ test.describe('dashboard pane hierarchy', () => {
       await open(page, `${services}/products`)
       await expectPanes(page, ['catalog'])
       await page.locator('#dashboard-panel-catalog').getByTestId('catalog-add').click()
-      await expect(page).toHaveURL(`${services}/products/new/kind`)
-      const kind = page.locator('#dashboard-panel-product-kind')
+      await expect(page).toHaveURL(`${services}/products/new`)
+      const kind = page.locator('#dashboard-panel-product')
       await kind.getByText('Practice area or consultation', { exact: true }).click()
       await expect(kind.getByRole('radio', { name: 'Practice area or consultation', exact: true })).toBeChecked()
-      await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
-      await expect(page).toHaveURL(`${services}/products/new/name`)
-      // The level is named for what is being made, and the step's own footer is the only commit.
-      await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'New service', level: 1, exact: true })).toBeVisible()
-      await expect(page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create service', exact: true })).toHaveCount(0)
+      await expect(page).toHaveURL(`${services}/products/new`)
+      // The name and introduction are written together before the one commit.
+      await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'New practice area', level: 1, exact: true })).toBeVisible()
+      await expect(kind.getByRole('button', { name: 'Create practice area', exact: true })).toBeDisabled()
       const name = `E2E Service ${Date.now().toString(36)}`
+      const description = 'An authored legal practice introduction supplied during creation.'
       await page.getByRole('textbox', { name: 'Name' }).fill(name)
+      await kind.getByRole('textbox', { name: 'Short description', exact: true }).fill(description)
       const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products` && response.request().method() === 'POST')
-      await page.locator('#dashboard-panel-product-name').getByRole('button', { name: 'Create service', exact: true }).click()
+      await kind.getByRole('button', { name: 'Create practice area', exact: true }).click()
       const response = await created
       expect(response.status(), await response.text()).toBe(201)
       const request = response.request().postDataJSON() as { idempotency_key?: string }
@@ -2140,7 +2271,7 @@ test.describe('dashboard pane hierarchy', () => {
       const productRead = await page.request.get(`${editor}/products/${productId}`)
       expect(productRead.status(), await productRead.text()).toBe(200)
       const product = (await productRead.json() as { product: Product }).product
-      expect(product).toMatchObject({ kind: 'service', active: false, name, publications: [{ published: false }], booking: null })
+      expect(product).toMatchObject({ kind: 'service', active: false, name, description, publications: [{ published: false }], booking: null })
       expect(product.variants).toHaveLength(1)
       expect(product.page).toMatchObject({ title: name })
       expect(product.page?.path).toMatch(/^\/services\/e2e-service-/)

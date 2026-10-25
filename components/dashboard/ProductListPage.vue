@@ -7,7 +7,7 @@
   -->
   <DashboardIndexPanel id="catalog" title="Catalog">
     <template #right>
-      <UButton :to="`${level.path.value}/new/kind`" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
+      <UButton :to="newProductTo" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
     </template>
 
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Catalog could not be loaded" :description="loadError" />
@@ -71,6 +71,7 @@ const kind = computed({
   set: (value: string) => void navigateTo({ path: level.path.value, query: { ...route.query, kind: value === 'all' ? undefined : value } }),
 })
 const kindFilters = computed(() => [{ value: 'all' as const, label: 'All' }, ...KINDS.filter(row => row.value === kind.value || offered(row.value))])
+const newProductTo = computed(() => router.resolve({ path: `${level.path.value}/new`, query: kind.value === 'all' ? {} : { kind: kind.value === 'menu' ? 'dish' : kind.value } }).fullPath)
 const activeFilterLabel = computed(() => kind.value === 'all' ? 'offerings' : KINDS.find(row => row.value === kind.value)!.label)
 
 // A menu belongs to a location: one card for each, holding that location's

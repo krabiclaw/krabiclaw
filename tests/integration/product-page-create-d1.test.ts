@@ -97,7 +97,11 @@ test('a service, its default variant, its page and their binding commit together
     await assert.rejects(createProduct(db, {
       organizationId: ORG, actor: ACTOR, product: { kind: 'service', name: 'Employment Law' },
       publication: { published: false }, page: { data: { ...SERVICE_PAGE, title: 'Employment Law' }, env }, idempotencyKey: 'create-family-law',
-    }), (error: { statusCode?: number }) => error.statusCode === 409)
+    }), (error: { statusCode?: number; data?: { mutation_applied?: boolean } }) => {
+      assert.equal(error.statusCode, 409)
+      assert.equal(error.data?.mutation_applied, undefined, 'an earlier committed creation is never classified as an unused key')
+      return true
+    })
     assert.deepEqual(await counts(db), before)
 
     const productBefore = await db.prepare('SELECT * FROM products WHERE id = ?').bind(created.id).first()
@@ -133,7 +137,11 @@ test('a refused page creates no product, and one page per product holds at the w
     await assert.rejects(createProduct(db, {
       organizationId: ORG, actor: ACTOR, product: { kind: 'service', name: 'Tenant Rights' },
       publication: { published: false }, page: { data: { ...SERVICE_PAGE, title: 'Tenant Rights' }, env }, idempotencyKey: 'create-tenant-rights',
-    }), (error: { statusCode?: number }) => error.statusCode === 402)
+    }), (error: { statusCode?: number; data?: { mutation_applied?: boolean } }) => {
+      assert.equal(error.statusCode, 402)
+      assert.deepEqual(error.data, { mutation_applied: false })
+      return true
+    })
     assert.deepEqual(await counts(db), { products: 0, variants: 0, pages: 0 })
 
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('sub', 'growth', ?, 'active', ?)")
