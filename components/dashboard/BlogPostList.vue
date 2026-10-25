@@ -43,7 +43,7 @@
     <div v-if="nextCursor" class="mt-4 flex justify-center">
       <UButton color="neutral" variant="outline" :loading="loadingMore" @click="loadMore">Load more posts</UButton>
     </div>
-    <UAlert v-if="orderError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="orderError" />
+    <UAlert v-if="listError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="listError" />
 
   </div>
 </template>
@@ -119,18 +119,25 @@ const { data, error, refresh } = await useAsyncData(
   fetchFirst,
 )
 
-const loadError = computed(() => (error.value ? getErrorMessage(error.value, 'Failed to load posts') : null))
+const moreError = ref<unknown>(null)
+const loadError = computed(() => {
+  const cause = error.value ?? moreError.value
+  return cause ? getErrorMessage(cause, 'Failed to load posts') : null
+})
 const nextCursor = computed(() => (data.value?.page_info.has_more ? data.value.page_info.next_cursor : null))
 const loadingMore = ref(false)
 async function loadMore() {
   const base = data.value
   if (!base || !nextCursor.value) return
   loadingMore.value = true
+  moreError.value = null
   try {
     const page = await fetchPage(nextCursor.value)
     // A page fetched for the list that was showing is dropped if the tab changed meanwhile.
     if (data.value !== base) return
     data.value = { posts: [...base.posts, ...page.posts], page_info: page.page_info }
+  } catch (cause) {
+    if (data.value === base) moreError.value = cause
   } finally {
     loadingMore.value = false
   }
@@ -188,7 +195,7 @@ function formatDate(iso: string) {
 // when the edit state closes — the way a menu's collections are reordered.
 // The moves not yet written, and the collection they belong to.
 const localOrder = ref<{ collection: ArticleCollection; posts: BlogPost[] } | null>(null)
-const orderError = ref<string | null>(null)
+const listError = ref<string | null>(null)
 
 function moveArticle(item: { row: BlogPost }, direction: -1 | 1) {
   const order = [...collectionOrder.value]
@@ -203,7 +210,7 @@ function moveArticle(item: { row: BlogPost }, direction: -1 | 1) {
 async function commitOrder() {
   const pending = localOrder.value
   if (!pending) return
-  orderError.value = null
+  listError.value = null
   try {
     await dashboardApi(`/api/editor/organizations/${organizationId}/blog/order`, {
       method: 'PUT',
@@ -212,7 +219,7 @@ async function commitOrder() {
     })
     if (localOrder.value === pending) localOrder.value = null
   } catch (error) {
-    orderError.value = getErrorMessage(error, 'Failed to save the new order')
+    listError.value = getErrorMessage(error, 'Failed to save the new order')
   }
   await refresh()
 }
@@ -226,12 +233,15 @@ watch(activeTab, () => { void commitOrder() })
 /** Removal lives in the list's edit state, the way every other list does it. */
 async function removePost(item: { id: string }) {
   removingId.value = item.id
+  listError.value = null
   try {
     await repository.delete(item.id)
     // A deleted article leaves the order being edited too, or the order written
     // on Done would name an article that no longer exists and be refused whole.
     if (localOrder.value) localOrder.value = { ...localOrder.value, posts: localOrder.value.posts.filter(post => post.id !== item.id) }
     await refresh()
+  } catch (error) {
+    listError.value = getErrorMessage(error, 'Failed to delete the post')
   } finally {
     removingId.value = null
   }

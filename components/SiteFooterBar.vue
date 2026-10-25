@@ -90,8 +90,7 @@ const SOCIAL_LABELS = { facebook: 'Facebook', instagram: 'Instagram' } as const
 
 const { t, locale, locales, setLocale, localePath } = useI18n()
 const organization = useTenantOrganization().organization
-const socialProfiles = organization?.social_profiles ?? []
-const policies = organization?.policies ?? []
+const { social_profiles: socialProfiles, policies } = organization
 // Theme state is read from the one composable that owns it.
 const { value: theme, setPreference } = usePlatformTheme()
 const isDark = computed(() => theme.value === 'dark')
@@ -100,7 +99,7 @@ const year = new Date().getFullYear()
 // can attribute the visit to the site and theme that sent it.
 const platformOrigin = useRuntimeConfig().public.siteUrl
 const requestHost = useRequestURL().host
-const themeSlug = organization?.template.slug
+const themeSlug = organization.template.slug
 const poweredByUrl = themeSlug && themeSlug !== 'platform'
   ? `${platformOrigin}/?${new URLSearchParams({ utm_source: requestHost, utm_medium: 'referral', utm_campaign: 'powered_by', utm_content: themeSlug })}`
   : null

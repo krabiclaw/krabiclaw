@@ -30,6 +30,7 @@ import { isRecord } from '~/server/utils/type-guards'
 import { PUBLIC_LOCATION_SECTIONS, type PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { isLegalPracticeSite } from '~/utils/template-registry'
+import { sanitizeAdditionalNotesHtml } from '~/server/utils/reservations'
 
 
 export interface OrganizationLocaleRecord {
@@ -516,6 +517,13 @@ interface PriorLocalization {
   created_by_user_id: string
 }
 
+// Translated booking notes render as HTML on the confirmation pages, so they
+// pass through the same sanitizer as the source field.
+async function sanitizeLocalizedNotes(resourceType: LocalizedResourceType, values: LocalizedValues): Promise<void> {
+  const policy = resourceType === 'business_location' && isRecord(values.reservation) && isRecord(values.reservation.policy) ? values.reservation.policy : undefined
+  if (typeof policy?.additional_notes_html === 'string') policy.additional_notes_html = await sanitizeAdditionalNotesHtml(policy.additional_notes_html) ?? ''
+}
+
 /**
  * The statements that write one localized representation at its saved route.
  *
@@ -584,6 +592,7 @@ export async function putResourceLocalization(
   if (!canonical) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Canonical resource was not found', { resource_type: resourceType, resource_id: input.resourceId })
   const values = validateLocalizedValues(resourceType, input.values, resourceType === 'product' ? assertProductKind(canonical.kind) : undefined,
     status === 'published' && resourceType === 'organization' ? { publishedLegalPractice: isLegalPracticeSite({ themeId: canonical.theme_id, vertical: canonical.vertical }) } : undefined)
+  await sanitizeLocalizedNotes(resourceType, values)
   if (resourceType === 'product' && canonical.kind === 'stay' && isRecord(values.details) && STAY_ALARM_AMENITIES.some(code => Object.hasOwn(values.details as object, STAY_ALARM_DETAIL_KEYS[code]))) {
     const source = await queryFirst<{ amenities: string; details_json: string }>(db, 'SELECT c.amenities, p.details_json FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id WHERE p.organization_id = ? AND p.id = ?', [input.organizationId, input.resourceId])
     if (!source) localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'The source home is no longer available', { field: 'details' })
@@ -898,6 +907,7 @@ export async function replaceResourceLocalizations(
       routePath: validateLocalizedRoutePath(resourceType, locale, item.routePath, resource.slug, byResource.get(item.resourceId)?.route_path),
     }
   })
+  for (const item of validated) await sanitizeLocalizedNotes(resourceType, item.values)
   const now = new Date().toISOString()
   const statements: BatchQuery[] = []
   for (const item of validated) {

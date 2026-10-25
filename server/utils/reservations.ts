@@ -119,7 +119,7 @@ const ALLOWED_NOTES_ATTRS: Record<string, Set<string>> = { a: new Set(['href', '
 // whole Worker at module load if imported anywhere in the server bundle, since jsdom
 // has no Workers-compatible build. See utils/sanitize.ts's server-side fallback for
 // the same constraint on the client/shared sanitize path.
-async function sanitizeAdditionalNotesHtml(value: string | null): Promise<string | null> {
+export async function sanitizeAdditionalNotesHtml(value: string | null): Promise<string | null> {
   if (!value) return null
   const rewriter = new HTMLRewriter().on('*', {
     element(el) {
