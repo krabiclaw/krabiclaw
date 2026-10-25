@@ -15,13 +15,11 @@ test.beforeEach(async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
 })
 
-test('an article and photo post are composed before creation and publish only to the website', async ({ page, baseURL }) => {
+test('an article composes its first draft and preserves pending edits through conflicts and publication', async ({ page, baseURL }) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Authoring writes require local D1.')
   await page.setViewportSize({ width: 900, height: 900 })
   let articleId: string | null = null
-  let postId: string | null = null
   let assetId: string | null = null
-  let concurrentAssetId: string | null = null
   const photoName = `creation-cover-${Date.now()}.avif`
   const createdTitle = `E2E Today article ${Date.now()}`
   const title = `${createdTitle} revised`
@@ -86,8 +84,8 @@ test('an article and photo post are composed before creation and publish only to
     const translations = articlePanel.getByTestId('localize-resource')
     await expect(canvasTitle).toHaveValue(createdTitle)
     await expect(saveArticle).toBeDisabled()
-    // Removing an authored cover edits the same canvas and retains the uploaded
-    // library image for the short post composed later in this journey.
+    // Removing an authored cover edits the same canvas and retains its image
+    // in the media library.
     await initialCover.focus()
     await initialCover.press('Delete')
     const removedCover = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/blog/${articleId}` && response.request().method() === 'PATCH')
@@ -161,7 +159,7 @@ test('an article and photo post are composed before creation and publish only to
     const kitchen = (await categoriesRead.json() as { categories: Array<{ id: string; name: string }> }).categories.filter(category => category.name === 'Kitchen')
     expect(kitchen, 'The demo blog has one existing Kitchen category').toHaveLength(1)
     // Continue the author's real workflow: choose the blog's real category,
-    // write its body, and publish explicitly before preparing a social post.
+    // write its body, and publish explicitly.
     const update = await page.request.patch(`${editor}/blog/${articleId}`, { data: {
       excerpt, category_id: kitchen[0]!.id, expected_updated_at: savedArticle.updated_at,
       content_blocks: [{ type: 'markdown', data: { markdown: body, editor_mode: 'rich' } }],
@@ -229,6 +227,55 @@ test('an article and photo post are composed before creation and publish only to
     await pendingCover.press('Delete')
     await expect(articlePanel.getByRole('status')).toHaveText('Saved')
     await expect(saveArticle).toBeDisabled()
+  } finally {
+    if (articleId) {
+      const removed = await page.request.delete(`${editor}/blog/${articleId}`)
+      expect(removed.status(), await removed.text()).toBe(200)
+    }
+    if (assetId) {
+      const removed = await page.request.delete(`${editor}/media/${assetId}`)
+      expect(removed.status(), await removed.text()).toBe(200)
+      expect(await removed.json()).toEqual({ deleted: true })
+    }
+  }
+})
+
+test('a prepared article photo post preserves concurrent media and publishes only after review', async ({ page, baseURL }) => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Authoring writes require local D1.')
+  let articleId: string | null = null
+  let postId: string | null = null
+  let assetId: string | null = null
+  let concurrentAssetId: string | null = null
+  const title = `E2E Prepared article ${Date.now()}`
+  const excerpt = 'An article prepared for a deliberate Facebook review.'
+  const photoName = `post-creation-cover-${Date.now()}.avif`
+  try {
+    const categoriesRead = await page.request.get(`${editor}/blog/categories`, { params: { collection: 'blog' } })
+    expect(categoriesRead.status(), await categoriesRead.text()).toBe(200)
+    const kitchen = (await categoriesRead.json() as { categories: Array<{ id: string; name: string }> }).categories.filter(category => category.name === 'Kitchen')
+    expect(kitchen, 'The source article uses the demo blog’s existing Kitchen category').toHaveLength(1)
+    const sourceCreated = await page.request.post(`${editor}/blog/posts`, { data: {
+      title, excerpt, collection: 'blog', category_id: kitchen[0]!.id,
+      content_blocks: [{ type: 'markdown', data: { markdown: 'A published source article for the photo-post composition journey.', editor_mode: 'rich' } }],
+      idempotency_key: `prepared-post-source-${crypto.randomUUID()}`,
+    } })
+    expect(sourceCreated.status(), await sourceCreated.text()).toBe(200)
+    const source = await sourceCreated.json() as { id: string; post: { updated_at: string; public_path: string } }
+    articleId = source.id
+    const sourcePublished = await page.request.post(`${editor}/blog/${articleId}/publish`, { data: { expected_updated_at: source.post.updated_at } })
+    expect(sourcePublished.status(), await sourcePublished.text()).toBe(200)
+    const contextRead = await page.request.get('/api/dashboard/context', { params: { org: orgSlug } })
+    expect(contextRead.status()).toBe(200)
+    const context = await contextRead.json() as { organization: { public_url: string } }
+    const articleUrl = new URL(source.post.public_path, context.organization.public_url).toString()
+    const uploaded = await page.request.post(`${editor}/media/upload`, { multipart: { image: {
+      name: photoName, mimeType: 'image/avif',
+      buffer: await sharp({ create: { width: 120, height: 80, channels: 3, background: '#1d4ed8' } }).avif().toBuffer(),
+    } } })
+    expect(uploaded.status(), await uploaded.text()).toBe(200)
+    const photo = await uploaded.json() as { asset_id: string; public_url: string; kind: string; status: string }
+    assetId = photo.asset_id
+    expect(photo).toMatchObject({ kind: 'image', status: 'active' })
     const postWrites: string[] = []
     page.on('request', request => {
       if (request.method() === 'POST' && new URL(request.url()).pathname.startsWith(`${editor}/posts`)) postWrites.push(new URL(request.url()).pathname)
@@ -341,14 +388,18 @@ test('an article and photo post are composed before creation and publish only to
       const appliedPost = mcpData<{ post: { updated_at: string; body: string; call_to_action: { label: string; url: string }; media: Array<{ asset_id: string; slot: string }> } }>(await appliedRead.json()).post
       expect(appliedPost)
         .toMatchObject({ body: revisedCaption, call_to_action: { label: 'Read article', url: articleUrl }, media: [{ asset_id: concurrentAssetId, slot: 'cover' }] })
+      const retryPatch = page.waitForResponse(response => new URL(response.url()).pathname === postPath && response.request().method() === 'PATCH')
       await caption.getByRole('button', { name: 'Save draft', exact: true }).click()
+      const retryResponse = await retryPatch
+      expect(retryResponse.status(), await retryResponse.text()).toBe(200)
+      await expect.poll(async () => {
+        const completedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_post', args: { organization_id: organizationId, post_id: postId } })
+        expect(completedRead.status()).toBe(200)
+        return mcpData<{ post: { body: string; call_to_action: { label: string; url: string }; media: Array<{ asset_id: string; slot: string }> } }>(await completedRead.json()).post
+      }).toMatchObject({ body: revisedCaption, call_to_action: { label: 'Read article', url: articleUrl }, media: [{ asset_id: assetId, slot: 'gallery' }] })
       await expect(caption.getByRole('button', { name: 'Save draft', exact: true })).toBeDisabled()
       await expect(caption.getByText('Post could not be completed', { exact: true })).toHaveCount(0)
       expect(captionPatches.at(-1)).toMatchObject({ expected_updated_at: appliedPost.updated_at, body: revisedCaption, call_to_action: { label: 'Read article', url: articleUrl } })
-      const completedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_post', args: { organization_id: organizationId, post_id: postId } })
-      expect(completedRead.status()).toBe(200)
-      expect(mcpData<{ post: { body: string; call_to_action: { label: string; url: string }; media: Array<{ asset_id: string; slot: string }> } }>(await completedRead.json()).post)
-        .toMatchObject({ body: revisedCaption, call_to_action: { label: 'Read article', url: articleUrl }, media: [{ asset_id: assetId, slot: 'gallery' }] })
     } finally { await page.unroute(interceptPost) }
     // Only the explicitly checked website is published. No external social
     // account is contacted by this local authoring journey.

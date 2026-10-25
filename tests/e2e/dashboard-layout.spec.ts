@@ -2138,7 +2138,7 @@ test.describe('dashboard pane hierarchy', () => {
       await page.setViewportSize(WIDE)
       for (const [locationId, collectionId, message] of [
         [section!.location_id!, `missing-section-${crypto.randomUUID()}`, 'This section no longer exists.'],
-        [`missing-location-${crypto.randomUUID()}`, section!.id, 'Location not found'],
+        [`missing-location-${crypto.randomUUID()}`, section!.id, 'Resource not found'],
       ] as const) {
         await open(page, `${ORG}/products/new?kind=dish&location_id=${encodeURIComponent(locationId)}&collection_id=${encodeURIComponent(collectionId)}`)
         const refusedCreation = page.locator('#dashboard-panel-product')
