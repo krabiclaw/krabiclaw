@@ -47,6 +47,8 @@ test('Products remains readable on a narrow mobile viewport', async ({ page }) =
 })
 
 test('Products section links reach their relevant published destinations', async ({ page }) => {
+  // The complete destination matrix shares one whole-journey budget.
+  test.slow()
   const destinations = [
     { label: 'Explore website builder', path: '/templates', heading: /Your business\.\s*Its own kind of beautiful\./ },
     { label: 'Explore AI management', path: '/docs/mcp-setup', heading: /^Connect KrabiClaw to ChatGPT$/ },

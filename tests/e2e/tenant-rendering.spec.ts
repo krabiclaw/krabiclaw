@@ -846,7 +846,13 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   // Closed, the card reads the stay back; its dates reopen the calendar.
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
+  await expect(card.getByText(`${total} Total`, { exact: true })).toBeVisible()
   await expect(card.getByText(dayLabel(checkIn.date), { exact: true })).toBeVisible()
+  await page.setViewportSize({ width: 390, height: 844 })
+  const mobileQuoteTotal = page.getByText(`${total} Total`, { exact: true }).filter({ visible: true })
+  await expect(mobileQuoteTotal).toBeVisible()
+  await expect(mobileQuoteTotal.locator('..').getByText(`${dayLabel(checkIn.date)} – ${dayLabel(checkOut)}`, { exact: true })).toBeVisible()
+  await page.setViewportSize({ width: 1440, height: 900 })
   await card.getByRole('button', { name: new RegExp(`Check-in\\s*${dayLabel(checkIn.date)}`) }).click()
   await expect(dialog).toBeVisible()
   await expect(dialog.getByRole('button', { name: dayLabel(checkIn.date), exact: true })).toHaveAttribute('aria-pressed', 'true')

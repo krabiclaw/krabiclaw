@@ -6,7 +6,7 @@ import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
-import type { GuestStay, StayDetail } from '../../server/domain/stays'
+import type { GuestStay, PublicStayCalendar, StayDetail, StayQuote } from '../../server/domain/stays'
 import { createReplayableReservationCancelToken } from '../../server/utils/reservation-cancel-token'
 import type { PostalAddress } from '../../utils/postal-address'
 import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
@@ -79,10 +79,16 @@ async function createStayHome(page: Page, baseURL: string, selectDifferentLocati
   await page.getByRole('textbox', { name: 'Title', exact: true }).fill('Cliff Cabin')
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
+  const creation = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products`)
   await page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create place to stay', exact: true }).click()
+  const saved = await creation
+  await expectStatus(saved, 201)
+  const savedProductId = (await saved.json() as { product: { id: string } }).product.id
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
   expect(new URL(page.url()).searchParams.get('location_id')).toBe(location.id)
   const productId = new URL(page.url()).pathname.split('/')[4]!
+  expect(productId).toBe(savedProductId)
   expect(productId).toMatch(/^[0-9a-f-]{36}$/)
   const unknownPropertyFacts = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
   const home = await call<{ product: { kind: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
@@ -1604,7 +1610,8 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
 })
 
 test("a host uploads, arranges, describes and removes a place to stay's photos", async ({ page, baseURL }) => {
-  test.setTimeout(60_000)
+  // Author the home, upload media, exercise its editors, and finish independent readbacks.
+  test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!)
   const { previewLink, previewModal, preview } = previewLocators(page)
@@ -2513,7 +2520,8 @@ test('the guest gallery stays flat while a room has no photo and shows room deta
 })
 
 test('moving a photo into the empty room publishes the authored photo tour, and deleting a room keeps its photos', async ({ page, baseURL }) => {
-  test.setTimeout(60_000)
+  // Includes gallery authoring and the independent post-deletion photo-preservation read.
+  test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, call, api, productId, pageErrors, uploadedPhotos, photoPath, photoOverview, roomGrid, red, blue, green, bedroomId, bedroomFacts, livingRoomId, livingRoomFacts, authoredHomeAnswers } = await galleryStayHome(page, baseURL!)
   const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
@@ -2746,10 +2754,13 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   await nightlyPrice.getByRole('button', { name: 'Save', exact: true }).click()
   expect((await priceSaved).status()).toBe(200)
   await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`))
+  const policySaved = await request.patch(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`, { data: { stay: { cancellation_policy: 'flexible' } } })
+  await expectStatus(policySaved, 200)
   const pricedProduct = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(pricedProduct.error).toBeNull()
   expect(pricedProduct.data!.product.variants[0]!.prices).toContainEqual(expect.objectContaining({ unit_amount: 150_00, currency: 'THB' }))
   expect(pricedProduct.data!.product.active).toBe(true)
+  expect(pricedProduct.data!.product.stay!.cancellation_policy).toBe('flexible')
   expect(pricedProduct.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
   const publicationPath = `/dashboard/${slug}/products/${productId}/publication`
   const publicationEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}/publication`
@@ -2826,6 +2837,40 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await expect(guest.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
     await expect(guest.locator('section[aria-label="Meet your host"]').getByText('Cliff Cabin host', { exact: true })).toBeVisible()
     await expect(guest.getByRole('button', { name: 'Check availability', exact: true }).last()).toBeVisible()
+    const publicNights = new URL(`/api/public/products/${pricedProduct.data!.product.slug}/nights`, previewURL)
+    publicNights.searchParams.set('from', localDay(1))
+    publicNights.searchParams.set('to', localDay(4))
+    const nightsRead = await anonymousListing.request.get(publicNights.href)
+    await expectStatus(nightsRead, 200)
+    const calendar = await nightsRead.json() as PublicStayCalendar
+    expect(calendar.home).toMatchObject({ currency: 'THB', min_nights: 2, base_price_minor: 150_00 })
+    expect(calendar.nights).toEqual([1, 2, 3].map(offset => expect.objectContaining({ date: localDay(offset), available: true, price_minor: 150_00, min_stay_arrival: 2, closed_to_arrival: false, closed_to_departure: false })))
+    const checkIn = calendar.nights[0]!.date
+    const checkOut = calendar.nights[2]!.date
+    const guestDialog = guest.locator('#product-booking')
+    await guest.getByRole('button', { name: 'Check availability', exact: true }).last().click()
+    await expect(guestDialog).toBeVisible()
+    await guestDialog.locator('input[type="date"]').nth(0).fill(checkIn)
+    await guestDialog.locator('input[type="date"]').nth(0).press('Tab')
+    const quoted = guest.waitForResponse(response => new URL(response.url()).pathname === `/api/public/products/${pricedProduct.data!.product.slug}/quote` && response.request().method() === 'GET')
+    await guestDialog.locator('input[type="date"]').nth(1).fill(checkOut)
+    await guestDialog.locator('input[type="date"]').nth(1).press('Tab')
+    const quoteRead = await quoted
+    await expectStatus(quoteRead, 200)
+    const { quote } = await quoteRead.json() as { quote: StayQuote }
+    expect(quote).toMatchObject({ product_id: productId, currency: 'THB', check_in_date: checkIn, check_out_date: checkOut, nights: 2, total_minor: 300_00,
+      nightly: calendar.nights.slice(0, 2).map(night => ({ date: night.date, price_minor: night.price_minor })) })
+    const quotedTotal = new Intl.NumberFormat('en-US', { style: 'currency', currency: quote.currency }).format(quote.total_minor / 100)
+    await expect(guestDialog.locator('dl > div').last().locator('dd')).toHaveText(quotedTotal)
+    await guest.keyboard.press('Escape')
+    await expect(guestDialog).toBeHidden()
+    await expect(guest.locator('article').getByText(`${quotedTotal} Total`, { exact: true })).toBeVisible()
+    await guest.setViewportSize({ width: 390, height: 844 })
+    const mobileQuoteTotal = guest.getByText(`${quotedTotal} Total`, { exact: true }).filter({ visible: true })
+    await expect(mobileQuoteTotal).toBeVisible()
+    const dayLabel = (date: string) => new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`))
+    await expect(mobileQuoteTotal.locator('..').getByText(`${dayLabel(checkIn)} – ${dayLabel(checkOut)}`, { exact: true })).toBeVisible()
+    await guest.setViewportSize({ width: 1440, height: 900 })
     await page.goto(`${publicationPath}/availability`)
     const availability = page.locator('#dashboard-panel-product-availability')
     const acceptBookings = availability.getByRole('switch', { name: 'Accept bookings', exact: true })
