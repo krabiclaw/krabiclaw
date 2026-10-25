@@ -314,8 +314,6 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     eyebrow: text('Eyebrow'),
     subtitle: prose('Subheading'),
     media: { kind: 'media', label: 'Image or video', translatable: false, section: 'image', slot: 'media', accept: 'any' },
-    gallery: { kind: 'media', label: 'Product screenshots', translatable: false, section: 'gallery', slot: 'gallery' },
-    caption: text('Screenshot caption', { section: 'gallery' }),
     cta_label: text('Button label', { section: 'button', pairedWith: 'cta_url' }),
     cta_url: link('Button URL', { pairedWith: 'cta_label' }),
     // A second button, which eight platform heroes already carry and no list

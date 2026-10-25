@@ -15,7 +15,7 @@
       <figure v-for="(screenshot, index) in screenshots" :key="screenshot.asset_id" :class="{ 'kc-product-scene__screenshot--portrait': screenshot.height && screenshot.width && screenshot.height > screenshot.width }">
         <img :src="mediaStillUrl(screenshot)!" :alt="screenshot.alt_text || ''" :width="screenshot.width ?? undefined" :height="screenshot.height ?? undefined" :fetchpriority="index === 0 ? 'high' : 'auto'" decoding="async">
       </figure>
-      <p v-if="text(block.data.caption)" class="kc-product-scene__caption">{{ text(block.data.caption) }}</p>
+      <p v-if="screenshotCaption" class="kc-product-scene__caption">{{ screenshotCaption }}</p>
     </div>
     </div>
   </section>
@@ -28,7 +28,9 @@ import { blockMedia, blockText as text } from '~/utils/tenant-page-block-data'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage; closing?: boolean; defaultArt?: string }>()
 const image = computed(() => blockMedia(props.block, 'media')[0])
-const screenshots = computed(() => blockMedia(props.block, 'gallery').filter(media => mediaStillUrl(media)))
+const proofStories = computed(() => props.page.path === '/lodging' ? props.page.blocks.filter(block => block.type === 'media_text' && blockMedia(block, 'media').some(media => mediaStillUrl(media))) : [])
+const screenshots = computed(() => proofStories.value.flatMap(block => blockMedia(block, 'media')).filter(media => mediaStillUrl(media)).slice(0, 2))
+const screenshotCaption = computed(() => text(proofStories.value[0]?.data.caption))
 const imageUrl = computed(() => image.value ? mediaStillUrl(image.value) : props.defaultArt)
 const label = computed(() => text(props.closing ? props.block.data.label : props.block.data.cta_label))
 const url = computed(() => text(props.closing ? props.block.data.url : props.block.data.cta_url))
