@@ -304,6 +304,7 @@ const variant = computed<'home' | 'detailed' | 'vertical' | 'pictures'>(() => {
 .kc-product-more--strip .kc-product-more__columns > div { border: 0; padding: 0; display: grid; grid-template-columns: auto 1fr; column-gap: 1rem; align-items: center; }
 .kc-product-more--strip .kc-product-more__columns > div + div { border-left: 1px solid #d8d7d3; padding-left: 2rem; }
 .kc-product-more--strip .kc-product-more__mark { grid-row: 1 / 3; margin: 0; color: #db4f40; }
+.kc-product-more--strip h3, .kc-product-more--strip p { grid-column: 2; }
 .kc-product-more--strip h3 { font-size: 1.15rem; letter-spacing: -.02em; }
 .kc-product-more--strip p { font-size: .8rem; color: #606168; margin: .25rem 0 0; line-height: 1.5; }
 @media (max-width: 1100px) {
