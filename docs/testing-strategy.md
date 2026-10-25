@@ -58,7 +58,7 @@ PLAYWRIGHT_WORKERS=2 yarn test:e2e:tenant-rendering --grep 'published route inve
   --reporter=list,./tests/e2e/progress-reporter.ts,json
 ```
 
-Each supplied URL is opened in Chromium at 1440px and 390px, checks its actual
+Each supplied URL is opened in Chromium at 1440px, 780px and 390px, checks its actual
 hydrated tenant content and media, and retains a full-page screenshot. An omitted
 inventory means the ordinary representative suite, not complete route coverage.
 One ordinary test per tenant and viewport walks its URLs in sequential native

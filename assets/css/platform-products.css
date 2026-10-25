@@ -29,3 +29,12 @@
   .kc-product-workflows__inner, .kc-product-more__columns { grid-template-columns: 1fr; gap: 3rem; }
   .kc-product-workflows__steps { flex-direction: column; }
 }
+
+/* A crop is authored on the block; it never changes the original capture. */
+.kc-product-capture { object-fit: cover; }
+.kc-product-capture--portrait { aspect-ratio: 4 / 5; height: auto; }
+.kc-product-capture--square { aspect-ratio: 1; height: auto; }
+.kc-product-capture--landscape { aspect-ratio: 6 / 5; height: auto; }
+.kc-product-capture--top { object-position: center top; }
+.kc-product-capture--bottom { object-position: center bottom; }
+.kc-product-capture--center { object-position: center; }
