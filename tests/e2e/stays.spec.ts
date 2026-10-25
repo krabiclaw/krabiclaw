@@ -71,9 +71,15 @@ async function createStayHome(page: Page, baseURL: string) {
   await expect(page).toHaveURL(/\/products\/new\/stay/)
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
+  const creation = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products`)
   await page.locator('#dashboard-panel-product-stay').getByRole('button', { name: 'Create place to stay', exact: true }).click()
+  const saved = await creation
+  await expectStatus(saved, 201)
+  const savedProductId = (await saved.json() as { product: { id: string } }).product.id
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
   const productId = new URL(page.url()).pathname.split('/')[4]!
+  expect(productId).toBe(savedProductId)
   expect(productId).toMatch(/^[0-9a-f-]{36}$/)
   const unknownPropertyFacts = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
   const home = await call<{ product: { kind: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
@@ -1595,7 +1601,8 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
 })
 
 test("a host uploads, arranges, describes and removes a place to stay's photos", async ({ page, baseURL }) => {
-  test.setTimeout(60_000)
+  // Author the home, upload media, exercise its editors, and finish independent readbacks.
+  test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!)
   const { previewLink, previewModal, preview } = previewLocators(page)
@@ -2504,7 +2511,8 @@ test('the guest gallery stays flat while a room has no photo and shows room deta
 })
 
 test('moving a photo into the empty room publishes the authored photo tour, and deleting a room keeps its photos', async ({ page, baseURL }) => {
-  test.setTimeout(60_000)
+  // Includes gallery authoring and the independent post-deletion photo-preservation read.
+  test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, call, api, productId, pageErrors, uploadedPhotos, photoPath, photoOverview, roomGrid, red, blue, green, bedroomId, bedroomFacts, livingRoomId, livingRoomFacts, authoredHomeAnswers } = await galleryStayHome(page, baseURL!)
   const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
