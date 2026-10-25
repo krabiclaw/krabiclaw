@@ -72,7 +72,7 @@ import DashboardResourceLocalization from '~/components/dashboard/DashboardResou
 import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
 import PostMediaFields from '~/components/dashboard/PostMediaFields.vue'
 import SocialPostMedia from '~/components/social/SocialPostMedia.vue'
-import { usePostEditor, type PostMediaFormItem, type PublishOutcome, type PublishTarget, type SocialChannel } from '~/composables/usePostEditor'
+import { normalizePostMediaForForm, usePostEditor, type PostMediaFormItem, type PublishOutcome, type PublishTarget, type SocialChannel } from '~/composables/usePostEditor'
 import type { PublicPostMedia } from '~/server/utils/post-management'
 import { parsePostInput, POST_BODY_MAX, POST_TITLE_MAX, POST_CALL_TO_ACTION_LABEL_MAX, type PostCallToAction } from '~/shared/posts'
 import { isBlogPostResponse } from '~/lib/components/workspace/blog/blog-response-contracts'
@@ -197,6 +197,7 @@ async function commit(publish: boolean) {
   committing.value = true
   actionError.value = ''
   try {
+    const authoredMedia = JSON.stringify(editor.form.media.filter(item => item.asset_id).map(({ asset_id, slot }) => ({ asset_id, slot })))
     const targets: PublishTarget[] = publish ? selected.value.map(channel => {
       if (channel === 'organization') return { channel }
       const connection = connections.value?.channels.find(item => item.channel === channel)
@@ -214,6 +215,7 @@ async function commit(publish: boolean) {
     }
     if (isNew) draft.value.created_id = String(saved.id)
     if (publish) {
+      if (authoredMedia !== JSON.stringify(normalizePostMediaForForm(saved.media).map(({ asset_id, slot }) => ({ asset_id, slot })))) throw new Error('Photos or videos changed while saving. Review them before publishing.')
       const result = await editor.publish(String(saved.id), targets)
       if (result) {
         lastOutcomes.value = result.outcomes
