@@ -83,7 +83,8 @@ export default defineHandler(async (event) => {
     if (!rangeMatch) return mediaResponse(isWorkerMediaPath, 416, { 'content-range': `bytes */${totalSize}` })
 
     const start = parseInt(rangeMatch[1] ?? '0', 10)
-    const end = rangeMatch[2] ? parseInt(rangeMatch[2], 10) : totalSize - 1
+    // An end past the object is satisfiable and means its last byte (RFC 9110 §14.1.2).
+    const end = rangeMatch[2] ? Math.min(parseInt(rangeMatch[2], 10), totalSize - 1) : totalSize - 1
 
     if (start >= totalSize || start > end || start < 0) {
       return mediaResponse(isWorkerMediaPath, 416, { 'content-range': `bytes */${totalSize}` })
