@@ -214,7 +214,7 @@ const addSnapshot = ref<string[]>([])
 const addError = ref<string | null>(null)
 const addCandidates = computed(() => catalog.products.value.filter(product => (!menuSection.value || product.kind === 'dish') && !addSnapshot.value.includes(product.id)
   && product.name.toLocaleLowerCase().includes(addSearch.value.trim().toLocaleLowerCase())))
-const newProductTo = computed(() => scoped(catalogPath.value + (menuSection.value ? '/new/name' : '/new/kind'), { kind: menuSection.value ? 'dish' : undefined, collection_id: collectionId.value }))
+const newProductTo = computed(() => scoped(`${catalogPath.value}/new`, { kind: menuSection.value ? 'dish' : undefined, collection_id: collectionId.value }))
 function openAdd() {
   if (busy.value || editing.value || loadError.value) return
   addSnapshot.value = membersFor(collectionId.value).map(product => product.id)

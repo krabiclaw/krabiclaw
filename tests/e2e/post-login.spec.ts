@@ -48,6 +48,8 @@ test('a signed-in owner resolves dashboard deep links with their query string ev
 // not change with viewport width; only the header does, so the narrow pass is
 // the header checks that actually differ rather than a second full traversal.
 test('public auth CTAs reflect the SSR session', async ({ page, baseURL }) => {
+  // Route, session and responsive-header checks form one complete journey.
+  test.slow()
   await dismissPreviewToolbar(page)
 
   // `Start free` is the action at every width. At 620px and below the header

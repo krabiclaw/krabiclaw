@@ -1,5 +1,5 @@
 <template>
-  <section :id="block.id" class="kc-product-story" :class="{ 'kc-product-story--gallery': examples.length > 1, 'kc-product-story--photos': block.data.example_type === 'posts' }" data-parity-section="product-story">
+  <section :id="block.id" class="kc-product-story" :class="{ 'kc-product-story--gallery': examples.length > 1 && !appScreens, 'kc-product-story--photos': block.data.example_type === 'posts', 'kc-product-story--lodging': lodging, 'kc-product-story--screens': appScreens, 'kc-product-story--screens-pair': appScreens && examples.length > 1, 'kc-product-story--text': !examples.length }" data-parity-section="product-story">
     <div class="kc-product-story__inner">
       <div class="kc-product-story__heading">
         <p v-if="text(block.data.eyebrow)" class="kc-product-eyebrow">{{ text(block.data.eyebrow) }}</p>
@@ -27,7 +27,7 @@
       </div>
       <div v-if="text(block.data.caption)" class="kc-product-story__caption">
         <p>{{ text(block.data.caption) }}</p>
-        <ul v-if="examples.length > 1 && block.data.example_type !== 'posts'" aria-label="Featured businesses">
+        <ul v-if="examples.length > 1 && block.data.example_type !== 'posts'" :aria-label="appScreens ? 'App screens' : 'Featured businesses'">
           <li v-for="(example, index) in examples" :key="index">{{ example.title }}</li>
         </ul>
       </div>
@@ -42,6 +42,8 @@ import { blockMedia, blockRecords, blockText as text, isInternalRoute } from '~/
 import { mediaStillUrl, mediaPlaybackUrl } from '~/shared/media-placement-contract'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
+const lodging = computed(() => props.page.path === '/lodging' || props.page.path.startsWith('/lodging/'))
+const appScreens = computed(() => props.block.data.example_type === 'app_screens')
 const { localePath } = useI18n()
 function route(url: string) { return isInternalRoute(url) ? localePath(url) : url }
 const examples = computed(() => {
@@ -76,11 +78,26 @@ const examples = computed(() => {
 .kc-product-story--photos .kc-product-story__picture--1 { width: 52%; transform: none; }
 .kc-product-story--photos .kc-product-story__picture--2 { left: auto; right: 4%; top: 0; width: 38%; }
 .kc-product-story--photos .kc-product-story__picture--3 { right: auto; left: 50%; top: 55%; width: 16%; transform: rotate(-7deg); }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story) { background: #0b0d13; color: #f8f7f3; }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story .kc-product-eyebrow), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story .kc-product-link) { color: #ff7768; }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story__copy > p), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story__caption) { color: #b3b5be; }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story__pictures) { grid-column: 1; }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story__heading), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story__copy) { grid-column: 2; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging)) { background: #0b0d13; color: #f8f7f3; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-eyebrow), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-link) { color: #ff7768; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__copy > p), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__caption) { color: #b3b5be; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__pictures) { grid-column: 1; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__heading), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__copy) { grid-column: 2; }
+.kc-product-story--lodging { padding: clamp(5rem, 11vw, 10rem) 0; }
+.kc-product-story--lodging .kc-product-story__inner { width: min(86%, 75rem); gap: 2rem 5rem; }
+.kc-product-story--lodging h2 { font-size: clamp(2.6rem, 4.6vw, 4.5rem); }
+.kc-product-story--lodging .kc-product-story__copy > p { font-size: clamp(1rem, 1.5vw, 1.35rem); white-space: pre-line; }
+.kc-product-story--lodging .kc-product-story__pictures img { border-radius: 1.1rem; box-shadow: 0 1.5rem 3rem #151a2514; }
+.kc-product-story--lodging .kc-product-story__caption { border: 0; padding-top: 0; margin-top: 1.5rem; }
+.kc-product-story--screens .kc-product-story__pictures { display: flex; justify-content: center; align-items: start; gap: 1.5rem; }
+.kc-product-story--screens .kc-product-story__pictures figure { width: min(100%, 19rem); border: .5rem solid #252936; border-radius: 2rem; overflow: hidden; box-shadow: 0 1.5rem 3rem #10152526; }
+.kc-product-story--screens .kc-product-story__pictures img { max-height: none; border-radius: 0; box-shadow: none; }
+.kc-product-story--lodging.kc-product-story--screens-pair { background: radial-gradient(ellipse at 0% 0%, #242e50, #0c1525 75%); color: #f8f7f3; }
+.kc-product-story--lodging.kc-product-story--screens-pair .kc-product-story__copy > p, .kc-product-story--lodging.kc-product-story--screens-pair .kc-product-story__caption { color: #c4c8d4; }
+.kc-product-story--lodging.kc-product-story--screens-pair .kc-product-link, .kc-product-story--lodging.kc-product-story--screens-pair .kc-product-eyebrow { color: #ff7768; }
+.kc-product-story--screens-pair .kc-product-story__caption ul { color: inherit; }
+.kc-product-story--lodging.kc-product-story--text .kc-product-story__copy { grid-column: 2; grid-row: 1; align-self: center; }
+.kc-product-story--lodging.kc-product-story--text { padding: clamp(4rem, 7vw, 7rem) 0; }
 @media (max-width: 767px) {
   .kc-product-story__inner { display: flex; flex-direction: column; align-items: stretch; gap: 2rem; }
   .kc-product-story__copy { align-self: auto; }
@@ -95,5 +112,9 @@ const examples = computed(() => {
   .kc-product-story--photos .kc-product-story__picture--1 { width: 68%; }
   .kc-product-story--photos .kc-product-story__picture--2 { right: 0; top: 40%; width: 42%; }
   .kc-product-story--photos .kc-product-story__picture--3 { left: 38%; top: 55%; width: 20%; }
+  .kc-product-story--lodging { padding: 4.5rem 0; }
+  .kc-product-story--lodging .kc-product-story__inner { width: calc(100% - 3rem); gap: 2rem; }
+  .kc-product-story--screens .kc-product-story__pictures { flex-direction: column; align-items: center; }
+  .kc-product-story--screens .kc-product-story__pictures figure { width: min(100%, 18rem); }
 }
 </style>

@@ -301,9 +301,9 @@ editor or writer, and it never grants or hides an authorization.
 | --- | --- |
 | Listings holds homes, experiences and services behind kind pills | Catalog's pills are Menu, Experiences, Services and Places to stay; each is a view of the same Products |
 | Homes and experiences have different editors | One Product editor at `O/products/:productId` for every kind: kind changes wording and rows, not the route or the editor |
-| Listing editor rows preview their values and open one concern | Product, location, page, post and member records do the same |
+| Listing editor rows preview their values and open one concern | Saved Product, location, page and member settings do the same |
 | Pricing and availability link to the calendar; Earnings links to payouts | Catalog links to Calendar and member availability; Earnings links to the organization's Payments |
-| — | Blog/Docs (an article canvas), short Posts and Website settings have no equivalent and use the same record → index → concern pattern |
+| — | Blog/Docs articles and short Posts have no Airbnb equivalent: their existing canvas and composer edit the content directly inside the shared shell |
 
 ### One record, many entrances
 
@@ -606,11 +606,15 @@ radius — and the commit bar's Save is the one `xl` (48px). Body text is 16px
 are neutral: navy in light, white in dark. Coral marks status and selection
 only — the lit tab, today's date, unread dots, the chosen bar. Switches are
 black, as Airbnb's are.
+Enabled secondary buttons use full-contrast text across every neutral variant.
+Muted labels and reduced opacity signal disabled controls, including disabled
+links and buttons waiting for a save. These states belong to the shared theme.
 
-## Canvas
+## Canvas and composition
 
-The only surface exempt from leaf size. Long-form article writing, and nothing
-else.
+Article writing and short Post composition use the frame when the content and
+its preview need the space. Both reuse `DashboardIndexPanel` and the route's
+`dashboardFrame`; neither introduces another shell or loses the parent URL.
 
 **A canvas edits the artifact directly.** The writer types into the rendering
 readers will see. There is no field list because there are no fields; the body
@@ -633,9 +637,30 @@ Article, distinct from a short Post.
 excerpt, publishing time, visibility and search appearance
 describe the post rather than being it. They are fields, and they obey leaf
 size: an index of rows, each previewing its value, each opening its own leaf.
+New articles include their actual publication prerequisites, such as category,
+beside the writing so the first Publish can complete without an intermediate
+record. Saved article settings retain their existing focused editors.
 
 **The test: is the control editing the artifact, or describing it?** Editing it
 is a canvas. Describing it is a field, and fields decompose.
+
+**A short Post is composed together.** Its ordered photos/video, caption and
+explicit publication destinations are one publishing task. The composer leads
+with media, permits text-only posts where the destination supports them, and
+shows the current draft beside its preview on desktop. A phone keeps media,
+caption and publication controls in one scroll. Optional headline, link button
+and location stay in More options. Save
+draft is secondary to Publish. An existing Post opens the same composer, not a
+six-row field index. Each destination retains its own canonical receipt and
+failure/reconciliation controls; website publication never implies social
+delivery. `PostEditorPage` and `usePostEditor` reuse the existing media picker,
+public media renderer, post writer and publisher that MCP uses.
+
+Creation references read on 2026-10-25: [Instagram's media-first post flow](https://www.facebook.com/help/instagram/442418472487929),
+[Meta Business Suite's media, text and destinations composer](https://www.facebook.com/business/help/942827662903020),
+and [TikTok's capture/upload, edit and publish flow](https://www.tiktok.com/support/faq_detail?id=7581826684085606968&category=web_account).
+These inform the task sequence; available destinations still come from the
+canonical publisher and saved connections.
 
 ## Presentation
 
@@ -852,27 +877,31 @@ fires on arrival, opens nothing.
 
 ## Creating
 
-Adding a record asks only for what names it, or what the contract will not
-accept it without — nothing more. Everything else is a section of the record
-once it exists and has an id to hang media, prices and translations on.
+Creation presents the coherent task the author came to complete. It does not
+create a minimal record merely to unlock its photos, description or price.
+`Add` opens `new` in the record's own slot, in the existing shell. A short Post
+opens its composer, an Article opens the existing title/cover/body canvas,
+and Catalog creation presents the offering's essential facts together. A dish
+offers photo, name, description and amount in one screen. The kind, menu
+section and location explicitly supplied by the entrance remain its context;
+the form does not ask for them again or infer another one. Legal practice
+areas do not require photographs. Lodging retains its actual location,
+capacity, arrival/departure and minimum-night requirements.
 
-It is a level, not a sheet: `Add` navigates to `new` in the record's own slot,
-which renders the record's own index, titled `New <record>`, with only the
-sections the contract needs. The index opens its first outstanding section at
-once at every width (`DashboardIndexPanel`'s `create`), and dismissing a
-section leaves the making for where Back goes: the list behind it is never a
-stop and carries no button of its own. Each section's commit names where it is
-going — `Next: <section>` while any remain, and `Create <record>` on the last
-one — so the tenant reads what is left rather than a banner listing it. The
-commit creates the record and navigates to its real id. `useCreateWalk` is the
-one implementation of that walk; an editor supplies its sections, their order
-and what blocks each. A record that is one leaf — a link, a session — is
-titled and committed with the same words, from `newRecordLabels`.
+Optional facts do not block saving a draft. Publishing checks the real domain
+requirements and names actual missing facts. A multi-step task that genuinely
+needs separate concerns uses the existing `useCreateWalk`, with explicit Next
+and final Create actions; it is not the default for every record. Simple links
+and sessions retain their existing focused leaf.
 
-A create level is the record's own level, so it draws no second panel or
-navbar of its own. The draft belongs to the record, not to the leaf: moving
-between sections remounts the level, so it lives in `useState` keyed to the
-record, never in a plain `reactive`.
+Opening or composing never persists an empty record. The draft belongs to the
+record in `useState`, with its retained creation idempotency key, until an
+explicit Save draft, Create or Publish. Existing domain operations remain the
+writers for CMS and MCP. When creation needs an id before media/relationships
+can be attached, preserve that returned id and visibly complete the remaining
+work before navigating to success. A failure does not create another record
+on retry or discard the author's pending input. Dismissal leaves for the
+canonical parent and discards unsaved edits.
 
 ## Committing
 

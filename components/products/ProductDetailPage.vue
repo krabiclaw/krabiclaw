@@ -12,8 +12,8 @@
       class="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-4 border-t border-default bg-default/95 px-5 py-4 shadow-lg backdrop-blur-sm lg:hidden"
     >
       <div v-if="priceLabel" class="min-w-0">
-        <p v-if="compareAtLabel" class="text-xs text-muted line-through">{{ compareAtLabel }}</p>
-        <p class="font-semibold leading-tight text-default">{{ isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel }}</p>
+        <p v-if="compareAtLabel && !stayQuoteTotalLabel" class="text-xs text-muted line-through">{{ compareAtLabel }}</p>
+        <p class="font-semibold leading-tight text-default">{{ stayQuoteTotalLabel ?? (isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel) }}</p>
         <p v-if="isStay && stayBooking.quote.value" class="text-xs text-muted">{{ stayBooking.rangeLabel.value }}</p>
       </div>
       <TenantButton v-if="canOrderExternally" class="shrink-0" :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</TenantButton>
@@ -293,9 +293,9 @@
             <div v-if="priceLabel" class="flex items-center justify-between gap-4">
               <div>
                 <span class="tenant-display text-2xl font-bold tabular-nums text-default">
-                  <span v-if="compareAtLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ isStay || enquiryOnly || (product.kind !== 'experience' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel }) }}
+                  <span v-if="compareAtLabel && !stayQuoteTotalLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ stayQuoteTotalLabel ?? (isStay || enquiryOnly || (product.kind !== 'experience' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel })) }}
                 </span>
-                <span v-if="isStay" class="text-sm font-normal text-muted"> / night</span>
+                <span v-if="isStay && !stayQuoteTotalLabel" class="text-sm font-normal text-muted"> / night</span>
                 <p v-if="!enquiryOnly && product.kind === 'experience'" class="mt-1 text-sm text-muted">{{ t('site.experience_detail.per_person') }}</p>
               </div>
               <div v-if="isStay && averageRating" class="flex items-center gap-1 text-xs font-semibold text-default">
@@ -567,6 +567,9 @@ const displayTitle = computed(() => props.product.name)
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
 const stayBooking = useStayBooking(() => ({ product: props.product, location: props.location, checkout: props.stayCheckoutAvailable }))
+const stayQuoteTotalLabel = computed(() => isStay.value && stayBooking.quote.value
+  ? `${stayBooking.money(stayBooking.quote.value.total_minor)} ${t('stay.total')}`
+  : null)
 const bookingLabel = computed(() => isStay.value
   ? stayBooking.quote.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
   : props.vertical === 'service'

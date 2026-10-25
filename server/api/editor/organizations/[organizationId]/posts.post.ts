@@ -34,7 +34,7 @@ export default defineHandler(async (event) => {
     const { post, replayed } = await createPost(db, env, organization.id, { post: fields, idempotencyKey }, session.user.id)
     return jsonResponse({ success: true, post, replayed }, { status: replayed ? 200 : 201 })
   } catch (error) {
-    if (error instanceof PostValidationError) return jsonResponse({ error: error.message }, { status: error.statusCode })
+    if (error instanceof PostValidationError) return jsonResponse({ error: error.message, ...(error.data ? { data: error.data } : {}) }, { status: error.statusCode })
     throw error
   }
 })

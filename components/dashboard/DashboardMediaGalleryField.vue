@@ -52,9 +52,11 @@
         @click="emit('remove', index)"
       />
     </div>
-    <UButton size="sm" color="neutral" variant="soft" icon="i-lucide-plus" @click="emit('add')">
-      Add media
-    </UButton>
+    <slot name="add">
+      <UButton size="sm" color="neutral" variant="soft" icon="i-lucide-plus" @click="emit('add')">
+        Add media
+      </UButton>
+    </slot>
   </div>
 </template>
 

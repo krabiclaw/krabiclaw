@@ -86,6 +86,17 @@ Workspace members can receive owner notifications as push notifications on the
 KrabiClaw iPhone app, per notification category, alongside email and WhatsApp.
 A push that Apple refuses is recorded as failed.
 
+## Linked Vrbo calendars
+
+A host can link a home's Vrbo iCal calendar to import occupied dates, and copy
+the home's KrabiClaw calendar link into Vrbo to share its occupied dates back.
+KrabiClaw reads the linked calendar every five minutes; Vrbo controls its own
+refresh timing. Imported occupied nights block direct booking and affect the
+availability sent to connected Airbnb listings. Conflicts and failed reads are
+reported to the host. Calendar links carry dates, without Vrbo prices, guest
+details or messages; they do not establish a full Vrbo channel integration or
+instant synchronization across channels.
+
 ## Airbnb listings
 
 A host connects their Airbnb account through Channex and requests which listings

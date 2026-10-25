@@ -69,6 +69,8 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
   test.skip(!writableEnvironment, 'guest writes are forbidden outside local and preview')
 
   test('Pottery House Product booking persists and creates log-only owner dispatch', async ({ page, request }) => {
+    // Guest submission, persisted readback and dispatch share this whole-journey budget.
+    test.slow()
     const since = new Date().toISOString()
     const email = `pottery-booking-${Date.now()}@playwright.example`
     // A guest books an occurrence, and occurrences are materialized from the
@@ -344,6 +346,7 @@ for (const target of [
   { name: 'Pottery House', owner: 'user-e2e-pottery-owner', org: E2E_POTTERY_ORGANIZATION_ID, slug: E2E_POTTERY_ORGANIZATION_ID, location: 'loc-pottery-house', locationSlug: 'krabi', base: potteryHouseBaseURL, headers: potteryHouseExtraHeaders, experience: true, kind: 'experience' },
 ]) {
   test(`${target.name} external checkout uses the shared CMS and public template`, async ({ page, request, baseURL }, testInfo) => {
+    test.slow()
     test.skip(!writableEnvironment, 'External checkout verification writes only local disposable products')
     await loginAs(page.request, baseURL!)
     const editor = `/api/editor/organizations/${target.org}/products`

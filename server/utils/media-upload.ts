@@ -9,7 +9,7 @@ import { executeBatch } from "~/server/db";
 import { publicResourceCacheInvalidationQuery } from "~/server/utils/public-resource-cache";
 import { assertNotPinnedByPublication, createMediaAsset, getMediaAsset, publicationPinGuardQuery, type MediaAsset } from "~/server/utils/media-asset-manager";
 import { fastStartMp4, readMp4Metadata } from "~/server/utils/video-metadata";
-import { R2_IMAGE_MIME_TYPES } from "~/server/utils/media-mime";
+import { imagePixelSize, R2_IMAGE_MIME_TYPES } from "~/server/utils/media-mime";
 
 interface UploadResolvedMediaInputBase {
   db: DbClient;
@@ -113,6 +113,7 @@ export async function uploadResolvedMediaToAssetStore(
   // stored, so an unreadable file is refused rather than saved without them.
   const mp4 = input.kind === "video" && input.contentType === "video/mp4" ? fastStartMp4(input.buffer) : null;
   const video = mp4 ? readMp4Metadata(mp4) : null;
+  const imageSize = input.kind === 'image' ? imagePixelSize(input.buffer instanceof Uint8Array ? input.buffer : new Uint8Array(input.buffer)) : null;
 
   const r2Key = provider === "cloudflare_r2" ? buildR2Key(input.organizationId, assetId, input.filename) : null;
   const startedAt = Date.now();
@@ -159,8 +160,8 @@ export async function uploadResolvedMediaToAssetStore(
       mime_type: input.contentType,
       file_name: input.filename,
       file_size: input.fileSize ?? input.buffer.byteLength,
-      width: video?.width ?? input.width ?? null,
-      height: video?.height ?? input.height ?? null,
+      width: video?.width ?? imageSize?.width ?? input.width ?? null,
+      height: video?.height ?? imageSize?.height ?? input.height ?? null,
       duration: video?.duration ?? null,
       alt_text: input.altText ?? null,
       category: input.category ?? null,

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:1717c27fd23044c6ee01e569ede0cec0bc66527a2e1917c6383715cab4a02fc5",
-  "documentationFingerprint": "sha256:7c0f220f1e905855b72f9f67423a1ee1c40bbbd3a728c59b813053119821782c",
+  "fingerprint": "sha256:6d7fbfb511310b74ee667b41c3603c0e039e27d5493f64427ab34efacd15bc11",
+  "documentationFingerprint": "sha256:d55dd69494525ea059336e9381b0dc32c8d6e186fa010cb752c2c7bf40f9ee6a",
   "tools": [
     {
       "name": "add_organization_language",
@@ -1240,6 +1240,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -4537,6 +4538,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -15661,6 +15663,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -21197,6 +21200,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -28891,6 +28895,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -32553,6 +32558,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -36984,6 +36990,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -41632,6 +41639,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -54240,6 +54248,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -58519,6 +58528,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -70825,6 +70835,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -75558,6 +75569,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -86632,6 +86644,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -88435,6 +88448,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -99465,6 +99479,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -113085,6 +113100,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -116751,6 +116767,7 @@
                 "enum": [
                   "websites",
                   "posts",
+                  "app_screens",
                   null
                 ],
                 "type": [
@@ -120074,7 +120091,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:975500978ec68040147ab89b71839c44a376dc483b13620c816fd12df0fb4959",
+        "create_product": "sha256:a7bda678adaf8914d9d4dbe0f5c186c317ac8905f62e74f9baf63c3cbf061ac6",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_collections": "sha256:e3e115808ba9a44475cd08c5cdf4290fb3e4e036aa89075910f2753576ba2309",
@@ -120130,7 +120147,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "create_product": "sha256:975500978ec68040147ab89b71839c44a376dc483b13620c816fd12df0fb4959",
+        "create_product": "sha256:a7bda678adaf8914d9d4dbe0f5c186c317ac8905f62e74f9baf63c3cbf061ac6",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
@@ -120179,14 +120196,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
+        "get_site_page": "sha256:9bd34037fc97f2c20d794dc6393dc8df6110ef2e218dbc7c22f06d477a637819",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_media_assets": "sha256:baf61a4e5e669943d219b28e0309d131ae3b38e6168c8092b7bac50ac9e218be",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
         "remove_media": "sha256:9f10e4fc49ea8ac1844f66eceb15024ab358f113bd2235dd24e1be243d0f07d5",
         "reorder_media": "sha256:2d576fb2f0b9fe1ccbfa813fda4631e861dc059a47afa4af74b1e1fa2879b573",
         "set_media": "sha256:1d6bd29b35cac32edcb36fb6ffc3fcbe1f618cfb4c54cf39a3c93f7b29eb2416",
-        "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
+        "update_site_page": "sha256:d8bdcec0c105305cc5e09af430b0610e59fe7d700bd505a4f43d2ed50d0b36c5"
       }
     },
     {
@@ -120202,7 +120219,7 @@
         "get_location": "sha256:997354e40501e6182c1fa9514f7aa19f307dcc840c706503ded44b208db7c36a",
         "get_post": "sha256:90a66e74e4c1bd71f9898112b21121f2ae6e2ebc9bfdca6fbd1edf74f4014bec",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
-        "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
+        "get_site_page": "sha256:9bd34037fc97f2c20d794dc6393dc8df6110ef2e218dbc7c22f06d477a637819",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "save_media_attachment": "sha256:420c7df571df0cd02f519a706d231efe51544183d79b66def3b90fc08d9b1bef",
         "set_media": "sha256:1d6bd29b35cac32edcb36fb6ffc3fcbe1f618cfb4c54cf39a3c93f7b29eb2416"
@@ -120217,9 +120234,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:975500978ec68040147ab89b71839c44a376dc483b13620c816fd12df0fb4959",
+        "create_product": "sha256:a7bda678adaf8914d9d4dbe0f5c186c317ac8905f62e74f9baf63c3cbf061ac6",
         "get_organization": "sha256:7ebc3f74bcada2b704d555b6f1b3380a16b39ee6f9694f1a74ab1d5579879063",
-        "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
+        "get_site_page": "sha256:9bd34037fc97f2c20d794dc6393dc8df6110ef2e218dbc7c22f06d477a637819",
         "get_website_draft": "sha256:ba4ac466ac8155b67b570e373c132ed877f24a5769b5d33c48dde59fd83e69e3",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
@@ -120230,7 +120247,7 @@
         "save_website_draft": "sha256:b492a71234d030ddcf7a065ec5af65900f6c879ba98b28c6a73c95c358dd8fc4",
         "update_menu": "sha256:5b13e967b7941a67b218375785afe57fa614ca2b42fe0d33d4aaca3ac9fe4afd",
         "update_organization_settings": "sha256:f3814e677c462c0f6cdc50cbe2849929481129997e3157a7e030727e87ae5652",
-        "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
+        "update_site_page": "sha256:d8bdcec0c105305cc5e09af430b0610e59fe7d700bd505a4f43d2ed50d0b36c5"
       }
     },
     {
@@ -120265,14 +120282,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "get_site_page": "sha256:053df646fa60a6edbb7bab811623a477b5f5cda1d3b39e8cd2def7932ce98be6",
+        "get_site_page": "sha256:9bd34037fc97f2c20d794dc6393dc8df6110ef2e218dbc7c22f06d477a637819",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_media_assets": "sha256:baf61a4e5e669943d219b28e0309d131ae3b38e6168c8092b7bac50ac9e218be",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
         "set_media": "sha256:1d6bd29b35cac32edcb36fb6ffc3fcbe1f618cfb4c54cf39a3c93f7b29eb2416",
         "update_product": "sha256:5e8d017fbc6db350da458809a9de36fc99b65c4b2d004677da02b859f264e314",
-        "update_site_page": "sha256:310955eba4d7f61d95ca7088bbc809d4e5e86330f694f1f1b513e8a836233773"
+        "update_site_page": "sha256:d8bdcec0c105305cc5e09af430b0610e59fe7d700bd505a4f43d2ed50d0b36c5"
       }
     },
     {

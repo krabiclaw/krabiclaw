@@ -27,6 +27,7 @@ import deletionStatus from '../../server/api/integrations/meta/data-deletion.get
 import { createBlogPost, getBlogPost } from '../../server/utils/content/publishing.ts'
 import { fetchTransformedImageAsDataUri } from '../../server/utils/og-image/fetch-image.ts'
 import { renderOgImagePng } from '../../server/utils/og-image/render.ts'
+import { PostValidationError, POST_TITLE_MAX } from '../../shared/posts.ts'
 
 /**
  * Publication, channel management and erasure against real local D1, with Meta and
@@ -249,7 +250,7 @@ const targets = {
   instagram: (organization = 'org-a') => ({ channel: 'instagram', target_id: IG, connection_revision: `ig-rev-${organization}` }) as PublishTarget,
 }
 
-test('an AVIF article picture renders through native Images and a create replay repairs its failed social card', async () => {
+test('AVIF article and Post pictures render through native Images and retries complete failed social cards', async () => {
   const { runtime, db, env, meta, asset, restore } = await setUp()
   try {
     const source = readFileSync(new URL('../../docs/marketing/publishing-assets/lodging-2026-10-23/new-home.avif', import.meta.url))
@@ -294,8 +295,10 @@ test('an AVIF article picture renders through native Images and a create replay 
 
     await asset('avif-source', 'image/avif')
     const input = { idempotency_key: 'avif-article', title: 'A home with an AVIF picture', content_blocks: [{ type: 'image' as const, data: { caption: 'The actual new-home editor' }, media: [{ asset_id: 'avif-source', slot: 'media' }] }] }
+    await assert.rejects(createBlogPost(db, 'owner', { ...input, category_id: 'missing-category' }, { organization_id: 'org-a' }, env), (error: unknown) => HTTPError.isError(error) && error.status === 400 && error.data?.mutation_applied === false)
+    assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE organization_id = 'org-a' AND kind = 'article' AND row_role = 'root'").first('count(*)'), 0)
     unavailable = true
-    await assert.rejects(createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env), /OG page media could not be loaded/)
+    await assert.rejects(createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env), (error: unknown) => error instanceof Error && /OG page media could not be loaded/.test(error.message) && !('data' in error && error.data && typeof error.data === 'object' && 'mutation_applied' in error.data))
     const saved = await db.prepare("SELECT id, status, updated_at FROM content_documents WHERE organization_id = 'org-a' AND kind = 'article' AND row_role = 'root'").first<{ id: string; status: string; updated_at: string }>()
     assert(saved)
     assert.equal(saved.status, 'draft')
@@ -316,6 +319,56 @@ test('an AVIF article picture renders through native Images and a create replay 
     assert.equal((await createBlogPost(db, 'owner', input, { organization_id: 'org-a' }, env)).id, saved.id)
     assert.equal(uploads.size, 1, 'a completed replay reuses the one independently served card')
     assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE organization_id = 'org-a' AND kind = 'article' AND row_role = 'root'").first('count(*)'), 1)
+
+    const postInput = { title: 'A short Post with an AVIF picture', body: 'The caption was authored with the photo.', media: [{ asset_id: 'avif-source', slot: 'cover' as const }] }
+    unavailable = true
+    await assert.rejects(createPost(db, env, 'org-a', { post: postInput, idempotencyKey: 'avif-post' }, 'owner'), (error: unknown) => error instanceof Error && /OG page media could not be loaded/.test(error.message) && !('data' in error && error.data && typeof error.data === 'object' && 'mutation_applied' in error.data))
+    const savedPost = await db.prepare("SELECT id, status, updated_at FROM content_documents WHERE organization_id = 'org-a' AND kind = 'social_post' AND row_role = 'root'").first<{ id: string; status: string; updated_at: string }>()
+    assert(savedPost)
+    assert.equal(savedPost.status, 'draft')
+    await assert.rejects(createPost(db, env, 'org-a', { post: postInput, idempotencyKey: 'avif-post' }, 'owner'), /OG page media could not be loaded/)
+    assert.equal(uploads.size, 1, 'the failed Post replay cannot report completed creation')
+    unavailable = false
+    const repairedPost = await createPost(db, env, 'org-a', { post: postInput, idempotencyKey: 'avif-post' }, 'owner')
+    assert.deepEqual([repairedPost.replayed, repairedPost.post.id], [true, savedPost.id])
+    const postRead = await getPost(db, env, 'org-a', savedPost.id)
+    assert(postRead)
+    assert.deepEqual([postRead.status, postRead.updated_at, postRead.title, postRead.body], ['draft', savedPost.updated_at, postInput.title, postInput.body])
+    assert.equal(postRead.media.find(item => item.slot === 'cover')?.asset_id, 'avif-source')
+    const postCard = await db.prepare("SELECT ma.public_url, ma.mime_type, ma.width, ma.height FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'social_card' AND mp.status = 'active'").bind(savedPost.id).first<{ public_url: string; mime_type: string; width: number; height: number }>()
+    assert(postCard)
+    assert.deepEqual([postCard.mime_type, postCard.width, postCard.height], ['image/png', 1200, 630])
+    const postServed = await fetch(postCard.public_url)
+    assert.equal(postServed.status, 200)
+    const postDecoded = await sharp(new Uint8Array(await postServed.arrayBuffer())).raw().toBuffer({ resolveWithObject: true })
+    assert.deepEqual([postDecoded.info.width, postDecoded.info.height], [1200, 630])
+    assert.equal(uploads.size, 2)
+
+    const revisedTitle = 'A revised short Post with an AVIF picture'
+    unavailable = true
+    await assert.rejects(updatePost(db, env, 'org-a', savedPost.id, { changes: { title: revisedTitle }, expectedUpdatedAt: postRead.updated_at }, 'owner'), /OG page media could not be loaded/)
+    const committedPost = await db.prepare('SELECT title, summary, updated_at FROM content_documents WHERE id = ?').bind(savedPost.id).first<{ title: string; summary: string; updated_at: string }>()
+    assert(committedPost)
+    assert.deepEqual([committedPost.title, committedPost.summary], [revisedTitle, postInput.body])
+    assert.notEqual(committedPost.updated_at, postRead.updated_at)
+    await assert.rejects(updatePost(db, env, 'org-a', savedPost.id, { changes: { title: revisedTitle }, expectedUpdatedAt: committedPost.updated_at }, 'owner'), /OG page media could not be loaded/)
+    assert.equal(uploads.size, 2, 'a no-op update still fails while its required card cannot complete')
+    unavailable = false
+    const repairedUpdate = await updatePost(db, env, 'org-a', savedPost.id, { changes: { title: revisedTitle }, expectedUpdatedAt: committedPost.updated_at }, 'owner')
+    assert(repairedUpdate)
+    assert.deepEqual([repairedUpdate.title, repairedUpdate.updated_at], [revisedTitle, committedPost.updated_at])
+    const updatedCard = await db.prepare("SELECT ma.public_url, ma.mime_type, ma.width, ma.height FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'social_card' AND mp.status = 'active'").bind(savedPost.id).first<{ public_url: string; mime_type: string; width: number; height: number }>()
+    assert(updatedCard)
+    assert.notEqual(updatedCard.public_url, postCard.public_url)
+    assert.deepEqual([updatedCard.mime_type, updatedCard.width, updatedCard.height], ['image/png', 1200, 630])
+    const updatedServed = await fetch(updatedCard.public_url)
+    assert.equal(updatedServed.status, 200)
+    const updatedDecoded = await sharp(new Uint8Array(await updatedServed.arrayBuffer())).raw().toBuffer({ resolveWithObject: true })
+    assert.deepEqual([updatedDecoded.info.width, updatedDecoded.info.height], [1200, 630])
+    assert.equal((await updatePost(db, env, 'org-a', savedPost.id, { changes: { title: revisedTitle }, expectedUpdatedAt: committedPost.updated_at }, 'owner'))?.updated_at, committedPost.updated_at)
+    assert.equal(uploads.size, 3, 'completed no-op retries reuse the independently served Post card')
+    assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE organization_id = 'org-a' AND kind = 'social_post' AND row_role = 'root'").first('count(*)'), 1)
+    assert.deepEqual(await db.prepare("SELECT mp.asset_id FROM media_placements mp WHERE mp.owner_type = 'content_document' AND mp.owner_id = ? AND mp.slot = 'cover'").bind(savedPost.id).all<{ asset_id: string }>().then(result => result.results), [{ asset_id: 'avif-source' }])
   } finally {
     restore()
     await runtime.dispose()
@@ -340,13 +393,20 @@ test('publication: one result, one external post per target, and no blind resend
     }
 
     // Creation is idempotent by key, and a reused key for other words conflicts.
+    await assert.rejects(create('   ', { body: 'A draft' }), { statusCode: 400, data: { mutation_applied: false } })
+    await assert.rejects(create('x'.repeat(201), { body: 'A draft' }), { statusCode: 400, data: { mutation_applied: false } })
+    await assert.rejects(create('invalid-payload', { title: 'x'.repeat(POST_TITLE_MAX + 1) }), { statusCode: 400, data: { mutation_applied: false } })
+    await assert.rejects(create('invalid-location', { body: 'A draft', location_id: 'missing-location' }), { statusCode: 400, data: { mutation_applied: false } })
+    await assert.rejects(create('invalid-photo', { body: 'A draft', media: [{ asset_id: 'missing-asset', slot: 'cover' }] }), { status: 400, data: { mutation_applied: false } })
+    assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE kind = 'social_post'").first('count(*)'), 0)
     const first = await create('key-1', { body: 'Pizza night Friday', media: [{ asset_id: 'a1', slot: 'cover' }, { asset_id: 'a2', slot: 'gallery' }], call_to_action: { label: 'Book', url: 'https://example.test/book' } })
     assert.equal(first.replayed, false)
     assert.equal(first.post.status, 'draft')
     assert.equal(first.post.slug, 'pizza-night-friday')
     assert.match(first.post.preview_url ?? '', /^https:\/\/org-a\.krabiclaw\.test\/posts\/pizza-night-friday\?preview_token=/)
     assert.equal((await create('key-1', { body: 'Pizza night Friday', media: [{ asset_id: 'a1', slot: 'cover' }, { asset_id: 'a2', slot: 'gallery' }], call_to_action: { label: 'Book', url: 'https://example.test/book' } })).post.id, first.post.id)
-    await assert.rejects(create('key-1', { body: 'Something else' }), /different post/)
+    await assert.rejects(create('key-1', { title: 'x'.repeat(POST_TITLE_MAX + 1) }), (error: unknown) => error instanceof PostValidationError && error.statusCode === 400 && error.data === undefined)
+    await assert.rejects(create('key-1', { body: 'Something else' }), (error: unknown) => HTTPError.isError(error) && error.status === 409 && /different post/.test(error.message) && !(error.data && typeof error.data === 'object' && 'mutation_applied' in error.data))
     assert.equal(await db.prepare("SELECT count(*) FROM content_documents WHERE kind = 'social_post'").first('count(*)'), 1)
     // An empty draft exists and has a generated route, and cannot be published.
     const empty = await create('key-empty', {})

@@ -555,6 +555,12 @@ test.describe('stateless MCP server', () => {
             return video.currentTime > 0 && !video.paused ? 'playing' : {
               time: video.currentTime, paused: video.paused, readyState: video.readyState,
               networkState: video.networkState, error: video.error?.message ?? null,
+              source: video.currentSrc, duration: video.duration, playbackRate: video.playbackRate,
+              ended: video.ended, seeking: video.seeking, connected: video.isConnected,
+              size: [video.videoWidth, video.videoHeight],
+              buffered: Array.from({ length: video.buffered.length }, (_, index) => [video.buffered.start(index), video.buffered.end(index)]),
+              seekable: Array.from({ length: video.seekable.length }, (_, index) => [video.seekable.start(index), video.seekable.end(index)]),
+              frames: video.getVideoPlaybackQuality().totalVideoFrames,
               visibility: document.visibilityState, bounds: video.getBoundingClientRect().toJSON(),
             }
           })).toBe('playing')

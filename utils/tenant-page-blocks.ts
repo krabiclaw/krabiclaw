@@ -493,6 +493,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     example_type: { kind: 'enum', label: 'Example type', translatable: false, section: 'examples', options: [
       { value: 'websites', label: 'Website examples' },
       { value: 'posts', label: 'Photos and posts' },
+      { value: 'app_screens', label: 'App screenshots' },
     ] },
     items: { kind: 'list', label: 'Examples', section: 'examples', of: {
       title: text('Example name', { required: true }),

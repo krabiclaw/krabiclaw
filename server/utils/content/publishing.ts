@@ -663,7 +663,6 @@ export async function createBlogPost(
   if (!organizationId) badRequest('organization_id is required')
   if (!env?.PREVIEW_SECRET) throw new HTTPError({ statusCode: 500, statusMessage: 'Article preview signing is not configured' })
   await loadOrganizationTemplate(db, organizationId)
-  validateBlogCommon(article, 'create')
   const requestHash = await creationRequestHash(article)
   const dedupeKey = creationDedupeKey('article', organizationId, idempotencyKey)
   const replay = async () => {
@@ -677,16 +676,31 @@ export async function createBlogPost(
   }
   const earlier = await replay()
   if (earlier) return earlier
-  const collection = articleCollectionOf(article.collection)
   const placementScope = { organizationId }
   const id = crypto.randomUUID()
-  const customSlug = typeof article.slug === 'string' && article.slug.trim()
-    ? normalizeBlogSlug(article.slug)
-    : null
-  const slugBase = customSlug ?? normalizeSlugFromTitle(article.title, 'post')
   const now = new Date().toISOString()
-  if (article.visibility && !['listed', 'unlisted'].includes(article.visibility)) badRequest('visibility must be listed or unlisted')
-  const canonicalBlocks = await normalizeCanonicalBlogBlocks(db, article, placementScope)
+  let collection: ArticleCollection
+  let customSlug: string | null
+  let canonicalBlocks: NormalizedEditorBlock[]
+  let additionalQueriesAfter: BatchQuery[]
+  // Only preparation can prove no mutation; a failed write, replay or card read stays unconfirmed.
+  try {
+    validateBlogCommon(article, 'create')
+    collection = articleCollectionOf(article.collection)
+    customSlug = typeof article.slug === 'string' && article.slug.trim() ? normalizeBlogSlug(article.slug) : null
+    canonicalBlocks = await normalizeCanonicalBlogBlocks(db, article, placementScope)
+    additionalQueriesAfter = [
+      ...(article.category_id === undefined ? [] : [await articleCategoryMembershipQuery(db, { organizationId, articleId: id, collection, categoryId: article.category_id })]),
+      ...await contentBlockPlacementQueries(db, canonicalBlocks, placementScope, now),
+      organizationEventQuery({ organizationId, actorId: authorId, eventType: 'article.created', entityType: 'article', entityId: id,
+        metadata: { request_hash: requestHash }, dedupeKey }),
+    ]
+  } catch (error) {
+    if (HTTPError.isError(error)) throw new HTTPError({ cause: error, body: error.body,
+      data: { ...(typeof error.data === 'object' && error.data !== null && !Array.isArray(error.data) ? error.data : {}), mutation_applied: false } })
+    throw error
+  }
+  const slugBase = customSlug ?? normalizeSlugFromTitle(article.title, 'post')
   const canonicalBody = renderCanonicalBlogBody(canonicalBlocks)
 
   const slugAttempts = customSlug ? 1 : MAX_SLUG_ATTEMPTS
@@ -698,14 +712,7 @@ export async function createBlogPost(
         title: article.title, slug, summary: article.excerpt ?? null, status: 'draft', visibility: article.visibility ?? 'listed',
         authorId, seoKeywords: article.seo_keywords,
         metadata: { collection },
-      }, canonicalBlocks, { bodyMarkdown: canonicalBody,
-        additionalQueriesAfter: [
-          ...(article.category_id === undefined ? [] : [await articleCategoryMembershipQuery(db, { organizationId, articleId: id, collection, categoryId: article.category_id })]),
-          ...await contentBlockPlacementQueries(db, canonicalBlocks, placementScope, now),
-          organizationEventQuery({ organizationId, actorId: authorId, eventType: 'article.created', entityType: 'article', entityId: id,
-            metadata: { request_hash: requestHash }, dedupeKey }),
-        ],
-      })
+      }, canonicalBlocks, { bodyMarkdown: canonicalBody, additionalQueriesAfter })
       await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: id }, actorId: authorId })
       return await createdArticleResult(db, id, organizationId, env)
     } catch (err) {
