@@ -113,6 +113,9 @@ export async function requireLocationReservationConfig(
 
 const ALLOWED_NOTES_TAGS = new Set(['p', 'br', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'a'])
 const ALLOWED_NOTES_ATTRS: Record<string, Set<string>> = { a: new Set(['href', 'target', 'rel']) }
+// Their content is raw text to the parser, so unwrapping them would turn text
+// such as `<img onerror=…>` into markup. They go with everything inside them.
+const RAW_TEXT_NOTES_TAGS = new Set(['script', 'style', 'textarea', 'title', 'xmp', 'iframe', 'noembed', 'noframes', 'noscript', 'plaintext', 'template'])
 
 // Uses the Workers runtime's native HTMLRewriter rather than a DOM-based sanitizer
 // (e.g. DOMPurify/jsdom) — those depend on Node's `vm`/native bindings and crash the
@@ -124,6 +127,10 @@ export async function sanitizeAdditionalNotesHtml(value: string | null): Promise
   const rewriter = new HTMLRewriter().on('*', {
     element(el) {
       const tag = el.tagName.toLowerCase()
+      if (RAW_TEXT_NOTES_TAGS.has(tag)) {
+        el.remove()
+        return
+      }
       if (!ALLOWED_NOTES_TAGS.has(tag)) {
         el.removeAndKeepContent()
         return
@@ -142,6 +149,9 @@ export async function sanitizeAdditionalNotesHtml(value: string | null): Promise
         el.setAttribute('href', sanitizeUrl(el.getAttribute('href')))
         el.setAttribute('rel', 'noopener noreferrer')
       }
+    },
+    comments(comment) {
+      comment.remove()
     },
   })
   const response = rewriter.transform(new Response(`<div>${value}</div>`, { headers: { 'content-type': 'text/html' } }))
