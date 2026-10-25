@@ -8,6 +8,8 @@ export function useLocationScope() {
   const route = useRoute()
   return computed(() => {
     const value = route.query.location_id
-    return typeof value === 'string' && value ? value : null
+    if (value === undefined || value === null) return null
+    if (typeof value !== 'string' || !value.trim()) throw createError({ statusCode: 400, statusMessage: 'Choose one location or the whole website' })
+    return value
   })
 }

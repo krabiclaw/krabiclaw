@@ -23,7 +23,7 @@ if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMes
 const currency = rawCurrency
 const brandName = organization.value?.name
 if (typeof brandName !== 'string' || brandName.trim().length === 0) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
-const productLocations = computed(() => locations.value.map(location => ({ id: location.id, slug: location.slug, title: location.title })))
+const productLocations = computed(() => locations.value.map(location => ({ id: location.id, slug: location.slug, title: location.title, sections: location.sections })))
 // A page about the business: its image is the organization's.
 useSocialMetadata(() => ({
   socialImage: organizationSocialImage,

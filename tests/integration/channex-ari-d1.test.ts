@@ -638,6 +638,7 @@ test('paid home product receipts repair failed billing reports before channel wo
     refused = true
     const create = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'billing-create', publication: { published: true }, product: { ...home, name: 'Creek Cabin' } }
     await assert.rejects(createProduct(db, create), billingFailure)
+    assert.deepEqual(meters, ['krabiclaw_locations=0'], 'a failed completion is reported once; only the caller retries its committed receipt')
     const createdId = await db.prepare("SELECT json_extract(payload_json, '$.entityId') AS id FROM activity_entries WHERE dedupe_key=?").bind(`create:product:${ORG}:billing-create`).first<string>('id')
     const created = await getProduct(db, ORG, createdId!)
     assert.equal(created.name, 'Creek Cabin')

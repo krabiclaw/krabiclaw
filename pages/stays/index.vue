@@ -30,6 +30,7 @@ const productLocations = computed(() => locations.value.map(location => ({
   id: String(location.id),
   slug: String(location.slug),
   title: String(location.title),
+  sections: location.sections,
   address: (location.address ?? null) as PostalAddress | null,
   public_area: location.public_area,
 })))

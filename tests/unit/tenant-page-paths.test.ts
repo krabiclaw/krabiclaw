@@ -115,7 +115,7 @@ test('the platform owns its marketing pages and excludes private auth routes fro
   // tenant-only route the platform template does not map still is not.
   assert.equal(allows('platform', '/our-story'), true)
   assert.equal(allows('platform', '/menu'), false)
-  for (const path of ['/oauth/login', '/oauth/consent', '/accept-invitation/nonexistent-invitation', '/login', '/forgot-password', '/reset-password']) {
+  for (const path of ['/oauth/login', '/oauth/consent', '/accept-invitation/nonexistent-invitation', '/login', '/forgot-password', '/reset-password', '/bookings/stay', '/bookings/confirmed', '/pay/payment-id']) {
     assert.equal(isTrackablePath(path), false, path)
   }
   for (const path of ['/signup', '/ja/menu', '/th/reservations', '/oauth-notes', '/accept-invitation-story']) {

@@ -1,9 +1,55 @@
 <template>
+  <DashboardIndexPanel v-if="isNew" id="product" :title="pageTitle" column="reading">
+    <UAlert v-if="saveError || photoError" class="mb-6" color="error" variant="soft" :description="saveError || photoError || ''" />
+    <p v-if="createdProductId && saveError" class="mb-6 text-base text-muted">Your draft is saved. Finish creating it to apply the selected photo and catalog placement.</p>
+    <fieldset :disabled="saving || creationSubmitted" class="w-full space-y-8" data-testid="product-create-form">
+      <UFormField v-if="!suppliedKind" label="Type" required>
+        <URadioGroup v-model="creationKind" :items="creationKinds" variant="card" indicator="hidden" />
+      </UFormField>
+      <template v-if="form.kind">
+        <template v-if="form.kind !== 'service'">
+          <DashboardCoverPhotoField v-if="!creationSubmitted" :organization-id="organizationId" :location-id="locationId" :model-value="form.image_asset_id" :preview-url="creationPhoto?.public_url" :preview-alt="form.name" :title="`${itemLabel} photo`" testid="product-create-photo" @change="selectCreationPhoto" />
+          <img v-else-if="creationPhoto?.public_url" :src="creationPhoto.public_url" :alt="form.name" class="aspect-[4/3] w-full rounded-xl object-cover">
+        </template>
+        <UFormField :label="form.kind === 'stay' ? 'Title' : 'Name'" required>
+          <UInput v-model="form.name" :aria-label="form.kind === 'stay' ? 'Title' : 'Name'" :maxlength="PRODUCT_LIMITS.name" class="w-full" data-testid="product-create-name" />
+        </UFormField>
+        <UFormField :label="creationDescriptionLabel" hint="Optional">
+          <UTextarea v-model="form.description" :aria-label="creationDescriptionLabel" :maxlength="PRODUCT_LIMITS.description" :rows="4" autoresize variant="none" class="w-full" :ui="{ base: 'resize-none' }" />
+        </UFormField>
+        <UFormField :label="`${form.kind === 'stay' ? 'Nightly price' : form.kind === 'service' ? 'Consultation price' : 'Price'} (${currency})`" hint="Optional" :error="creationPriceError || undefined">
+          <UInput v-model="creationPrice" inputmode="decimal" class="w-full" data-testid="product-create-price" />
+        </UFormField>
+        <UCollapsible v-if="form.kind === 'service' && !creationSubmitted" class="space-y-4">
+          <UButton label="Add a photo" icon="i-lucide-image-plus" color="neutral" variant="ghost" />
+          <template #content>
+            <DashboardCoverPhotoField :organization-id="organizationId" :location-id="locationId" :model-value="form.image_asset_id" :preview-url="creationPhoto?.public_url" :preview-alt="form.name" title="Practice area photo" testid="product-create-photo" @change="selectCreationPhoto" />
+          </template>
+        </UCollapsible>
+        <template v-if="form.kind === 'stay'">
+          <UFormField label="Location" required>
+            <p v-if="locationsError" role="alert" class="text-error">{{ getErrorMessage(locationsError, 'Locations could not be loaded') }}</p>
+            <USelect v-else v-model="form.stay_location_id" :items="creationLocations" placeholder="Choose a location" class="w-full" />
+          </UFormField>
+          <div class="grid gap-6 sm:grid-cols-2">
+            <UFormField label="Check-in from" required><UInput v-model="form.check_in_time" type="time" class="w-full" /></UFormField>
+            <UFormField label="Check-in until"><StayCheckInEndSelect v-model="form.check_in_end_time" /></UFormField>
+            <UFormField label="Checkout by" required><UInput v-model="form.check_out_time" type="time" class="w-full" /></UFormField>
+            <UFormField label="Sleeps" required><UInput v-model="form.max_guests" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
+            <UFormField label="Minimum nights" required><UInput v-model="form.min_nights" inputmode="numeric" pattern="[0-9]*" class="w-full" /></UFormField>
+          </div>
+        </template>
+      </template>
+    </fieldset>
+    <template #footer>
+      <DashboardPanelFooter :save-label="saveLabel" :loading="saving" :disabled="saveDisabled" @cancel="cancelCreation" @save="save()" />
+    </template>
+  </DashboardIndexPanel>
   <DashboardIndexPanel
+    v-else
     id="product"
     :title="stayEditor ? 'Listing editor' : dishEditor ? 'Dish editor' : experienceEditor ? 'Experience editor' : legalEditor ? 'Legal Services editor' : pageTitle"
     :auto-open="autoOpenTarget"
-    :create="firstStep"
     :paired-size="summaryCards ? 39 : undefined"
     :footer-class="summaryCards ? 'pointer-events-none absolute inset-x-0 bottom-6 border-0 py-0' : undefined"
   >
@@ -131,43 +177,7 @@
               <div><dt class="text-sm text-muted">Checkout by</dt><dd class="mt-1 text-base text-highlighted">{{ product?.stay?.check_out_time }}</dd></div>
             </dl>
           </section>
-          <section v-if="arrivalHome.directions">
-            <h2 class="text-xl font-medium text-highlighted">Directions</h2>
-            <p class="mt-3 whitespace-pre-wrap break-words text-base text-muted">{{ arrivalHome.directions }}</p>
-          </section>
-          <section v-if="arrivalHome.check_in_method || arrivalHome.check_in_instructions">
-            <h2 class="text-xl font-medium text-highlighted">Check-in method</h2>
-            <p v-if="arrivalHome.check_in_method" class="mt-3 text-base text-muted">{{ STAY_CHECK_IN_METHODS[arrivalHome.check_in_method].label }}</p>
-            <p v-if="arrivalHome.check_in_instructions" class="mt-3 whitespace-pre-wrap break-words text-base text-muted">{{ arrivalHome.check_in_instructions }}</p>
-          </section>
-          <section v-if="arrivalHome.wifi_network || arrivalHome.wifi_password">
-            <h2 class="text-xl font-medium text-highlighted">Wifi details</h2>
-            <dl class="mt-4 space-y-4">
-              <div v-if="arrivalHome.wifi_network"><dt class="text-sm text-muted">Wifi network</dt><dd class="mt-1 whitespace-pre-wrap break-words text-base text-highlighted">{{ arrivalHome.wifi_network }}</dd></div>
-              <div v-if="arrivalHome.wifi_password"><dt class="text-sm text-muted">Wifi password</dt><dd class="mt-1 whitespace-pre-wrap break-words text-base text-highlighted">{{ arrivalHome.wifi_password }}</dd></div>
-            </dl>
-          </section>
-          <section v-if="arrivalHome.house_manual">
-            <h2 class="text-xl font-medium text-highlighted">House manual</h2>
-            <p class="mt-3 whitespace-pre-wrap break-words text-base text-muted">{{ arrivalHome.house_manual }}</p>
-          </section>
-          <section v-if="savedHouseRules.length">
-            <h2 class="text-xl font-medium text-highlighted">House rules</h2>
-            <ul class="mt-3 space-y-3 text-base text-muted"><li v-for="(line, index) in savedHouseRules" :key="index" class="whitespace-pre-wrap break-words">{{ line }}</li></ul>
-          </section>
-          <section v-if="arrivalSafety.length">
-            <h2 class="text-xl font-medium text-highlighted">Safety &amp; property</h2>
-            <ul class="mt-3 space-y-3 text-base text-muted"><li v-for="(line, index) in arrivalSafety" :key="index" class="whitespace-pre-wrap break-words">{{ line }}</li></ul>
-          </section>
-          <section v-if="arrivalHome.checkout_instructions.length">
-            <h2 class="text-xl font-medium text-highlighted">Checkout instructions</h2>
-            <ul class="mt-4 space-y-6">
-              <li v-for="instruction in arrivalHome.checkout_instructions" :key="instruction.task" class="flex gap-4">
-                <UIcon :name="STAY_CHECKOUT_TASKS[instruction.task].icon" class="mt-0.5 size-6 shrink-0 text-highlighted" aria-hidden="true" />
-                <div><h3 class="text-base font-medium text-highlighted">{{ STAY_CHECKOUT_TASKS[instruction.task].label }}</h3><p v-if="instruction.details" class="mt-1 whitespace-pre-wrap break-words text-base text-muted">{{ instruction.details }}</p></div>
-              </li>
-            </ul>
-          </section>
+          <StayArrivalGuideView :guide="arrivalHome" :rules="savedHouseRules" :safety="arrivalSafety" />
         </div>
       </div>
     </template>
@@ -197,7 +207,7 @@ import type { VerticalCopy } from '~/utils/vertical-copy'
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
-  'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location',
+  'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'property-type', 'rooms', 'amenities', 'accessibility', 'cancellation', 'team', 'guest-safety', 'location',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
@@ -387,9 +397,11 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 import { cloneFnJSON } from '@vueuse/core'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
+import DashboardCoverPhotoField, { type CoverPhotoAsset } from '~/components/dashboard/DashboardCoverPhotoField.vue'
+import StayCheckInEndSelect from '~/components/dashboard/StayCheckInEndSelect.vue'
 import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
 import type { ProductDetailField, ProductDetailKey, ProductDetailValue, ProductKind } from '~/shared/product-details'
-import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, isStayFocusedDetail, stayHouseRuleLines } from '~/shared/product-details'
+import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, PRODUCT_KIND_ICONS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, isStayFocusedDetail, stayHouseRuleLines } from '~/shared/product-details'
 import { STAY_SAFETY_DETAIL_KEYS, STAY_SAFETY_SECTIONS, staySafetyLines, staySafetySectionKeys, stayAlarmLines } from '~/shared/stay-safety'
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
@@ -399,6 +411,7 @@ import { useHomesQuote } from '~/composables/usePaymentsSettings'
 import { formatPostalAddress } from '~/utils/postal-address'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { ApiClientError } from '~/utils/api-clients'
+import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
 import { isStayArrivalGuide, stayCheckInWindow } from '~/shared/stay-arrival'
 import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct } from '~/utils/product-presentation'
@@ -422,7 +435,6 @@ import {
   STAY_CANCELLATION_POLICIES,
   STAY_LONG_TERM_CANCELLATION_POLICIES,
   STAY_CHECK_IN_METHODS,
-  STAY_CHECKOUT_TASKS,
   isStayPropertyType,
 } from '~/shared/stay-listing'
 
@@ -437,15 +449,16 @@ const productId = computed(() => String(route.params.productId ?? ''))
 const locationScope = useLocationScope()
 // Online is an explicit booking scope, never a physical location or a Price location id.
 const locationId = computed(() => locationScope.value === 'online' ? null : locationScope.value)
-// A product created from a collection joins it; the URL that opened the walk names it.
-const createCollectionId = computed(() => typeof route.query.collection_id === 'string' && route.query.collection_id ? route.query.collection_id : null)
+// A product created from a collection joins it; the URL that opened creation names it.
+if (route.query.collection_id !== undefined && (typeof route.query.collection_id !== 'string' || !route.query.collection_id.trim())) throw createError({ statusCode: 400, statusMessage: 'A menu section ID is required' })
+const createCollectionId = computed(() => typeof route.query.collection_id === 'string' ? route.query.collection_id : null)
 const level = useRouteLevel()
 /** The record's own URL. It is the route level's, never rebuilt from params. */
 const itemPath = level.path
 const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products`)
 /**
  * A URL beneath this record. An existing product's sections keep its location
- * scope and nothing else; a product being created keeps the whole walk's query,
+ * scope and nothing else; a product being created keeps the whole creation query,
  * which names its kind and the collection it will join.
  */
 function sectionPath(section: string) {
@@ -493,7 +506,6 @@ const sectionLabels: Record<SectionKey, string> = {
   'publication': 'Status',
   get booking() { return product.value?.kind === 'service' ? 'Consultations' : product.value?.kind === 'experience' ? 'Bookings' : 'Scheduling' },
   get locations() { return product.value?.kind === 'service' ? 'Offices' : 'Locations' },
-  'stay': 'Stay settings',
   'guests': 'Number of guests',
   'availability': 'Availability',
   'arrival-time': 'Check-in & checkout',
@@ -540,7 +552,7 @@ watch(editorKey, () => {
 const isCollectionList = (value: unknown): value is { collections: Collection[] } =>
   isRecord(value) && Array.isArray(value.collections)
 const isOne = (value: unknown): value is { success: true, product: Product } =>
-  isRecord(value) && isRecord(value.product)
+  isRecord(value) && value.success === true && isRecord(value.product) && typeof value.product.id === 'string' && Boolean(value.product.id.trim())
 const isProductRead = (value: unknown): value is { success: true; product: Product; public_url: string | null; public_urls: Record<string, string> } =>
   isOne(value) && 'public_url' in value && (value.public_url === null || typeof value.public_url === 'string')
   && 'public_urls' in value && isRecord(value.public_urls) && Object.values(value.public_urls).every(url => typeof url === 'string')
@@ -781,7 +793,11 @@ async function reloadSchedule() {
 
 // ── The form ────────────────────────────────────────────
 
-const draftKey = `product-draft:${organizationId}:${productId.value}`
+if (route.query.kind !== undefined && !PRODUCT_KINDS.includes(route.query.kind as ProductKind)) throw createError({ statusCode: 400, statusMessage: 'Unsupported product type' })
+const suppliedKind = route.query.kind as ProductKind | undefined
+// New entries retain only their caller's exact type, location and menu section.
+const creationScope = [suppliedKind ?? '', locationScope.value ?? '', createCollectionId.value ?? ''].map(encodeURIComponent).join(':')
+const draftKey = `product-draft:${organizationId}:${productId.value}${isNew.value ? `:${creationScope}` : ''}`
 const draft = useState<ProductForm>(draftKey, () => ({
   kind: '',
   name: '',
@@ -827,11 +843,43 @@ const homeBilling = computed<{ text: string; billing?: string } | null>(() => {
   if (!quote.billing.period_end) throw new Error('A billed home has no billing period')
   return { text: `${adds}, billed on your next invoice on ${formatExactDateTime(quote.billing.period_end)}.` }
 })
-// One key per product being created, kept across the walk's leaves and retries.
-const createKeyName = `product-create-key:${organizationId}`
+// One explicit creation operation survives a lost response or a failed placement.
+const createKeyName = `${draftKey}:idempotency`
 const createKey = useState(createKeyName, () => crypto.randomUUID())
-// A walk opened from a filtered Catalog already knows the kind it is creating.
-if (isNew.value && !form.kind && PRODUCT_KINDS.includes(route.query.kind as ProductKind)) form.kind = route.query.kind as ProductKind
+if (isNew.value && !form.kind && suppliedKind) form.kind = suppliedKind
+const createdProductId = useState<string | null>(`${draftKey}:created`, () => null)
+const creationSubmitted = useState(`${draftKey}:submitted`, () => false)
+const creationPhoto = useState<CoverPhotoAsset | null>(`${draftKey}:photo`, () => null)
+const creationPrice = useState(`${draftKey}:price`, () => '')
+let commitNavigation = false
+onBeforeRouteLeave(() => !isNew.value || !saving.value || commitNavigation)
+onBeforeRouteUpdate((to, from) => !isNew.value || !saving.value || commitNavigation || to.path === from.path
+  && JSON.stringify([to.query.kind, to.query.location_id, to.query.collection_id]) === JSON.stringify([from.query.kind, from.query.location_id, from.query.collection_id]))
+onUnmounted(() => {
+  if (productId.value === 'new' && !creationSubmitted.value) clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
+})
+const creationKind = computed({ get: () => form.kind || undefined, set: value => { form.kind = value ?? '' } })
+const creationKinds = PRODUCT_KINDS.map(value => ({ value, label: PRODUCT_KIND_LABELS[value], icon: PRODUCT_KIND_ICONS[value] }))
+const creationLocations = computed(() => organizationLocations.value.map(entry => ({ label: entry.title, value: entry.id })))
+const creationDescriptionLabel = computed(() => form.kind === 'experience' ? 'What you’ll do' : form.kind === 'service' ? 'Short description' : 'Description')
+const creationPriceError = computed(() => {
+  if (!creationPrice.value.trim()) return null
+  try { majorAmountToMinor(creationPrice.value.trim(), currency); return null }
+  catch (error) { return getErrorMessage(error, 'Enter a valid price') }
+})
+function selectCreationPhoto(asset: CoverPhotoAsset | null) {
+  if (creationSubmitted.value || saving.value) return
+  form.image_asset_id = asset?.asset_id ?? null
+  creationPhoto.value = asset
+}
+async function cancelCreation() {
+  if (saving.value) return
+  try {
+    const result = await navigateTo(level.to.value ?? catalogPath.value)
+    if (isNavigationFailure(result)) throw result
+  } catch (error) { saveError.value = getErrorMessage(error, 'The catalog could not be opened') }
+}
+
 
 /**
  * The location a price is read and written for: a place to stay is priced at
@@ -1055,7 +1103,6 @@ const sectionValid = computed(() => {
   if (editorKey.value === 'kind') return PRODUCT_KINDS.includes(form.kind as ProductKind)
   if (editorKey.value === 'name') return Boolean(form.name.trim())
   if (editorKey.value === 'description') return form.description.length <= PRODUCT_LIMITS.description
-  if (editorKey.value === 'stay') return !stayIncomplete()
   if (editorKey.value === 'guests') return Number.isInteger(Number(form.max_guests)) && Number(form.max_guests) >= 1 && Number(form.max_guests) <= 99
   if (editorKey.value === 'availability') return Number.isInteger(Number(form.min_nights)) && Number(form.min_nights) >= 1 && Number(form.min_nights) <= 365
   if (editorKey.value === 'arrival-time') return checkInWindowValid()
@@ -1090,11 +1137,6 @@ function stayIncomplete(): boolean {
 function checkInWindowValid(): boolean {
   return MINUTE_TIME_PATTERN.test(form.check_in_time) && MINUTE_TIME_PATTERN.test(form.check_out_time)
     && (form.check_in_end_time === '' || (MINUTE_TIME_PATTERN.test(form.check_in_end_time) && form.check_in_end_time !== form.check_in_time))
-}
-function staySummary(): string {
-  const place = organizationLocations.value.find(entry => entry.id === form.stay_location_id)?.title
-  if (!place) return 'Choose where it is'
-  return `${place} · Check-in ${stayCheckInWindow(form.check_in_time, form.check_in_end_time || null)}, checkout ${form.check_out_time} · Sleeps ${form.max_guests}`
 }
 function stayTeamSummary(): string {
   if (schedulingMembersError.value) return 'Teams could not be loaded'
@@ -1213,14 +1255,7 @@ function productLocationSummary(): string {
 
 const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   const image = product.value?.image
-  if (isNew.value) return [{
-    id: 'item',
-    items: [
-      { id: 'kind', label: 'Type', summary: form.kind ? PRODUCT_KIND_LABELS[form.kind] : 'Choose a type', to: sectionPath('kind') },
-      { id: 'name', label: 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
-      ...(form.kind === 'stay' ? [{ id: 'stay', label: 'Stay settings', summary: staySummary(), placeholder: stayIncomplete(), to: sectionPath('stay') }] : []),
-    ],
-  }]
+  if (isNew.value) return []
   // A product that failed to load has nothing to summarize; the level shows the failure.
   if (!product.value || loadError.value) return []
   if (dishEditor.value || experienceEditor.value || legalEditor.value) {
@@ -1390,7 +1425,7 @@ const activeNavigationItem = computed(() => {
  * beside this index. A row that leads into a level of its own — Bookings,
  * Pricing — would open that level too and push this index off the screen.
  */
-const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'stay', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
+const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
 const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
 const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'accessibility', 'location', 'house-rules', 'guest-safety', 'cancellation', 'team', 'featured', 'collections']
@@ -1402,13 +1437,17 @@ function rowRank(id: string) {
 /**
  * The sections this product actually has, read from the rows it offers rather
  * than from a list of every section a product could ever have — a product being
- * created has only its name, and the rows already say so.
+ * created composes its essential facts together rather than opening rows.
  */
 const openSections = computed(() => [...navigationGroups.value.flatMap(group => group.items.filter(item => item.id !== 'page' || canPreview.value).map(item => item.id)), ...additionalDetails.value.map(item => item.id), ...(!isNew.value && definitions.value.some(field => field.id === route.params.definitionId && field.key !== PRICING_NOTE_HANDLE && field.key !== 'tagline' && !isStayFocusedDetail(field.key)) ? ['attributes'] : [])])
 
 // A section this product does not have 404s. A watcher, not a setup-time check:
 // moving between leaves reuses this component.
 watchEffect(() => {
+  if (isNew.value) {
+    if (detailKey.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+    return
+  }
   // A product that failed to load has no rows, and every real section would
   // read as unsupported; the failure is shown instead, never a 404.
   if (!isNew.value && !product.value) return
@@ -1664,31 +1703,20 @@ const sectionUnchanged = computed(() => {
   return false
 })
 
-const { title: newTitle, firstStep, saveLabel: createSaveLabel, saveDisabled, save: saveCurrentEditor } = useCreateWalk({
-  recordPath: itemPath,
-  isNew,
-  openKey: editorKey,
-  labels: sectionLabels,
-  order: () => form.kind === 'stay' ? ['kind', 'name', 'stay'] : ['kind', 'name'],
-  missing: key => key === 'name' ? !form.name.trim() : key === 'stay' ? stayIncomplete() : !form.kind,
-  noun: () => itemLabel.value.toLowerCase(),
-  saving,
-  // A failed read cannot be saved. A retained stale draft needs an explicit
-  // reset to the current product before another save can use its revision.
-  existingBlocked: () => !product.value || Boolean(loadError.value) || editVersion.value !== product.value.updated_at || !sectionValid.value || sectionUnchanged.value && !saveError.value,
-  commit,
-})
-
+const creationNoun = computed(() => form.kind === 'service' ? 'practice area' : itemLabel.value.toLowerCase())
+const newTitle = computed(() => newRecordLabels(creationNoun.value).title)
+const saveDisabled = computed(() => saving.value || (isNew.value
+  ? !createdProductId.value && (!form.kind || !form.name.trim() || Boolean(creationPriceError.value) || form.kind === 'stay' && (stayIncomplete() || Boolean(locationsError.value)))
+  : !product.value || Boolean(loadError.value) || editVersion.value !== product.value.updated_at || !sectionValid.value || sectionUnchanged.value && !saveError.value))
 const pageTitle = computed(() => isNew.value ? newTitle.value : (experienceEditor.value ? product.value?.name : form.name) || itemLabel.value)
-
-// Saving content and publishing the listing are separate owner decisions.
-const saveLabel = computed(() => createSaveLabel.value ?? 'Save')
+// Saving a draft never makes it publicly available or enables consultations.
+const saveLabel = computed(() => isNew.value ? `${createdProductId.value ? 'Finish creating' : creationSubmitted.value && saveError.value ? 'Retry creating' : 'Create'} ${creationNoun.value}` : 'Save')
 
 const closeTo = ref<string | null>(null)
 async function save(target?: string, concern?: ProductConcern) {
   if (saving.value || saveDisabled.value) return
   closeTo.value = target ?? null
-  try { if (concern !== undefined) await commit(concern); else await saveCurrentEditor() } finally { closeTo.value = null }
+  try { await commit(concern) } finally { closeTo.value = null }
 }
 
 async function commit(concern?: ProductConcern) {
@@ -1744,32 +1772,58 @@ async function commit(concern?: ProductConcern) {
       // sale-inactive, the page and the offer drafted before anything is sold.
       // The key makes a retry after a lost response return this product
       // rather than a second.
-      const created = await dashboardApi(`/api/editor/organizations/${organizationId}/products`, {
-        method: 'POST',
-        body: {
-          ...payload(),
-          ...(form.kind === 'service' ? { active: false } : {}),
-          idempotency_key: createKey.value,
-        },
-        validate: isOne,
+      if (!creationSubmitted.value && !createdProductId.value) {
+        const targetLocationId = form.kind === 'stay' ? form.stay_location_id : id
+        if (targetLocationId) await dashboardApi(`/api/organizations/${organizationId}/locations/${encodeURIComponent(targetLocationId)}`, {
+          validate: (value): value is Record<string, unknown> => isRecord(value) && value.success === true && isRecord(value.location) && value.location.id === targetLocationId,
+        })
+        if (createCollectionId.value) {
+          await refreshCatalog()
+          collectionProductIds(createCollectionId.value)
+        }
+      }
+      // Once submitted, the same authored input is retained even if the response
+      // is lost; retrying must reuse its key rather than describe another item.
+      creationSubmitted.value = true
+      if (!createdProductId.value) {
+        const created = await dashboardApi(`/api/editor/organizations/${organizationId}/products`, {
+          method: 'POST',
+          body: {
+            ...payload(),
+            ...(creationPrice.value.trim() ? { variants: [{ name: form.name.trim(), prices: [{ unit_amount: majorAmountToMinor(creationPrice.value.trim(), currency), currency, location_id: priceLocationId() }] }] } : {}),
+            ...(form.kind === 'service' ? { active: false } : {}),
+            idempotency_key: createKey.value,
+          },
+          validate: isOne,
+        })
+        createdProductId.value = created.product.id
+      }
+      const createdId = createdProductId.value
+      if (form.image_asset_id) await dashboardApi(`/api/editor/organizations/${organizationId}/media/placements`, {
+        method: 'PUT', body: { placement: { owner_type: 'product', owner_id: createdId, slot: 'image' }, asset_id: form.image_asset_id }, validate: isRecord,
       })
       // A product created in a location's catalog is offered there, and one
       // created from a collection joins it — explicit writes, each named by the
-      // URL that opened the walk, neither implied. The location relationship is
+      // URL that opened creation, neither implied. The location relationship is
       // not collection membership.
-      if (id && form.kind !== 'stay') await dashboardApi(`/api/editor/organizations/${organizationId}/products/${created.product.id}/locations/${id}`, {
+      if (id && form.kind !== 'stay') await dashboardApi(`/api/editor/organizations/${organizationId}/products/${createdId}/locations/${id}`, {
         method: 'PUT', body: { active: true, published: false }, validate: isRecord,
       })
       if (createCollectionId.value) {
         await refreshCatalog()
         const members = collectionProductIds(createCollectionId.value)
-        await setCollectionProducts(createCollectionId.value, members.includes(created.product.id) ? members : [...members, created.product.id], members)
+        await setCollectionProducts(createCollectionId.value, members.includes(createdId) ? members : [...members, createdId], members)
       }
       await refreshCatalog()
       // The record it became, not the `new` form it was, so Back from a saved
       // product goes to Catalog and never to an empty Add screen.
-      clearNuxtState([draftKey, createKeyName])
-      await navigateTo(router.resolve({ path: `${catalogPath.value}/${created.product.id}`, query: { location_id: id ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) } }).fullPath, { replace: true })
+      const destinationLocationId = form.kind === 'stay' ? form.stay_location_id : id
+      commitNavigation = true
+      try {
+        const navigation = await navigateTo(router.resolve({ path: `${catalogPath.value}/${createdId}`, query: { location_id: destinationLocationId ?? undefined, ...(route.query.kind === 'dish' ? { kind: 'dish' } : {}) } }).fullPath, { replace: true })
+        if (isNavigationFailure(navigation)) throw navigation
+      } finally { commitNavigation = false }
+      clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
       return
     }
     if (concern === 'publication-visibility') {
@@ -1800,9 +1854,19 @@ async function commit(concern?: ProductConcern) {
     // A booking write changes what the schedule is: its start times, whether the
     // product has a calendar at all, or the time zone an online one runs in.
     if (concern !== undefined && concern !== 'publication-visibility' && concern !== 'publication-availability' && concern !== 'house-rules' && concern !== 'additional-rules' && concern !== 'arrival-time' && !isSafetyConcern(concern)) await reloadSchedule()
-    await (closeTo.value ? navigateTo(closeTo.value) : level.close())
+    if (!closeTo.value || router.resolve(closeTo.value).fullPath !== router.currentRoute.value.fullPath) {
+      const result = await (closeTo.value ? navigateTo(closeTo.value) : level.close())
+      if (isNavigationFailure(result)) throw result
+    }
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
+    // Only the canonical planner can prove the request never reached its write.
+    // A lost response, accepted Product or failed placement keeps its intent.
+    if (isNew.value && !createdProductId.value && error instanceof ApiClientError
+      && (error.data.mutation_applied === false || isRecord(error.data.data) && error.data.data.mutation_applied === false)) {
+      creationSubmitted.value = false
+      createKey.value = crypto.randomUUID()
+    }
     if (ordinaryDraft || bookingDraft || scheduleDraft || locationDraft || safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
       try {
         await reload()

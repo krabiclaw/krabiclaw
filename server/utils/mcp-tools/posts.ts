@@ -224,7 +224,7 @@ async function asMcpValidationError<T>(work: () => Promise<T>): Promise<T> {
   try {
     return await work()
   } catch (error) {
-    if (error instanceof PostValidationError) throw mcpProtocolError(MCP_ERROR.invalidParams, error.message)
+    if (error instanceof PostValidationError) throw mcpProtocolError(MCP_ERROR.invalidParams, error.message, error.data)
     throw error
   }
 }

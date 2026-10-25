@@ -1,4 +1,5 @@
-import { execute, type DbClient } from '~/server/db'
+import { execute, queryFirst, type DbClient } from '~/server/db'
+import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { publishNotificationInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 export const NOTIFICATION_EVENT_TYPES = {
@@ -86,6 +87,32 @@ export async function createCanonicalNotification(db: DbClient, input: CreateNot
     })
   }
   return statement.id
+}
+
+/** A guest event reaches the account that currently owns its conversation. */
+export async function notifyBuyerThread(db: DbClient, input: {
+  threadId: string
+  entryId: string
+  title: string
+  message?: string | null
+  conversation?: boolean
+}): Promise<void> {
+  const thread = await queryFirst<{ user_id: string | null; kind: string; current_buyer: number }>(db, `
+    SELECT r.user_id, r.kind, (${REQUEST_CURRENT_BUYER_SQL}) AS current_buyer
+    FROM requests r JOIN activity_entries e ON e.request_id = r.id
+    WHERE r.id = ? AND e.id = ?`, [input.threadId, input.entryId])
+  if (!thread) throw new Error('Buyer notification has no matching conversation event')
+  if (!thread.user_id) return
+  if (!thread.current_buyer) throw new Error('Buyer notification ownership does not match its booking')
+  const destination = input.conversation || thread.kind === 'contact'
+    ? 'messages' : `activity/${thread.kind}`
+  await createCanonicalNotification(db, {
+    scope: 'global', targetUserId: thread.user_id,
+    template: 'guest_thread_event',
+    idempotencyKey: `buyer-thread:${input.entryId}`,
+    title: input.title, message: input.message,
+    deepLink: `/dashboard/account/${destination}/${encodeURIComponent(input.threadId)}`,
+  })
 }
 
 export async function notifyNewUserSignup(db: DbClient): Promise<void> {

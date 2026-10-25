@@ -108,14 +108,14 @@ export function blogEditorPath(orgSlug: string, articleId: string): string {
 }
 
 export function blogCreatePath(orgSlug: string): string {
-  return `${blogEditorPath(orgSlug, 'new')}/headline`
+  return blogEditorPath(orgSlug, 'new')
 }
 
 /** Prepare a draft from this article; opening it never publishes anything. */
 export function articleFacebookPostPath(orgSlug: string, articleId: string, locationId?: string | null): string {
   const query = new URLSearchParams({ article_id: articleId, channel: 'facebook' })
   if (locationId) query.set('location_id', locationId)
-  return `${organizationBase(orgSlug)}/website/posts/new/body?${query}`
+  return `${organizationBase(orgSlug)}/website/posts/new?${query}`
 }
 
 export function insightsPath(orgSlug: string, query?: { startDate: string; endDate: string; tab?: 'ads' }): string {

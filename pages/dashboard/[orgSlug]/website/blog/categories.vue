@@ -56,19 +56,22 @@ import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialo
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { isCategoryResponse, isCategoriesResponse, type DashboardArticleCategory } from '~/composables/useArticleCategories'
-import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, type ArticleCollection } from '~/utils/article-collections'
+import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, isArticleCollection, type ArticleCollection } from '~/utils/article-collections'
 import { getErrorMessage } from '~/utils/errors'
 
-definePageMeta({ layout: 'dashboard' })
+definePageMeta({ layout: 'dashboard', key: route => String(route.params.orgSlug) })
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 useSeoMeta({ title: 'Categories | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 const dashboardApi = useDashboardApi()
+const route = useRoute()
+const router = useRouter()
 const organizationId = await useDashboardOrganizationId()
 const level = useRouteLevel()
 
 const collectionTabs = ARTICLE_COLLECTION_SLUGS.map(slug => ({ value: slug, label: ARTICLE_COLLECTIONS[slug].label }))
-const collection = ref<ArticleCollection>('blog')
+if (route.query.collection !== undefined && !isArticleCollection(route.query.collection)) throw createError({ statusCode: 400, statusMessage: 'Choose an article collection' })
+const collection = ref<ArticleCollection>(isArticleCollection(route.query.collection) ? route.query.collection : 'blog')
 const { data, error, refresh } = await useArticleCategories(organizationId, collection)
 
 const editing = ref(false)
@@ -97,7 +100,7 @@ const categories = computed(() => {
   walk(null, 1)
   return rows
 })
-const listItems = computed(() => categories.value.map(({ row, depth }) => ({ id: row.id, title: row.name, to: `${level.path.value}/${row.id}`, row, depth })))
+const listItems = computed(() => categories.value.map(({ row, depth }) => ({ id: row.id, title: row.name, to: router.resolve({ path: `${level.path.value}/${row.id}`, query: { collection: collection.value } }).fullPath, row, depth })))
 function countSummary(row: DashboardArticleCategory) {
   const articles = row.article_count === 1 ? '1 article' : `${row.article_count} articles`
   return row.child_count ? `${articles} · ${row.child_count === 1 ? '1 subcategory' : `${row.child_count} subcategories`}` : articles
@@ -117,7 +120,7 @@ async function createCategory() {
     adding.value = false
     newName.value = ''
     await refresh()
-    await navigateTo(`${level.path.value}/${category.id}`)
+    await navigateTo({ path: `${level.path.value}/${category.id}`, query: { collection: collection.value } })
   } catch (cause) {
     actionError.value = getErrorMessage(cause, 'The category could not be created')
   } finally {

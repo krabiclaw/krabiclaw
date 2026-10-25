@@ -12,8 +12,8 @@
       class="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-4 border-t border-default bg-default/95 px-5 py-4 shadow-lg backdrop-blur-sm lg:hidden"
     >
       <div v-if="priceLabel" class="min-w-0">
-        <p v-if="compareAtLabel" class="text-xs text-muted line-through">{{ compareAtLabel }}</p>
-        <p class="font-semibold leading-tight text-default">{{ isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel }}</p>
+        <p v-if="compareAtLabel && !stayQuoteTotalLabel" class="text-xs text-muted line-through">{{ compareAtLabel }}</p>
+        <p class="font-semibold leading-tight text-default">{{ stayQuoteTotalLabel ?? (isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel) }}</p>
         <p v-if="isStay && stayBooking.quote.value" class="text-xs text-muted">{{ stayBooking.rangeLabel.value }}</p>
       </div>
       <TenantButton v-if="canOrderExternally" class="shrink-0" :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</TenantButton>
@@ -273,9 +273,9 @@
 
           <WhoYouMeet v-if="booking || isStay" class="mt-10" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" :session-id="bookingController.selectedSession.value?.id" :contact-to="enquiryPath" />
 
-          <section v-if="thingsToKnow.length" id="things-to-know" class="mt-10 scroll-mt-24 border-t border-default pt-10">
+          <section v-if="!isStay && thingsToKnow.length" id="things-to-know" class="mt-10 scroll-mt-24 border-t border-default pt-10">
             <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.things_to_know') }}</h2>
-            <div class="mt-5 grid gap-x-10 gap-y-6 sm:grid-cols-2" :class="isStay ? 'lg:grid-cols-3' : undefined">
+            <div class="mt-5 grid gap-x-10 gap-y-6 sm:grid-cols-2">
               <div v-for="detail in thingsToKnow" :key="detail.key">
                 <h3 class="text-sm font-semibold text-default">{{ detail.label }}</h3>
                 <ul class="mt-2 space-y-1.5">
@@ -293,9 +293,9 @@
             <div v-if="priceLabel" class="flex items-center justify-between gap-4">
               <div>
                 <span class="tenant-display text-2xl font-bold tabular-nums text-default">
-                  <span v-if="compareAtLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ isStay || enquiryOnly || (product.kind !== 'experience' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel }) }}
+                  <span v-if="compareAtLabel && !stayQuoteTotalLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ stayQuoteTotalLabel ?? (isStay || enquiryOnly || (product.kind !== 'experience' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel })) }}
                 </span>
-                <span v-if="isStay" class="text-sm font-normal text-muted"> / night</span>
+                <span v-if="isStay && !stayQuoteTotalLabel" class="text-sm font-normal text-muted"> / night</span>
                 <p v-if="!enquiryOnly && product.kind === 'experience'" class="mt-1 text-sm text-muted">{{ t('site.experience_detail.per_person') }}</p>
               </div>
               <div v-if="isStay && averageRating" class="flex items-center gap-1 text-xs font-semibold text-default">
@@ -502,7 +502,7 @@ import UpcomingSessions from '~/components/booking/UpcomingSessions.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
-import { STAY_AMENITIES, STAY_ALARM_AMENITIES, STAY_AMENITY_GROUPS, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { stayPhotoRoomName, stayPhotoTourReady } from '~/shared/stay-photos'
 import { STAY_ROOM_ACCESSIBILITY_FEATURES, STAY_HOME_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import type { MediaGalleryGroup } from '~/components/MediaLightbox.vue'
@@ -513,8 +513,8 @@ import { ga4Major } from '~/utils/ga4-projection'
 import { productLocationCollectionPath, staySpecLabels } from '~/utils/product-presentation'
 import { extractDietarySchemaUrls, type ProductCollectionSibling } from '~/utils/product-seo'
 import type { ProductDetailValue } from '~/shared/product-details'
-import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
-import { STAY_SAFETY_DETAIL_KEYS, staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
+import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, STAY_LOCATION_DETAIL_KEYS } from '~/shared/product-details'
+import { STAY_SAFETY_DETAIL_KEYS } from '~/shared/stay-safety'
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
@@ -567,6 +567,9 @@ const displayTitle = computed(() => props.product.name)
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
 const stayBooking = useStayBooking(() => ({ product: props.product, location: props.location, checkout: props.stayCheckoutAvailable }))
+const stayQuoteTotalLabel = computed(() => isStay.value && stayBooking.quote.value
+  ? `${stayBooking.money(stayBooking.quote.value.total_minor)} ${t('stay.total')}`
+  : null)
 const bookingLabel = computed(() => isStay.value
   ? stayBooking.quote.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
   : props.vertical === 'service'
@@ -836,19 +839,7 @@ const visibleDetails = computed(() => productDetailFields(props.product.kind).fl
   if (value === undefined || value === null) return []
   const values = Array.isArray(value) ? value : [String(value)]
   return values.length ? [{ key: definition.id, label: definition.name, values }] : []
-}).concat(stayDetails(props.product.stay)))
-
-/** A place to stay's amenities and cancellation policies, named from their catalogs. */
-function stayDetails(stay: typeof props.product.stay): Array<{ key: string; label: string; values: string[] }> {
-  if (!stay) return []
-  const policies = [
-    ...(stay.cancellation_policy ? [`${STAY_CANCELLATION_POLICIES[stay.cancellation_policy].label}: ${STAY_CANCELLATION_POLICIES[stay.cancellation_policy].summary}`] : []),
-    ...(stay.long_term_cancellation_policy ? [`${STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy].label}: ${STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy].summary}`] : []),
-  ]
-  return [
-    ...(policies.length ? [{ key: 'cancellation_policy', label: 'Cancellation policy', values: policies }] : []),
-  ]
-}
+}))
 
 const { data: initialSessions, error: initialSessionsError } = await useAsyncData(`product-detail-sessions:${props.organizationId}:${props.product.id}:${props.location?.id ?? 'online'}`, async () => {
   if (!props.booking || props.product.order_url || props.scopeRequired) return []
@@ -948,32 +939,10 @@ const stayCheckIn = computed(() => {
     ? t('stay.check_in_after', { time: formatTime(stay.check_in_time, locale.value) })
     : t('stay.check_in_window', { start: formatTime(stay.check_in_time, locale.value), end: formatTime(stay.check_in_end_time, locale.value) })
 })
-const stayRules = computed(() => props.product.kind === 'stay' ? stayHouseRuleLines(props.product.details, value => formatTime(value, locale.value)) : [])
-/** Airbnb's three columns for a home: house rules with its times and party, safety and property, then its other details. */
-const stayHouseRules = computed(() => props.product.stay ? [
-  stayCheckIn.value,
-  t('stay.check_out_before', { time: formatTime(props.product.stay.check_out_time, locale.value) }),
-  t('stay.guests_maximum', props.product.stay.max_guests),
-  ...stayRules.value,
-] : [])
-// Installed, absent and unanswered alarms retain their distinct authored meaning.
-const staySafety = computed(() => {
-  const stay = props.product.stay
-  if (!stay) return []
-  return [
-    ...STAY_AMENITY_GROUPS.home_safety.amenities.filter(code => !(STAY_ALARM_AMENITIES as readonly string[]).includes(code) && stay.amenities.includes(code)).map(code => STAY_AMENITIES[code].label),
-    ...stayAlarmLines(stay.amenity_answers, props.product.details, { includeUnknown: true, absent: item => t('stay.not_installed', { item }), unknown: item => t('stay.not_reported', { item }) }),
-    ...staySafetyLines(props.product.details),
-  ]
-})
-const thingsToKnow = computed(() => [
-  ...(stayHouseRules.value.length ? [{ key: 'house_rules', label: t('stay.house_rules'), values: stayHouseRules.value }] : []),
-  ...(staySafety.value.length ? [{ key: 'safety', label: t('stay.safety_property'), values: staySafety.value }] : []),
-  ...visibleDetails.value.filter((detail) => {
-    const definition = productDetailFields(props.product.kind).find(entry => entry.id === detail.key)
-    return !definition || !PLACED_ATTRIBUTE_HANDLES.has(productDetailKey(definition))
-  }),
-])
+const thingsToKnow = computed(() => visibleDetails.value.filter((detail) => {
+  const definition = productDetailFields(props.product.kind).find(entry => entry.id === detail.key)
+  return !definition || !PLACED_ATTRIBUTE_HANDLES.has(productDetailKey(definition))
+}))
 
 const addressLine = computed(() => formatPostalAddress(props.location?.address ?? null))
 // A home is named by its town, as Airbnb's "Villa in Ao Nang"; its location's title is the home's own name.

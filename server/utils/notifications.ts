@@ -47,7 +47,7 @@ import {
   stayCancelledMessage,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { createCanonicalNotification, type NotificationSeverity } from '~/server/utils/notification-center'
+import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
 import { createDeliveryReceipt, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
@@ -376,12 +376,17 @@ async function sendEmailNotification(
     unsubscribeUrl?: string | null
     unsubscribeOneClickUrl?: string | null
     delivery?: ThreadDeliveryContext | null
+    buyerAlert?: boolean
   }
 ): Promise<void> {
   // In provider mode a reserved test address is refused by sendEmail, and the
   // refusal is this Resend delivery's recorded outcome.
   const provider = getEmailDeliveryMode(env) === 'provider' ? 'resend' : 'log_only'
   const deliveryContext = opts.delivery
+  if (opts.buyerAlert) {
+    if (!deliveryContext?.threadId) throw new Error('Buyer alert requires its guest conversation event')
+    await notifyBuyerThread(db, { threadId: deliveryContext.threadId, entryId: deliveryContext.entryId, title: opts.title, message: opts.organizationName })
+  }
   const delivery = deliveryContext
     ? await createDeliveryReceipt(db, {
         entryId: deliveryContext.entryId,
@@ -964,6 +969,7 @@ export async function notifyReservationCreated(
       title: guestMessage.title,
       payload,
       email: { subject: guestMessage.title, html: guestEmail.html, text: guestEmail.text },
+      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'reservation_customer_received', opts.email),
     })]),
   ])
@@ -1051,6 +1057,7 @@ export async function notifyReservationCancelled(
       title: guestMessage.title,
       payload,
       email: { subject: guestMessage.title, html: guestEmail.html, text: guestEmail.text },
+      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'status_update', 'email', 'reservation_customer_cancelled', opts.email),
     }),
   ])
@@ -1122,6 +1129,7 @@ export async function notifyContactSubmitted(
       title: guestMessage.title,
       payload,
       email: { subject: guestMessage.title, html: guestEmail.html, text: guestEmail.text },
+      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'contact_customer_received', opts.email),
     }),
   ])
@@ -1300,6 +1308,7 @@ export async function notifyBookingCreated(
       title: guestTitle,
       payload,
       email: { subject: guestTitle, html: guestEmail.html, text: guestEmail.text },
+      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'booking_customer_received', opts.email),
     })]),
   ])
@@ -1370,6 +1379,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
       organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
       template: 'stay_customer_confirmed', title: guestTitle, payload,
       email: { subject: guestTitle, html: guestEmail.html, text: guestEmail.text },
+      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_confirmed', stay.guest_email),
     }),
   ])
@@ -1457,6 +1467,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,
       template: 'stay_customer_cancelled', title: recorded.subject, payload,
       email: { subject: recorded.subject, html: recorded.email.html, text: recorded.email.text },
+      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_cancelled', recorded.email.to),
     }),
   ])
@@ -1543,6 +1554,7 @@ export async function notifyBookingCancelled(
       title: guestMessage.title,
       payload,
       email: { subject: guestMessage.title, html: guestEmail.html, text: guestEmail.text },
+      buyerAlert: true,
       delivery: threadDelivery(threadContext, 'status_update', 'email', 'booking_customer_cancelled', opts.email),
     }),
   ])
