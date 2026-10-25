@@ -7,6 +7,7 @@
       :src="item.url"
       :poster="item.poster || undefined"
       :controls="controls"
+      :aria-label="controls ? item.alt : undefined"
       preload="metadata"
       muted
       :loop="!controls"
