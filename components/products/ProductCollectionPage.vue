@@ -424,7 +424,8 @@ const priceLabel = (product: PublicProduct, collectionLocationId: string | null 
 // One section per collection, in the merchant's order — see
 // groupProductsByCollection for what membership does and does not imply.
 const groups = computed(() => {
-  const grouped = groupProductsByCollection(props.products, props.collections)
+  const grouped = groupProductsByCollection(props.products, props.collections
+    .filter(collection => collection.location_id === null || locationMap.value.has(collection.location_id)))
     .map(group => ({ id: group.id, category: group.name, description: group.description, image: group.image, sort_order: group.sort_order, location_id: group.location_id, products: group.products }))
   const included = new Set(grouped.flatMap(group => group.products.map(product => product.id)))
   const ungrouped = props.products.filter(product => !included.has(product.id))
