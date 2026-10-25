@@ -59,6 +59,8 @@ test('agendaToTodayCard presents consultation with calendar-clock icon', () => {
     partySize: 1,
     status: 'confirmed',
     stayId: null,
+    productId: 'consultation-1',
+    stayChannel: null,
     stayMoment: null,
   }
 
@@ -70,4 +72,5 @@ test('agendaToTodayCard presents consultation with calendar-clock icon', () => {
   assert.equal(card.imageIcon, 'i-lucide-user')
   assert.equal(card.badgeIcon, 'i-lucide-calendar-clock')
   assert.match(card.headline, /Consultation with Sarah today/)
+  assert.equal(card.productId, 'consultation-1')
 })

@@ -138,7 +138,10 @@ before scheduled activity, then at most two factual performance or content
 opportunities. Assigned service members see only
 their own authorized appointments and related work. Lodging members see only
 the arrivals and departures at homes assigned to them through Better Auth
-members or teams.
+members or teams. Owners and admins also see guests currently staying, between
+their arrival and departure days; these are not extra cleanings for assigned
+members. A departure notes when another noncancelled stay at that same home
+arrives on its checkout date.
 
 The card is an entrance to its data owner, never a second editor or task
 database. A reply opens its conversation; a decision opens its booking; a
@@ -280,6 +283,14 @@ is a child of the calendar, which lights Calendar.
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
+| Guest messaging | organization saved replies and their automatic home schedules at `O/messages/replies`; immutable delivery snapshots at `O/messages/scheduled` or a conversation's `scheduled` child |
+
+Saved replies use the canonical message-template operations: Reply edits its name
+and reusable message, Automatic schedule edits its trigger, local time and named
+homes. Managers create, change and delete them; members can insert a reply into
+the conversation's existing composer before sending. Scheduled-message history
+reads the canonical snapshots and reasons; managers may cancel pending messages.
+Neither editor introduces a second sending or scheduling lifecycle.
 
 Themes own nothing. A theme renders what these hold; it adds no CMS route,
 editor or writer, and it never grants or hides an authorization.
@@ -347,6 +358,15 @@ While they pay, a checkout hold claims
 those nights (and closes them on a connected channel), and the captured payment
 becomes a confirmed direct stay with its guest conversation. A lapsed hold gives
 its nights back.
+
+Today and Calendar open the same manual-stay creation walk at
+`O/bookings/stay/new`: home, dates, guest and total, with an optional initial
+payment recorded in that same operation. A supplied home stays explicit; without
+one the host chooses it. Creation opens the existing stay detail after readback.
+The home's nightly calendar has Month, Year and List views. Its native calendar
+control selects separate nights; Select nights chooses a contiguous run. All
+views read the same home calendar, and all selected-night writes use the existing
+night operation with its visible channel result.
 
 What the home is and offers — its property type, bedrooms, beds and baths, its
 amenities from the fixed catalog in `shared/stay-listing.ts`, and its short- and

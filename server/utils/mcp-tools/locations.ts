@@ -3,6 +3,7 @@ import { calendarDateSchema, addLocalDays, assertCalendarDate, localNow, timezon
 import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, organizationTool, specialHoursInputSchema, workspaceContextObject, PHONE_FORMAT } from './shared'
 import { HTTPError } from 'nitro'
 import { STAY_MAP_SHARING_MODES } from '~/shared/stay-listing'
+import { STAY_CHANNELS } from '~/shared/bookings'
 import type { McpExecutorContext } from './execution'
 import { createLocation, getLocation, updateLocation, type CreateLocationInput, type LocationRecord } from '~/server/utils/location-management'
 import { AGENDA_KINDS, listAgenda, type AgendaKind } from '~/server/utils/dashboard-agenda'
@@ -17,13 +18,15 @@ const agendaItem = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...AGENDA_KINDS] }, requestId: nullableText,
   operationalBookingId: nullableText, operationalReservationId: nullableText,
   stayId: { ...nullableText, description: 'For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.' },
-  stayMoment: { type: ['string', 'null'], enum: ['arrival', 'departure', null] },
+  productId: nullableText,
+  stayChannel: { type: ['string', 'null'], enum: [...STAY_CHANNELS, null] },
+  stayMoment: { type: ['string', 'null'], enum: ['arrival', 'departure', 'turnover', 'current', null] },
   assignedMemberId: nullableText, assignedMemberName: nullableText,
   startsAt: text, endsAt: nullableText, dayKey: text, timeZone: text, showTimeZone: { type: 'boolean' },
   title: text, subtitle: nullableText, status: text, organizationId: text,
   locationId: nullableText, locationTitle: nullableText, guestImageUrl: nullableText,
   resourceImageUrl: nullableText, resourceTitle: nullableText, partySize: { type: ['integer', 'null'] }, to: text,
-}, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'operationalReservationId', 'stayId', 'stayMoment', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
+}, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'operationalReservationId', 'stayId', 'productId', 'stayChannel', 'stayMoment', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
 const locationMutation = { ...locationMutationSummaryObject, properties: { ...locationMutationSummaryObject.properties, saved_fields: { ...locationObject, required: [], description: 'Persisted values of the fields named in changed_fields.' } }, required: [...locationMutationSummaryObject.required, 'saved_fields'] }
 const calendarMutation = { ...locationMutation, properties: { ...locationMutation.properties, affected_commitments: { type: 'array', items: agendaItem } }, required: [...locationMutation.required, 'affected_commitments'] }
 

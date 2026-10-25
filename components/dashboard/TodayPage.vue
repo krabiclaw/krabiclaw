@@ -6,6 +6,7 @@
     <template #right>
       <!-- An account has one agenda and nothing to narrow it by. -->
       <AgendaFilters v-if="!personalScope" :locations="todayData?.locations ?? []" :kinds="todayData?.availableKinds ?? []" :organization-id="schedulingOrganizationId" />
+      <UButton v-if="canAddStay" :to="`/dashboard/${encodeURIComponent(orgSlug)}/bookings/stay/new`" icon="i-lucide-plus" color="neutral" variant="ghost" aria-label="Add stay" />
     </template>
 
     <div>
@@ -81,6 +82,8 @@ import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
 import { useDashboardTelemetry } from '~/composables/useDashboardTelemetry'
+import { authClient } from '~/lib/auth-client'
+import type { organizationRoles } from '~/utils/organization-access'
 
 useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
@@ -104,6 +107,10 @@ const orgSlug = computed(() => props.personalScope ? 'account' : String(route.pa
 const { signature: filterSignature, active: hasActiveFilters, query: filterQuery, range: activeRange, failure: navigationError } = useAgendaFilters()
 const organizationId = props.personalScope ? null : await useDashboardOrganizationId()
 const { organization } = useDashboardOrganization()
+const canAddStay = computed(() => {
+  const role = organization.value?.role as keyof typeof organizationRoles | undefined
+  return !props.personalScope && organization.value?.vertical === 'lodging' && Boolean(role && authClient.organization.checkRolePermission({ role, permissions: { operations: ['update'] } }))
+})
 const schedulingOrganizationId = computed(() => organization.value?.vertical === 'lodging' ? null : organizationId)
 const todayKey = computed(() => `dashboard-today-${orgSlug.value}-${props.personalScope ? '' : filterSignature.value}`)
 const isTodayFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
@@ -193,7 +200,7 @@ function isPersonalAgenda(value: unknown): value is AgendaPayload {
     && typeof item.title === 'string' && typeof item.to === 'string'
     && nullableString(item.subtitle) && nullableString(item.locationTitle)
     && nullableString(item.guestImageUrl) && nullableString(item.resourceImageUrl) && nullableString(item.resourceTitle)
-    && nullableString(item.locationId) && nullableString(item.assignedMemberId)
+    && nullableString(item.locationId) && nullableString(item.assignedMemberId) && nullableString(item.productId) && nullableString(item.stayChannel)
     && (item.partySize === null || typeof item.partySize === 'number'))
 }
 

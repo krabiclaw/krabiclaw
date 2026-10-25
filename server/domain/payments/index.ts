@@ -102,7 +102,7 @@ export async function paymentSummary(db: DbClient, principal: FinancialPrincipal
   return { organization_id: principal.organizationId, timezone: 'UTC', from, to, amounts, usage, usage_status: 'Stripe meters bill captured volume on the plan subscription; Stripe costs follow once Stripe itemizes them', source: 'Stripe authenticated projections', refreshed_at: new Date().toISOString() }
 }
 
-/** Only an authenticated browser approval may approve this request. MCP receives a handoff. */
+/** Only an explicit authenticated dashboard or native-app approval may approve this request. MCP receives a handoff. */
 export type RefundAuthorizationAction = 'refund' | 'reject_booking' | 'cancel_booking' | 'cancel_reservation' | 'cancel_stay'
 /** How long a business has to approve a refund it asked for. */
 export const AUTHORIZATION_WINDOW_SECONDS = 600

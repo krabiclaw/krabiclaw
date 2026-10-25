@@ -116,7 +116,8 @@ import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
 import { isGuestStay } from '~/shared/stay-arrival'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
-import type { GuestStay, StayDetail, StayPaymentMethod } from '~/server/domain/stays'
+import type { GuestStay, StayDetail } from '~/server/domain/stays'
+import { STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
@@ -155,8 +156,7 @@ watch(realtime.event, event => {
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 
 const CHANNELS = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'You' } as const
-const METHODS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }
-const methods = Object.entries(METHODS).map(([value, label]) => ({ value, label }))
+const methods = Object.entries(STAY_PAYMENT_METHOD_LABELS).map(([value, label]) => ({ value, label }))
 const channelName = computed(() => stay.value ? CHANNELS[stay.value.channel] : '')
 /**
  * Who the stay is for. A stay made here always names its guest, so one without
@@ -191,7 +191,7 @@ function money(minor: number): string {
   if (!isCurrencyCode(currency)) throw new Error(`Unsupported stay currency ${String(currency)}`)
   return `${minor < 0 ? '−' : ''}${formatMinorAmount(Math.abs(minor), currency)}`
 }
-function methodLabel(method: StayPaymentMethod) { return METHODS[method] }
+function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LABELS[method] }
 
 const rows = computed(() => {
   const value = stay.value
