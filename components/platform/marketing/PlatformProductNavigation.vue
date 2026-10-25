@@ -29,8 +29,8 @@ const links = computed(() => blockRecords(props.block.data.buttons).flatMap(item
 .kc-product-nav > div { display: flex; gap: clamp(1.5rem, 5vw, 5rem); }
 .kc-product-nav a { color: #d6d7dd; text-decoration: none; font-size: 1rem; }
 .kc-product-nav a:hover, .kc-product-nav a:focus-visible { color: var(--kc-coral); }
-.kc-product-nav--lodging { width: 100%; padding: 2.5rem max(1.5rem, calc((100% - 75rem) / 2)); background: #f6f4ef; }
+.kc-product-nav--lodging { width: 100%; padding: 2.5rem max(7%, calc((100% - 75rem) / 2)); background: #f6f4ef; }
 .kc-product-nav--lodging > div { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem; }
 .kc-product-nav--lodging a { color: #252c47; font-size: .9rem; }
-@media (max-width: 767px) { .kc-product-nav--lodging > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; } }
+@media (max-width: 767px) { .kc-product-nav--lodging { padding: 2.5rem 1.5rem; } .kc-product-nav--lodging > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; } }
 </style>

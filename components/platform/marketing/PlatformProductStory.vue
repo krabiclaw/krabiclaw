@@ -84,7 +84,7 @@ const examples = computed(() => {
 :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__pictures) { grid-column: 1; }
 :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__heading), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__copy) { grid-column: 2; }
 .kc-product-story--lodging { padding: clamp(5rem, 11vw, 10rem) 0; }
-.kc-product-story--lodging .kc-product-story__inner { width: min(100% - 3rem, 75rem); gap: 2rem 5rem; }
+.kc-product-story--lodging .kc-product-story__inner { width: min(86%, 75rem); gap: 2rem 5rem; }
 .kc-product-story--lodging h2 { font-size: clamp(2.6rem, 4.6vw, 4.5rem); }
 .kc-product-story--lodging .kc-product-story__copy > p { font-size: clamp(1rem, 1.5vw, 1.35rem); white-space: pre-line; }
 .kc-product-story--lodging .kc-product-story__pictures img { border-radius: 1.1rem; box-shadow: 0 1.5rem 3rem #151a2514; }
@@ -113,7 +113,7 @@ const examples = computed(() => {
   .kc-product-story--photos .kc-product-story__picture--2 { right: 0; top: 40%; width: 42%; }
   .kc-product-story--photos .kc-product-story__picture--3 { left: 38%; top: 55%; width: 20%; }
   .kc-product-story--lodging { padding: 4.5rem 0; }
-  .kc-product-story--lodging .kc-product-story__inner { gap: 2rem; }
+  .kc-product-story--lodging .kc-product-story__inner { width: calc(100% - 3rem); gap: 2rem; }
   .kc-product-story--screens .kc-product-story__pictures { flex-direction: column; align-items: center; }
   .kc-product-story--screens .kc-product-story__pictures figure { width: min(100%, 18rem); }
 }

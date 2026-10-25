@@ -287,7 +287,7 @@ const variant = computed<'home' | 'detailed' | 'vertical' | 'pictures'>(() => {
 }
 
 .kc-product-more--lodging { background: #f6f4ef; color: #171920; padding: clamp(5rem, 10vw, 9rem) 0; }
-.kc-product-more--lodging .kc-product-more__inner { width: min(100% - 3rem, 75rem); }
+.kc-product-more--lodging .kc-product-more__inner { width: min(86%, 75rem); }
 .kc-product-more--lodging h2 { font-size: clamp(2.6rem, 4.6vw, 4.5rem); font-weight: 600; letter-spacing: -.045em; line-height: 1.02; white-space: pre-line; color: inherit; max-width: 45rem; margin-bottom: 3.5rem; }
 .kc-product-more--lodging .kc-product-more__columns > div { border: 0; padding: 0; }
 .kc-product-more--lodging h3 { font-size: clamp(1.3rem, 2vw, 1.8rem); }
@@ -300,6 +300,7 @@ const variant = computed<'home' | 'detailed' | 'vertical' | 'pictures'>(() => {
 }
 
 @media (max-width: 767px) {
+  .kc-product-more--lodging .kc-product-more__inner { width: calc(100% - 3rem); }
   .kc-picture-cards__grid {
     grid-template-columns: 1fr;
   }
