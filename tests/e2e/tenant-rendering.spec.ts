@@ -61,14 +61,15 @@ if (inventoryFile) {
   if (!process.env.PLAYWRIGHT_PREVIEW_URL) throw new Error('A published route inventory requires PLAYWRIGHT_PREVIEW_URL')
   const platform = new URL(testBaseUrl())
   const targets = new Map([
-    ['KrabiClaw', { origin: platform.origin, identity: /KrabiClaw/i }],
-    ['Pottery House', { origin: new URL(potteryHouseBaseURL).origin, identity: /Pottery House/i }],
-    ['Kikuzuki', { origin: new URL(kikuzukiTestBaseUrl()).origin, identity: /Kikuzuki/i }],
-    ['NCLS', { origin: new URL(blawbyBaseURL).origin, identity: /North Carolina Legal Services/i }],
+    ['KrabiClaw', { origin: platform.origin, identity: /KrabiClaw/i, shell: '.platform-layout' }],
+    ['Pottery House', { origin: new URL(potteryHouseBaseURL).origin, identity: /Pottery House/i, shell: '.tenant-layout' }],
+    ['Kikuzuki', { origin: new URL(kikuzukiTestBaseUrl()).origin, identity: /Kikuzuki/i, shell: '.tenant-layout' }],
+    ['NCLS', { origin: new URL(blawbyBaseURL).origin, identity: /North Carolina Legal Services/i, shell: '.tenant-layout' }],
   ])
   if (platform.hostname === 'staging.krabiclaw.com') targets.set('Saltleaf', {
     origin: `https://${environmentTenantAliasHostname(platform.hostname, 'saltleaf-stays-demo')}`,
     identity: /Saltleaf Stays/i,
+    shell: '.tenant-layout',
   })
   const inventory: unknown = JSON.parse(readFileSync(inventoryFile, 'utf8'))
   if (!Array.isArray(inventory) || !inventory.length) throw new Error('The published route inventory must be a nonempty array')
@@ -124,7 +125,7 @@ if (inventoryFile) {
               const response = await openTenantPage(page, url.href, {})
               expect(response?.status()).toBe(200)
               await expect(page).toHaveURL(url.href)
-              await expect(page.locator('.tenant-layout')).toBeVisible()
+              await expect(page.locator(target.shell)).toBeVisible()
               const locale = await page.locator('html').getAttribute('lang')
               expect(locale).toMatch(/\S/)
               const shellRead = await request.get(`${url.origin}/api/public/shell`, { params: { locale: locale! } })
