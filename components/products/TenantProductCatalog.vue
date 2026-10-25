@@ -29,9 +29,7 @@ if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMes
 const currency = rawCurrency
 const brandName = String(organization.value?.name ?? '').trim()
 const collectionTitle = computed(() => t('site.products.collection_title', { organization: brandName }))
-const productLocations = computed(() => locations.value
-  .filter(location => location.sections.products)
-  .map(location => ({ id: String(location.id), slug: String(location.slug), title: String(location.title) })))
+const productLocations = computed(() => locations.value.map(location => ({ id: String(location.id), slug: String(location.slug), title: String(location.title), sections: location.sections })))
 // A page about the business: its image is the organization's.
 useSocialMetadata(() => presentation && ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('site.products.meta_description', { organization: brandName }) }))
 </script>

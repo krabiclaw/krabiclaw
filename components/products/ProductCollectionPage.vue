@@ -22,9 +22,9 @@
             {{ t('site.menu_page.updated', { date: menuUpdated }) }}
           </p>
         </div>
-        <div v-if="locations.length > 1 && !locationId" class="mt-8 flex flex-wrap justify-center gap-3">
+        <div v-if="locationChoices.length > 1 && !locationId" class="mt-8 flex flex-wrap justify-center gap-3">
           <NuxtLink
-            v-for="location in locations"
+            v-for="location in locationChoices"
             :key="location.id"
             :to="localePath(productLocationCollectionPath(vertical, location.slug))"
             class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
@@ -47,9 +47,9 @@
           <p v-if="collectionLabel" class="tenant-kicker mb-4">{{ collectionLabel }}</p>
           <h1 class="tenant-display-md text-default">{{ title }}</h1>
         </div>
-        <div v-if="locations.length > 1 && !locationId && !isStays" class="mt-8 flex flex-wrap gap-3">
+        <div v-if="locationChoices.length > 1 && !locationId && !isStays" class="mt-8 flex flex-wrap gap-3">
           <NuxtLink
-            v-for="location in locations"
+            v-for="location in locationChoices"
             :key="location.id"
             :to="localePath(`/locations/${encodeURIComponent(location.slug)}/${presentation.locationCollectionSegment}`)"
             class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
@@ -275,8 +275,9 @@ import { extractDietarySchemaUrls } from '~/utils/product-seo'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { resolveSeoUrl } from '~/utils/social-metadata'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
+import type { PublicShellLocation } from '~/utils/public-resource-contracts'
 
-interface LocationSummary { id: string; slug: string; title: string; address?: PostalAddress | null; public_area?: PublicLocationArea | null }
+interface LocationSummary extends Pick<PublicShellLocation, 'id' | 'slug' | 'title' | 'sections'> { address?: PostalAddress | null; public_area?: PublicLocationArea | null }
 
 // Resolved once: a dynamic `:is` given the string 'NuxtLink' renders a literal
 // <NuxtLink> element that no browser follows, so the card looked linked in the
@@ -317,6 +318,11 @@ const emptyCollectionMessage = computed(() => (isExperiences.value
   ? t('site.experiences.empty')
   : t('site.products.empty')))
 const locationMap = computed(() => new Map(props.locations.map(location => [location.id, location])))
+// Section flags govern chooser destinations; the full locations still scope prices and collections.
+const locationChoices = computed(() => {
+  const surface = props.presentation.locationCollectionSegment
+  return surface === 'stays' ? [] : props.locations.filter(location => location.sections[surface])
+})
 const showLocations = computed(() => !props.locationId && props.locations.length > 1)
 const currentLocation = computed(() => {
   if (!props.locationId) return null
@@ -424,8 +430,7 @@ const priceLabel = (product: PublicProduct, collectionLocationId: string | null 
 // One section per collection, in the merchant's order — see
 // groupProductsByCollection for what membership does and does not imply.
 const groups = computed(() => {
-  const grouped = groupProductsByCollection(props.products, props.collections
-    .filter(collection => collection.location_id === null || locationMap.value.has(collection.location_id)))
+  const grouped = groupProductsByCollection(props.products, props.collections)
     .map(group => ({ id: group.id, category: group.name, description: group.description, image: group.image, sort_order: group.sort_order, location_id: group.location_id, products: group.products }))
   const included = new Set(grouped.flatMap(group => group.products.map(product => product.id)))
   const ungrouped = props.products.filter(product => !included.has(product.id))

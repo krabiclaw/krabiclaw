@@ -26,7 +26,7 @@ if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMes
 const currency = rawCurrency
 const locationId = currentLocation.id
 const locationTitle = currentLocation.title
-const productLocations = computed(() => locations.value.map(item => ({ id: item.id, slug: item.slug, title: item.title })))
+const productLocations = computed(() => locations.value.map(item => ({ id: item.id, slug: item.slug, title: item.title, sections: item.sections })))
 useSocialMetadata(() => ({
   path: `/locations/${encodeURIComponent(currentLocation.slug)}/menu`,
   title: `${locationTitle} Menu`,

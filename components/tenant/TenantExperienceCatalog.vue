@@ -29,9 +29,7 @@ const brandName = String(organization.value?.name ?? '').trim()
 if (!brandName) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
 const { t } = useI18n()
 const collectionTitle = computed(() => t('site.experiences.collection_title', { organization: brandName }))
-const productLocations = computed(() => locations.value
-  .filter(location => location.sections.experiences)
-  .map(location => ({ id: String(location.id), slug: String(location.slug), title: String(location.title) })))
+const productLocations = computed(() => locations.value.map(location => ({ id: String(location.id), slug: String(location.slug), title: String(location.title), sections: location.sections })))
 // A page about the business: its image is the organization's.
 const { social_image: socialImage } = useTenantOrganization().organization
 useSocialMetadata(() => ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('site.experiences.meta_description', { organization: brandName }) }))
