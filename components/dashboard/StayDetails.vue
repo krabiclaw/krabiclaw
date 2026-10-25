@@ -117,7 +117,7 @@ import { isGuestStay } from '~/shared/stay-arrival'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import type { GuestStay, StayDetail } from '~/server/domain/stays'
-import { STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
+import { STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
@@ -155,9 +155,8 @@ watch(realtime.event, event => {
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 
-const CHANNELS = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'You' } as const
 const methods = Object.entries(STAY_PAYMENT_METHOD_LABELS).map(([value, label]) => ({ value, label }))
-const channelName = computed(() => stay.value ? CHANNELS[stay.value.channel] : '')
+const channelName = computed(() => stay.value ? stay.value.channel === 'direct' ? 'You' : STAY_CHANNEL_LABELS[stay.value.channel] : '')
 /**
  * Who the stay is for. A stay made here always names its guest, so one without
  * is missing data; a channel may send a stay without a name, which is said as

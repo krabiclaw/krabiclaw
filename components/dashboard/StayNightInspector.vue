@@ -17,7 +17,7 @@
           <UButton label="Open selected nights" color="neutral" variant="outline" :disabled="busy" @click="$emit('patch', { closed: false })" />
           <UButton label="Block selected nights" color="neutral" variant="outline" :disabled="busy" @click="$emit('patch', { closed: true })" />
         </div>
-        <p v-if="occupied" class="mt-3 text-sm">Opening nights keeps existing reservations and checkout holds.</p>
+        <p v-if="occupied" class="mt-3 text-sm">Opening nights keeps existing reservations, checkout holds and linked-calendar blocks.</p>
         <p v-for="expiry in holdExpiries" :key="expiry" class="mt-3 text-sm">Checkout hold expires {{ formatTimestamp(expiry, 'en', home.timezone) }} ({{ home.timezone }}).</p>
         <UButton v-for="id in stayIds" :key="id" :to="{ path: `/dashboard/${orgSlug}/calendar/stay/${encodeURIComponent(id)}`, query: route.query }" label="View stay" color="neutral" variant="outline" class="mt-3" />
       </UCard>
@@ -73,6 +73,7 @@ export type NightDraft = Record<NightEditField, string>
 <script setup lang="ts">
 import type { StayHome, StayNight } from '~/server/domain/stays'
 import { formatMinorAmount } from '~/shared/prices'
+import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import { formatTimestamp } from '~/utils/timezone'
 
 const props = defineProps<{
@@ -104,11 +105,11 @@ function common<K extends keyof StayNight>(field: K): StayNight[K] | 'mixed' {
 }
 const money = (value: number) => formatMinorAmount(value, props.home.currency)
 const closed = computed(() => common('closed'))
-const occupied = computed(() => props.nights.some(night => night.stay_id || night.held_until))
+const occupied = computed(() => props.nights.some(night => night.stay_id || night.held_until || night.calendar))
 const stayIds = computed(() => [...new Set(props.nights.flatMap(night => night.stay_id ? [night.stay_id] : []))])
 const holdExpiries = computed(() => [...new Set(props.nights.flatMap(night => night.held_until ? [night.held_until] : []))].sort())
 const availabilityLabel = computed(() => {
-  const states = new Set(props.nights.map(night => night.stay_id ? 'Reserved' : night.held_until ? 'Checkout hold' : night.closed ? 'Blocked by you' : 'Available'))
+  const states = new Set(props.nights.map(night => night.stay_id ? 'Reserved' : night.held_until ? 'Checkout hold' : night.calendar ? `Unavailable from ${STAY_CHANNEL_LABELS[night.calendar]}` : night.closed ? 'Blocked by you' : 'Available'))
   return states.size === 1 ? [...states][0] : 'Mixed availability'
 })
 const price = computed(() => common('price_minor'))

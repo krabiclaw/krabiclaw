@@ -51,7 +51,7 @@
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
                 <span v-if="channelState(day)" class="size-2 shrink-0 rounded-full" :class="channelState(day) === 'pending' ? 'bg-warning' : 'bg-error'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
-              <span v-if="night(day)?.stay_id || night(day)?.held_until" class="hidden truncate text-xs sm:block">{{ night(day)?.stay_id ? 'Reserved' : 'Checkout hold' }}</span>
+              <span v-if="night(day)?.stay_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
             </span>
@@ -141,6 +141,7 @@
 <script setup lang="ts">
 import { parseDate, today, type DateValue } from '@internationalized/date'
 import type { Stay, StayHome, StayNight } from '~/server/domain/stays'
+import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import StayNightInspector, { type NightConcern, type NightDraft, type NightEditField } from './StayNightInspector.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
 import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
@@ -176,7 +177,7 @@ const view = computed<CalendarView>(() => {
   if (typeof route.query.view !== 'string' || !Object.hasOwn(views, route.query.view)) throw createError({ statusCode: 400, statusMessage: 'Choose Month, Year or List.' })
   return route.query.view as CalendarView
 })
-const channels = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'Direct' } as const
+const channels = STAY_CHANNEL_LABELS
 const viewItems = computed(() => [Object.entries(views).map(([key, value]) => ({ ...value, type: 'checkbox' as const, checked: view.value === key, onSelect: () => changeView(key as CalendarView) }))])
 const selectedDates = shallowRef<DateValue[]>([])
 const selectedRanges = computed(() => {
@@ -224,6 +225,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
     && nullableText(stay.guest_name) && nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(item => isRecord(item) && isValidCalendarDate(item.date)
     && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.stay_id) && nullableAmount(item.price_minor)
+    && (item.calendar === null || item.calendar === 'vrbo')
     && nullableRule(item.min_stay_arrival) && nullableRule(item.min_stay_through) && nullableRule(item.max_stay)
     && typeof item.closed_to_arrival === 'boolean' && typeof item.closed_to_departure === 'boolean'
     && [null, 'host', 'import'].includes(item.source as string | null) && (item.held_until === null || isValidInstant(item.held_until))
@@ -249,7 +251,16 @@ const { data, error, status, refresh } = await useAsyncData(
   },
 )
 const nightsByDate = computed(() => new Map((data.value?.nights ?? []).map(night => [night.date, night])))
+const staysById = computed(() => new Map((data.value?.stays ?? []).map(stay => [stay.id, stay])))
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
+function stayLabel(day: DateValue) {
+  const value = night(day)
+  if (value?.stay_id) {
+    const stay = staysById.value.get(value.stay_id)
+    return stay ? `${[stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided'} · ${channels[stay.channel]}` : 'Reserved'
+  }
+  return value?.calendar ? `Unavailable from ${channels[value.calendar]}` : 'Checkout hold'
+}
 const selectedNights = computed(() => selectedDates.value.flatMap(day => nightsByDate.value.get(day.toString()) ?? []))
 const selected = (day: DateValue) => selectedDates.value.some(date => date.toString() === day.toString())
 const listedStays = computed(() => (data.value?.stays ?? []).filter(stay => stay.status !== 'cancelled' && monthRange.value && stay.check_in_date < monthRange.value.to && stay.check_out_date > monthRange.value.from).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.id.localeCompare(b.id)))
@@ -265,7 +276,7 @@ const channelNote = (value: StayNight) => value.channel?.state === 'needs_review
 function nightTitle(day: DateValue) {
   const value = night(day)
   const note = value ? channelNote(value) : null
-  return value ? `${day.toString()} · ${value.stay_id ? 'Reserved' : value.held_until ? 'Checkout hold' : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
+  return value ? `${day.toString()} · ${value.stay_id ? stayLabel(day) : value.held_until ? 'Checkout hold' : value.calendar ? `Unavailable from ${channels[value.calendar]}` : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
 }
 const dateLabel = computed(() => {
   const range = selectedRange.value

@@ -1,5 +1,9 @@
 <template>
-  <DashboardIndexPanel id="saved-reply" :title="isNew ? 'New saved reply' : saved?.title ?? 'Saved reply'" :auto-open="`${level.path.value}/content`" :create="walk.firstStep.value">
+  <DashboardLeafPanel v-if="isNew" id="new-saved-reply" :title="createLabels.title" lead="Save a reusable message and optionally choose when to send it for your homes." :saving="saving" :disabled="disabled" :save-label="saveLabel" :error="error" @cancel="revert" @save="commit">
+    <UButton v-if="recoveryLabel" :label="recoveryLabel" color="neutral" variant="outline" class="mb-6" :disabled="saving" @click="recover" />
+    <UForm :state="draft" :disabled="saving" @submit="commit"><SavedReplyFields /></UForm>
+  </DashboardLeafPanel>
+  <DashboardIndexPanel v-else id="saved-reply" :title="saved?.title ?? 'Saved reply'" :auto-open="`${level.path.value}/content`">
     <template v-if="saved && manage" #right><UButton icon="i-lucide-trash-2" color="neutral" variant="ghost" aria-label="Delete saved reply" :disabled="saving" @click="deleteOpen = true" /></template>
     <UAlert v-if="loadError" color="error" title="Saved reply could not be loaded" :description="loadError" />
     <EditorNavigationList v-else :groups="groups" :active-item="level.child.value" />
@@ -30,6 +34,7 @@ export const savedReplyEditorKey = Symbol('saved-reply-editor') as InjectionKey<
 </script>
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
+import SavedReplyFields from '~/components/dashboard/SavedReplyFields.vue'
 import { isNavigationFailure } from 'vue-router'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
@@ -43,6 +48,7 @@ const dashboard = useDashboardOrganization()
 const api = useDashboardApi()
 const templateId = computed(() => String(route.params.templateId))
 const isNew = computed(() => templateId.value === 'new')
+const createLabels = newRecordLabels('saved reply')
 const role = computed(() => dashboard.organization.value?.role as keyof typeof organizationRoles | undefined)
 const manage = computed(() => Boolean(role.value && authClient.organization.checkRolePermission({ role: role.value, permissions: { operations: ['update'] } })))
 const key = `saved-reply:${dashboard.organizationId.value}:${templateId.value}`
@@ -64,8 +70,7 @@ const { data: homesData, error: homesReadError } = await useAsyncData(`saved-rep
 }))
 const homes = computed(() => homesData.value?.homes ?? [])
 const homesError = computed(() => homesReadError.value ? getErrorMessage(homesReadError.value, 'Homes could not be loaded') : '')
-const concern = computed(() => level.child.value === 'schedule' ? 'schedule' : 'content')
-watchEffect(() => { if (level.child.value && !['content', 'schedule'].includes(level.child.value)) showError(createError({ statusCode: 404, statusMessage: 'Saved reply concern not found' })) })
+watchEffect(() => { if (level.child.value && (isNew.value || !['content', 'schedule'].includes(level.child.value))) showError(createError({ statusCode: 404, statusMessage: 'Saved reply concern not found' })) })
 const valid = computed(() => {
   if (!draft.value.title.trim() || !draft.value.body.trim()) return false
   const schedule = draft.value.schedule
@@ -73,13 +78,12 @@ const valid = computed(() => {
     && (schedule.trigger === 'booking_received' || (Number.isInteger(schedule.offsetDays) && schedule.offsetDays >= -7 && schedule.offsetDays <= 7 && /^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.localTime))))
 })
 const dirty = computed(() => !saved.value || JSON.stringify(draft.value) !== JSON.stringify(clone(saved.value)))
-const walk = useCreateWalk({ recordPath: level.path, isNew, openKey: concern, labels: { content: 'Reply', schedule: 'Automatic schedule' }, order: ['content'] as const,
-  missing: () => !valid.value, noun: 'saved reply', saving, existingBlocked: () => !valid.value || !dirty.value, commit })
-const disabled = computed(() => !manage.value || Boolean(loadError.value) || walk.saveDisabled.value || isNew.value && Boolean(creation.value.id || creation.value.uncertain))
+const saveLabel = computed(() => isNew.value ? createLabels.action : undefined)
+const disabled = computed(() => saving.value || !manage.value || Boolean(loadError.value) || !valid.value || !dirty.value || isNew.value && Boolean(creation.value.id || creation.value.uncertain))
 const recoveryLabel = computed(() => !isNew.value ? null : creation.value.id ? 'Open created saved reply' : creation.value.uncertain ? 'Review saved replies before creating another' : null)
 const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'saved-reply', items: [
   { id: 'content', label: 'Reply', summary: draft.value.body || 'Write a reply', to: `${level.path.value}/content` },
-  ...(!isNew.value ? [{ id: 'schedule', label: 'Automatic schedule', summary: messageScheduleLabel(draft.value.schedule), to: `${level.path.value}/schedule` }] : []),
+  { id: 'schedule', label: 'Automatic schedule', summary: messageScheduleLabel(draft.value.schedule), to: `${level.path.value}/schedule` },
 ] }])
 
 function revert() { draft.value = saved.value ? clone(saved.value) : empty(); actionError.value = '' }
@@ -133,5 +137,5 @@ async function remove() {
   } catch (cause) { actionError.value = getErrorMessage(cause, 'The saved reply could not be deleted') }
   finally { saving.value = false }
 }
-provide(savedReplyEditorKey, { draft, homes, homesError, manage, saving, error, disabled, saveLabel: walk.saveLabel, save: walk.save, revert, recoveryLabel, recover })
+provide(savedReplyEditorKey, { draft, homes, homesError, manage, saving, error, disabled, saveLabel, save: commit, revert, recoveryLabel, recover })
 </script>

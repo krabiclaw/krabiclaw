@@ -7,8 +7,7 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { postEditorPath } from '~/server/utils/dashboard-links'
 import type { Stay } from '~/server/domain/stays'
-
-const STAY_CHANNEL_NAMES = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com' } as const
+import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 
 export const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const
 export type AgendaKind = typeof AGENDA_KINDS[number]
@@ -337,7 +336,7 @@ export async function listAgenda(
     // Only a channel may withhold the guest's name (stays_app_guest_check).
     const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ')
     if (!named && (stay.owner !== 'channel' || stay.channel === 'direct')) throw new HTTPError({ statusCode: 500, message: `Stay ${stay.id} has no guest name`, data: { code: 'INVALID_STAY', field: 'guest_name', stay_id: stay.id } })
-    const guest = named || `Name not provided by ${STAY_CHANNEL_NAMES[stay.channel as Exclude<typeof stay.channel, 'direct'>]}`
+    const guest = named || `Name not provided by ${STAY_CHANNEL_LABELS[stay.channel]}`
     // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and departure do.
     const title = Number(stay.overbooked) === 1 ? `Overbooked · ${guest}` : guest
     const moments: Array<['arrival' | 'departure' | 'current', string, string]> = scope.buyerUserId ? [['arrival', stay.check_in_date, stay.check_in_time]]

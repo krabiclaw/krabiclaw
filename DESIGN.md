@@ -287,7 +287,8 @@ is a child of the calendar, which lights Calendar.
 
 Saved replies use the canonical message-template operations: Reply edits its name
 and reusable message, Automatic schedule edits its trigger, local time and named
-homes. Managers create, change and delete them; members can insert a reply into
+homes. New saved reply presents the message and optional schedule together before
+creating one record. Managers create, change and delete them; members can insert a reply into
 the conversation's existing composer before sending. Scheduled-message history
 reads the canonical snapshots and reasons; managers may cancel pending messages.
 Neither editor introduces a second sending or scheduling lifecycle.
@@ -359,8 +360,8 @@ those nights (and closes them on a connected channel), and the captured payment
 becomes a confirmed direct stay with its guest conversation. A lapsed hold gives
 its nights back.
 
-Today and Calendar open the same manual-stay creation walk at
-`O/bookings/stay/new`: home, dates, guest and total, with an optional initial
+Today and Calendar open the same manual-stay creation form at
+`O/bookings/stay/new`: home, dates, guest and total together, with an optional initial
 payment recorded in that same operation. A supplied home stays explicit; without
 one the host chooses it. Creation opens the existing stay detail after readback.
 The home's nightly calendar has Month, Year and List views. Its native calendar
