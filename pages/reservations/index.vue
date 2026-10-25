@@ -23,16 +23,9 @@
           class="overflow-hidden border border-default bg-default"
         >
           <div class="relative aspect-video bg-muted">
-            <video
+            <MediaPreview
               v-if="getLocationMediaUrl(loc) && getLocationMediaKind(loc) === 'video'"
-              :src="getLocationMediaUrl(loc) ?? undefined"
-              :poster="getLocationPoster(loc) ?? undefined"
-              autoplay
-              muted
-              loop
-              playsinline
-              preload="metadata"
-              class="h-full w-full object-cover"
+              :item="{ url: getLocationMediaUrl(loc)!, kind: 'video', poster: getLocationPoster(loc) || undefined, alt: String(loc.title) }"
             />
             <img
               v-else-if="getLocationMediaUrl(loc)"
@@ -167,6 +160,7 @@ import { setBookingConfirmation } from '~/composables/useBookingHandoff'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { mediaStillUrl, type MediaPresentation } from '~/shared/media-placement-contract'
 import { getPhoneCountry, formatPhone } from '~/utils/phone'
+import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
 
 function formatTitleItalics(text: string | null | undefined): string {
   if (!text) return ''
@@ -283,6 +277,7 @@ const contactEmail = computed(() =>
 
 // ── Modal State ───────────────────────────────────────────────────────────
 const isBookingModalOpen = ref(false)
+provideMediaPreviews(isBookingModalOpen)
 const isHydrated = ref(false)
 onMounted(() => { isHydrated.value = true })
 // Skipped when opened from a location card (location is already pre-selected)

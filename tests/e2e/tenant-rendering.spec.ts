@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { expect, test, type Page, type Request } from '@playwright/test'
+import { devices, expect, test, type Page, type Request } from '@playwright/test'
 import {
   blawbyBaseURL, blawbyExtraHeaders,
   openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
@@ -57,8 +57,11 @@ const tenants: Tenant[] = [
 // Staging intentionally publishes no sitemap; the operator maps the production
 // sitemap and current native public inventory to the existing tenant aliases.
 const inventoryFile = process.env.PLAYWRIGHT_TENANT_ROUTE_INVENTORY
-if (inventoryFile) {
+if (inventoryFile) test.describe('published route inventory', () => {
   if (!process.env.PLAYWRIGHT_PREVIEW_URL) throw new Error('A published route inventory requires PLAYWRIGHT_PREVIEW_URL')
+  // This exhaustive crawler must not generate thousands of customer analytics
+  // events. Ordinary representative journeys retain their human browser agent.
+  test.use({ userAgent: `${devices['Desktop Chrome']!.userAgent} KrabiClawRouteVerificationBot/1.0` })
   const platform = new URL(testBaseUrl())
   const targets = new Map([
     ['KrabiClaw', { origin: platform.origin, identity: /KrabiClaw/i, shell: '.platform-layout' }],
@@ -91,10 +94,14 @@ if (inventoryFile) {
     groups.set(entry.tenant, urls)
   }
 
-  for (const [tenant, urls] of groups) {
+  const batches = [...groups].flatMap(([tenant, urls]) => Array.from(
+    { length: Math.ceil(urls.length / 30) },
+    (_, index) => ({ tenant, offset: index * 30, urls: urls.slice(index * 30, index * 30 + 30) }),
+  ))
+  for (const { tenant, offset, urls } of batches) {
     const target = targets.get(tenant)!
     for (const width of [1440, 780, 390]) {
-      test(`published route inventory: ${tenant} at ${width}px`, async ({ page, request }, testInfo) => {
+      test(`published route inventory: ${tenant} at ${width}px, routes ${offset + 1}–${offset + urls.length}`, async ({ page, request }, testInfo) => {
         test.setTimeout(urls.length * 60_000 + 30_000)
         await page.setViewportSize({ width, height: 900 })
         const errors: string[] = []
@@ -114,7 +121,7 @@ if (inventoryFile) {
         page.on('response', response => {
           if (!firstParty(response.url())) return
           if (response.status() >= 400) errors.push(`${response.status()} ${response.url()}`)
-          else if (response.status() === 200 || response.status() === 304) successfulResponses.set(response.url(), response.status())
+          else if ([200, 206, 304].includes(response.status())) successfulResponses.set(response.url(), response.status())
         })
 
         const completed: string[] = []
@@ -125,7 +132,10 @@ if (inventoryFile) {
               const response = await openTenantPage(page, url.href, {})
               expect(response?.status()).toBe(200)
               await expect(page).toHaveURL(url.href)
-              await expect(page.locator(target.shell)).toBeVisible()
+              // Help owns a standalone conversation viewport and its header;
+              // it deliberately has neither the marketing shell nor footer.
+              const supportConversation = tenant === 'KrabiClaw' && url.pathname === '/help'
+              await expect(page.locator(supportConversation ? 'main' : target.shell)).toBeVisible()
               const locale = await page.locator('html').getAttribute('lang')
               expect(locale).toMatch(/\S/)
               const shellRead = await request.get(`${url.origin}/api/public/shell`, { params: { locale: locale! } })
@@ -191,8 +201,11 @@ if (inventoryFile) {
                   await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
                 }
               })
-              await expect(page.locator('footer').last()).toBeVisible()
-              await expect(page.locator('footer').last()).not.toBeEmpty()
+              if (supportConversation) await expect(page.getByRole('textbox', { name: 'Ask ChowBot anything...' })).toBeVisible()
+              else {
+                await expect(page.locator('footer').last()).toBeVisible()
+                await expect(page.locator('footer').last()).not.toBeEmpty()
+              }
               await page.evaluate(async () => {
                 const scrollers = [...document.querySelectorAll<HTMLElement>('*')]
                   .filter(element => element.scrollWidth > element.clientWidth && element.clientWidth > 0)
@@ -212,12 +225,12 @@ if (inventoryFile) {
                 }
               })
               for (const video of await page.locator('video:visible').all()) {
-                await video.scrollIntoViewIfNeeded()
+                await video.evaluate(element => element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' }))
                 // Native controlled videos deliberately preload nothing. Exercise
-                // playback before requiring a decoded frame from that resource.
+                // those controls; scoped previews retain their own autoplay owner.
                 await video.evaluate(async element => {
                   const media = element as HTMLVideoElement
-                  if (media.paused) await media.play()
+                  if (media.controls && media.paused) await media.play()
                 })
                 await expect.poll(() => video.evaluate(element => {
                   const media = element as HTMLVideoElement
@@ -242,25 +255,28 @@ if (inventoryFile) {
                 const failed = failedRequests.shift()!
                 const error = failed.failure()?.errorText
                 const resourceType = failed.resourceType()
-                const status = successfulResponses.get(failed.url())
-                // A cancelled duplicate is not a missing customer asset when the
-                // exact URL succeeded and its current rendered owner decoded.
+                // Chromium may cancel an image duplicate or a video byte range.
+                // A picture may also replace its fallback with a selected source.
+                // Require the selected resource to succeed and decode in its
+                // rendered owner before accepting cancellation.
                 const owner = failed.method() === 'GET' && error === 'net::ERR_ABORTED'
-                  && (resourceType === 'image' || resourceType === 'other') && status !== undefined
-                  ? await page.evaluate(async value => {
+                  && (resourceType === 'image' || resourceType === 'other' || resourceType === 'media')
+                  ? await page.evaluate(async ({ value, successful }) => {
                     const image = [...document.images].find(image => image.getClientRects().length
-                      && (image.currentSrc || image.src) === value && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
+                      && (image.src === value || image.currentSrc === value) && successful.includes(image.currentSrc || image.src)
+                      && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
                     if (image) {
                       await image.decode()
                       return { element: 'img', src: image.src, current_src: image.currentSrc, natural_width: image.naturalWidth, natural_height: image.naturalHeight }
                     }
                     const video = [...document.querySelectorAll('video')].find(video => video.getClientRects().length
-                      && video.poster === value && video.error === null && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
+                      && video.currentSrc === value && successful.includes(value)
+                      && video.error === null && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
                       && video.videoWidth > 0 && video.videoHeight > 0)
                     return video ? { element: 'video', poster: video.poster, current_src: video.currentSrc, ready_state: video.readyState, video_width: video.videoWidth, video_height: video.videoHeight, error: null } : null
-                  }, failed.url())
+                  }, { value: failed.url(), successful: [...successfulResponses.keys()] })
                   : null
-                if (owner) resolvedDuplicateCancellations.push({ url: failed.url(), resource_type: resourceType, error, success_status: status, decoded_owner: owner })
+                if (owner) resolvedDuplicateCancellations.push({ url: failed.url(), resource_type: resourceType, error, successful_responses: Object.fromEntries(successfulResponses), decoded_owner: owner })
                 else errors.push(`${failed.method()} ${failed.url()}: ${error}`)
               }
               if (resolvedDuplicateCancellations.length) await testInfo.attach(`resolved duplicate media cancellations ${index + 1} ${url.pathname}${url.search}`, {
@@ -281,7 +297,7 @@ if (inventoryFile) {
       })
     }
   }
-}
+})
 
 test('unknown sites render an unbranded 404 while resolved tenant errors retain their identity', async ({ page }) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local tenant header exercises an unresolved host without changing deployed DNS.')
@@ -612,7 +628,21 @@ test('KrabiClaw social viewer keyboard navigation changes the visible media', as
   const close = viewer.getByRole('button', { name: 'Close photos and videos', exact: true })
   await close.press('ArrowDown')
   await expect.poll(() => pictures.nth(1).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(0)
-  await expect.poll(() => pictures.nth(1).locator('img:not([aria-hidden]), video').evaluate(element => element instanceof HTMLVideoElement ? element.videoWidth : (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  const visibleMedia = pictures.nth(1).locator('img:not([aria-hidden]), video')
+  if (await visibleMedia.evaluate(element => element instanceof HTMLVideoElement)) {
+    await expect(visibleMedia).toHaveJSProperty('controls', true)
+    const initialTime = await visibleMedia.evaluate(element => (element as HTMLVideoElement).currentTime)
+    await visibleMedia.press('Space')
+    await expect(visibleMedia).toHaveJSProperty('paused', false)
+    await expect.poll(() => visibleMedia.evaluate((element, start) => {
+      const video = element as HTMLVideoElement
+      return video.currentTime > start && !video.paused ? 'playing' : {
+        time: video.currentTime, paused: video.paused, readyState: video.readyState,
+        networkState: video.networkState, error: video.error?.message ?? null, src: video.currentSrc,
+      }
+    }, initialTime)).toBe('playing')
+  }
+  await expect.poll(() => visibleMedia.evaluate(element => element instanceof HTMLVideoElement ? element.videoWidth : (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
   await close.press('ArrowUp')
   await expect.poll(() => pictures.nth(0).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(0)
   await close.click()
@@ -671,6 +701,17 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
   await expect.poll(() => playingPreview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
   const resumedTime = await playingPreview.evaluate(element => (element as HTMLVideoElement).currentTime)
   await expect.poll(() => playingPreview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(resumedTime)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(0)
+  await trigger.click()
+  await expect(viewer).toBeVisible()
+  await expect(video).toHaveJSProperty('controls', true)
+  await video.focus()
+  await video.press('Space')
+  await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
+  await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
+  await viewer.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+  await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(0)
 })
 
 for (const tenant of tenants) {
@@ -973,7 +1014,7 @@ test.describe('NCLS representative journeys', () => {
 
   // One reader walking the site. Each route is a different page recipe, so the
   // traversal is the coverage; six separate fixtures were not.
-  test('renders every route reachable from the header', async ({ page }) => {
+  test('renders every route reachable from the header', async ({ page, request }) => {
     const journeys = [
       { path: '/pricing', text: /pricing|income|calculator/i },
       { path: '/blog/writing-your-own-will-how-it-works', text: /will|North Carolina/i },
@@ -1008,5 +1049,31 @@ test.describe('NCLS representative journeys', () => {
       const bodyText = (await body.allInnerTexts()).join(' ').trim()
       expect(bodyText.length, `${journey.path} body sections are empty`).toBeGreaterThan(200)
     }
+    const shellResponse = await request.get(`${blawbyBaseURL}/api/public/shell`, { headers: blawbyExtraHeaders })
+    expect(shellResponse.status()).toBe(200)
+    const shell = await shellResponse.json() as { locations: Array<{ id: string; slug: string; title: string }> }
+    expect(shell.locations.length).toBeGreaterThan(0)
+    const office = shell.locations[0]!
+    const officePath = `/locations/${office.slug}`
+    const pageview = page.waitForResponse(response => new URL(response.url()).pathname === '/api/analytics/track'
+      && response.request().postDataJSON()?.eventType === 'pageview'
+      && response.request().postDataJSON()?.pagePath === officePath)
+    const response = await openTenantPage(page, `${blawbyBaseURL}${officePath}`, blawbyExtraHeaders)
+    expect(response?.status()).toBe(200)
+    await expect(page.locator('main')).toContainText(office.title)
+    const tracked = await pageview
+    expect(tracked.status(), await tracked.text()).toBe(200)
+    expect(await tracked.json()).toMatchObject({ ok: true })
+    await loginAs(request, testBaseUrl(), process.env.PLAYWRIGHT_PREVIEW_URL ? undefined : 'user-e2e-ncls-owner')
+    const analytics = await mcpRequest(request, testBaseUrl(), { method: 'tools/call', toolName: 'query_organization_analytics', args: {
+      organization_id: 'org-ncls-blawby', mode: 'events',
+      sort: 'occurred_at_desc', limit: 200, filters: { kind: 'pageview', page_path: officePath, location_id: office.id },
+    } })
+    expect(analytics.status()).toBe(200)
+    const recorded = mcpData<{ rows: Array<{ event_id: string; kind: string; location_id: string; page: { path: string } }> }>(await analytics.json())
+    expect(recorded.rows).toContainEqual(expect.objectContaining({
+      event_id: tracked.request().postDataJSON().eventId, kind: 'pageview', location_id: office.id,
+      page: expect.objectContaining({ path: officePath }),
+    }))
   })
 })
