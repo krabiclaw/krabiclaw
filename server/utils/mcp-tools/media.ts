@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import type { McpToolDefinition } from './shared'
-import { chatgptFileInput, mediaAssetObject, mediaPlacementSlotInputSchema, pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool } from './shared'
+import { chatgptFileInput, mediaAssetObject, mediaPlacementSlotInputSchema, pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool, workspaceContextObject } from './shared'
 import { EDITABLE_MEDIA_PLACEMENT_OWNERS, WRITABLE_MEDIA_CATEGORIES,
   attachMediaPlacement,
   parseMediaPlacementKey,
@@ -74,7 +74,7 @@ const mediaMutationOutputSchema = {
     asset_ids: { type: 'array', items: { type: 'string' } },
     media: { type: 'array', items: resolvedMediaAssetObject },
     cleared: { type: 'boolean' },
-    context: { type: 'object' },
+    context: workspaceContextObject,
   },
   required: ['ok', 'entity', 'id', 'placement', 'asset_ids', 'media', 'cleared'],
 } as const

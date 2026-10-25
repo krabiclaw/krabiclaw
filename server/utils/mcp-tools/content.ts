@@ -2,7 +2,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { CONTENT_BLOCK_TYPES } from '~/shared/content-registries'
 import { pageEditorPath } from '~/server/utils/dashboard-links'
 import type { McpToolDefinition } from './shared'
-import { contentBlockDataInputSchema, contentBlockMediaInputRef, contentBlockObject, contentBlockTypeBranches, contentBlockUpdatedAtInput, locationReservationConfigObject, locationReservationConfigWriteSchema, pageInfoObject, paginationInputSchema, renderedBookingPolicySummaryObject, organizationTool } from './shared'
+import { contentBlockDataInputSchema, contentBlockMediaInputRef, contentBlockObject, contentBlockTypeBranches, contentBlockUpdatedAtInput, locationReservationConfigObject, locationReservationConfigWriteSchema, pageInfoObject, paginationInputSchema, renderedBookingPolicySummaryObject, organizationTool, workspaceContextObject } from './shared'
 import { HTTPError } from 'nitro';
 import { CANCELLATION_TIER_IDS, cancellationPatch, cancellationTierOf, type CancellationTierId } from "~/shared/availability-settings";
 import type { McpExecutorContext } from './execution'
@@ -320,7 +320,7 @@ export const CONTENT_TOOLS: McpToolDefinition[] = [
           location_id: { type: 'string' },
           changed_fields: { type: 'array', items: { type: 'string' } },
           updated_at: { type: 'string' },
-          context: { type: 'object' },
+          context: workspaceContextObject,
           summary: renderedBookingPolicySummaryObject,
         },
         required: ['ok', 'entity', 'location_id'],

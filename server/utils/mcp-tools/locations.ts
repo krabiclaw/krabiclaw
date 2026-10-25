@@ -1,6 +1,6 @@
 import type { McpToolDefinition } from './shared'
 import { calendarDateSchema, addLocalDays, assertCalendarDate, localNow, timezoneSchema } from '~/utils/timezone'
-import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, organizationTool, specialHoursInputSchema, PHONE_FORMAT } from './shared'
+import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, organizationTool, specialHoursInputSchema, workspaceContextObject, PHONE_FORMAT } from './shared'
 import { HTTPError } from 'nitro'
 import { STAY_MAP_SHARING_MODES } from '~/shared/stay-listing'
 import type { McpExecutorContext } from './execution'
@@ -30,7 +30,7 @@ const calendarMutation = { ...locationMutation, properties: { ...locationMutatio
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'create_location',
-      description: 'Add a location to the selected business website. Every plan includes 2 locations. Growth and Business include 2 locations, then $49 per additional location per month, billed at the end of the period; Basic refuses a third location. Repeat the same idempotency key with the same details on retry.',
+      description: 'Add an active location to the selected business website. Every plan includes 2 locations. Growth and Business include 2 locations, then $49 per additional location per month, billed at the end of the period; Basic refuses a third location. Repeat the same idempotency key with the same details on retry. Returns its identity, status, timezone and saved timestamp; use get_location for its full details.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -48,8 +48,24 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       required: ['title', 'idempotency_key', 'timezone'],
       outputSchema: {
         type: 'object',
-        properties: { location: locationObject, context: { type: 'object' } },
+        properties: {
+          location: {
+            type: 'object',
+            properties: {
+              id: locationObject.properties.id,
+              slug: locationObject.properties.slug,
+              title: locationObject.properties.title,
+              status: { type: 'string', description: 'Current operational status. New locations are active; a retry returns the saved location’s current status.' },
+              timezone: { type: 'string', description: 'Saved IANA timezone for this location.' },
+              updated_at: { type: 'string', description: 'Saved location update timestamp.' },
+            },
+            required: ['id', 'slug', 'title', 'status', 'timezone', 'updated_at'],
+            additionalProperties: false,
+          },
+          context: workspaceContextObject,
+        },
         required: ['location', 'context'],
+        additionalProperties: false,
       },
     }),
   organizationTool({
@@ -181,7 +197,14 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
       assertDomainSuccess(result);
       const location = (result.data as { location: LocationRecord }).location;
       return {
-        location: await requireLocation(organization, location.id),
+        location: {
+          id: location.id,
+          slug: location.slug,
+          title: location.title,
+          status: location.status,
+          timezone: location.timezone,
+          updated_at: location.updated_at,
+        },
         context: await mutationContextPayload(organization, { locationId: location.id }),
       };
     }

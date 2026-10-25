@@ -1292,7 +1292,7 @@ test.describe('stateless MCP server', () => {
         { name: `Starters ${stamp}`, items: [item('Edamame', 500), item('Gyoza', 800)] },
         { name: `Desserts ${stamp}`, items: [item('Matcha cake', 900)] },
       ] }
-      type Menu = { sections: Array<{ collection: { id: string; name: string }; products: Array<{ id: string; name: string }> }>; replayed: boolean }
+      type Menu = { sections: Array<{ collection: { id: string; name: string }; products: Product[] }>; replayed: boolean }
       type Scheduling = Awaited<ReturnType<typeof readMemberScheduling>>
       type PublicProfile = Pick<NonNullable<Scheduling>, 'member_id' | 'updated_at' | 'public_name' | 'public_photo_url' | 'public_bio' | 'public_approved'>
       let menu: Menu | null = null
@@ -1304,6 +1304,16 @@ test.describe('stateless MCP server', () => {
       const cleanupRequest = await playwrightRequest.newContext({ baseURL, storageState: await request.storageState() })
       try {
         menu = await call<Menu>('update_menu', args)
+        for (const section of menu.sections) {
+          expect(Object.keys(section.collection).sort()).toEqual(['id', 'organization_id', 'location_id', 'name', 'slug', 'description', 'image', 'sort_order'].sort())
+          for (const product of section.products) {
+            expect(product.kind).toBe('dish')
+            expect(Object.keys(product).sort()).toEqual(['id', 'kind', 'name', 'slug', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'options', 'variants', 'details', 'publications', 'locations', 'collections', 'updated_at'].sort())
+            for (const variant of product.variants) for (const price of variant.prices) {
+              for (const field of ['organization_id', 'product_variant_id', 'created_by', 'updated_by', 'created_at', 'updated_at', 'source']) expect(price).not.toHaveProperty(field)
+            }
+          }
+        }
         const written = menu.sections.filter(section => section.collection.name.endsWith(stamp))
         expect(written.map(section => section.collection.name)).toEqual(args.sections.map(section => section.name))
         expect(written.map(section => section.products.map(product => product.name))).toEqual(args.sections.map(section => section.items.map(product => product.name)))

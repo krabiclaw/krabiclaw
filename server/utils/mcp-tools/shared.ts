@@ -68,6 +68,7 @@ export const workspaceContextObject = {
     location_title: { type: ['string', 'null'] },
   },
   required: ['organization_id', 'organization_name', 'organization_slug', 'organization_subdomain', 'organization_public_url', 'location_id', 'location_slug', 'location_title'],
+  additionalProperties: false,
 }
 
 // --- reusable schema fragments ---
@@ -467,12 +468,12 @@ export const postMutationResultObject = {
     ok: { type: 'boolean' },
     post: postObject,
     replayed: { type: 'boolean', description: 'True when this idempotency_key had already created the post.' },
-    context: { type: 'object' },
+    context: workspaceContextObject,
   },
   required: ['ok', 'post'],
 }
 
-const publishOutcomeObject = {
+export const publishOutcomeObject = {
   type: 'object',
   properties: {
     channel: { type: 'string', enum: ['organization', 'facebook', 'instagram', 'discord'] },
