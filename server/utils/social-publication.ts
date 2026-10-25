@@ -366,6 +366,8 @@ function claimed(db: DbClient, publicationId: string, attemptId: string) {
       write("state = 'failed', attempt_id = NULL, error_code = ?, error_message = ?, provider_handles_json = ?", [code, message.slice(0, 1000), JSON.stringify(handles)], ['preparing', 'publishing']),
     unknown: (code: string, message: string) =>
       write("state = 'unknown', attempt_id = NULL, error_code = ?, error_message = ?", [code, message.slice(0, 1000)], ['publishing']),
+    /** Keeps the claim current while this invocation waits on the provider. */
+    renew: () => write('attempt_id = attempt_id', [], ['preparing', 'publishing']),
     /** Hand the saved preparation to the next call: nothing is public, and nothing is lost. */
     release: (states: readonly string[] = ['preparing']) => write("state = 'preparing', attempt_id = NULL", [], states),
   }
@@ -500,11 +502,11 @@ const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
  * Waits until Instagram finishes processing a container. Each poll renews this
  * invocation's claim, so the claim lasts exactly as long as the wait.
  */
-async function containerReady(target: InstagramTarget, containerId: string, fence: ReturnType<typeof claimed>, handles: Handles): Promise<'FINISHED' | 'EXPIRED' | 'ERROR' | 'PUBLISHED'> {
+async function containerReady(target: InstagramTarget, containerId: string, fence: ReturnType<typeof claimed>): Promise<'FINISHED' | 'EXPIRED' | 'ERROR' | 'PUBLISHED'> {
   for (;;) {
     const { status } = await readContainerStatus(target, containerId)
     if (status !== 'IN_PROGRESS') return status
-    await fence.saveHandles(handles)
+    await fence.renew()
     await pause(3_000)
   }
 }
@@ -530,7 +532,7 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
       await fence.saveHandles(handles)
     }
     for (const child of handles.children) {
-      const status = await containerReady(target, child, fence, handles)
+      const status = await containerReady(target, child, fence)
       if (status !== 'FINISHED') return await notReady(status)
     }
   }
@@ -543,7 +545,7 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
         : { kind: 'video', url: only.public_url, caption: context.caption, carouselItem: false, coverUrl: only.thumbnail_url })
     await fence.saveHandles(handles)
   }
-  const status = await containerReady(target, handles.container_id, fence, handles)
+  const status = await containerReady(target, handles.container_id, fence)
   if (status === 'PUBLISHED') {
     // Only a container this publication saved can report its own publication.
     await fence.published({ providerPostId: null, permalink: null, publishedAt: nowIso(), handles })
@@ -552,7 +554,20 @@ async function publishToInstagram(context: ChannelContext, target: InstagramTarg
   if (status !== 'FINISHED') return await notReady(status)
   await fence.beginFinal()
   let mediaId: string | null = null
-  return await finalize(context, async () => { mediaId = await publishContainer(target, handles.container_id!); return mediaId }, async () => {
+  // Meta can answer media_publish with 9007/2207027, "media not ready", after the container
+  // reads FINISHED; that is the same readiness wait, so it waits on the container again.
+  const publishWhenReady = async (): Promise<string> => {
+    for (;;) {
+      try { return await publishContainer(target, handles.container_id!) } catch (error) {
+        if (!(error instanceof MetaGraphError) || error.details.code !== 9007 || error.details.subcode !== 2207027) throw error
+        await fence.renew()
+        await pause(3_000)
+        const { status } = await readContainerStatus(target, handles.container_id!)
+        if (status !== 'FINISHED' && status !== 'IN_PROGRESS') throw error
+      }
+    }
+  }
+  return await finalize(context, async () => { mediaId = await publishWhenReady(); return mediaId }, async () => {
     if (mediaId) {
       const media = await readMedia(target, mediaId)
       return { published: true, providerPostId: media.id, permalink: media.permalink ?? null, publishedAt: media.timestamp }
