@@ -17,6 +17,20 @@ be built from the patterns here is a gap in this document to be argued and
 written down — not a one-off. Every previous "this one is different" is what
 produced the inconsistency the redesign exists to remove.
 
+### Product page presentation
+
+Product hero captures, image proportions/focus, editorial story layouts and
+open feature columns belong to the existing page blocks. Their controls are
+declared in `utils/tenant-page-blocks.ts` and rendered by the existing
+`TenantPageFieldControl` under Pages → page → section; no new editor route or
+writer is introduced. The owner is the explicitly selected organization's
+`content_block`, under its page document. The existing page update operation
+and media placement operation enforce that organization's website permissions;
+CMS and MCP use those same operations. Read the saved page and its public route
+back after a change. A hero's product image uses its own `featured` placement,
+separate from its background `media`; it never borrows another block's image.
+Image crops change presentation only and retain the original uploaded capture.
+
 ## The two axes
 
 Navigation questions are almost always one of these two, and confusing them is

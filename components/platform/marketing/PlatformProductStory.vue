@@ -1,5 +1,5 @@
 <template>
-  <section :id="block.id" class="kc-product-story" :class="{ 'kc-product-story--gallery': examples.length > 1 && !appScreens, 'kc-product-story--photos': block.data.example_type === 'posts', 'kc-product-story--lodging': lodging, 'kc-product-story--screens': appScreens, 'kc-product-story--screens-pair': appScreens && examples.length > 1, 'kc-product-story--text': !examples.length }" data-parity-section="product-story">
+  <section :id="block.id" class="kc-product-story" :class="{ 'kc-product-story--gallery': examples.length > 1 && !appScreens, 'kc-product-story--photos': block.data.example_type === 'posts', 'kc-product-story--editorial': editorial, 'kc-product-story--dark': block.data.tone === 'dark', 'kc-product-story--annotated': editorial && points.length > 0, 'kc-product-story--screens': appScreens, 'kc-product-story--screens-pair': appScreens && examples.length > 1, 'kc-product-story--text': !examples.length }" data-parity-section="product-story">
     <div class="kc-product-story__inner">
       <div class="kc-product-story__heading">
         <p v-if="text(block.data.eyebrow)" class="kc-product-eyebrow">{{ text(block.data.eyebrow) }}</p>
@@ -22,9 +22,15 @@
             playsinline
             preload="none"
           />
-          <img v-else :src="mediaStillUrl(example.image)!" :alt="example.image.alt_text || example.title" :width="example.image.width ?? undefined" :height="example.image.height ?? undefined" loading="lazy" decoding="async">
+          <img v-else class="kc-product-capture" :class="['kc-product-capture--' + text(block.data.image_ratio), 'kc-product-capture--' + text(block.data.image_position)]" :src="mediaStillUrl(example.image)!" :alt="example.image.alt_text || example.title" :width="example.image.width ?? undefined" :height="example.image.height ?? undefined" loading="lazy" decoding="async">
         </figure>
       </div>
+      <dl v-if="editorial && points.length" class="kc-product-story__points">
+        <div v-for="point in points" :key="text(point.title)">
+          <dt>{{ text(point.title) }}</dt>
+          <dd>{{ text(point.description) }}</dd>
+        </div>
+      </dl>
       <div v-if="text(block.data.caption)" class="kc-product-story__caption">
         <p>{{ text(block.data.caption) }}</p>
         <ul v-if="examples.length > 1 && block.data.example_type !== 'posts'" :aria-label="appScreens ? 'App screens' : 'Featured businesses'">
@@ -42,8 +48,9 @@ import { blockMedia, blockRecords, blockText as text, isInternalRoute } from '~/
 import { mediaStillUrl, mediaPlaybackUrl } from '~/shared/media-placement-contract'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const lodging = computed(() => props.page.path === '/lodging' || props.page.path.startsWith('/lodging/'))
-const appScreens = computed(() => props.block.data.example_type === 'app_screens')
+const editorial = computed(() => props.block.data.layout === 'editorial')
+const points = computed(() => blockRecords(props.block.data.items).filter(item => text(item.description)))
+const appScreens = computed(() => props.block.data.example_type === 'app_screens' && !editorial.value)
 const { localePath } = useI18n()
 function route(url: string) { return isInternalRoute(url) ? localePath(url) : url }
 const examples = computed(() => {
@@ -78,30 +85,44 @@ const examples = computed(() => {
 .kc-product-story--photos .kc-product-story__picture--1 { width: 52%; transform: none; }
 .kc-product-story--photos .kc-product-story__picture--2 { left: auto; right: 4%; top: 0; width: 38%; }
 .kc-product-story--photos .kc-product-story__picture--3 { right: auto; left: 50%; top: 55%; width: 16%; transform: rotate(-7deg); }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging)) { background: #0b0d13; color: #f8f7f3; }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-eyebrow), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-link) { color: #ff7768; }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__copy > p), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__caption) { color: #b3b5be; }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__pictures) { grid-column: 1; }
-:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__heading), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--lodging) .kc-product-story__copy) { grid-column: 2; }
-.kc-product-story--lodging { padding: clamp(5rem, 11vw, 10rem) 0; }
-.kc-product-story--lodging .kc-product-story__inner { width: min(86%, 75rem); gap: 2rem 5rem; }
-.kc-product-story--lodging h2 { font-size: clamp(2.6rem, 4.6vw, 4.5rem); }
-.kc-product-story--lodging .kc-product-story__copy > p { font-size: clamp(1rem, 1.5vw, 1.35rem); white-space: pre-line; }
-.kc-product-story--lodging .kc-product-story__pictures img { border-radius: 1.1rem; box-shadow: 0 1.5rem 3rem #151a2514; }
-.kc-product-story--lodging .kc-product-story__caption { border: 0; padding-top: 0; margin-top: 1.5rem; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--editorial):not(.kc-product-story--dark)) { background: #0b0d13; color: #f8f7f3; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--editorial):not(.kc-product-story--dark) .kc-product-eyebrow), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--editorial):not(.kc-product-story--dark) .kc-product-link) { color: #ff7768; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--editorial):not(.kc-product-story--dark) .kc-product-story__copy > p), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--editorial):not(.kc-product-story--dark) .kc-product-story__caption) { color: #b3b5be; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--editorial):not(.kc-product-story--dark) .kc-product-story__pictures) { grid-column: 1; }
+:global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--editorial):not(.kc-product-story--dark) .kc-product-story__heading), :global(.kc-products-page > .tenant-page-block:nth-child(even) .kc-product-story:not(.kc-product-story--editorial):not(.kc-product-story--dark) .kc-product-story__copy) { grid-column: 2; }
 .kc-product-story--screens .kc-product-story__pictures { display: flex; justify-content: center; align-items: start; gap: 1.5rem; }
 .kc-product-story--screens .kc-product-story__pictures figure { width: min(100%, 19rem); border: .5rem solid #252936; border-radius: 2rem; overflow: hidden; box-shadow: 0 1.5rem 3rem #10152526; }
 .kc-product-story--screens .kc-product-story__pictures img { max-height: none; border-radius: 0; box-shadow: none; }
-.kc-product-story--lodging.kc-product-story--screens-pair { background: radial-gradient(ellipse at 0% 0%, #242e50, #0c1525 75%); color: #f8f7f3; }
-.kc-product-story--lodging.kc-product-story--screens-pair .kc-product-story__copy > p, .kc-product-story--lodging.kc-product-story--screens-pair .kc-product-story__caption { color: #c4c8d4; }
-.kc-product-story--lodging.kc-product-story--screens-pair .kc-product-link, .kc-product-story--lodging.kc-product-story--screens-pair .kc-product-eyebrow { color: #ff7768; }
-.kc-product-story--screens-pair .kc-product-story__caption ul { color: inherit; }
-.kc-product-story--lodging.kc-product-story--text .kc-product-story__copy { grid-column: 2; grid-row: 1; align-self: center; }
-.kc-product-story--lodging.kc-product-story--text { padding: clamp(4rem, 7vw, 7rem) 0; }
+.kc-product-story--editorial { padding: clamp(3rem, 5.5vw, 5.5rem) 0; }
+.kc-product-story--editorial .kc-product-story__inner { width: min(calc(100% - 3rem), 75rem); grid-template-columns: .8fr 1.2fr; gap: 1.5rem 3rem; }
+.kc-product-story--editorial h2 { font-size: clamp(2.2rem, 3.6vw, 3.6rem); line-height: 1.08; }
+.kc-product-story--editorial .kc-product-story__heading { align-self: end; }
+.kc-product-story--editorial .kc-product-story__copy { align-self: start; }
+.kc-product-story--editorial .kc-product-story__copy > p { font-size: clamp(1.05rem, 1.4vw, 1.25rem); white-space: pre-line; }
+.kc-product-story--editorial .kc-product-story__pictures img { max-height: none; object-fit: cover; border-radius: .75rem; box-shadow: 0 1rem 2rem #0002; }
+.kc-product-story--editorial .kc-product-story__caption { border: 0; padding: 0; margin: 0; font-size: .8rem; }
+.kc-product-story--dark { background: radial-gradient(ellipse at 0% 0%, #202b46, #0c1525 75%); color: #f8f7f3; }
+.kc-product-story--dark .kc-product-story__copy > p, .kc-product-story--dark .kc-product-story__caption { color: #c4c8d4; }
+.kc-product-story--dark .kc-product-story__caption ul { color: #f8f7f3; }
+.kc-product-story--dark .kc-product-link, .kc-product-story--dark .kc-product-eyebrow { color: #ff7768; }
+.kc-product-story--annotated .kc-product-story__inner { grid-template-columns: 1.15fr 1fr .7fr; gap: 1.5rem 3rem; }
+.kc-product-story__points { grid-column: 3; grid-row: 1 / 3; margin: 0; }
+.kc-product-story__points > div + div { border-top: 1px solid #17192026; margin-top: 1.25rem; padding-top: 1.25rem; }
+.kc-product-story__points dt { font-weight: 600; line-height: 1.3; }
+.kc-product-story__points dd { margin: .5rem 0 0; color: #606168; font-size: .9rem; line-height: 1.5; }
+.kc-product-story--dark .kc-product-story__points dd { color: #c4c8d4; }
+.kc-product-story--dark .kc-product-story__points > div + div { border-color: #ffffff30; }
+@media (max-width: 1100px) {
+  .kc-product-story--annotated .kc-product-story__inner { grid-template-columns: 1fr 1fr; }
+  .kc-product-story__points { grid-column: 1 / -1; grid-row: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; }
+  .kc-product-story__points > div + div { border: 0; padding: 0; margin: 0; }
+}
 @media (max-width: 767px) {
-  .kc-product-story__inner { display: flex; flex-direction: column; align-items: stretch; gap: 2rem; }
+  .kc-product-story__inner, .kc-product-story--editorial .kc-product-story__inner { display: flex; flex-direction: column; align-items: stretch; gap: 2rem; }
   .kc-product-story__copy { align-self: auto; }
+  .kc-product-story--editorial .kc-product-story__heading { align-self: stretch; }
   .kc-product-story__pictures { order: 2; }
+  .kc-product-story__points { order: 3; grid-template-columns: 1fr; gap: 1.5rem; }
   .kc-product-story__pictures img, .kc-product-story__pictures video { max-height: 28rem; }
   .kc-product-story__caption { order: 3; flex-direction: column; gap: 1rem; }
   .kc-product-story__caption ul { gap: 1rem; font-size: .8rem; }
@@ -112,8 +133,6 @@ const examples = computed(() => {
   .kc-product-story--photos .kc-product-story__picture--1 { width: 68%; }
   .kc-product-story--photos .kc-product-story__picture--2 { right: 0; top: 40%; width: 42%; }
   .kc-product-story--photos .kc-product-story__picture--3 { left: 38%; top: 55%; width: 20%; }
-  .kc-product-story--lodging { padding: 4.5rem 0; }
-  .kc-product-story--lodging .kc-product-story__inner { width: calc(100% - 3rem); gap: 2rem; }
   .kc-product-story--screens .kc-product-story__pictures { flex-direction: column; align-items: center; }
   .kc-product-story--screens .kc-product-story__pictures figure { width: min(100%, 18rem); }
 }

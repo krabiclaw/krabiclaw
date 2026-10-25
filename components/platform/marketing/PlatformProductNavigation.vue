@@ -1,8 +1,8 @@
 <template>
-  <nav v-if="page.recipe === 'products'" class="kc-product-nav" :class="{ 'kc-product-nav--lodging': lodging }" :aria-label="page.title">
-    <span v-if="!lodging">{{ page.title }}</span>
+  <nav v-if="page.recipe === 'products'" class="kc-product-nav" :class="{ 'kc-product-nav--links': block.data.layout === 'links' }" :aria-label="page.title">
+    <span v-if="block.data.layout !== 'links'">{{ page.title }}</span>
     <div>
-      <NuxtLink v-for="link in links" :key="link.url" :to="link.url">{{ link.label }}</NuxtLink>
+      <NuxtLink v-for="link in links" :key="link.url" :to="link.url">{{ link.label }} <span v-if="block.data.layout === 'links'" aria-hidden="true">→</span></NuxtLink>
     </div>
   </nav>
   <div v-else class="my-8 flex flex-wrap gap-3">
@@ -15,7 +15,6 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockRecords, blockText, isInternalRoute } from '~/utils/tenant-page-block-data'
 import TenantPageButton from '~/components/tenant-pages/TenantPageButton.vue'
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const lodging = computed(() => props.page.path === '/lodging' || props.page.path.startsWith('/lodging/'))
 const { localePath } = useI18n()
 const links = computed(() => blockRecords(props.block.data.buttons).flatMap(item => {
   const label = blockText(item.label)
@@ -29,8 +28,8 @@ const links = computed(() => blockRecords(props.block.data.buttons).flatMap(item
 .kc-product-nav > div { display: flex; gap: clamp(1.5rem, 5vw, 5rem); }
 .kc-product-nav a { color: #d6d7dd; text-decoration: none; font-size: 1rem; }
 .kc-product-nav a:hover, .kc-product-nav a:focus-visible { color: var(--kc-coral); }
-.kc-product-nav--lodging { width: 100%; padding: 2.5rem max(7%, calc((100% - 75rem) / 2)); background: #f6f4ef; }
-.kc-product-nav--lodging > div { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem; }
-.kc-product-nav--lodging a { color: #252c47; font-size: .9rem; }
-@media (max-width: 767px) { .kc-product-nav--lodging { padding: 2.5rem 1.5rem; } .kc-product-nav--lodging > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; } }
+.kc-product-nav--links { width: 100%; padding: 1.8rem max(1.5rem, calc((100% - 75rem) / 2)); background: #f6f4ef; }
+.kc-product-nav--links > div { width: 100%; justify-content: space-between; flex-wrap: wrap; gap: 1.5rem; }
+.kc-product-nav--links a { color: #252c47; font-size: .9rem; }
+@media (max-width: 900px) { .kc-product-nav--links { padding: 1.8rem 1.5rem; } .kc-product-nav--links > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; } }
 </style>

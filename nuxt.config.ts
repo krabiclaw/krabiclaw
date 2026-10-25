@@ -167,6 +167,11 @@ export default defineNuxtConfig({
         'lucide:menu',
         'lucide:panel-left-close',
         'lucide:panel-left-open',
+        'lucide:house',
+        'lucide:users',
+        'lucide:credit-card',
+        'lucide:calendar',
+        'lucide:globe',
       ],
     },
     customCollections: [
