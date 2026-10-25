@@ -143,8 +143,7 @@ be archived; removing them can prevent native confirmation on the original
 contract. Archive retired products and prices to exclude them from new plan
 choices, and verify the actual portal's available alternatives after archival.
 Better Auth's saleability guard also rejects new subscriptions and plan changes
-to retired identities. Quantity is how an owner adds or removes locations on
-their plan. Read the saved products with
+to retired identities. Read the saved products with
 `expand=['features.subscription_update.products']`; the ordinary configuration
 response omits them. Preserve existing cancellation, payment-method, invoice,
 proration and timing settings unless the operator explicitly changes them.

@@ -186,10 +186,12 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     }
   }
 
+  const quoteChoice = () => [checkIn.value, checkOut.value, adults.value, children.value, infants.value].join('|')
   async function refreshQuote() {
     quote.value = null
+    quotePending.value = false
     if (!checkIn.value || !checkOut.value) return
-    const asked = [checkIn.value, checkOut.value, adults.value, children.value, infants.value].join('|')
+    const asked = quoteChoice()
     quotePending.value = true
     bookingError.value = ''
     try {
@@ -198,11 +200,11 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
         validate: (value): value is { quote: StayQuote } => isRecord(value) && isRecord(value.quote) && Number.isSafeInteger(value.quote.total_minor) && Array.isArray(value.quote.nightly),
       })
       // A later choice replaced this one while it was in flight.
-      if (asked === [checkIn.value, checkOut.value, adults.value, children.value, infants.value].join('|')) quote.value = response.quote
+      if (asked === quoteChoice()) quote.value = response.quote
     } catch (error) {
-      bookingError.value = refusal(error)
+      if (asked === quoteChoice()) bookingError.value = refusal(error)
     } finally {
-      quotePending.value = false
+      if (asked === quoteChoice()) quotePending.value = false
     }
   }
   watch([checkIn, checkOut, adults, children, infants], () => { void refreshQuote() })
@@ -241,7 +243,8 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     submitting.value = true
     bookingError.value = ''
     try {
-      const fingerprint = JSON.stringify([context.value.product.id, checkIn.value, checkOut.value, adults.value, children.value, infants.value, contact.name.trim(), contact.email.trim(), contact.phone?.trim() || null, contact.notes?.trim() || null])
+      const guest = { name: contact.name.trim(), email: contact.email.trim(), phone: contact.phone?.trim() || null, notes: contact.notes?.trim() || null }
+      const fingerprint = JSON.stringify([context.value.product.id, checkIn.value, checkOut.value, adults.value, children.value, infants.value, guest.name, guest.email, guest.phone, guest.notes])
       if (fingerprint !== requestFingerprint) {
         requestKey = crypto.randomUUID()
         requestFingerprint = fingerprint
@@ -252,7 +255,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
         body: {
           idempotency_key: requestKey, check_in_date: checkIn.value, check_out_date: checkOut.value,
           adults: adults.value, children: children.value, infants: infants.value,
-          guest_name: contact.name, guest_email: contact.email, guest_phone: contact.phone || null, notes: contact.notes || null, locale: locale.value,
+          guest_name: guest.name, guest_email: guest.email, guest_phone: guest.phone, notes: guest.notes, locale: locale.value,
         },
         validate: (value): value is CheckoutResponse => isRecord(value) && value.success === true && value.status === 'checkout' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/')
           && typeof value.purchase_claim === 'string' && typeof value.payment_id === 'string' && isValidInstant(value.expires_at),
