@@ -186,12 +186,13 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     }
   }
 
-  const quoteChoice = () => [checkIn.value, checkOut.value, adults.value, children.value, infants.value].join('|')
+  let quoteRun = 0
   async function refreshQuote() {
     quote.value = null
     quotePending.value = false
+    // Counted before the dates are checked, so clearing them retires a request in flight.
+    const run = ++quoteRun
     if (!checkIn.value || !checkOut.value) return
-    const asked = quoteChoice()
     quotePending.value = true
     bookingError.value = ''
     try {
@@ -200,11 +201,11 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
         validate: (value): value is { quote: StayQuote } => isRecord(value) && isRecord(value.quote) && Number.isSafeInteger(value.quote.total_minor) && Array.isArray(value.quote.nightly),
       })
       // A later choice replaced this one while it was in flight.
-      if (asked === quoteChoice()) quote.value = response.quote
+      if (run === quoteRun) quote.value = response.quote
     } catch (error) {
-      if (asked === quoteChoice()) bookingError.value = refusal(error)
+      if (run === quoteRun) bookingError.value = refusal(error)
     } finally {
-      if (asked === quoteChoice()) quotePending.value = false
+      if (run === quoteRun) quotePending.value = false
     }
   }
   watch([checkIn, checkOut, adults, children, infants], () => { void refreshQuote() })

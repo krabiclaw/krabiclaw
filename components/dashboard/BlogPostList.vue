@@ -228,8 +228,9 @@ async function commitOrder() {
 watch(editing, (value, previous) => {
   if (previous && !value) void commitOrder()
 })
-// Leaving a collection's tab mid-edit writes the moves made there, rather than dropping them.
-watch(activeTab, () => { void commitOrder() })
+// Leaving a collection's tab mid-edit writes the moves made there, rather than dropping them;
+// a failed "Load more" belonged to the tab that was left.
+watch(activeTab, () => { moreError.value = null; void commitOrder() })
 
 /** Removal lives in the list's edit state, the way every other list does it. */
 async function removePost(item: { id: string }) {

@@ -71,7 +71,7 @@ export function isTransactionsView(value:unknown):value is {payments:Transaction
 /** Rows to a CSV file the browser saves, as Airbnb's "Export CSV". */
 export function downloadCsv(filename:string,header:string[],rows:Array<Array<string|number>>):void {
  // A buyer writes their own name, so text a spreadsheet would run as a formula is kept as text.
- const escape=(cell:string|number)=>`"${(typeof cell==='string'&&/^(?:[=+@\t\r]|-(?![\d.]))/.test(cell)?`'${cell}`:String(cell)).replace(/"/g,'""')}"`
+ const escape=(cell:string|number)=>`"${(typeof cell==='string'&&/^[=+\-@\t\r]/.test(cell)&&!/^-\d+(?:\.\d+)?$/.test(cell)?`'${cell}`:String(cell)).replace(/"/g,'""')}"`
  const text=[header,...rows].map(row=>row.map(escape).join(',')).join('\n')
  const url=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'}))
  const link=document.createElement('a'); link.href=url; link.download=filename; link.click(); URL.revokeObjectURL(url)

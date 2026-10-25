@@ -345,7 +345,15 @@ export async function getCachedPlans(env: EnvWithOrganizationCache, buildId: str
     // Each request fetches its own miss: Workers refuse to let one request
     // await I/O that another request started.
     const plans = await fetchStripeProducts(env)
-    if (kv) await kv.put(cacheKey, JSON.stringify(plans), { expirationTtl: PLANS_CACHE_TTL_SECONDS })
+    if (kv) {
+      try {
+        await kv.put(cacheKey, JSON.stringify(plans), { expirationTtl: PLANS_CACHE_TTL_SECONDS })
+      } catch (error) {
+        // KV takes one write per key per second, so a concurrent miss can lose
+        // the write race; the cache is filled only if a read now finds it.
+        if (await kv.get(cacheKey, 'text') === null) throw error
+      }
+    }
     return plans
   } catch (error) {
     if (error instanceof BillingPlansError) throw error

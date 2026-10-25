@@ -178,7 +178,7 @@ async function listRecentGuestDeliveryCandidates(db: D1Database, env: ApiRecord,
     FROM guest_thread_deliveries d
     JOIN activity_entries e ON e.id = d.entry_id
     JOIN requests gt ON gt.id = e.request_id
-    JOIN member m ON m.organizationId = gt.organization_id AND m.userId = ?
+    JOIN member m ON m.organizationId = gt.organization_id AND m.userId = ? AND m.role IN ('owner', 'admin')
     WHERE d.channel = 'whatsapp' AND d.created_at > ?
     GROUP BY gt.id
     ORDER BY createdAt DESC
