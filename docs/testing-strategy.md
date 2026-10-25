@@ -61,12 +61,15 @@ PLAYWRIGHT_WORKERS=2 yarn test:e2e:tenant-rendering --grep 'published route inve
 Each supplied URL is opened in Chromium at 1440px, 780px and 390px, checks its actual
 hydrated tenant content and media, and retains a full-page screenshot. An omitted
 inventory means the ordinary representative suite, not complete route coverage.
-One ordinary test per tenant and viewport walks its URLs in sequential native
-Playwright steps, each with a 60-second budget. That anonymous visitor retains
-normal browser cache and announcement state between routes. The report attaches
+Cases group at most 30 routes per tenant and viewport, walked in sequential native
+Playwright steps, each with a 60-second budget. The exhaustive visitor identifies
+itself as a crawler through the existing bot exclusion, preserving customer
+analytics and visitor quotas. Ordinary representative journeys retain a human
+browser agent and verify collection. Browser cache and announcement state are
+retained within each case. The report attaches
 each route's unique full-page capture and the planned and completed URL scope,
 including partial scope on failure. Group results prove full coverage only when
-their completed scopes match the supplied inventory at both widths.
+their completed scopes match the supplied inventory at all three widths.
 Keep the JSON reporter output as private release evidence: it retains native
 body attachments, including completed route scope and duplicate-cancellation
 diagnostics from passing tests. List and progress output alone do not retain
