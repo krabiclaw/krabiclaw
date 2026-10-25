@@ -1371,53 +1371,70 @@ export async function createProduct(db: DbClient, input: {
   const earlier = await replay()
   if (earlier) return earlier
 
-  const planned = await planProduct(db, input.organizationId, product, { organizationId: input.organizationId })
-  assertVariantPricesConsistent(planned)
-  const now = new Date().toISOString()
-  const writes = productWrites(input.organizationId, planned, input.actor, now, 'insert')
-  if (input.booking) {
-    await assertBookableOffering(db, input.organizationId, planned, input.booking.data.location_id)
-    const { prepareProductBookingSetup } = await import('~/server/utils/availability')
-    writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: planned.id, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data, productInSameBatch: true }))
-  }
-  if (input.publication?.published && planned.kind === 'experience' && !input.booking && !planned.order_url) invalid('Provide booking details or an external booking destination before publishing an experience')
-  if (input.publication?.published) await assertStayBookable(db, input.organizationId, planned)
-  const page = await prepareProductPageCreate(db, { organizationId: input.organizationId, product: planned, actor: input.actor, page: pageInput, env })
-  if (page) writes.push(...page.queries)
-  if (input.publication && input.organizationId) {
-    writes.push({
-      query: `INSERT INTO product_publications (organization_id, product_id, published, created_at, updated_at, created_by, updated_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      params: [input.organizationId, planned.id, input.publication.published ? 1 : 0, now, now, input.actor.actorId, input.actor.actorId],
-    })
-    writes.push(publicResourceCacheInvalidationQuery(input.organizationId, 'product_created'))
-  }
-  writes.push(organizationEventQuery({
-    organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.created', entityType: 'product', entityId: planned.id,
-    ...(dedupeKey ? { metadata: { request_hash: requestHash, page_id: page?.variantId ?? null }, dedupeKey } : {}),
-  }))
-  if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering has too many schedule entries for one atomic write')
+  // No earlier creation exists. Planning rejects authored input before this
+  // operation reaches the write boundary; later failures cannot make that claim.
+  let writeStarted = false
   try {
-    await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Create product', action: 'create it', stay: planned.kind === 'stay' })
-  } catch (error) {
-    if (isUniqueDedupeConflict(error)) {
+    const planned = await planProduct(db, input.organizationId, product, { organizationId: input.organizationId })
+    assertVariantPricesConsistent(planned)
+    const now = new Date().toISOString()
+    const writes = productWrites(input.organizationId, planned, input.actor, now, 'insert')
+    if (input.booking) {
+      await assertBookableOffering(db, input.organizationId, planned, input.booking.data.location_id)
+      const { prepareProductBookingSetup } = await import('~/server/utils/availability')
+      writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: planned.id, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data, productInSameBatch: true }))
+    }
+    if (input.publication?.published && planned.kind === 'experience' && !input.booking && !planned.order_url) invalid('Provide booking details or an external booking destination before publishing an experience')
+    if (input.publication?.published) await assertStayBookable(db, input.organizationId, planned)
+    const page = await prepareProductPageCreate(db, { organizationId: input.organizationId, product: planned, actor: input.actor, page: pageInput, env })
+    if (page) writes.push(...page.queries)
+    if (input.publication && input.organizationId) {
+      writes.push({
+        query: `INSERT INTO product_publications (organization_id, product_id, published, created_at, updated_at, created_by, updated_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        params: [input.organizationId, planned.id, input.publication.published ? 1 : 0, now, now, input.actor.actorId, input.actor.actorId],
+      })
+      writes.push(publicResourceCacheInvalidationQuery(input.organizationId, 'product_created'))
+    }
+    writes.push(organizationEventQuery({
+      organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.created', entityType: 'product', entityId: planned.id,
+      ...(dedupeKey ? { metadata: { request_hash: requestHash, page_id: page?.variantId ?? null }, dedupeKey } : {}),
+    }))
+    if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This offering has too many schedule entries for one atomic write')
+    writeStarted = true
+    try {
+      await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Create product', action: 'create it', stay: planned.kind === 'stay' })
+    } catch (error) {
+      // A confirmed commit with unfinished billing is retried by the caller.
+      if (HTTPError.isError(error) && error.data !== null && typeof error.data === 'object' && 'committed' in error.data && error.data.committed === true) throw error
+      // A competing creation can claim the slug or page before the audit key.
       const concurrent = await replay()
       if (concurrent) return concurrent
+      if (isProductPageConflict(error)) conflict('Product already has a canonical page')
+      if (input.booking) {
+        const { bookingConfigurationWriteError } = await import('~/server/utils/availability')
+        throw bookingConfigurationWriteError(error)
+      }
+      throw error
     }
-    if (isProductPageConflict(error)) conflict('Product already has a canonical page')
-    if (input.booking) {
-      const { bookingConfigurationWriteError } = await import('~/server/utils/availability')
-      throw bookingConfigurationWriteError(error)
+    // The product and its page are committed. The page's social card is drawn
+    // after, and a failure there is reported as itself; a retry under the same
+    // key returns this product rather than making another.
+    if (page && pageInput) await refreshTenantPageCard(db, pageInput.env, page, input.actor.actorId)
+    const created = await getProduct(db, input.organizationId, planned.id)
+    await publishStayProducts(env, [created])
+    return created
+  } catch (error) {
+    if (!writeStarted && HTTPError.isError(error)) {
+      const concurrent = await replay()
+      if (concurrent) return concurrent
+      throw new HTTPError({
+        cause: error, body: error.body,
+        data: { ...(error.data !== null && typeof error.data === 'object' && !Array.isArray(error.data) ? error.data : {}), mutation_applied: false },
+      })
     }
     throw error
   }
-  // The product and its page are committed. The page's social card is drawn
-  // after, and a failure there is reported as itself; a retry under the same
-  // key returns this product rather than making another.
-  if (page && pageInput) await refreshTenantPageCard(db, pageInput.env, page, input.actor.actorId)
-  const created = await getProduct(db, input.organizationId, planned.id)
-  await publishStayProducts(env, [created])
-  return created
 }
 
 /**

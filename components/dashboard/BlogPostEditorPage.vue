@@ -1,12 +1,6 @@
 <template>
-  <!-- A post being made gives its headline first; the article is written once it exists. -->
-  <DashboardIndexPanel v-if="isNew" id="organization-blog-new" :title="newTitle" :create="firstStep">
-    <UAlert v-if="createFailure" color="error" variant="soft" :description="createFailure" />
-    <EditorNavigationList :groups="createGroups" :active-item="level.child.value" />
-  </DashboardIndexPanel>
-
   <UAlert
-    v-else-if="loadError"
+    v-if="loadError"
     color="error"
     variant="soft"
     icon="i-lucide-triangle-alert"
@@ -15,15 +9,16 @@
   />
 
   <BlogPostEditor
-    v-else-if="postResource"
+    v-else-if="isNew || postResource"
     :repository="repository"
-    :initial-post="postResource.post"
+    :initial-post="postResource?.post ?? null"
     :organization-id="organizationId"
     panel-id="organization-blog-post"
     :media-picker-component="MediaPicker"
   >
     <template #actions="{ post: savedPost, saving }">
       <DashboardResourceLocalization
+        v-if="!isNew"
         :organization-id="organizationId"
         resource-type="content_document"
         :resource-id="postId"
@@ -38,33 +33,14 @@
   </BlogPostEditor>
 </template>
 
-<script lang="ts">
-import type { InjectionKey, Ref } from 'vue'
-
-/** The headline a post is made with, for its one create leaf. */
-export interface BlogPostCreateEditor {
-  draft: Ref<{ title: string; idempotency_key: string }>
-  saving: Ref<boolean>
-  error: Ref<string | null>
-  saveLabel: Ref<string | undefined>
-  saveDisabled: Ref<boolean>
-  save: () => Promise<void>
-  revert: () => void
-}
-
-export const blogPostCreateKey = Symbol('blog-post-create') as InjectionKey<BlogPostCreateEditor>
-</script>
-
 <script setup lang="ts">
-import { isNavigationFailure } from 'vue-router'
-import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import { tenantBlogRepository } from '~/lib/components/workspace/blog/tenantBlogRepository'
 import { isBlogPostResponse } from '~/lib/components/workspace/blog/blog-response-contracts'
 import BlogPostEditor from '~/lib/components/workspace/blog/BlogPostEditor.vue'
 import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
 import type { BlogEditorBlock, BlogPost } from '~/lib/components/workspace/blog/types'
-import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlocks, writeBlogLocalizedText, type BlogLocalizedFieldPath } from '~/utils/blog-editor'
+import { blankBlogLocalizedText, blogLocalizedTextFields, writeBlogLocalizedText, type BlogLocalizedFieldPath } from '~/utils/blog-editor'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
 // One post. Rendered by `blog.vue`, which owns the frame — this level draws its
@@ -80,40 +56,9 @@ const level = useRouteLevel()
 const isNew = postId === 'new'
 const repository = tenantBlogRepository({ organizationId, orgSlug })
 
-// ── A post being made ───────────────────────────────────
-const blankDraft = () => ({ title: '', idempotency_key: crypto.randomUUID() })
-const draftKey = `blog-create:${organizationId}`
-const draft = useState(draftKey, blankDraft)
-const creating = ref(false)
-const createFailure = ref<string | null>(null)
-const createGroups = computed(() => [{ id: 'new-article', items: [{
-  id: 'headline', label: 'Headline', summary: draft.value.title || 'No headline',
-  placeholder: !draft.value.title, to: `${level.path.value}/headline`,
-}] }])
-const { title: newTitle, firstStep, saveLabel, saveDisabled, save } = useCreateWalk({
-  recordPath: level.path, isNew: computed(() => isNew), openKey: computed(() => 'headline' as const),
-  labels: { headline: 'Headline' }, order: ['headline'], missing: () => !draft.value.title.trim(),
-  noun: 'article', saving: creating, commit: createPost,
-})
-async function createPost() {
-  creating.value = true
-  createFailure.value = null
-  try {
-    const post = await repository.create({ title: draft.value.title.trim(), content_blocks: initialBlogEditorBlocks(), idempotency_key: draft.value.idempotency_key })
-    const navigation = await navigateTo(repository.editUrl(post.id), { replace: true })
-    if (isNavigationFailure(navigation)) throw navigation
-    clearNuxtState(draftKey)
-  } catch (cause) {
-    createFailure.value = getErrorMessage(cause, 'Failed to create the article.')
-  } finally {
-    creating.value = false
-  }
-}
-provide(blogPostCreateKey, { draft, saving: creating, error: createFailure, saveLabel, saveDisabled, save, revert: () => { draft.value = blankDraft() } })
-// Only the headline is asked before a post exists, and an existing post's headline is its document's.
+// New articles use the same writing canvas; only saved articles have metadata leaves.
 watchEffect(() => {
-  const child = level.child.value
-  if (child && (isNew ? child !== 'headline' : child === 'headline')) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  if (isNew && level.child.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
 
 // ── An existing post ────────────────────────────────────
@@ -249,5 +194,5 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
   }
 }
 
-useSeoMeta({ title: () => `${isNew ? newTitle.value : postResource.value?.post.title || 'Article'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew ? 'New article' : postResource.value?.post.title || 'Article'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 </script>
