@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b47df52d-4752-412b-bc22-4022a344ab62",
-  "prevId": "57e48b11-5107-4bb0-ad7e-072d59dc5785",
+  "id": "3f4ab06a-38f5-459e-b22a-893cc9e441c4",
+  "prevId": "30db8a66-797e-48e7-9399-2a2451814e6b",
   "tables": {
     "account": {
       "name": "account",
@@ -1969,6 +1969,28 @@
           "notNull": false,
           "autoincrement": false
         },
+        "sent_json": {
+          "name": "sent_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "retry_at": {
+          "name": "retry_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "text",
@@ -1984,6 +2006,14 @@
           "columns": [
             "organization_id",
             "state"
+          ],
+          "isUnique": false
+        },
+        "channel_night_pushes_due_idx": {
+          "name": "channel_night_pushes_due_idx",
+          "columns": [
+            "state",
+            "retry_at"
           ],
           "isUnique": false
         }
@@ -2049,6 +2079,14 @@
         "channel_night_pushes_updated_at_check": {
           "name": "channel_night_pushes_updated_at_check",
           "value": "strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at"
+        },
+        "channel_night_pushes_attempts_check": {
+          "name": "channel_night_pushes_attempts_check",
+          "value": "attempts >= 0"
+        },
+        "channel_night_pushes_retry_check": {
+          "name": "channel_night_pushes_retry_check",
+          "value": "retry_at IS NULL OR (state = 'pending' AND strftime('%Y-%m-%dT%H:%M:%fZ', retry_at, '+0 days') IS retry_at)"
         }
       }
     },
@@ -2248,6 +2286,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
+          "autoincrement": false
+        },
+        "moved_from_thread_id": {
+          "name": "moved_from_thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         },
         "created_at": {
@@ -3482,6 +3527,234 @@
         }
       }
     },
+    "content_reports": {
+      "name": "content_reports",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reporter_user_id": {
+          "name": "reporter_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "subject": {
+          "name": "subject",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "team_message_id": {
+          "name": "team_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "author_user_id": {
+          "name": "author_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "excerpt": {
+          "name": "excerpt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "blocked": {
+          "name": "blocked",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "resolved_by_user_id": {
+          "name": "resolved_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "content_reports_status_created_idx": {
+          "name": "content_reports_status_created_idx",
+          "columns": [
+            "status",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "content_reports_request_idx": {
+          "name": "content_reports_request_idx",
+          "columns": [
+            "request_id"
+          ],
+          "isUnique": false
+        },
+        "content_reports_team_message_idx": {
+          "name": "content_reports_team_message_idx",
+          "columns": [
+            "team_message_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "content_reports_organization_id_organization_id_fk": {
+          "name": "content_reports_organization_id_organization_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "content_reports_reporter_user_id_user_id_fk": {
+          "name": "content_reports_reporter_user_id_user_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "user",
+          "columnsFrom": [
+            "reporter_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "content_reports_request_id_requests_id_fk": {
+          "name": "content_reports_request_id_requests_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "requests",
+          "columnsFrom": [
+            "request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "content_reports_team_message_id_team_messages_id_fk": {
+          "name": "content_reports_team_message_id_team_messages_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "team_messages",
+          "columnsFrom": [
+            "team_message_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "content_reports_author_user_id_user_id_fk": {
+          "name": "content_reports_author_user_id_user_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "user",
+          "columnsFrom": [
+            "author_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "content_reports_resolved_by_user_id_user_id_fk": {
+          "name": "content_reports_resolved_by_user_id_user_id_fk",
+          "tableFrom": "content_reports",
+          "tableTo": "user",
+          "columnsFrom": [
+            "resolved_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "content_reports_subject_check": {
+          "name": "content_reports_subject_check",
+          "value": "(subject = 'guest_thread' AND team_message_id IS NULL) OR (subject = 'team_message' AND request_id IS NULL AND blocked = 0)"
+        },
+        "content_reports_reason_check": {
+          "name": "content_reports_reason_check",
+          "value": "length(reason) BETWEEN 1 AND 1000 AND reason = trim(reason)"
+        },
+        "content_reports_resolution_check": {
+          "name": "content_reports_resolution_check",
+          "value": "(status = 'open') = (resolved_at IS NULL)"
+        },
+        "content_reports_instants_check": {
+          "name": "content_reports_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (resolved_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', resolved_at, '+0 days') IS resolved_at)"
+        }
+      }
+    },
     "device_tokens": {
       "name": "device_tokens",
       "columns": {
@@ -4032,6 +4305,13 @@
         "error": {
           "name": "error",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "non_delivery_confirmed": {
+          "name": "non_delivery_confirmed",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -5687,35 +5967,35 @@
           "name": "timezone",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "weekly_json": {
           "name": "weekly_json",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "time_off_json": {
           "name": "time_off_json",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "windows_json": {
           "name": "windows_json",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "windows_until": {
           "name": "windows_until",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "public_name": {
@@ -5848,7 +6128,12 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "checkConstraints": {}
+      "checkConstraints": {
+        "member_scheduling_hours_check": {
+          "name": "member_scheduling_hours_check",
+          "value": "(\"member_scheduling\".\"timezone\" IS NULL AND \"member_scheduling\".\"weekly_json\" IS NULL AND \"member_scheduling\".\"time_off_json\" IS NULL AND \"member_scheduling\".\"windows_json\" IS NULL AND \"member_scheduling\".\"windows_until\" IS NULL) OR (\"member_scheduling\".\"timezone\" IS NOT NULL AND \"member_scheduling\".\"weekly_json\" IS NOT NULL AND \"member_scheduling\".\"time_off_json\" IS NOT NULL AND \"member_scheduling\".\"windows_json\" IS NOT NULL AND \"member_scheduling\".\"windows_until\" IS NOT NULL)"
+        }
+      }
     },
     "message_templates": {
       "name": "message_templates",
@@ -11031,6 +11316,20 @@
           "autoincrement": false,
           "default": false
         },
+        "delivery_lease": {
+          "name": "delivery_lease",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "delivery_lease_until": {
+          "name": "delivery_lease_until",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -14021,6 +14320,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "blocked_at": {
+          "name": "blocked_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "payload_json": {
           "name": "payload_json",
           "type": "text",
@@ -15632,6 +15938,181 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "stay_calendar_links": {
+      "name": "stay_calendar_links",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "channel": {
+          "name": "channel",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "import_url": {
+          "name": "import_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "export_token": {
+          "name": "export_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "blocked_json": {
+          "name": "blocked_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "synced_at": {
+          "name": "synced_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sync_error": {
+          "name": "sync_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "stay_calendar_links_home_channel_unique": {
+          "name": "stay_calendar_links_home_channel_unique",
+          "columns": [
+            "product_id",
+            "channel"
+          ],
+          "isUnique": true
+        },
+        "stay_calendar_links_export_token_unique": {
+          "name": "stay_calendar_links_export_token_unique",
+          "columns": [
+            "export_token"
+          ],
+          "isUnique": true
+        },
+        "stay_calendar_links_org_product_id_unique": {
+          "name": "stay_calendar_links_org_product_id_unique",
+          "columns": [
+            "organization_id",
+            "product_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "stay_calendar_links_organization_id_organization_id_fk": {
+          "name": "stay_calendar_links_organization_id_organization_id_fk",
+          "tableFrom": "stay_calendar_links",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "stay_calendar_links_home_scope_fk": {
+          "name": "stay_calendar_links_home_scope_fk",
+          "tableFrom": "stay_calendar_links",
+          "tableTo": "product_stay_configs",
+          "columnsFrom": [
+            "organization_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "stay_calendar_links_channel_check": {
+          "name": "stay_calendar_links_channel_check",
+          "value": "channel = 'vrbo'"
+        },
+        "stay_calendar_links_import_url_check": {
+          "name": "stay_calendar_links_import_url_check",
+          "value": "import_url LIKE 'https://%'"
+        },
+        "stay_calendar_links_blocked_check": {
+          "name": "stay_calendar_links_blocked_check",
+          "value": "json_valid(blocked_json) AND json_type(blocked_json) = 'array'"
+        },
+        "stay_calendar_links_instants_check": {
+          "name": "stay_calendar_links_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (synced_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', synced_at, '+0 days') IS synced_at)"
+        }
+      }
+    },
     "stay_nights": {
       "name": "stay_nights",
       "columns": {
@@ -15669,6 +16150,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "calendar_link_id": {
+          "name": "calendar_link_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -15683,6 +16171,13 @@
           "name": "stay_nights_hold_idx",
           "columns": [
             "hold_id"
+          ],
+          "isUnique": false
+        },
+        "stay_nights_calendar_link_idx": {
+          "name": "stay_nights_calendar_link_idx",
+          "columns": [
+            "calendar_link_id"
           ],
           "isUnique": false
         }
@@ -15730,6 +16225,23 @@
           ],
           "onDelete": "cascade",
           "onUpdate": "no action"
+        },
+        "stay_nights_calendar_link_scope_fk": {
+          "name": "stay_nights_calendar_link_scope_fk",
+          "tableFrom": "stay_nights",
+          "tableTo": "stay_calendar_links",
+          "columnsFrom": [
+            "organization_id",
+            "product_id",
+            "calendar_link_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -15749,7 +16261,7 @@
         },
         "stay_nights_claimant_check": {
           "name": "stay_nights_claimant_check",
-          "value": "(stay_id IS NULL) <> (hold_id IS NULL)"
+          "value": "(stay_id IS NOT NULL) + (hold_id IS NOT NULL) + (calendar_link_id IS NOT NULL) = 1"
         }
       }
     },
@@ -16199,6 +16711,16 @@
           "isUnique": true,
           "where": "external_booking_id IS NOT NULL"
         },
+        "stays_channel_reservation_unique": {
+          "name": "stays_channel_reservation_unique",
+          "columns": [
+            "organization_id",
+            "channel",
+            "channel_booking_id"
+          ],
+          "isUnique": true,
+          "where": "channel_booking_id IS NOT NULL"
+        },
         "stays_request_unique": {
           "name": "stays_request_unique",
           "columns": [
@@ -16316,7 +16838,7 @@
         },
         "stays_channel_check": {
           "name": "stays_channel_check",
-          "value": "channel IN ('airbnb', 'vrbo', 'direct')"
+          "value": "channel IN ('airbnb', 'vrbo', 'booking_com', 'direct')"
         },
         "stays_owner_check": {
           "name": "stays_owner_check",

@@ -1,6 +1,6 @@
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { listThreadEntries, isBuyerVisibleThreadEntry } from '~/server/domain/guest-threads/entries'
-import { d1JsonStringSet, execute, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, queryFirst, type DbClient } from '~/server/db'
 
 interface NotificationVisibility {
   userId: string
@@ -8,6 +8,10 @@ interface NotificationVisibility {
   whereParams: unknown[]
 }
 
+// A member acknowledges a notification once. Counting only new acknowledgements
+// is what lets a caller publish "read" only when something became read: a
+// thread read re-acknowledging everything published on every read, and the app,
+// which reloads on that event, read the thread again in a loop.
 async function acknowledgeVisibleNotifications(
   db: DbClient,
   visibility: NotificationVisibility,
@@ -20,17 +24,23 @@ async function acknowledgeVisibleNotifications(
     INSERT INTO activity_entries (id, kind, scope_kind, organization_id, location_id, parent_id, actor_kind, actor_user_id, dedupe_key, occurred_at, created_at)
     SELECT ? || ':' || n.id, 'acknowledgement', n.scope_kind, n.organization_id, n.location_id, n.id, 'member', ?, ? || ':' || n.id, ?, ?
     FROM activity_entries n WHERE n.kind = 'notification' AND ${selectionSql} AND ${visibility.whereSql}
+      AND NOT EXISTS (SELECT 1 FROM activity_entries ack WHERE ack.kind = 'acknowledgement' AND ack.parent_id = n.id AND ack.actor_user_id = ?)
     ON CONFLICT(dedupe_key) DO NOTHING
-  `, [command, visibility.userId, `ack:${command}`, now, now, ...selectionParams, ...visibility.whereParams])
+  `, [command, visibility.userId, `ack:${command}`, now, now, ...selectionParams, ...visibility.whereParams, visibility.userId])
   return Number(result?.meta?.changes ?? 0)
 }
 
+/** `null` when the caller cannot see the notification; otherwise whether this call newly read it. */
 export async function acknowledgeNotification(
   db: DbClient,
   visibility: NotificationVisibility,
   notificationId: string,
-): Promise<boolean> {
-  return await acknowledgeVisibleNotifications(db, visibility, 'n.id = ?', [notificationId]) > 0
+): Promise<{ newlyRead: boolean } | null> {
+  if (await acknowledgeVisibleNotifications(db, visibility, 'n.id = ?', [notificationId]) > 0) return { newlyRead: true }
+  const visible = await queryFirst<{ id: string }>(db,
+    `SELECT n.id FROM activity_entries n WHERE n.kind = 'notification' AND n.id = ? AND ${visibility.whereSql}`,
+    [notificationId, ...visibility.whereParams])
+  return visible ? { newlyRead: false } : null
 }
 
 export async function acknowledgeAllNotifications(

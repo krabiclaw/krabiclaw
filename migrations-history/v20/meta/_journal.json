@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1792732026102,
+      "tag": "0000_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792737133664,
+      "tag": "0001_airbnb_import_draft",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792746128973,
+      "tag": "0002_airbnb_sync_jobs",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792752213610,
+      "tag": "0003_member_profile_hours",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792768205907,
+      "tag": "0004_vrbo_calendar_link",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792822740344,
+      "tag": "0005_channel_reply_retry_proof",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792827231482,
+      "tag": "0006_channex_ari_outbox",
+      "breakpoints": true
+    }
+  ]
+}

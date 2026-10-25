@@ -7,7 +7,7 @@ import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { getGuestRequest, getThreadOperationalRecord, partySizeIsMinimum, requestActions, requestSummary, type ThreadOperationalRecord } from '~/server/domain/requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
 import { findEntryByDedupeKey, parseEntryPayload } from './entries'
-import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhoto } from './attachments'
+import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhotoInput } from './attachments'
 import type { UploadResolvedMediaInput } from '~/server/utils/media-upload'
 import { mailboxTransitionQueries, updateThreadProjectionIfLatestEntry } from './repository'
 import { resolveGuestThreadMailbox } from './mailbox'
@@ -23,6 +23,7 @@ import { formatTimestamp } from '~/utils/timezone'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { getChannelThreadMapping, replyThroughChannex } from './channel-messages'
 import type { ChannexEnv, ChannexError } from '~/server/integrations/channex/client'
+import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, guestThreadExcerpt, reportReason, type ContentReportEnv } from '~/server/domain/content-reports'
 import type {
   GuestThreadDeliveryProvider,
   GuestThreadDeliveryRow,
@@ -36,7 +37,7 @@ import type {
 // member to reach for. Archive and unarchive say where the conversation is
 // filed, not what state it is in, and touch neither the booking nor
 // conversation_state.
-export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'reply', 'archive', 'unarchive'])
+export const GUEST_THREAD_ACTIONS = new Set(['confirm', 'reject', 'cancel', 'reply', 'archive', 'unarchive', 'report', 'block', 'unblock'])
 
 type SuccessfulOperationOutcome = { ok: true; status: 200; thread: GuestThreadRow; availableActions: string[] }
 
@@ -60,9 +61,11 @@ export type ExecuteOperationInput = {
   organizationId: string
   action: string
   body?: string
+  /** Why a member reports or blocks the guest. */
+  reason?: string
   /** The photos a reply carries, in the order they were chosen. */
-  photos?: MessagePhoto[] | { sourceIds: string[]; resolve: () => Promise<MessagePhoto[]> }
-  env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv
+  photos?: MessagePhotoInput
+  env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv & ContentReportEnv
   idempotencyKey?: string
   actorUserId: string
   financialAuthorizationId?: string
@@ -504,20 +507,25 @@ async function executeReply(
   if (actorUserId === null && photoCount) throw new HTTPError({ statusCode: 400, message: 'Scheduled messages carry text only', data: { code: 'SCHEDULED_MESSAGE_PHOTOS_UNSUPPORTED', field: 'photos' } })
   const eventName = actorUserId === null ? 'thread.scheduled_message' : 'thread.member_reply'
   const purpose = actorUserId === null ? 'scheduled_message' : 'member_reply'
+  const photoIdentity = Array.isArray(photoInput)
+    ? await Promise.all(photoInput.map(async photo => ({ filename: photo.filename, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('') })))
+    : photoInput.sourceIds
+  const requestHash = await creationRequestHash({ body, photos: photoIdentity })
   const channel = await getChannelThreadMapping(db, context.thread.id, context.thread.organization_id)
   if (channel) {
-    if (photoCount) throw new HTTPError({ statusCode: 400, message: 'Airbnb replies currently accept text; send attachments through Airbnb', data: { code: 'CHANNEL_ATTACHMENTS_UNSUPPORTED', field: 'photos' } })
-    const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey! })
+    if (photoCount > 1 || (photoCount && body)) throw new HTTPError({ statusCode: 400, message: 'Send one Airbnb photo at a time, separately from text', data: { code: 'CHANNEL_PHOTO_MESSAGE_INVALID', field: 'photos' } })
+    const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey!, requestHash,
+      photoCount, resolvePhotos: async () => Array.isArray(photoInput) ? photoInput : await photoInput.resolve() }).catch((error: unknown) => {
+      if (error instanceof MessagePhotoRejection) return error
+      throw error
+    })
+    if (sent instanceof MessagePhotoRejection) return { ok: false, status: 400, reason: 'invalid_photo', message: sent.message }
     if (!sent.ok) return { ...sent, reason: 'delivery_failed' }
     return successfulOutcome(db, context)
   }
   if (context.thread.kind === 'stay' && await queryFirst(db, "SELECT id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel'", [context.thread.organization_id, context.thread.id])) {
     throw new HTTPError({ statusCode: 409, message: 'This channel stay has no addressable provider conversation; import its conversation before replying', data: { code: 'CHANNEL_THREAD_UNADDRESSABLE', field: 'channel_thread' } })
   }
-  const photoIdentity = Array.isArray(photoInput)
-    ? await Promise.all(photoInput.map(async photo => ({ filename: photo.filename, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('') })))
-    : photoInput.sourceIds
-  const requestHash = await creationRequestHash({ body, photos: photoIdentity })
   const matchesReply = (entry: GuestThreadEntryRow): boolean => {
     if (!entryMatchesRequest(entry, eventName, body)) return false
     const payload = JSON.parse(entry.payload_json ?? '{}') as { request_hash?: string }
@@ -720,6 +728,42 @@ async function executeMailboxTransition(
   return conflict(after.occurrenceEnded ? ENDED_OCCURRENCE_MESSAGE : 'This conversation changed; reload it and try again')
 }
 
+/**
+ * Report the guest, or block and report them: the report and the block land
+ * together, and KrabiClaw's operators are emailed before the member hears it
+ * worked. The report's id comes from the key, so a retry files nothing new.
+ */
+async function executeReport(db: DbClient, context: ThreadContext, input: ExecuteOperationInput, block: boolean): Promise<OperationOutcome> {
+  const reason = reportReason(input.reason)
+  const id = contentReportId(input.actorUserId, input.idempotencyKey as string)
+  await executeBatch(db, [
+    contentReportInsert({
+      id, organizationId: context.thread.organization_id, reporterUserId: input.actorUserId, subject: 'guest_thread',
+      requestId: context.thread.id, teamMessageId: null, authorUserId: context.thread.user_id, reason,
+      excerpt: await guestThreadExcerpt(db, context.thread.id), blocked: block,
+    }),
+    // Only the request that filed the report blocks: a retry of an earlier
+    // block must not undo an unblock made since.
+    ...(block ? [{
+      query: 'UPDATE requests SET blocked_at = COALESCE(blocked_at, ?) WHERE organization_id = ? AND id = ? AND changes() = 1',
+      params: [new Date().toISOString(), context.thread.organization_id, context.thread.id],
+    }] : []),
+  ], { operation: block ? 'Block and report a guest' : 'Report a guest conversation' })
+  await assertSameReport(db, id, { subject: 'guest_thread', requestId: context.thread.id, teamMessageId: null, reason, blocked: block })
+  await announceContentReport(input.env, db, id)
+  return await successfulOutcome(db, context)
+}
+
+/** Bring a blocked guest's conversation back to the inbox; the report stays filed. */
+async function executeUnblock(db: DbClient, context: ThreadContext): Promise<OperationOutcome> {
+  const [update] = await executeBatch(db, [{
+    query: 'UPDATE requests SET blocked_at = NULL WHERE organization_id = ? AND id = ? AND blocked_at IS NOT NULL',
+    params: [context.thread.organization_id, context.thread.id],
+  }], { operation: 'Unblock a guest' })
+  if ((update?.meta?.changes ?? 0) === 0 && context.thread.blocked_at === null) return conflict('This guest is not blocked')
+  return await successfulOutcome(db, context)
+}
+
 export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOperationInput): Promise<OperationOutcome> {
   if (!input.idempotencyKey) return { ok: false, status: 400, reason: 'missing_idempotency_key' }
   const context = await loadThreadContext(db, input.threadId, input.organizationId)
@@ -729,6 +773,8 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
   if (input.action === 'archive' || input.action === 'unarchive') {
     return await executeMailboxTransition(db, context, input, input.action)
   }
+  if (input.action === 'report' || input.action === 'block') return await executeReport(db, context, input, input.action === 'block')
+  if (input.action === 'unblock') return await executeUnblock(db, context)
   return await executeSourceMutation(db, context, input)
 }
 

@@ -152,6 +152,7 @@ export async function getGuestThreadDetail(
     manuallyArchived: mailbox.manuallyArchived,
     archivedAt: audience ? null : thread.archived_at,
     archivedByUserId: audience ? null : thread.archived_by_user_id,
+    blockedAt: audience ? null : thread.blocked_at,
     canArchive: audience ? false : mailbox.canArchive,
     canUnarchive: audience ? false : mailbox.canUnarchive,
     deliveryFailures: audience ? [] : deliveryFailureRows.map(d => ({

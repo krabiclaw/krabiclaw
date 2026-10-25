@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
-import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { announceContentReport, assertSameReport, contentReportId, contentReportInsert, reportReason, type ContentReport, type ContentReportEnv } from '~/server/domain/content-reports'
 import { assertLocationAccess, assertRoleAllows, listAllOrganizationMembers, organizationAdapter, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
 import { publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
@@ -15,13 +16,14 @@ import {
   messagePhotoPlacements,
   messagePreview,
   uploadMessagePhotos,
-  type MessagePhoto,
+  type MessagePhotoInput,
 } from '~/server/domain/guest-threads/attachments'
 
 /**
  * Team conversations: the organization's own members talking to each other,
  * optionally about one stay. The dashboard and the native app call these
- * functions; nothing else reads or writes the team tables.
+ * functions; nothing else reads or writes the team tables. Staff removal of a
+ * reported message runs `teamMessageRemovalQueries` from here.
  *
  * Who may take part is Better Auth membership and the `team_messages`
  * permission. A seat is a member row, so leaving the organization ends a
@@ -275,9 +277,8 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
   ], { operation: 'Start a team conversation' })
   const thread = await queryFirst<{ id: string }>(db, 'SELECT id FROM team_threads WHERE organization_id = ? AND participants_key = ?', [access.organizationId, participantsKey])
   if (!thread) throw new Error(`Team conversation ${participantsKey} was neither created nor found`)
-  if (thread.id !== id) return { id: thread.id, created: false }
-  await publishThreadChanged(env, access.organizationId, id, {})
-  return { id, created: true }
+  await publishThreadChanged(env, access.organizationId, thread.id, {})
+  return { id: thread.id, created: thread.id === id }
 }
 
 async function readMessages(db: DbClient, organizationId: string, rows: Array<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string }>): Promise<TeamMessage[]> {
@@ -329,7 +330,7 @@ export async function sendTeamMessage(
   db: DbClient,
   access: TeamAccess,
   threadId: string,
-  input: { body: unknown; photos: MessagePhoto[]; idempotencyKey: unknown; senderName: string },
+  input: { body: unknown; photos: MessagePhotoInput; idempotencyKey: unknown; senderName: string },
 ): Promise<{ message: TeamMessage; created: boolean }> {
   await requireSeat(db, access, threadId)
   if (typeof input.idempotencyKey !== 'string' || !input.idempotencyKey.trim()) fail(400, 'MISSING_IDEMPOTENCY_KEY', 'An idempotency key is required', 'idempotencyKey')
@@ -338,11 +339,17 @@ export async function sendTeamMessage(
   if (input.body !== undefined && typeof input.body !== 'string') fail(422, 'INVALID_MESSAGE', 'body must be text', 'body')
   const body = (input.body ?? '').trim()
   if (body.length > MAX_BODY) fail(422, 'MESSAGE_TOO_LONG', `A message can be at most ${MAX_BODY} characters`, 'body')
-  if (!body && !input.photos.length) fail(422, 'EMPTY_MESSAGE', 'Write a message or add a photo', 'body')
-  if (input.photos.length > MAX_MESSAGE_PHOTOS) fail(422, 'INVALID_PHOTO', `A message can carry at most ${MAX_MESSAGE_PHOTOS} photos`, 'photos')
+  const photoInput = input.photos
+  const suppliedPhotoCount = Array.isArray(photoInput) ? photoInput.length : photoInput.sourceIds.length
+  if (!body && !suppliedPhotoCount) fail(422, 'EMPTY_MESSAGE', 'Write a message or add a photo', 'body')
+  if (suppliedPhotoCount > MAX_MESSAGE_PHOTOS) fail(422, 'INVALID_PHOTO', `A message can carry at most ${MAX_MESSAGE_PHOTOS} photos`, 'photos')
   const requestHash = await creationRequestHash({
     body,
-    photos: await Promise.all(input.photos.map(async photo => [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join(''))),
+    // Keep the native byte-array identity; host file IDs are a different source,
+    // whose bytes are needed only when a message has not already been saved.
+    photos: Array.isArray(photoInput)
+      ? await Promise.all(photoInput.map(async photo => [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('')))
+      : { sourceIds: photoInput.sourceIds },
   })
   const findByKey = () => queryFirst<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string; request_hash: string }>(db,
     'SELECT id, thread_id, sender_user_id, body, created_at, request_hash FROM team_messages WHERE organization_id = ? AND thread_id = ? AND idempotency_key = ?',
@@ -356,7 +363,9 @@ export async function sendTeamMessage(
     const now = new Date().toISOString()
     let assetIds: string[]
     try {
-      assetIds = await uploadMessagePhotos(db, env, access.organizationId, input.photos, { source: 'uploaded', userId: access.userId })
+      const photos = Array.isArray(photoInput) ? photoInput : await photoInput.resolve()
+      if (photos.length !== suppliedPhotoCount) throw new Error('Resolved team message photos do not match their declared sources')
+      assetIds = await uploadMessagePhotos(db, env, access.organizationId, photos, { source: 'uploaded', userId: access.userId })
     } catch (error) {
       if (error instanceof MessagePhotoRejection) fail(422, 'INVALID_PHOTO', error.message, 'photos')
       throw error
@@ -410,6 +419,36 @@ export async function sendTeamMessage(
   await publishThreadChanged(env, access.organizationId, threadId, { message_id: row.id })
   const [message] = await readMessages(db, access.organizationId, [row])
   return { message: message!, created }
+}
+
+/**
+ * Report a message in one of the caller's conversations (App Store guideline
+ * 1.2). KrabiClaw's operators are emailed before the caller hears it worked;
+ * the same key finds the same report.
+ */
+export async function reportTeamMessage(env: ContentReportEnv, db: DbClient, access: TeamAccess, threadId: string, messageId: string, input: { reason: unknown; idempotencyKey: unknown }): Promise<ContentReport> {
+  await requireSeat(db, access, threadId)
+  const reason = reportReason(input.reason)
+  if (typeof input.idempotencyKey !== 'string' || !input.idempotencyKey.trim()) fail(400, 'MISSING_IDEMPOTENCY_KEY', 'Idempotency key is required', 'idempotencyKey')
+  const message = await queryFirst<{ sender_user_id: string | null; body: string }>(db,
+    'SELECT sender_user_id, body FROM team_messages WHERE organization_id = ? AND thread_id = ? AND id = ?', [access.organizationId, threadId, messageId])
+  if (!message) fail(404, 'TEAM_MESSAGE_NOT_FOUND', 'That message is not in this conversation', 'messageId')
+  if (message.sender_user_id === access.userId) fail(422, 'OWN_MESSAGE', 'You cannot report your own message', 'messageId')
+  const id = contentReportId(access.userId, input.idempotencyKey)
+  await executeBatch(db, [contentReportInsert({
+    id, organizationId: access.organizationId, reporterUserId: access.userId, subject: 'team_message', requestId: null,
+    teamMessageId: messageId, authorUserId: message.sender_user_id, reason, excerpt: message.body || 'Photos only', blocked: false,
+  })], { operation: 'Report a team message' })
+  await assertSameReport(db, id, { subject: 'team_message', requestId: null, teamMessageId: messageId, reason, blocked: false })
+  return await announceContentReport(env, db, id)
+}
+
+/** Staff removal of a reported message: its photo placements, then the message. */
+export function teamMessageRemovalQueries(organizationId: string, messageId: string): BatchQuery[] {
+  return [
+    { query: `DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'team_message' AND owner_id = ?`, params: [organizationId, messageId] },
+    { query: 'DELETE FROM team_messages WHERE organization_id = ? AND id = ?', params: [organizationId, messageId] },
+  ]
 }
 
 /** The caller has read the conversation up to now. */

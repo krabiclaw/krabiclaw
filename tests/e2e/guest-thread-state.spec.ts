@@ -508,12 +508,15 @@ for (const viewport of [
     await openMessages('?archived=')
     await expect(rowFor(guestName)).toBeVisible()
 
-    // A conversation Past because its booking ended offers no way back.
+    // A conversation Past because its booking ended offers no way back; its
+    // guest can still be reported or blocked.
     const pastThreads = (await (await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { mailbox: 'past' } })).json() as { threads: GuestThreadListItemViewModel[] }).threads
     const ended = pastThreads.find(thread => !thread.manuallyArchived)
     expect(ended, 'Pottery House fixtures include a booking that has ended').toBeDefined()
     await expect(page.locator(`[data-thread-row="${ended!.id}"]`)).toBeVisible()
-    await expect(page.locator(`[data-thread-row="${ended!.id}"]`).getByRole('button', { name: /^Conversation actions for / })).toHaveCount(0)
+    await page.locator(`[data-thread-row="${ended!.id}"]`).getByRole('button', { name: /^Conversation actions for / }).click()
+    await expect(page.getByRole('menuitem')).toHaveText(['Report', 'Block guest'])
+    await page.keyboard.press('Escape')
 
     // On desktop the conversation is open beside the list, so moving it back
     // follows it into Current. Below that width nothing opens on its own, and

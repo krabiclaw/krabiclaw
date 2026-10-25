@@ -30,6 +30,7 @@ export type VerticalCopy = {
   reservationExploreLabel: string
   reservationExploreRoute: string
   experiencesPageTitle: string
+  staysPageTitle: string
   experiencesPageSubtitle: string
   locationGroupLine: (_count: number) => string
   bookingNotesPlaceholder: string
@@ -130,6 +131,7 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       reservationExploreLabel: "View Menu",
       reservationExploreRoute: "/menu",
       experiencesPageTitle: "Experiences",
+      staysPageTitle: "Places to stay",
       experiencesPageSubtitle:
         "Classes, special dinners, and bookable nights beyond the usual table reservation.",
       locationGroupLine: (_count: number) => {
@@ -233,6 +235,7 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       reservationExploreLabel: "View Experiences",
       reservationExploreRoute: "/experiences",
       experiencesPageTitle: "Experiences",
+      staysPageTitle: "Places to stay",
       experiencesPageSubtitle:
         "Classes, workshops, and special sessions you can book right now.",
       locationGroupLine: (_count: number) => {
@@ -338,6 +341,7 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       reservationExploreLabel: "ดูเมนู",
       reservationExploreRoute: "/menu",
       experiencesPageTitle: "ประสบการณ์",
+      staysPageTitle: "ที่พัก",
       experiencesPageSubtitle:
         "คลาส อาหารค่ำพิเศษ และคืนพิเศษที่จองได้ นอกเหนือจากการจองโต๊ะปกติ",
       locationGroupLine: (_count: number) => {
@@ -441,6 +445,7 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       reservationExploreLabel: "ดูประสบการณ์",
       reservationExploreRoute: "/experiences",
       experiencesPageTitle: "ประสบการณ์",
+      staysPageTitle: "ที่พัก",
       experiencesPageSubtitle:
         "คลาส เวิร์กช็อป และเซสชันพิเศษที่จองได้ตอนนี้",
       locationGroupLine: (_count: number) => {
@@ -548,6 +553,7 @@ registry.en.service = {
   reservationExploreLabel: "View Practice Areas",
   reservationExploreRoute: "/services",
   experiencesPageTitle: "Practice Areas",
+  staysPageTitle: "Places to stay",
   experiencesPageSubtitle:
     "Legal services and practice areas you can explore before getting in touch.",
   locationGroupLine: (_count: number) => "Our offices",
@@ -627,6 +633,7 @@ registry.th.service = {
   reservationExploreLabel: "ดูบริการ",
   reservationExploreRoute: "/services",
   experiencesPageTitle: "บริการ",
+  staysPageTitle: "ที่พัก",
   experiencesPageSubtitle: "บริการและความเชี่ยวชาญที่คุณดูได้ก่อนติดต่อเรา",
   locationGroupLine: (_count: number) => `${_count} จุดให้บริการ ทีมเดียวกัน`,
   bookingNotesPlaceholder: "บอกเราว่าคุณต้องการความช่วยเหลือแบบใด ช่วงเวลาที่สะดวกให้ติดต่อ หรือความต้องการด้านการเข้าถึง",
@@ -688,6 +695,7 @@ registry.ja.restaurant = {
   reservationExploreLabel: "メニューを見る",
   reservationExploreRoute: "/menu",
   experiencesPageTitle: "体験",
+  staysPageTitle: "宿泊施設",
   experiencesPageSubtitle: "通常のお席のご予約に加え、料理教室や特別なディナーなどをお楽しみいただけます。",
   locationGroupLine: (_count: number) => `${_count}店舗で、料理への同じ想いを。`,
   bookingNotesPlaceholder: "食事制限、バリアフリー対応、ご希望のお席、お祝いなどについてお知らせください。",
@@ -818,6 +826,7 @@ registry.ja.service = {
   reservationExploreLabel: "サービスを見る",
   reservationExploreRoute: "/services",
   experiencesPageTitle: "サービス",
+  staysPageTitle: "宿泊施設",
   experiencesPageSubtitle: "お問い合わせの前に、専門サービスや対応分野をご覧ください。",
   locationGroupLine: (_count: number) => `${_count}の拠点で、ひとつのチームが対応します。`,
   bookingNotesPlaceholder: "ご相談内容、ご希望の連絡時間、バリアフリー対応などについてお知らせください。",
@@ -873,6 +882,7 @@ registry.vi.restaurant = {
   reservationExploreLabel: "Xem thực đơn",
   reservationExploreRoute: "/menu",
   experiencesPageTitle: "Trải nghiệm",
+  staysPageTitle: "Chỗ nghỉ",
   experiencesPageSubtitle: "Ngoài đặt bàn thông thường, bạn có thể tham gia lớp nấu ăn, bữa tối đặc biệt và nhiều trải nghiệm khác.",
   locationGroupLine: (_count: number) => `${_count} chi nhánh, cùng một tâm huyết với ẩm thực.`,
   bookingNotesPlaceholder: "Cho chúng tôi biết về chế độ ăn kiêng, nhu cầu tiếp cận, chỗ ngồi mong muốn hoặc dịp kỷ niệm.",
@@ -1006,6 +1016,7 @@ registry.vi.service = {
   reservationExploreLabel: "Xem dịch vụ",
   reservationExploreRoute: "/services",
   experiencesPageTitle: "Dịch vụ",
+  staysPageTitle: "Chỗ nghỉ",
   experiencesPageSubtitle: "Xem các dịch vụ chuyên môn và lĩnh vực chúng tôi hỗ trợ trước khi liên hệ.",
   locationGroupLine: (_count: number) => `${_count} địa điểm, một đội ngũ hỗ trợ.`,
   bookingNotesPlaceholder: "Cho chúng tôi biết nội dung cần tư vấn, thời gian liên hệ phù hợp hoặc nhu cầu tiếp cận.",

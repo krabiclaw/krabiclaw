@@ -78,6 +78,9 @@ definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 
 const dashboard = useDashboardOrganization()
 const session = authClient.useSession()
+// The ClientOnly dashboard may mount this page before Better Auth's shared session has resolved.
+if (session.value.isPending) await session.value.refetch()
+if (session.value.error) throw createError({ statusCode: session.value.error.status || 503, statusMessage: getErrorMessage(session.value.error, 'Your session could not be loaded') })
 if (!dashboard.organization.value || !canOpenPlatformAccounts(dashboard.organization.value, (session.value.data?.user as { role?: string | null } | undefined)?.role)) {
   throw createError({ statusCode: 404, statusMessage: 'Page not found' })
 }

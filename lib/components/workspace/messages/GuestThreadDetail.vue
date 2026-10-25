@@ -56,8 +56,17 @@
                 >
                   <template v-if="item.startsRun" #header>
                     <span class="font-medium text-highlighted">{{ item.who }}</span>
-                    <span class="ms-1.5">{{ item.providerTimestamp ? 'Recorded ' : '' }}{{ formatClockTime(item.occurredAt) }}</span>
-                  <span v-if="item.providerTimestamp" class="block break-all text-xs text-muted">Provider timestamp: {{ item.providerTimestamp }}</span>
+                    <UPopover v-if="item.providerTimestamp">
+                      <button type="button" class="ms-1.5 rounded focus-visible:outline-2" aria-label="Message time details">{{ messageTime(item) }}</button>
+                      <template #content>
+                        <div class="max-w-xs space-y-2 p-4 text-sm">
+                          <p>{{ providerDate(item.providerTimestamp) }} · {{ messageTime(item) }}</p>
+                          <p v-if="!hasProviderTimezone(item.providerTimestamp)" class="text-muted">Airbnb supplied this time without a timezone.</p>
+                          <p class="text-muted">Recorded in KrabiClaw {{ new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.occurredAt)) }}</p>
+                        </div>
+                      </template>
+                    </UPopover>
+                    <span v-else class="ms-1.5">{{ messageTime(item) }}</span>
                   </template>
                   <template #body>
                     <!-- Photos lead, the way they do on Airbnb: each one whole,
@@ -159,125 +168,8 @@
           />
         </TransitionGroup>
 
-        <!-- Airbnb's composer, measured at 1440: a ~112px box, 20px insets,
-             16px text, the photo glyph (24px) flush with the text's left
-             edge and a 32px send circle at the right — pale until there is
-             something to send. A pasted photo is added the same way. The
-             form's own spacing goes in `class`: `ui.root` is forwarded to the
-             textarea inside it as well. It does not take focus on mount: on
-             desktop the first conversation opens beside the list, and Nuxt
-             UI's default autofocus took the keyboard away from the list. -->
-        <UChatPrompt
-          v-model="draft"
-          :autofocus="false"
-          placeholder="Write a message…"
-          color="neutral"
-          :disabled="!canReply"
-          :rows="2"
-          :maxrows="8"
-          class="gap-2 rounded-2xl px-5 pb-2.5 pt-4"
-          :ui="{ header: 'flex-wrap gap-2 pb-1', base: 'px-0 py-0 text-base/6 sm:text-base/6', footer: 'items-center' }"
-          @submit="sendReply"
-          @paste="addPastedPhotos"
-        >
-          <template v-if="chosen.length" #header>
-            <TransitionGroup
-              enter-from-class="opacity-0 scale-75"
-              enter-active-class="transition duration-200 ease-out motion-reduce:transition-none"
-              leave-to-class="opacity-0 scale-75"
-              leave-active-class="transition duration-150 motion-reduce:transition-none"
-            >
-              <div v-for="(photo, at) in chosen" :key="photo.url" class="relative">
-                <img :src="photo.url" :alt="photo.file.name" class="size-16 rounded-xl object-cover">
-                <UButton
-                  icon="i-lucide-x"
-                  color="neutral"
-                  variant="solid"
-                  size="xs"
-                  square
-                  class="absolute -right-1.5 -top-1.5 rounded-full ring-2 ring-default"
-                  :aria-label="`Remove ${photo.file.name}`"
-                  @click="removePhoto(at)"
-                />
-              </div>
-            </TransitionGroup>
-          </template>
-
-          <template #footer>
-            <UButton
-              icon="i-lucide-image"
-              color="neutral"
-              variant="ghost"
-              square
-              class="-ms-1.5 size-9 justify-center rounded-full p-0"
-              :ui="{ leadingIcon: 'size-6' }"
-              aria-label="Add photos"
-              :title="thread.replyChannel === 'airbnb' ? 'Photo replies via Airbnb are unavailable here' : 'Add photos'"
-              :disabled="!canReply || thread.replyChannel === 'airbnb' || chosen.length >= MAX_PHOTOS"
-              @click="picker?.click()"
-            />
-            <input ref="picker" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" multiple class="hidden" @change="addPickedPhotos">
-            <UChatPromptSubmit
-              status="ready"
-              color="neutral"
-              variant="solid"
-              square
-              class="size-8 justify-center rounded-full p-0 transition duration-200 active:scale-90 disabled:bg-elevated disabled:text-dimmed disabled:opacity-100"
-              :ui="{ leadingIcon: 'size-4' }"
-              aria-label="Send reply"
-              title="Send reply"
-              :disabled="!canReply || sending || (!draft.trim() && !chosen.length)"
-            />
-          </template>
-        </UChatPrompt>
-
-        <!-- A photo opens whole over the conversation, and steps through the
-             others it was sent with. -->
-        <UModal
-          :open="viewer !== null"
-          :title="viewer ? `Photo ${viewer.at + 1} of ${viewer.photos.length}` : ''"
-          :ui="{ content: 'max-w-4xl bg-transparent shadow-none ring-0', header: 'sr-only', body: 'p-0 sm:p-0' }"
-          @update:open="open => { if (!open) viewer = null }"
-        >
-          <template #body>
-            <div v-if="viewer" class="relative flex items-center justify-center">
-              <Transition
-                mode="out-in"
-                enter-from-class="opacity-0 scale-[0.98]"
-                enter-active-class="transition duration-200 ease-out motion-reduce:transition-none"
-                leave-to-class="opacity-0"
-                leave-active-class="transition duration-100"
-              >
-                <img
-                  :key="viewer.photos[viewer.at]!.url"
-                  :src="viewer.photos[viewer.at]!.url"
-                  :alt="viewer.photos[viewer.at]!.alt ?? ''"
-                  class="max-h-[85vh] w-auto rounded-2xl object-contain"
-                >
-              </Transition>
-              <template v-if="viewer.photos.length > 1">
-                <UButton
-                  icon="i-lucide-chevron-left"
-                  color="neutral"
-                  variant="solid"
-                  square
-                  class="absolute left-3 rounded-full"
-                  aria-label="Previous photo"
-                  @click="viewer.at = (viewer.at + viewer.photos.length - 1) % viewer.photos.length"
-                />
-                <UButton
-                  icon="i-lucide-chevron-right"
-                  color="neutral"
-                  variant="solid"
-                  square
-                  class="absolute right-3 rounded-full"
-                  aria-label="Next photo"
-                  @click="viewer.at = (viewer.at + 1) % viewer.photos.length"
-                />
-              </template>
-            </div>
-          </template>
-        </UModal>
+        <MessageComposer v-model="draft" v-model:photos="chosen" :disabled="!canReply" :sending="sending" :channel="!personalScope && thread.replyChannel === 'airbnb' ? 'airbnb' : 'email'" send-label="Send reply" @send="sendReply" />
+        <MessagePhotoViewer v-model="viewer" />
 
         <p v-if="!canReply" class="mt-2 text-xs text-warning">This guest has no email on file. Once they accept an invite to this conversation, your replies reach their KrabiClaw inbox.</p>
       </div>
@@ -287,6 +179,7 @@
 
 <script setup lang="ts">
 import { formatPhone } from '~/utils/phone'
+import { formatCalendarDate, formatTime, isValidInstant } from '~/utils/timezone'
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import type { AvatarProps } from '@nuxt/ui'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
@@ -294,6 +187,8 @@ import { isThreadDetailResponse, threadRecordTitle, type ThreadDetail } from '~/
 import type { GuestThreadDeliveryFailureViewModel, GuestThreadEntryViewModel } from '~/server/domain/guest-threads/types'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
+import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
+import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 /*
@@ -324,7 +219,7 @@ const readError = ref<string | null>(null)
   has it. The attempt keeps its idempotency key until it succeeds, so sending
   the same words again after a failure is the same request, not a second one.
 */
-const attempt = ref<{ key: string; body: string; photos: ChosenPhoto[]; sentAfter: Set<string> } | null>(null)
+const attempt = ref<{ key: string; body: string; photos: MessagePhotoDraft[]; sentAfter: Set<string> } | null>(null)
 const sending = ref(false)
 // The server's entry for a reply that was on screen as a pending one takes the
 // pending one's key, so it settles in place instead of animating in again.
@@ -334,26 +229,25 @@ async function sendReply() {
   const body = draft.value.trim()
   const photos = chosen.value
   if (!thread.value || !canReply.value || (!body && !photos.length) || sending.value) return
-  if (attempt.value?.body !== body || !samePhotos(attempt.value.photos, photos)) {
+  if (attempt.value?.body !== body || !sameMessagePhotos(attempt.value.photos, photos)) {
     attempt.value = { key: crypto.randomUUID(), body, photos, sentAfter: new Set(thread.value.entries.map(entry => entry.id)) }
   }
   const current = attempt.value
   sending.value = true
   actionError.value = null
-  draft.value = ''
-  chosen.value = []
   void scrollToLatest()
   try {
     const res = await (props.personalScope?applicationFetch:dashboardApi)<{ thread: ThreadDetail }>(`${threadPath.value}/${props.personalScope?'reply':'operations/reply'}`, {
       method: 'POST',
-      body: photos.length ? replyForm(body, photos, current.key) : { body, idempotencyKey: current.key },
+      body: photos.length ? messageReplyForm(body, photos, current.key) : { body, idempotencyKey: current.key },
       validate: isThreadDetailResponse,
     })
     const reply = res.thread.entries.findLast(entry => entry.kind === 'message' && entry.actorKind === (props.personalScope?'guest':'member') && !current.sentAfter.has(entry.id))
     if (reply) settledKeys.value = { ...settledKeys.value, [reply.id]: `pending:${current.key}` }
     data.value = res
     attempt.value = null
-    for (const photo of photos) URL.revokeObjectURL(photo.url)
+    draft.value = ''
+    chosen.value = []
   } catch (err) {
     actionError.value = getErrorMessage(err, 'Failed to send reply')
     // The words and photos come back to the composer rather than vanishing with the bubble.
@@ -364,64 +258,8 @@ async function sendReply() {
   }
 }
 
-/*
-  Photos chosen for the next reply, each with a local preview URL that the
-  composer and the reply on its way both show until the server has them.
-*/
-type ChosenPhoto = { file: File; url: string }
-const MAX_PHOTOS = 10
-const ACCEPTED_PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif'])
-const chosen = ref<ChosenPhoto[]>([])
-const picker = useTemplateRef<HTMLInputElement>('picker')
-const viewer = ref<{ photos: MessagePhotoView[]; at: number } | null>(null)
-
-function addPhotos(files: File[]) {
-  if (thread.value?.replyChannel === 'airbnb') {
-    actionError.value = 'Photo replies via Airbnb are unavailable here.'
-    return
-  }
-  const accepted = files.filter(file => ACCEPTED_PHOTO_TYPES.has(file.type))
-  const refused = files.length - accepted.length
-  const room = MAX_PHOTOS - chosen.value.length
-  chosen.value = [...chosen.value, ...accepted.slice(0, room).map(file => ({ file, url: URL.createObjectURL(file) }))]
-  actionError.value = refused
-    ? `${refused === 1 ? 'That file is' : `${refused} files are`} not a JPEG, PNG, WebP, GIF or AVIF photo.`
-    : accepted.length > room ? `A message can carry at most ${MAX_PHOTOS} photos.` : null
-}
-
-function addPickedPhotos(event: Event) {
-  const input = event.target as HTMLInputElement
-  addPhotos([...(input.files ?? [])])
-  input.value = ''
-}
-
-function addPastedPhotos(event: ClipboardEvent) {
-  const files = [...(event.clipboardData?.files ?? [])].filter(file => file.type.startsWith('image/'))
-  if (!files.length) return
-  event.preventDefault()
-  addPhotos(files)
-}
-
-function removePhoto(at: number) {
-  const [removed] = chosen.value.splice(at, 1)
-  if (removed) URL.revokeObjectURL(removed.url)
-}
-
-function samePhotos(a: ChosenPhoto[], b: ChosenPhoto[]) {
-  return a.length === b.length && a.every((photo, at) => photo.file === b[at]!.file)
-}
-
-function replyForm(body: string, photos: ChosenPhoto[], idempotencyKey: string) {
-  const form = new FormData()
-  form.set('body', body)
-  form.set('idempotencyKey', idempotencyKey)
-  for (const photo of photos) form.append('photos', photo.file, photo.file.name)
-  return form
-}
-
-onBeforeUnmount(() => {
-  for (const photo of chosen.value) URL.revokeObjectURL(photo.url)
-})
+const chosen = useMessagePhotoDraft()
+const viewer = ref<MessagePhotoViewerState | null>(null)
 
 function refreshThreadState() {
   if (!props.personalScope) realtime.connect()
@@ -556,6 +394,10 @@ type StreamItem =
   | { type: 'event'; key: string; icon: string; label: string }
   | MessageItem
 
+// A provider civil clock is valid data too; the instant predicate only tells us
+// whether a timezone was supplied, not whether the message can be displayed.
+const hasProviderTimezone: (value: string) => boolean = isValidInstant
+
 /**
  * The stream in the shape it reads in: a heading per day, messages grouped into
  * runs from one speaker under one name line, the reply on its way at the end,
@@ -568,10 +410,12 @@ const stream = computed<StreamItem[]>(() => {
   let previousDay: string | null = null
 
   const push = (occurredAt: string, item: StreamItem) => {
-    const occurred = new Date(occurredAt)
-    const day = `${occurred.getFullYear()}-${occurred.getMonth()}-${occurred.getDate()}`
+    const providerTime = item.type === 'message' ? item.providerTimestamp : null
+    const civil = providerTime !== null && !hasProviderTimezone(providerTime)
+    const occurred = new Date(providerTime && !civil ? providerTime : occurredAt)
+    const day = civil ? providerTime.slice(0, 10) : `${occurred.getFullYear()}-${String(occurred.getMonth() + 1).padStart(2, '0')}-${String(occurred.getDate()).padStart(2, '0')}`
     if (day !== previousDay) {
-      items.push({ type: 'day', key: `day:${day}`, label: dayLabel(occurred) })
+      items.push({ type: 'day', key: `day:${item.key}`, label: civil ? formatCalendarDate(day, locale.value) : dayLabel(occurred) })
       previousDay = day
     }
     items.push(item)
@@ -608,7 +452,7 @@ const stream = computed<StreamItem[]>(() => {
         photos: mirrored ? [] : entry.attachments,
         attachmentLinks: mirrored ? entry.attachments.map(attachment => attachment.url) : [],
         providerTimestamp: entry.providerTimestamp,
-        ...(mirrored ? { run: `provider:${entry.id}` } : {}),
+        run: `${entry.actorKind}:${entry.actorUserId ?? entry.actorLabel ?? current.participantLabel}`,
         unshown: Array.isArray(unshown) ? unshown.filter((name): name is string => typeof name === 'string') : [],
         ...(member ? { receipt: receiptFor(entry, current.participantLabel) } : {}),
       })
@@ -664,6 +508,19 @@ function receiptFor(entry: GuestThreadEntryViewModel, participantLabel: string):
 
 function formatClockTime(iso: string) {
   return new Intl.DateTimeFormat(locale.value, { hour: 'numeric', minute: '2-digit' }).format(new Date(iso))
+}
+
+function messageTime(item: MessageItem) {
+  if (!item.providerTimestamp) return formatClockTime(item.occurredAt)
+  return hasProviderTimezone(item.providerTimestamp)
+    ? formatClockTime(item.providerTimestamp)
+    : formatTime(item.providerTimestamp.slice(11, 16), locale.value)
+}
+
+function providerDate(timestamp: string) {
+  return hasProviderTimezone(timestamp)
+    ? new Intl.DateTimeFormat(locale.value, { dateStyle: 'medium' }).format(new Date(timestamp))
+    : formatCalendarDate(timestamp.slice(0, 10), locale.value)
 }
 
 function dayLabel(date: Date) {

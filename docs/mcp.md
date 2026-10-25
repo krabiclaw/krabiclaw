@@ -82,6 +82,23 @@ See [Google Calendar](integrations/google-calendar.md) for projection and cleanu
 
 - MCP app URL: `https://krabiclaw.com/api/mcp`
 
+## Internal team conversations
+
+`list_team_conversation_recipients` discovers the selected organization's real
+members and identifies the caller. `start_team_conversation` creates or reuses
+the conversation with exactly the selected member user IDs and optional explicit
+stay/location context. This neither invites someone nor creates a Better Auth Team.
+`list_team_conversations` reads only conversations the caller participates in;
+`get_team_conversation` pages their messages newest first with the native
+`before`/`before_id` pair. Reading does not mark a conversation read.
+
+`send_team_message` sends the requested text and/or supplied photo as the actual
+caller under a stable `idempotency_key`. Read its message and push receipts back;
+a saved message does not prove device delivery. `mark_team_conversation_read`
+changes only the caller's read position. These tools use the same team messaging
+operations, Better Auth memberships and participant seats as CMS and iOS. They
+never reply to a guest or turn team conversations into permission groups.
+
 ## Tool catalog
 
 KrabiClaw exposes one canonical tool contract. Every tool name, input schema,

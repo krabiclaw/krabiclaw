@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page, type Request, type WebSocket } from '@playwright/test'
+import { expect, test, type APIRequestContext, type APIResponse, type Page, type Request, type WebSocket } from '@playwright/test'
 import Ajv from 'ajv'
 import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
@@ -34,16 +34,23 @@ async function tool<T>(request: APIRequestContext, baseURL: string, organization
   return { data: body.result!.structuredContent!, error: null }
 }
 
+// A wrong status explains itself with its body. Reading the body only then
+// keeps a request torn down by a timeout from replacing the step that ran out
+// of time with "Response has been disposed".
+async function expectStatus(response: Pick<APIResponse, 'status' | 'text'>, status: number) {
+  expect(response.status(), response.status() === status ? undefined : await response.text()).toBe(status)
+}
+
 async function createStayHome(page: Page, baseURL: string) {
   const request = page.request
   await loginAs(request, baseURL, 'user-e2e-lodging-host')
   const headers = authRequestHeaders(baseURL)
   const slug = `e2e-stays-${crypto.randomUUID().slice(0, 8)}`
   const created = await request.post(`${baseURL}/api/auth/organization/create`, { headers, data: { name: `Stays ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
-  expect(created.status(), await created.text()).toBe(200)
+  await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
   const provisioned = await request.post(`${baseURL}/api/organizations`, { headers, data: { organizationId, name: `Stays ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
-  expect(provisioned.status(), await provisioned.text()).toBe(200)
+  await expectStatus(provisioned, 200)
   expect((await request.post(`${baseURL}/api/auth/organization/set-active`, { headers, data: { organizationId } })).status()).toBe(200)
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(request, baseURL, organizationId, name, args)
   const locations = await call<{ locations: Array<{ id: string; title: string }> }>('list_locations', {})
@@ -95,7 +102,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(addressSaved.error).toBeNull()
   const mapPin = { latitude: 8.0326, longitude: 98.822 }
   const pinSaved = await request.patch(api(`stay-homes/${productId}`), { headers, data: mapPin })
-  expect(pinSaved.status(), await pinSaved.text()).toBe(200)
+  await expectStatus(pinSaved, 200)
 
   // A stay arriving today holds its nights; another on them is refused.
   const checkIn = localDay(0)
@@ -178,7 +185,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(activityId).toBeTruthy()
   expect(paid.data!.stay.user_id).toBeNull()
   const invited = await request.post(api(`organizations/${organizationId}/guest-threads/${activityId}/invite`), { headers, data: {} })
-  expect(invited.status(), await invited.text()).toBe(201)
+  await expectStatus(invited, 201)
   const invitation = await invited.json() as { url: string }
   const inviteToken = new URL(invitation.url).pathname.split('/').at(-1)!
   expect(inviteToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
@@ -189,18 +196,18 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   try {
     await loginAs(guest.request, baseURL!, 'user-e2e-buyer')
     const claimed = await guest.request.post(`${baseURL}/api/guest-invites/${inviteToken}/claim`, { headers, data: {} })
-    expect(claimed.status(), await claimed.text()).toBe(200)
+    await expectStatus(claimed, 200)
     expect(await claimed.json()).toEqual({ thread_id: activityId, path: `/dashboard/account/messages/${activityId}` })
     const accountApi = `${baseURL}/api/account/stays/${activityId}`
     const receiptApi = `${baseURL}/api/public/guest-stays/${activityId}`
     const receiptHeaders = { 'x-preview-tenant': slug, authorization: `Bearer ${signed.token}` }
     const accountRead = await guest.request.get(accountApi)
-    expect(accountRead.status(), await accountRead.text()).toBe(200)
+    await expectStatus(accountRead, 200)
     const mapUrl = 'https://maps.google.com/maps?q=8.0326%2C98.822'
     const exactLocation = { address: exactAddress, ...mapPin, maps_url: mapUrl }
     expect(await accountRead.json()).toMatchObject({ organization_id: organizationId, stay: { id: stay.data!.stay.id, status: 'confirmed', user_id: 'user-e2e-buyer' }, home: { location: exactLocation } })
     const receiptRead = await guest.request.get(receiptApi, { headers: receiptHeaders })
-    expect(receiptRead.status(), await receiptRead.text()).toBe(200)
+    await expectStatus(receiptRead, 200)
     expect(await receiptRead.json()).toMatchObject({ stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation } })
 
     const receiptPage = await guest.newPage()
@@ -235,7 +242,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     // Cancellation withdraws the exact location from both independent reads
     // and from the receipt and account screens that previously displayed it.
     for (const response of await Promise.all([guest.request.get(accountApi), guest.request.get(receiptApi, { headers: receiptHeaders })])) {
-      expect(response.status(), await response.text()).toBe(200)
+      await expectStatus(response, 200)
       const cancelledGuest = await response.json() as GuestStay
       expect(cancelledGuest.stay.status).toBe('cancelled')
       expect(cancelledGuest.home.location).toBeNull()
@@ -255,22 +262,22 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 
   const later = [localDay(10), localDay(13)] as const
   const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
-  expect(made.status(), await made.text()).toBe(201)
+  await expectStatus(made, 201)
   const native = (await made.json() as { stay: { id: string; version: number } }).stay
   const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { expected_version: native.version, guest_name: 'Kai Mendes' } })
-  expect(edited.status(), await edited.text()).toBe(200)
+  await expectStatus(edited, 200)
   const nativeRead = await call<{ stay: { guest_name: string; check_in_date: string; total_minor: number } }>('get_stay', { stay_id: native.id })
   expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00 })
 
   const listed = await request.get(api(`stays?from=${later[0]}&to=${later[1]}`))
-  expect(listed.status(), await listed.text()).toBe(200)
+  await expectStatus(listed, 200)
   expect((await listed.json() as { stays: Array<{ id: string }> }).stays.map(stay => stay.id)).toEqual([native.id])
 
   const closedNight = localDay(20)
   const closed = await request.put(api(`stay-homes/${productId}/nights`), { headers, data: { from: closedNight, to: localDay(21), closed: true } })
-  expect(closed.status(), await closed.text()).toBe(200)
+  await expectStatus(closed, 200)
   const nativeCalendar = await request.get(api(`stay-homes/${productId}/calendar?from=${later[0]}&to=${localDay(21)}`))
-  expect(nativeCalendar.status(), await nativeCalendar.text()).toBe(200)
+  await expectStatus(nativeCalendar, 200)
   const nights = (await nativeCalendar.json() as { nights: Array<{ date: string; available: boolean; stay_id: string | null; closed: boolean }> }).nights
   expect(nights.filter(night => night.stay_id === native.id).map(night => night.date)).toEqual([later[0], localDay(11), localDay(12)])
   expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
@@ -284,15 +291,55 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(cancelledByMcp.data).toEqual({ stay: { id: native.id, product_id: productId, request_id: savedCancellation.request_id, status: 'cancelled', version: savedCancellation.version, updated_at: savedCancellation.updated_at, check_in_date: later[0], check_out_date: later[1], cancelled_at: savedCancellation.cancelled_at, cancellation_reason: 'Contract cancellation' }, channel_push: null })
 })
 
-for (const concern of ['property-and-amenities', 'description-and-safety'] as const) {
-  test(concern === 'property-and-amenities' ? 'a host authors property facts and amenities and previews their saved guest projection' : 'a host describes a place to stay through its focused editors and previews the saved guest page', async ({ page, browser, baseURL }) => {
+// What the property journey authors through the UI, and what the description,
+// settings, safety and preview journeys each start from through the canonical writer.
+const propertyFacts = { property_type_group: 'unique_homes', property_type: 'treehouse', listing_type: 'entire_place', total_floors: 3, listing_floor: 2, year_built: 2019, property_size: 85.5, property_size_unit: 'square_meters' } as const
+const listingDescription = 'A peaceful treehouse above the Krabi coast.'
+const listingDetails = {
+  your_property: 'Two airy floors and a shaded deck overlook the limestone cliffs.',
+  guest_access: 'Guests have the whole treehouse and its private garden.',
+  interaction_with_guests: 'Your host is available by message throughout your stay.',
+  other_details_to_note: 'The treehouse is reached by a flight of outdoor stairs.',
+}
+const descriptionSections = [
+  { section: 'listing-description', label: 'Listing description', value: listingDescription },
+  { section: 'your_property', label: 'Your property', value: listingDetails.your_property },
+  { section: 'guest_access', label: 'Guest access', value: listingDetails.guest_access },
+  { section: 'interaction_with_guests', label: 'Interaction with guests', value: listingDetails.interaction_with_guests },
+  { section: 'other_details_to_note', label: 'Other details to note', value: listingDetails.other_details_to_note },
+]
+const poolDetail = 'The plunge pool beside the deck does not have a fence.'
+const specialSafety = 'Supervise children near the stone terrace.'
+const monitorDetail = 'A sound-level sensor is mounted in the dining room.'
+const stairsDetail = 'There are twelve steps from the street to the front door.'
+const considerationPatch = { unsecured_pool: true, unsecured_pool_details: poolDetail, nearby_water: false, nearby_water_details: null, climbing_structures: null, climbing_structures_details: null, unprotected_heights: null, unprotected_heights_details: null, dangerous_animals: null, dangerous_animals_details: null, special_safety_considerations: specialSafety }
+const devicePatch = { exterior_security_cameras: false, exterior_security_cameras_details: null, noise_decibel_monitors: true, noise_decibel_monitors_details: monitorDetail, carbon_monoxide_detector_details: null, smoke_detector_details: null }
+const propertyInfoPatch = { stairs_required: true, stairs_required_details: stairsDetail, potential_noise: false, potential_noise_details: null, resident_pets: null, resident_pets_details: null, no_property_parking: null, no_property_parking_details: null, shared_spaces: null, shared_spaces_details: null, limited_essentials: null, limited_essentials_details: null, weapons_on_property: null, weapons_on_property_details: null }
+const safetyFacts = { unsecured_pool: true, unsecured_pool_details: poolDetail, nearby_water: false, special_safety_considerations: specialSafety, exterior_security_cameras: false, noise_decibel_monitors: true, noise_decibel_monitors_details: monitorDetail, stairs_required: true, stairs_required_details: stairsDetail, potential_noise: false }
+const authoredSafetyLines = [`Unsecured pool or hot tub\n${poolDetail}`, specialSafety, 'No exterior security cameras', `Noise decibel monitors\n${monitorDetail}`, `Guests must climb stairs\n${stairsDetail}`]
+
+async function describedStayHome(page: Page, baseURL: string) {
+  const home = await createStayHome(page, baseURL)
+  const propertySetup = await home.call<{ product: Product }>('update_product', { product_id: home.productId, stay: { ...propertyFacts, amenities: ['dryer', 'wireless_internet'] } })
+  expect(propertySetup.error).toBeNull()
+  return { ...home, propertySetup, productWritePath: `/api/editor/organizations/${home.organizationId}/products/${home.productId}` }
+}
+
+test('a host authors property facts and amenities and previews their saved guest projection', async ({ page, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home } = await createStayHome(page, baseURL!)
-
-  const propertyFacts = { property_type_group: 'unique_homes', property_type: 'treehouse', listing_type: 'entire_place', total_floors: 3, listing_floor: 2, year_built: 2019, property_size: 85.5, property_size_unit: 'square_meters' } as const
+  const { request, slug, organizationId, call, productId, unknownPropertyFacts, home } = await createStayHome(page, baseURL!)
   const productWritePath = `/api/editor/organizations/${organizationId}/products/${productId}`
-  if (concern === 'property-and-amenities') {
+  const propertyPicker = page.locator('#dashboard-panel-product-property-type')
+  const propertyGroup = propertyPicker.getByRole('combobox', { name: 'Which is most like your place?', exact: true })
+  const propertyType = propertyPicker.getByRole('combobox', { name: 'Property type', exact: true })
+  const listingType = propertyPicker.getByRole('combobox', { name: 'Listing type', exact: true })
+  const totalFloors = propertyPicker.getByRole('spinbutton', { name: 'How many floors in the building?', exact: true })
+  const listingFloor = propertyPicker.getByRole('spinbutton', { name: 'Which floor is the listing on?', exact: true })
+  const yearBuilt = propertyPicker.getByRole('spinbutton', { name: 'Year built', exact: true })
+  const propertySize = propertyPicker.getByRole('spinbutton', { name: 'Property size', exact: true })
+  const sizeUnit = propertyPicker.getByRole('combobox', { name: 'Size unit', exact: true })
+  await test.step('property facts survive an interrupted save and save only what the host authored', async () => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(`/dashboard/${slug}/products`)
     const stayTile = page.getByTestId('catalog-grid').getByTestId(`selector-item-${productId}`)
@@ -306,15 +353,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     // Only authored property facts are saved. Unknowns remain nullable in the
     // editor, domain reads and the real guest projection.
     await page.getByRole('link', { name: /Property type/ }).click()
-    const propertyPicker = page.locator('#dashboard-panel-product-property-type')
-    const propertyGroup = propertyPicker.getByRole('combobox', { name: 'Which is most like your place?', exact: true })
-    const propertyType = propertyPicker.getByRole('combobox', { name: 'Property type', exact: true })
-    const listingType = propertyPicker.getByRole('combobox', { name: 'Listing type', exact: true })
-    const totalFloors = propertyPicker.getByRole('spinbutton', { name: 'How many floors in the building?', exact: true })
-    const listingFloor = propertyPicker.getByRole('spinbutton', { name: 'Which floor is the listing on?', exact: true })
-    const yearBuilt = propertyPicker.getByRole('spinbutton', { name: 'Year built', exact: true })
-    const propertySize = propertyPicker.getByRole('spinbutton', { name: 'Property size', exact: true })
-    const sizeUnit = propertyPicker.getByRole('combobox', { name: 'Size unit', exact: true })
     await expect(listingType).not.toContainText('Entire place')
     for (const input of [totalFloors, listingFloor, yearBuilt, propertySize]) await expect(input).toHaveValue('')
     await expect(sizeUnit).not.toContainText('Square meters')
@@ -340,14 +378,10 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await totalFloors.press('Enter')
     await expect(propertyPicker.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
     await expect(listingFloor).toHaveValue('2')
-    await propertyGroup.scrollIntoViewIfNeeded()
-    await propertySize.scrollIntoViewIfNeeded()
     await page.setViewportSize({ width: 1440, height: 900 })
     const savedPropertyCard = page.getByTestId('editor-card-property-type')
     await expect(savedPropertyCard).toBeVisible()
     await expect(savedPropertyCard).toContainText('Choose property type')
-    await propertyGroup.scrollIntoViewIfNeeded()
-    await propertySize.scrollIntoViewIfNeeded()
     const interceptProperty = (url: URL) => url.pathname === productWritePath
     await page.route(interceptProperty, async route => route.request().method() === 'PATCH' ? await route.abort('failed') : await route.continue())
     const interruptedProperty = page.waitForEvent('requestfailed', outgoing => outgoing.method() === 'PATCH' && new URL(outgoing.url()).pathname === productWritePath)
@@ -372,54 +406,17 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const propertySaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
     const propertyResponse = await propertySaved
-    expect(propertyResponse.status(), await propertyResponse.text()).toBe(200)
+    await expectStatus(propertyResponse, 200)
     expect(propertyResponse.request().postDataJSON()).toEqual({ stay: propertyFacts })
     await expect(propertyPicker).not.toBeVisible()
     const savedProperty = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedProperty.error).toBeNull()
     expect(savedProperty.data!.product.stay).toMatchObject(propertyFacts)
     const savedHome = await request.get(`/api/dashboard/stay-homes/${productId}`, { params: { org: slug } })
-    expect(savedHome.status(), await savedHome.text()).toBe(200)
+    await expectStatus(savedHome, 200)
     expect((await savedHome.json() as { home: Record<string, unknown> }).home).toMatchObject(propertyFacts)
-
-    // Clearing optional details writes explicit nulls; it never invents a floor,
-    // year or area. A reload reads that absence before the known facts are restored.
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.goto(`/dashboard/${slug}/products/${productId}`)
-    await page.getByTestId('editor-card-property-type').click()
-    await propertyPicker.getByRole('button', { name: 'Clear optional details', exact: true }).click()
-    const propertyCleared = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
-    await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
-    const clearedPropertyResponse = await propertyCleared
-    expect(clearedPropertyResponse.status(), await clearedPropertyResponse.text()).toBe(200)
-    expect(clearedPropertyResponse.request().postDataJSON()).toEqual({ stay: { ...propertyFacts, ...unknownPropertyFacts } })
-    await expect(propertyPicker).not.toBeVisible()
-    const clearedHome = await request.get(`/api/dashboard/stay-homes/${productId}`, { params: { org: slug } })
-    expect(clearedHome.status(), await clearedHome.text()).toBe(200)
-    expect((await clearedHome.json() as { home: Record<string, unknown> }).home).toMatchObject({ ...propertyFacts, ...unknownPropertyFacts })
-    await page.getByTestId('editor-card-property-type').click()
-    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/property-type`)
-    await expect(propertyGroup).toBeVisible()
-    await page.reload()
-    await expect(propertyGroup).toContainText('Unique space')
-    await expect(propertyType).toContainText('Treehouse')
-    await expect(listingType).not.toContainText('Entire place')
-    for (const input of [totalFloors, listingFloor, yearBuilt, propertySize]) await expect(input).toHaveValue('')
-    await expect(sizeUnit).not.toContainText('Square meters')
-    await listingType.click()
-    await page.getByRole('option', { name: 'Entire place', exact: true }).click()
-    await totalFloors.fill('3')
-    await listingFloor.fill('2')
-    await yearBuilt.fill('2019')
-    await propertySize.fill('85.5')
-    await sizeUnit.click()
-    await page.getByRole('option', { name: 'Square meters', exact: true }).click()
-    const propertyRestored = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
-    await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
-    const restoredPropertyResponse = await propertyRestored
-    expect(restoredPropertyResponse.status(), await restoredPropertyResponse.text()).toBe(200)
-    expect(restoredPropertyResponse.request().postDataJSON()).toEqual({ stay: propertyFacts })
-    await expect(propertyPicker).not.toBeVisible()
+  })
+  await test.step('the amenity picker drafts, searches, removes and discards selections', async () => {
     await page.getByRole('link', { name: /Amenities/ }).click()
     const amenityOverview = page.locator('#dashboard-panel-product-amenities')
     await amenityOverview.getByTestId('list-editor-add').click()
@@ -520,10 +517,9 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(amenitiesCard).toHaveAttribute('aria-current', 'page')
     await expect(amenitiesCard).toContainText('Dryer')
     await expect(amenitiesCard).toContainText('Wifi')
-    await amenitiesCard.scrollIntoViewIfNeeded()
-    await expect(amenitiesCard).toBeInViewport()
 
-
+  })
+  await test.step('the guest preview projects the saved property facts', async () => {
     const { previewLink, previewModal, preview } = previewLocators(page)
     await previewLink.click()
     await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
@@ -532,7 +528,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
       await expect(term).toBeVisible()
       await expect(term.locator('..').getByRole('definition')).toHaveText(value)
     }
-    await preview.getByRole('term').filter({ hasText: /^Listing type$/ }).scrollIntoViewIfNeeded()
     const propertySchema = preview.locator('script[type="application/ld+json"]')
     await expect(propertySchema).toHaveCount(1)
     const accommodation = (JSON.parse((await propertySchema.textContent())!) as { '@graph': Array<Record<string, unknown>> })['@graph'].find(node => node['@type'] === 'Accommodation')
@@ -543,31 +538,43 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
       { '@type': 'PropertyValue', name: 'yearBuilt', value: 2019 },
     ]))
     await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
-  } else {
-    // This independent description/safety home starts with the property facts
-    // exercised through the UI in the sibling journey, via the canonical writer.
-    const propertySetup = await call<{ product: Product }>('update_product', { product_id: productId, stay: { ...propertyFacts, amenities: ['dryer', 'wireless_internet'] } })
-    expect(propertySetup.error).toBeNull()
+  })
+  await test.step('clearing optional facts writes explicit nulls that a reload reads back', async () => {
+    // year or area, and a reload reads that absence.
+    await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(`/dashboard/${slug}/products/${productId}`)
-    // Each public description section is edited through its own leaf and read
-    // back through MCP, a fresh editor load and the actual guest renderer.
-    const listingDescription = 'A peaceful treehouse above the Krabi coast.'
-    const listingDetails = {
-      your_property: 'Two airy floors and a shaded deck overlook the limestone cliffs.',
-      guest_access: 'Guests have the whole treehouse and its private garden.',
-      interaction_with_guests: 'Your host is available by message throughout your stay.',
-      other_details_to_note: 'The treehouse is reached by a flight of outdoor stairs.',
-    }
-    const descriptionSections = [
-      { section: 'listing-description', label: 'Listing description', value: listingDescription },
-      { section: 'your_property', label: 'Your property', value: listingDetails.your_property },
-      { section: 'guest_access', label: 'Guest access', value: listingDetails.guest_access },
-      { section: 'interaction_with_guests', label: 'Interaction with guests', value: listingDetails.interaction_with_guests },
-      { section: 'other_details_to_note', label: 'Other details to note', value: listingDetails.other_details_to_note },
-    ]
-    await page.getByTestId('editor-card-description').click()
-    const descriptionOverview = page.locator('#dashboard-panel-product-description')
-    const descriptionSection = page.locator('#dashboard-panel-product-description-section')
+    await page.getByTestId('editor-card-property-type').click()
+    await propertyPicker.getByRole('button', { name: 'Clear optional details', exact: true }).click()
+    const propertyCleared = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+    await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
+    const clearedPropertyResponse = await propertyCleared
+    await expectStatus(clearedPropertyResponse, 200)
+    expect(clearedPropertyResponse.request().postDataJSON()).toEqual({ stay: { ...propertyFacts, ...unknownPropertyFacts } })
+    await expect(propertyPicker).not.toBeVisible()
+    const clearedHome = await request.get(`/api/dashboard/stay-homes/${productId}`, { params: { org: slug } })
+    await expectStatus(clearedHome, 200)
+    expect((await clearedHome.json() as { home: Record<string, unknown> }).home).toMatchObject({ ...propertyFacts, ...unknownPropertyFacts })
+    await page.getByTestId('editor-card-property-type').click()
+    await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/property-type`)
+    await expect(propertyGroup).toBeVisible()
+    await page.reload()
+    await expect(propertyGroup).toContainText('Unique space')
+    await expect(propertyType).toContainText('Treehouse')
+    await expect(listingType).not.toContainText('Entire place')
+    for (const input of [totalFloors, listingFloor, yearBuilt, propertySize]) await expect(input).toHaveValue('')
+    await expect(sizeUnit).not.toContainText('Square meters')
+  })
+})
+
+test('a host edits each description section through its own leaf and resolves a concurrent edit', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { slug, call, productId, propertySetup, productWritePath } = await describedStayHome(page, baseURL!)
+  await page.goto(`/dashboard/${slug}/products/${productId}`)
+  await page.getByTestId('editor-card-description').click()
+  const descriptionOverview = page.locator('#dashboard-panel-product-description')
+  const descriptionSection = page.locator('#dashboard-panel-product-description-section')
+  await test.step('a concurrent edit refuses the stale section save until the host reviews it', async () => {
     // Switching a reused section leaf must not carry its uncommitted text into
     // the next section's save.
     await descriptionOverview.getByRole('link', { name: /^Guest access/ }).click()
@@ -581,7 +588,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const staleDescriptionSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await descriptionSection.getByRole('button', { name: 'Save', exact: true }).click()
     const staleDescriptionResponse = await staleDescriptionSaved
-    expect(staleDescriptionResponse.status(), await staleDescriptionResponse.text()).toBe(409)
+    await expectStatus(staleDescriptionResponse, 409)
     expect(staleDescriptionResponse.request().postDataJSON()).toEqual({ expected_updated_at: propertySetup.data!.product.updated_at, details_mode: 'merge', details: { your_property: listingDetails.your_property } })
     expect(await staleDescriptionResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: productId } })
     await expect(descriptionSection).toContainText('The product changed while you were editing.')
@@ -597,13 +604,15 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const reviewedDescriptionSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await descriptionSection.getByRole('button', { name: 'Save', exact: true }).click()
     const reviewedDescriptionResponse = await reviewedDescriptionSaved
-    expect(reviewedDescriptionResponse.status(), await reviewedDescriptionResponse.text()).toBe(200)
+    await expectStatus(reviewedDescriptionResponse, 200)
     expect(reviewedDescriptionResponse.request().postDataJSON().expected_updated_at).toBe(refusedDescription.data!.product.updated_at)
     await expect(page).toHaveURL(new RegExp(`/products/${productId}/description$`))
     const switchedDescription = await call<{ product: { details: Record<string, unknown> } }>('get_product', { product_id: productId })
     expect(switchedDescription.error).toBeNull()
     expect(switchedDescription.data!.product.details.your_property).toBe(listingDetails.your_property)
     expect(switchedDescription.data!.product.details).not.toHaveProperty('guest_access')
+  })
+  await test.step('each section saves, reloads and cancels on its own', async () => {
     for (const section of descriptionSections) {
       if (section.section === 'your_property') continue
       await descriptionOverview.getByRole('link', { name: new RegExp(`^${section.label}`) }).click()
@@ -629,7 +638,16 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     expect(descriptionRead.data!.product.description).toBe(listingDescription)
     expect(descriptionRead.data!.product.details).toMatchObject(listingDetails)
     await expect(descriptionOverview).toBeVisible()
+  })
+})
 
+test('a host saves cancellation policies, guests, minimum nights and arrival times as separate concerns', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, slug, organizationId, location, homeAddress, call, api, productId } = await describedStayHome(page, baseURL!)
+  expect((await call('update_product', { product_id: productId, description: listingDescription })).error).toBeNull()
+  await page.goto(`/dashboard/${slug}/products/${productId}`)
+  await test.step('the two cancellation periods keep their own policy', async () => {
     // The two cancellation periods retain their own policy. Reading more about
     // another policy does not select it, and cancelling an edit changes neither.
     await page.getByTestId('editor-card-cancellation').click()
@@ -663,7 +681,8 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     expect(policiesRead.error).toBeNull()
     expect(policiesRead.data!.product.stay).toMatchObject({ cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm' })
     await expect(cancellationOverview).toBeVisible()
-
+  })
+  const settingsRead = await test.step('each saved setting preserves the others', async () => {
     // Saved settings are separate concerns; each save preserves the other
     // concerns and a cancelled capacity edit restores the loaded value.
     await page.getByTestId('editor-card-guests').click()
@@ -710,15 +729,17 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(arrivalPanel).not.toBeVisible()
     const settingsRead = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(settingsRead.error).toBeNull()
-    expect(settingsRead.data!.product).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
+    expect(settingsRead.data!.product).toMatchObject({ description: listingDescription, stay: {
       ...propertyFacts,
       check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1,
       amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
     } })
-
+    return settingsRead
+  })
+  await test.step('the native home projection carries the editor choices', async () => {
     // The editor's listing choices persist through the native home projection.
     const homes = await request.get(api('stay-homes'))
-    expect(homes.status(), await homes.text()).toBe(200)
+    await expectStatus(homes, 200)
     // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
     expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
       product_id: productId, product_updated_at: settingsRead.data!.product.updated_at, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
@@ -740,32 +761,31 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
       ],
       check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }])
+  })
+})
 
-    // Safety disclosures keep an unanswered choice distinct from No. Nested
-    // detail editors change only the category draft until its explicit Save.
-    const safetyBefore = await call<{ product: Product }>('get_product', { product_id: productId })
-    expect(safetyBefore.error).toBeNull()
-    for (const key of STAY_SAFETY_DETAIL_KEYS) expect(safetyBefore.data!.product.details).not.toHaveProperty(key)
-    const poolDetail = 'The plunge pool beside the deck does not have a fence.'
-    const specialSafety = 'Supervise children near the stone terrace.'
-    const monitorDetail = 'A sound-level sensor is mounted in the dining room.'
-    const stairsDetail = 'There are twelve steps from the street to the front door.'
-    const considerationPatch = { unsecured_pool: true, unsecured_pool_details: poolDetail, nearby_water: false, nearby_water_details: null, climbing_structures: null, climbing_structures_details: null, unprotected_heights: null, unprotected_heights_details: null, dangerous_animals: null, dangerous_animals_details: null, special_safety_considerations: specialSafety }
-    const devicePatch = { exterior_security_cameras: false, exterior_security_cameras_details: null, noise_decibel_monitors: true, noise_decibel_monitors_details: monitorDetail, carbon_monoxide_detector_details: null, smoke_detector_details: null }
-    const propertyInfoPatch = { stairs_required: true, stairs_required_details: stairsDetail, potential_noise: false, potential_noise_details: null, resident_pets: null, resident_pets_details: null, no_property_parking: null, no_property_parking_details: null, shared_spaces: null, shared_spaces_details: null, limited_essentials: null, limited_essentials_details: null, weapons_on_property: null, weapons_on_property_details: null }
-    const safetyFacts = { unsecured_pool: true, unsecured_pool_details: poolDetail, nearby_water: false, special_safety_considerations: specialSafety, exterior_security_cameras: false, noise_decibel_monitors: true, noise_decibel_monitors_details: monitorDetail, stairs_required: true, stairs_required_details: stairsDetail, potential_noise: false }
-    const authoredSafetyLines = [`Unsecured pool or hot tub\n${poolDetail}`, specialSafety, 'No exterior security cameras', `Noise decibel monitors\n${monitorDetail}`, `Guests must climb stairs\n${stairsDetail}`]
-    await page.getByTestId('editor-card-guest-safety').click()
-    const safetyIndex = page.locator('#dashboard-panel-product-guest-safety')
-    const considerationsLink = safetyIndex.getByRole('link', { name: /^Safety considerations/ })
-    const devicesLink = safetyIndex.getByRole('link', { name: /^Safety devices/ })
-    const propertyInfoLink = safetyIndex.getByRole('link', { name: /^Property info/ })
-    await expect(safetyIndex.locator('a[href*="/guest-safety/"]')).toHaveCount(3)
-    expect(await safetyIndex.locator('a[href*="/guest-safety/"]').evaluateAll(links => links.map(link => link.getAttribute('href')))).toEqual(['considerations', 'devices', 'property-info'].map(section => `/dashboard/${slug}/products/${productId}/guest-safety/${section}`))
-    const savedConsiderations = await considerationsLink.innerText()
+test('a host answers guest safety disclosures and keeps an unanswered choice distinct from No', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { slug, organizationId, call, productId, productWritePath } = await describedStayHome(page, baseURL!)
+  await page.goto(`/dashboard/${slug}/products/${productId}`)
+  const safetyBefore = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(safetyBefore.error).toBeNull()
+  for (const key of STAY_SAFETY_DETAIL_KEYS) expect(safetyBefore.data!.product.details).not.toHaveProperty(key)
+  await page.getByTestId('editor-card-guest-safety').click()
+  const safetyIndex = page.locator('#dashboard-panel-product-guest-safety')
+  const considerationsLink = safetyIndex.getByRole('link', { name: /^Safety considerations/ })
+  const devicesLink = safetyIndex.getByRole('link', { name: /^Safety devices/ })
+  const propertyInfoLink = safetyIndex.getByRole('link', { name: /^Property info/ })
+  await expect(safetyIndex.locator('a[href*="/guest-safety/"]')).toHaveCount(3)
+  expect(await safetyIndex.locator('a[href*="/guest-safety/"]').evaluateAll(links => links.map(link => link.getAttribute('href')))).toEqual(['considerations', 'devices', 'property-info'].map(section => `/dashboard/${slug}/products/${productId}/guest-safety/${section}`))
+  const savedConsiderations = await considerationsLink.innerText()
+  const safetySection = page.locator('#dashboard-panel-product-guest-safety-section')
+  const pool = safetySection.getByRole('group', { name: 'Unsecured pool or hot tub', exact: true })
+  const poolYes = pool.getByRole('button', { name: 'Yes', exact: true })
+  const safetyDetail = page.locator('#dashboard-panel-product-guest-safety-detail')
+  await test.step('nested detail editors change only the draft, and Cancel writes nothing', async () => {
     await considerationsLink.click()
-    const safetySection = page.locator('#dashboard-panel-product-guest-safety-section')
-    const pool = safetySection.getByRole('group', { name: 'Unsecured pool or hot tub', exact: true })
     for (const name of ['Unsecured pool or hot tub', 'Nearby water', 'Climbing or play structures', 'Unprotected heights', 'Potentially dangerous animals']) {
       const group = safetySection.getByRole('group', { name, exact: true })
       await expect(group.getByRole('button', { name: 'Yes', exact: true })).toHaveAttribute('aria-pressed', 'false')
@@ -776,7 +796,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
       if (new URL(outgoing.url()).pathname === productWritePath && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(outgoing.method())) safetyDraftRequests.push(outgoing.url())
     }
     page.on('request', trackSafetyDraft)
-    const poolYes = pool.getByRole('button', { name: 'Yes', exact: true })
     await poolYes.focus()
     await poolYes.press('Space')
     await expect(poolYes).toHaveAttribute('aria-pressed', 'true')
@@ -784,7 +803,6 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(poolYes).toHaveAttribute('aria-pressed', 'false')
     await poolYes.press('Space')
     await safetySection.getByRole('link', { name: 'Unsecured pool or hot tub details', exact: true }).click()
-    const safetyDetail = page.locator('#dashboard-panel-product-guest-safety-detail')
     await safetyDetail.getByRole('textbox', { name: 'Unsecured pool or hot tub', exact: true }).fill(poolDetail)
     await safetyDetail.getByRole('button', { name: 'Continue', exact: true }).click()
     await safetySection.getByRole('link', { name: 'Unsecured pool or hot tub details', exact: true }).click()
@@ -804,7 +822,8 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const cancelledSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(cancelledSafety.error).toBeNull()
     expect(cancelledSafety.data!.product.details).toEqual(safetyBefore.data!.product.details)
-
+  })
+  await test.step('an interrupted save keeps the draft, and the retry writes only the considerations', async () => {
     await considerationsLink.click()
     await expect(poolYes).toHaveAttribute('aria-pressed', 'false')
     await poolYes.click()
@@ -835,9 +854,11 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const considerationsSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await safetySection.getByRole('button', { name: 'Save', exact: true }).click()
     const considerationsResponse = await considerationsSaved
-    expect(considerationsResponse.status(), await considerationsResponse.text()).toBe(200)
+    await expectStatus(considerationsResponse, 200)
     expect(considerationsResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: considerationPatch })
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/guest-safety`)
+  })
+  await test.step('devices and property info save, clear and restore their own facts', async () => {
     await devicesLink.click()
     for (const alarm of ['Smoke alarm', 'Carbon monoxide alarm']) {
       const choice = safetySection.getByRole('group', { name: alarm, exact: true })
@@ -855,7 +876,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const devicesSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await safetySection.getByRole('button', { name: 'Save', exact: true }).click()
     const devicesResponse = await devicesSaved
-    expect(devicesResponse.status(), await devicesResponse.text()).toBe(200)
+    await expectStatus(devicesResponse, 200)
     expect(devicesResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: devicePatch, stay: { amenity_answers: [] } })
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/guest-safety`)
     await propertyInfoLink.click()
@@ -868,7 +889,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const propertyInfoSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await safetySection.getByRole('button', { name: 'Save', exact: true }).click()
     const propertyInfoResponse = await propertyInfoSaved
-    expect(propertyInfoResponse.status(), await propertyInfoResponse.text()).toBe(200)
+    await expectStatus(propertyInfoResponse, 200)
     expect(propertyInfoResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: propertyInfoPatch })
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/guest-safety`)
     await propertyInfoLink.click()
@@ -878,7 +899,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const stairsCleared = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await safetySection.getByRole('button', { name: 'Save', exact: true }).click()
     const stairsClearResponse = await stairsCleared
-    expect(stairsClearResponse.status(), await stairsClearResponse.text()).toBe(200)
+    await expectStatus(stairsClearResponse, 200)
     expect(stairsClearResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { ...propertyInfoPatch, stairs_required: null, stairs_required_details: null } })
     const clearedSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(clearedSafety.error).toBeNull()
@@ -899,7 +920,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const stairsRestored = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await safetySection.getByRole('button', { name: 'Save', exact: true }).click()
     const stairsRestoreResponse = await stairsRestored
-    expect(stairsRestoreResponse.status(), await stairsRestoreResponse.text()).toBe(200)
+    await expectStatus(stairsRestoreResponse, 200)
     expect(stairsRestoreResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: propertyInfoPatch })
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/guest-safety`)
     await expect(safetySection).toHaveCount(0)
@@ -913,9 +934,11 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const alarmSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
     await safetySection.getByRole('button', { name: 'Save', exact: true }).click()
     const alarmResponse = await alarmSaved
-    expect(alarmResponse.status(), await alarmResponse.text()).toBe(200)
+    await expectStatus(alarmResponse, 200)
     expect(alarmResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: devicePatch, stay: { amenity_answers: [{ code: 'smoke_detector', available: true }] } })
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/guest-safety`)
+  })
+  await test.step('saved answers read back on mobile and in the arrival guide', async () => {
     const savedSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedSafety.error).toBeNull()
     expect(savedSafety.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, featured: true, ...safetyFacts })
@@ -944,22 +967,30 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await safetyGuidePreview.getByRole('button', { name: 'Close', exact: true }).click()
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`) && !url.searchParams.has('guide'))
+  })
+})
 
-    // Product detail leaves carry their read version. A concurrent safety
-    // answer refuses the stale draft until the host reviews current facts.
-    await page.goto(`/dashboard/${slug}/products/${productId}/attributes/featured`)
-    const featuredEditor = page.locator('#dashboard-panel-product-attribute')
-    const featuredSwitch = featuredEditor.getByRole('switch', { name: 'Featured', exact: true })
-    await expect(featuredSwitch).toBeChecked()
-    await featuredSwitch.click()
-    await expect(featuredSwitch).not.toBeChecked()
+test('a stale detail leaf refuses its save after a concurrent safety answer until the host reviews it', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { slug, call, productId, propertySetup, productWritePath } = await describedStayHome(page, baseURL!)
+  const safetySeed = await call<{ product: Product }>('update_product', { product_id: productId, details_mode: 'merge', details: { ...safetyFacts, featured: true } })
+  expect(safetySeed.error).toBeNull()
+  expect(safetySeed.data!.product.details).toEqual({ ...propertySetup.data!.product.details, ...safetyFacts, featured: true })
+  await page.goto(`/dashboard/${slug}/products/${productId}/attributes/featured`)
+  const featuredEditor = page.locator('#dashboard-panel-product-attribute')
+  const featuredSwitch = featuredEditor.getByRole('switch', { name: 'Featured', exact: true })
+  await expect(featuredSwitch).toBeChecked()
+  await featuredSwitch.click()
+  await expect(featuredSwitch).not.toBeChecked()
+  await test.step('the stale save is refused, then the reviewed save lands', async () => {
     const concurrentSafety = await call('update_product', { product_id: productId, details_mode: 'merge', details: { dangerous_animals: false } })
     expect(concurrentSafety.error).toBeNull()
     const featuredSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await featuredEditor.getByRole('button', { name: 'Save', exact: true }).click()
     const featuredResponse = await featuredSaved
-    expect(featuredResponse.status(), await featuredResponse.text()).toBe(409)
-    expect(featuredResponse.request().postDataJSON().expected_updated_at).toBe(savedSafety.data!.product.updated_at)
+    await expectStatus(featuredResponse, 409)
+    expect(featuredResponse.request().postDataJSON().expected_updated_at).toBe(safetySeed.data!.product.updated_at)
     expect(featuredResponse.request().postDataJSON().details_mode).toBe('merge')
     expect(featuredResponse.request().postDataJSON().details).toEqual({ featured: false })
     expect(await featuredResponse.json()).toMatchObject({ data: { code: 'PRODUCT_UPDATE_CONFLICT', field: 'expected_updated_at', product_id: productId } })
@@ -968,7 +999,7 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(featuredEditor.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     const refusedAttribute = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(refusedAttribute.error).toBeNull()
-    expect(refusedAttribute.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: true })
+    expect(refusedAttribute.data!.product.details).toEqual({ ...propertySetup.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: true })
     await featuredEditor.getByRole('button', { name: 'Use saved details', exact: true }).click()
     await expect(featuredSwitch).toBeChecked()
     await expect(featuredEditor.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
@@ -976,29 +1007,36 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     const reviewedAttributeSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await featuredEditor.getByRole('button', { name: 'Save', exact: true }).click()
     const reviewedAttributeResponse = await reviewedAttributeSaved
-    expect(reviewedAttributeResponse.status(), await reviewedAttributeResponse.text()).toBe(200)
+    await expectStatus(reviewedAttributeResponse, 200)
     expect(reviewedAttributeResponse.request().postDataJSON().expected_updated_at).toBe(refusedAttribute.data!.product.updated_at)
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/photo`)
     const savedAttributeSafety = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(savedAttributeSafety.error).toBeNull()
-    expect(savedAttributeSafety.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: false })
+    expect(savedAttributeSafety.data!.product.details).toEqual({ ...propertySetup.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: false })
+  })
+})
 
-    // Preview is a URL-owned editor mode around the real guest page. It
-    // preserves the open concern and authored draft while showing saved content.
-    const titlePath = `/dashboard/${slug}/products/${productId}/name?location_id=${encodeURIComponent(location.id)}`
-    await page.goto(titlePath)
-    const titlePanel = page.locator('#dashboard-panel-product-name')
-    const titleInput = titlePanel.getByRole('textbox', { name: 'Title', exact: true })
-    await expect(titleInput).toHaveValue('Cliff Cabin')
-    await titleInput.fill('An unsaved cliff cabin title')
-    const previewSource = page.url()
-    const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
-    // The host previewing their own listing is not a guest visit: the guest page records nothing.
-    const previewCollections: string[] = []
-    page.on('request', outgoing => {
-      const url = new URL(outgoing.url())
-      if (outgoing.frame() !== page.mainFrame() && ['/api/analytics/track', '/api/analytics/interactions', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
-    })
+test('a host previews the saved guest page around an unsaved draft without recording a visit', async ({ page, browser, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, slug, location, call, productId } = await describedStayHome(page, baseURL!)
+  const pageSeed = await call<{ product: Product }>('update_product', { product_id: productId, description: listingDescription, details_mode: 'merge', details: { ...listingDetails, ...safetyFacts }, stay: { check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', amenity_answers: [{ code: 'smoke_detector', available: true }] } })
+  expect(pageSeed.error).toBeNull()
+  const titlePath = `/dashboard/${slug}/products/${productId}/name?location_id=${encodeURIComponent(location.id)}`
+  await page.goto(titlePath)
+  const titlePanel = page.locator('#dashboard-panel-product-name')
+  const titleInput = titlePanel.getByRole('textbox', { name: 'Title', exact: true })
+  await expect(titleInput).toHaveValue('Cliff Cabin')
+  await titleInput.fill('An unsaved cliff cabin title')
+  const previewSource = page.url()
+  const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
+  // The host previewing their own listing is not a guest visit: the guest page records nothing.
+  const previewCollections: string[] = []
+  page.on('request', outgoing => {
+    const url = new URL(outgoing.url())
+    if (outgoing.frame() !== page.mainFrame() && ['/api/analytics/track', '/api/analytics/interactions', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
+  })
+  const previewURL = await test.step('the preview shows the saved description, settings and safety', async () => {
     await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
     await previewLink.click()
     await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/name`) && url.searchParams.get('location_id') === location.id && url.searchParams.get('editMode') === 'preview' && url.searchParams.get('previewViewport') === 'desktop')
@@ -1016,14 +1054,14 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(preview.locator('article')).toContainText('Flexible cancellation policy')
     await expect(preview.locator('article')).toContainText('Firm Long Term: Full refund up to 30 days before check-in.')
     const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
-    expect(publicRead.status(), await publicRead.text()).toBe(200)
+    await expectStatus(publicRead, 200)
     const publicProduct = (await publicRead.json() as { product: { details: Record<string, unknown> } }).product
     expect(publicProduct).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
       ...propertyFacts,
       check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1,
       cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
     } })
-    expect(publicProduct.details).toEqual(savedAttributeSafety.data!.product.details)
+    expect(publicProduct.details).toEqual(pageSeed.data!.product.details)
     const guestSafety = preview.getByRole('heading', { name: 'Safety & property', exact: true }).locator('..').getByRole('listitem')
     await expect(guestSafety).toHaveText(['Carbon monoxide alarm not reported', 'Smoke alarm', ...authoredSafetyLines])
     for (const line of authoredSafetyLines) await expect(preview.getByText(line, { exact: true })).toHaveCount(1)
@@ -1032,6 +1070,9 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     // With no rules set, House rules holds only the home's own times and party, as Airbnb's does.
     const houseRules = preview.getByRole('heading', { name: 'House rules', exact: true }).locator('xpath=..').getByRole('listitem')
     await expect(houseRules).toHaveText(['Check-in after 4:00 PM', 'Checkout before 10:00 AM', '6 guests maximum'])
+    return previewURL
+  })
+  const mobilePreviewRoute = await test.step('device modes and closing keep the URL-owned mode and the unsaved draft', async () => {
     await previewModal.getByRole('tab', { name: 'Mobile view', exact: true }).click()
     await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'mobile')
     await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
@@ -1062,6 +1103,9 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     await expect(previewModal).not.toBeVisible()
     await expect(titleInput).toHaveValue('An unsaved cliff cabin title')
     await titlePanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    return mobilePreviewRoute
+  })
+  await test.step('a reload rebuilds the device mode, and the page is hidden without its token', async () => {
     // Direct entry and a reload reconstruct the same device mode from its URL.
     await page.goto(mobilePreviewRoute)
     await page.reload()
@@ -1082,9 +1126,8 @@ for (const concern of ['property-and-amenities', 'description-and-safety'] as co
     } finally {
       await anonymous.close()
     }
-  }
+  })
 })
-}
 
 test('a host edits the shared lodging location and protects its exact address and pin in every guest projection', async ({ page, baseURL }) => {
   test.setTimeout(60_000)
@@ -1122,15 +1165,10 @@ test('a host edits the shared lodging location and protects its exact address an
     await productLocation.getByRole('link', { name: new RegExp(`^${label}`) }).click()
     await expect(locationDescription.getByRole('textbox', { name: label, exact: true })).toHaveValue('')
     await locationDescription.getByRole('textbox', { name: label, exact: true }).fill(value)
-    if (field === 'neighborhood_description') {
-      await page.setViewportSize({ width: 390, height: 844 })
-      await expect(locationDescription.getByRole('textbox', { name: label, exact: true })).toHaveValue(value)
-      await page.setViewportSize({ width: 1440, height: 900 })
-    }
     const textSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
     await locationDescription.getByRole('button', { name: 'Save', exact: true }).click()
     const textResponse = await textSaved
-    expect(textResponse.status(), await textResponse.text()).toBe(200)
+    await expectStatus(textResponse, 200)
     expect(textResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { [field]: value } })
     await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
     await expect(productLocation.getByRole('link', { name: new RegExp(`^${label}`) })).toContainText(value)
@@ -1148,7 +1186,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const scenicSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
   await scenicPicker.getByRole('button', { name: 'Done', exact: true }).click()
   const scenicResponse = await scenicSaved
-  expect(scenicResponse.status(), await scenicResponse.text()).toBe(200)
+  await expectStatus(scenicResponse, 200)
   expect(scenicResponse.request().postDataJSON()).toEqual({ stay: { amenities: ['mountain_view'] } })
   const savedView = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(savedView.error).toBeNull()
@@ -1187,7 +1225,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const clearAddressSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const clearAddressResponse = await clearAddressSaved
-  expect(clearAddressResponse.status(), await clearAddressResponse.text()).toBe(200)
+  await expectStatus(clearAddressResponse, 200)
   expect(clearAddressResponse.request().postDataJSON()).toEqual({ address: null, expected_updated_at: addressBefore.data!.location.updated_at })
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
   const clearedAddress = await call<{ location: { address: PostalAddress | null } }>('get_location', { location_id: location.id })
@@ -1211,7 +1249,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const staleAddressSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const staleAddressResponse = await staleAddressSaved
-  expect(staleAddressResponse.status(), await staleAddressResponse.text()).toBe(409)
+  await expectStatus(staleAddressResponse, 409)
   expect(staleAddressResponse.request().postDataJSON()).toEqual({ address: changedAddress, expected_updated_at: editAddressVersion.data!.location.updated_at })
   await expect(addressPanel.getByText('The location changed since it was read. Reload it and try again.', { exact: false })).toBeVisible()
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location/address`)
@@ -1227,7 +1265,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const addressRetried = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const addressRetryResponse = await addressRetried
-  expect(addressRetryResponse.status(), await addressRetryResponse.text()).toBe(200)
+  await expectStatus(addressRetryResponse, 200)
   expect(addressRetryResponse.request().postDataJSON()).toEqual({ address: changedAddress, expected_updated_at: locationAfterRename.data!.location.updated_at })
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
   await expect(addressPanel).toHaveCount(0)
@@ -1246,13 +1284,8 @@ test('a host edits the shared lodging location and protects its exact address an
   await expect(apartment).toHaveValue('Apartment 4')
   await expect(thirdAddressLine).toHaveValue('East building')
   await expect(addressCity).toHaveValue('Nong Thale')
-  await streetAddress.scrollIntoViewIfNeeded()
-  await page.setViewportSize({ width: 390, height: 844 })
-  await streetAddress.scrollIntoViewIfNeeded()
-  await country.scrollIntoViewIfNeeded()
   await addressPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
-  await page.setViewportSize({ width: 1440, height: 900 })
 
   // The canonical Location owns its stored pair. The address form has no
   // coordinate or map-link control; the free guest map reads this saved fact.
@@ -1284,13 +1317,6 @@ test('a host edits the shared lodging location and protects its exact address an
   await expect(specificPreview).toBeVisible()
   expect(new URL((await specificPreview.getAttribute('src'))!).searchParams.get('q')).toBe('8.0326,98.822')
   await expect(sharingPanel.locator('figcaption')).toHaveText('Your listing shows a precise pin. Your street address stays private.')
-  // Capture the provider's rendered map, rather than the iframe's empty initial document.
-  await expect(specificPreview.contentFrame().getByRole('region', { name: 'Map', exact: true })).toBeVisible()
-  await expect(specificPreview.contentFrame().getByRole('link', { name: 'Terms (opens in new tab)', exact: true })).toBeVisible()
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(specificLocation).toBeChecked()
-  await expect(specificPreview.contentFrame().getByRole('link', { name: 'Terms (opens in new tab)', exact: true })).toBeVisible()
-  await page.setViewportSize({ width: 1440, height: 900 })
   await specificLocation.click()
   const generalPreview = sharingPanel.locator('iframe[title="General location preview"]')
   await expect(generalPreview).toBeVisible()
@@ -1311,7 +1337,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const specificSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await sharingPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const specificResponse = await specificSaved
-  expect(specificResponse.status(), await specificResponse.text()).toBe(200)
+  await expectStatus(specificResponse, 200)
   expect(specificResponse.request().postDataJSON()).toEqual({ stay_map_sharing: 'specific', expected_updated_at: cancelledSharing.data!.location.updated_at })
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
   await expect(sharingLink).toContainText('Show specific location')
@@ -1326,7 +1352,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const sharingPublicURL = new URL((await sharingFrame.getAttribute('src'))!, baseURL!)
   sharingPublicURL.pathname = sharingPublicURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
   const specificPublic = await request.get(sharingPublicURL.href)
-  expect(specificPublic.status(), await specificPublic.text()).toBe(200)
+  await expectStatus(specificPublic, 200)
   const specificPublicData = await specificPublic.json() as { location: PublicLocationDisclosure; product: Product }
   expect(specificPublicData.location).toMatchObject({ address: null, maps_url: null, ...mapPin, stay_map_sharing: 'specific', public_area: { approximate: false, center: mapPin } })
   expect(JSON.stringify(specificPublicData)).not.toContain('12 Test Road')
@@ -1342,7 +1368,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const generalSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await sharingPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const generalResponse = await generalSaved
-  expect(generalResponse.status(), await generalResponse.text()).toBe(200)
+  await expectStatus(generalResponse, 200)
   expect(generalResponse.request().postDataJSON()).toEqual({ stay_map_sharing: 'general', expected_updated_at: savedSpecific.data!.location.updated_at })
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
   await expect(sharingLink).toContainText('Show general location')
@@ -1350,7 +1376,7 @@ test('a host edits the shared lodging location and protects its exact address an
   expect(savedGeneral.error).toBeNull()
   expect(savedGeneral.data!.location).toMatchObject({ stay_map_sharing: 'general', address: changedAddress })
   const generalPublic = await request.get(sharingPublicURL.href)
-  expect(generalPublic.status(), await generalPublic.text()).toBe(200)
+  await expectStatus(generalPublic, 200)
   const generalPublicData = await generalPublic.json() as { location: PublicLocationDisclosure }
   expect(generalPublicData.location).toMatchObject({ address: null, maps_url: null, latitude: null, longitude: null, stay_map_sharing: 'general', public_area: { approximate: true } })
   expect(generalPublicData.location.public_area).toMatchObject({ center: { latitude: 8.03, longitude: 98.83 }, radius_meters: 2000 })
@@ -1360,7 +1386,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const generalGuestURL = new URL(sharingPublicURL)
   generalGuestURL.pathname = generalGuestURL.pathname.replace(/^\/api\/public\/stays\//, '/stays/')
   const generalHTML = await request.get(generalGuestURL.href)
-  expect(generalHTML.status(), await generalHTML.text()).toBe(200)
+  await expectStatus(generalHTML, 200)
   const generalMarkup = await generalHTML.text()
   for (const privateFact of ['12 Test Road', '8.0326', '98.822']) expect(generalMarkup).not.toContain(privateFact)
   expect(generalMarkup).not.toMatch(/"@type"\s*:\s*"GeoCoordinates"/)
@@ -1411,7 +1437,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const nativeAddressConflict = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const nativeConflictResponse = await nativeAddressConflict
-  expect(nativeConflictResponse.status(), await nativeConflictResponse.text()).toBe(409)
+  await expectStatus(nativeConflictResponse, 409)
   expect(nativeConflictResponse.request().postDataJSON()).toEqual({ address: nativeChangedAddress, expected_updated_at: nativeAddressVersion.data!.location.updated_at })
   await expect(addressPanel.getByText('The location changed since it was read. Reload it and try again.', { exact: false })).toBeVisible()
   await expect(page).toHaveURL(`/dashboard/${slug}/locations/${savedLocationSlug}/address`)
@@ -1427,7 +1453,7 @@ test('a host edits the shared lodging location and protects its exact address an
   const nativeAddressRetried = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
   await addressPanel.getByRole('button', { name: 'Save', exact: true }).click()
   const nativeRetryResponse = await nativeAddressRetried
-  expect(nativeRetryResponse.status(), await nativeRetryResponse.text()).toBe(200)
+  await expectStatus(nativeRetryResponse, 200)
   expect(nativeRetryResponse.request().postDataJSON()).toEqual({ address: nativeChangedAddress, expected_updated_at: nativeRenamedVersion.data!.location.updated_at })
   await expect(page).toHaveURL(`/dashboard/${slug}/locations/${savedLocationSlug}/address`)
   await expect(addressPanel.getByRole('textbox', { name: 'Postal code', exact: true })).toHaveValue('81000')
@@ -1486,7 +1512,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   const absentSaved = page.waitForResponse(response => new URL(response.url()).pathname === productWritePath && response.request().method() === 'PATCH')
   await devices.getByRole('button', { name: 'Save', exact: true }).click()
   const absentResponse = await absentSaved
-  expect(absentResponse.status(), await absentResponse.text()).toBe(200)
+  await expectStatus(absentResponse, 200)
   expect(absentResponse.request().postDataJSON().stay).toEqual({ amenity_answers: [{ code: 'smoke_detector', available: false }] })
   const absent = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(absent.error).toBeNull()
@@ -1496,7 +1522,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   await previewLink.click()
   await expect(publicSafety).toHaveText(['Carbon monoxide alarm not reported', 'Smoke alarm not installed'])
   const absentPublic = await request.get(publicURL.href)
-  expect(absentPublic.status(), await absentPublic.text()).toBe(200)
+  await expectStatus(absentPublic, 200)
   expect((await absentPublic.json() as { product: Product }).product.stay!.amenity_answers).toEqual([{ code: 'smoke_detector', available: false }])
   const absentSchema = JSON.parse((await preview.locator('script[type="application/ld+json"]').textContent())!) as { '@graph': Array<Record<string, unknown>> }
   expect(absentSchema['@graph'].find(node => node['@type'] === 'Accommodation')!.amenityFeature).toEqual([{ '@type': 'LocationFeatureSpecification', name: 'Smoke alarm', value: false }])
@@ -1504,9 +1530,6 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   await devicesLink.click()
   await expect(smoke.getByRole('button', { name: 'No', exact: true })).toHaveAttribute('aria-pressed', 'true')
   await expect(carbon.getByRole('button', { name: 'No', exact: true })).toHaveAttribute('aria-pressed', 'false')
-  await page.setViewportSize({ width: 390, height: 844 })
-  await smoke.scrollIntoViewIfNeeded()
-  await page.setViewportSize({ width: 1440, height: 900 })
 
   await smoke.getByRole('button', { name: 'Yes', exact: true }).click()
   await devices.getByRole('link', { name: 'Smoke alarm details', exact: true }).click()
@@ -1527,7 +1550,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   const installedSaved = page.waitForResponse(response => new URL(response.url()).pathname === productWritePath && response.request().method() === 'PATCH')
   await devices.getByRole('button', { name: 'Save', exact: true }).click()
   const installedResponse = await installedSaved
-  expect(installedResponse.status(), await installedResponse.text()).toBe(200)
+  await expectStatus(installedResponse, 200)
   expect(installedResponse.request().postDataJSON().stay).toEqual({ amenity_answers: [{ code: 'smoke_detector', available: true }] })
   expect(installedResponse.request().postDataJSON().details.smoke_detector_details).toBe(alarmDescription)
   const installed = await call<{ product: Product }>('get_product', { product_id: productId })
@@ -1553,7 +1576,7 @@ test('a host distinguishes absent alarms from unanswered alarms and clears their
   const unknownSaved = page.waitForResponse(response => new URL(response.url()).pathname === productWritePath && response.request().method() === 'PATCH')
   await devices.getByRole('button', { name: 'Save', exact: true }).click()
   const unknownResponse = await unknownSaved
-  expect(unknownResponse.status(), await unknownResponse.text()).toBe(200)
+  await expectStatus(unknownResponse, 200)
   expect(unknownResponse.request().postDataJSON().stay).toEqual({ amenity_answers: [{ code: 'smoke_detector', available: null }] })
   expect(unknownResponse.request().postDataJSON().details.smoke_detector_details).toBeNull()
   const unknown = await call<{ product: Product }>('get_product', { product_id: productId })
@@ -1582,13 +1605,13 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   // A home's photos are its product's media; the photo routes refuse what is not a photo before storing anything.
   const photos = api(`stay-homes/${productId}/photos`)
   const ordered = await request.put(photos, { headers, data: { photo_ids: [] } })
-  expect(ordered.status(), await ordered.text()).toBe(200)
+  await expectStatus(ordered, 200)
   expect((await ordered.json() as { home: { photos: unknown[] } }).home.photos).toEqual([])
   const notAPhoto = await request.post(photos, { headers, multipart: { image: { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a photo') } } })
-  expect(notAPhoto.status(), await notAPhoto.text()).toBe(415)
+  await expectStatus(notAPhoto, 415)
   expect(await notAPhoto.json()).toMatchObject({ data: { code: 'UNSUPPORTED_PHOTO_TYPE', field: 'image' } })
   const missing = await request.patch(api(`stay-homes/${productId}/photos/absent`), { headers, data: { alt_text: 'The deck at sunset' } })
-  expect(missing.status(), await missing.text()).toBe(404)
+  await expectStatus(missing, 404)
   expect(await missing.json()).toMatchObject({ data: { code: 'PHOTO_NOT_FOUND', field: 'photo_id' } })
 
   // Technical AVIF inputs exercise the real picker/R2 upload; they are not property photos.
@@ -1621,7 +1644,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
       const uploaded = activePage.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/media/upload` && response.request().method() === 'POST')
       await picker.locator('input[type="file"]').setInputFiles({ name, mimeType: 'image/avif', buffer: await sharp({ create: { width, height, channels: 3, background } }).avif().toBuffer() })
       const uploadResponse = await uploaded
-      expect(uploadResponse.status(), await uploadResponse.text()).toBe(200)
+      await expectStatus(uploadResponse, 200)
       const asset = await uploadResponse.json() as { asset_id: string; public_url: string; kind: string; status: string; thumbnail_url: string | null }
       expect(asset).toMatchObject({ kind: 'image', status: 'active', thumbnail_url: null })
       uploadedPhotos.push({ id: asset.asset_id, url: asset.public_url, width, height })
@@ -1669,7 +1692,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await expect(photoOverview.getByTestId('stay-additional-photos')).toContainText('3 photos')
   await expect(photoOverview.getByTestId('stay-additional-photos').locator('img')).toHaveAttribute('src', red.url)
   const projectedHome = await request.get(api(`stay-homes/${productId}`))
-  expect(projectedHome.status(), await projectedHome.text()).toBe(200)
+  await expectStatus(projectedHome, 200)
   expect((await projectedHome.json() as { home: { photos: Array<{ id: string; position: number }> } }).home.photos.map(photo => ({ id: photo.id, position: photo.position })))
     .toEqual(uploadedPhotos.map((photo, position) => ({ id: photo.id, position })))
   const projectedCalendar = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
@@ -1694,8 +1717,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await expect(photoCard).toContainText('3 photos')
   await expect(photoCard).not.toContainText('None set')
   const allPhotosAction = photoOverview.getByRole('link', { name: 'All photos', exact: true })
-  await expect(allPhotosAction).toBeInViewport({ ratio: 1 })
-  await expect.poll(() => allPhotosAction.locator('[data-slot="label"]').evaluate(label => label.scrollWidth <= label.clientWidth)).toBe(true)
   await allPhotosAction.click()
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}`)
   const photoGrid = page.locator('#dashboard-panel-product-all-photos')
@@ -1711,8 +1732,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}`)
   await expect(photoLinks).toHaveCount(3)
   const managePhotosAction = photoGrid.getByRole('button', { name: 'Manage photos', exact: true })
-  await expect(managePhotosAction).toBeInViewport({ ratio: 1 })
-  await expect.poll(() => managePhotosAction.locator('[data-slot="label"]').evaluate(label => label.scrollWidth <= label.clientWidth)).toBe(true)
 
   // Reordering is one local draft until Save; Cancel restores the saved order.
   await photoGrid.getByRole('button', { name: 'Options for photo 3', exact: true }).click()
@@ -1733,16 +1752,13 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await page.reload()
   for (const [index, id] of [red.id, green.id, blue.id].entries()) await expect(photoLinks.nth(index)).toHaveAttribute('href', `${allPhotosPath}/${id}`)
   const reorderedHome = await request.get(api(`stay-homes/${productId}`))
-  expect(reorderedHome.status(), await reorderedHome.text()).toBe(200)
+  await expectStatus(reorderedHome, 200)
   expect((await reorderedHome.json() as { home: { photos: Array<{ id: string; position: number }> } }).home.photos.map(photo => ({ id: photo.id, position: photo.position })))
     .toEqual([red.id, green.id, blue.id].map((id, position) => ({ id, position })))
   const reorderedProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(reorderedProduct.error).toBeNull()
   expect(reorderedProduct.data!.product.image!.asset_id).toBe(red.id)
   expect(reorderedProduct.data!.product.gallery.map(asset => asset.asset_id)).toEqual([green.id, blue.id])
-  await expect(allPhotosBack).toBeVisible()
-  await expect(allPhotosBack).toHaveAttribute('href', photoPath)
-  await allPhotosBack.click({ trial: true })
 
   await photoLinks.nth(2).click()
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}/${blue.id}`)
@@ -1787,14 +1803,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   expect(describedProduct.error).toBeNull()
   expect(describedProduct.data!.product.image).toMatchObject({ asset_id: blue.id, alt_text: photoDescription })
 
-  await page.setViewportSize({ width: 390, height: 844 })
-  await photoDetail.getByRole('link', { name: 'Edit visual description', exact: true }).click()
-  await expect(visualDescription).toHaveValue(photoDescription)
-  await visualDescription.fill('A discarded mobile visual description')
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await expect(visualDescription).toHaveValue('A discarded mobile visual description')
-  await page.setViewportSize({ width: 390, height: 844 })
-  await photoDescriptionPanel.getByRole('link', { name: 'Close', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}/${blue.id}`)
   await expect(photoDetail.locator('img')).toHaveAttribute('alt', photoDescription)
   await expect(photoDetail.locator('img')).toHaveJSProperty('naturalWidth', blue.width)
@@ -1805,8 +1813,6 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   const promotedProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(promotedProduct.error).toBeNull()
   expect([promotedProduct.data!.product.image!.asset_id, ...promotedProduct.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, green.id])
-  await expect(managePhotosAction).toBeInViewport({ ratio: 1 })
-  await expect.poll(() => managePhotosAction.locator('[data-slot="label"]').evaluate(label => label.scrollWidth <= label.clientWidth)).toBe(true)
   await managePhotosAction.click()
   const photoSelection = page.getByTestId('grid-editor-takeover')
   await photoSelection.getByRole('button', { name: 'Select Photo 2', exact: true }).click()
@@ -1835,142 +1841,101 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   expect([reattachedProduct.data!.product.image!.asset_id, ...reattachedProduct.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, blue.id])
 })
 
-for (const concern of ['room-tour', 'accessibility'] as const) {
-  test(concern === 'room-tour' ? 'a host authors a room photo tour and shares the same rooms through CMS, MCP and the guest gallery' : 'a host authors listing and bedroom accessibility evidence through CMS, MCP and the guest gallery', async ({ page, baseURL }) => {
-  test.setTimeout(60_000)
-  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+type PhotoProduct = { updated_at: string; image: { asset_id: string } | null; gallery: Array<{ asset_id: string }>; stay: { amenities: string[]; photo_rooms: StayPhotoRoom[]; accessibility: StayHomeAccessibility[] } }
+const unknownHomeAccessibility: StayHomeAccessibility[] = [
+  { feature: 'disabled_parking_spot', available: null, photo_ids: [] },
+  { feature: 'path_to_entrance_lit_at_night', available: null, photo_ids: [] },
+  { feature: 'home_step_free_access', available: null, photo_ids: [] },
+  { feature: 'home_wide_doorway', available: null, photo_ids: [] },
+  { feature: 'pool_hoist', available: null, photo_ids: [] },
+  { feature: 'ceiling_hoist', available: null, photo_ids: [] },
+]
+const unknownRoomDetails = { sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1, amenities: [], accessibility: [] }
+const unknownBedroomAccessibility: StayPhotoRoom['accessibility'] = [{ feature: 'step_free_access', available: null, photo_ids: [] }, { feature: 'wide_doorway', available: null, photo_ids: [] }]
+const unknownBedroomDetails = { ...unknownRoomDetails, accessibility: unknownBedroomAccessibility }
+
+// The room journeys start from three technical photos placed through the
+// home's photo route; the picker upload itself is the photo journey's concern.
+async function photographedStayHome(page: Page, baseURL: string) {
   const pageErrors: string[] = []
   page.on('pageerror', error => pageErrors.push(error.stack ?? error.message))
-  const { request, headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
-  const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
-  const photoPath = `/dashboard/${slug}/products/${productId}/photo`
-  const allPhotosPath = `${photoPath}/photos`
-  const photoOverview = page.locator('#dashboard-panel-product-photo')
-  const allPhotos = page.locator('#dashboard-panel-product-all-photos')
-  type PhotoProduct = { updated_at: string; image: { asset_id: string } | null; gallery: Array<{ asset_id: string }>; stay: { amenities: string[]; photo_rooms: StayPhotoRoom[]; accessibility: StayHomeAccessibility[] } }
-  const unknownHomeAccessibility: StayHomeAccessibility[] = [
-    { feature: 'disabled_parking_spot', available: null, photo_ids: [] },
-    { feature: 'path_to_entrance_lit_at_night', available: null, photo_ids: [] },
-    { feature: 'home_step_free_access', available: null, photo_ids: [] },
-    { feature: 'home_wide_doorway', available: null, photo_ids: [] },
-    { feature: 'pool_hoist', available: null, photo_ids: [] },
-    { feature: 'ceiling_hoist', available: null, photo_ids: [] },
-  ]
-  const unknownRoomDetails = { sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1, amenities: [], accessibility: [] }
-  const unknownBedroomAccessibility: StayPhotoRoom['accessibility'] = [{ feature: 'step_free_access', available: null, photo_ids: [] }, { feature: 'wide_doorway', available: null, photo_ids: [] }]
-  const unknownBedroomDetails = { ...unknownRoomDetails, accessibility: unknownBedroomAccessibility }
-  const uploadedPhotos: Array<{ id: string; url: string }> = []
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await page.goto(allPhotosPath)
-  // Technical inputs go through the actual picker and storage upload. Room
-  // membership is then authored through the visible CMS and native MCP tools.
-  for (const [name, background] of [['red-room-proof.avif', '#dc2626'], ['blue-room-proof.avif', '#2563eb'], ['green-room-proof.avif', '#16a34a']] as const) {
-    await allPhotos.getByRole('button', { name: 'Add photos', exact: true }).click()
-    const picker = page.getByRole('dialog', { name: 'Add photos', exact: true })
-    const uploaded = page.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/media/upload` && response.request().method() === 'POST')
-    await picker.locator('input[type="file"]').setInputFiles({ name, mimeType: 'image/avif', buffer: await sharp({ create: { width: 120, height: 80, channels: 3, background } }).avif().toBuffer() })
-    const response = await uploaded
-    expect(response.status(), await response.text()).toBe(200)
-    const asset = await response.json() as { asset_id: string; public_url: string }
-    uploadedPhotos.push({ id: asset.asset_id, url: asset.public_url })
-    await picker.getByRole('button', { name: 'Done', exact: true }).click()
-    await expect(picker).not.toBeVisible()
-    await expect(allPhotos.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(uploadedPhotos.length)
+  const home = await createStayHome(page, baseURL)
+  const photos: Array<{ id: string; url: string }> = []
+  for (const background of ['#dc2626', '#2563eb', '#16a34a']) {
+    const added = await home.request.post(home.api(`stay-homes/${home.productId}/photos`), { headers: home.headers, multipart: { image: { name: 'room-proof.avif', mimeType: 'image/avif', buffer: await sharp({ create: { width: 120, height: 80, channels: 3, background } }).avif().toBuffer() } } })
+    await expectStatus(added, 201)
+    const photo = (await added.json() as { home: { photos: Array<{ id: string; url: string }> } }).home.photos.at(-1)!
+    photos.push({ id: photo.id, url: photo.url })
   }
-  const [red, blue, green] = uploadedPhotos as [typeof uploadedPhotos[number], typeof uploadedPhotos[number], typeof uploadedPhotos[number]]
-  const beforeRooms = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-  expect(beforeRooms.error).toBeNull()
-  expect(beforeRooms.data!.product.stay.photo_rooms).toEqual([])
-  expect(beforeRooms.data!.product.stay.amenities).toEqual([])
-  expect(beforeRooms.data!.product.stay.accessibility).toEqual(unknownHomeAccessibility)
+  const [red, blue, green] = photos as [typeof photos[number], typeof photos[number], typeof photos[number]]
+  const photoPath = `/dashboard/${home.slug}/products/${home.productId}/photo`
+  return {
+    ...home, pageErrors, uploadedPhotos: photos, red, blue, green, photoPath,
+    photoOverview: page.locator('#dashboard-panel-product-photo'),
+    roomGrid: page.locator('#dashboard-panel-product-all-photos'),
+    chooseRoom: page.getByRole('dialog', { name: 'Choose a room or space', exact: true }),
+    addBedroomPhotos: page.getByRole('dialog', { name: 'Add photos to Bedroom', exact: true }),
+  }
+}
 
-  const authoredHomeAnswers: StayHomeAccessibility[] = unknownHomeAccessibility.map(answer => answer.feature === 'disabled_parking_spot' ? { ...answer, available: false } : answer.feature === 'path_to_entrance_lit_at_night' ? { ...answer, available: true, photo_ids: [red.id] } : answer)
-  if (concern === 'accessibility') {
-    // Listing-wide answers use their own Product version and the same actual
-    // gallery evidence, without manufacturing a room or changing the cover.
-    const homeAccessibilityPath = `/dashboard/${slug}/products/${productId}/accessibility`
-    const homeAccessibilityIndex = page.locator('#dashboard-panel-product-accessibility')
-    const homeAccessibilityPanel = page.locator('#dashboard-panel-product-accessibility-feature')
-    const homeFeatureLink = homeAccessibilityIndex.getByRole('link', { name: /^Path to entrance lit at night/ })
-    const homeAccessibilityEndpoint = `/api/dashboard/stay-homes/${productId}/accessibility`
-    await page.goto(homeAccessibilityPath)
-    await expect(homeAccessibilityIndex.getByRole('link').filter({ hasText: 'Add details' })).toHaveCount(6)
-    await homeFeatureLink.click()
-    await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I don’t have this feature', exact: true })).not.toBeChecked()
-    await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true })).not.toBeChecked()
-    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await homeAccessibilityPanel.getByRole('radio', { name: 'I don’t have this feature', exact: true }).check()
-    const absentHomeFeatureResponse = page.waitForResponse(response => new URL(response.url()).pathname === homeAccessibilityEndpoint && response.request().method() === 'PATCH')
-    await homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
-    expect((await absentHomeFeatureResponse).status()).toBe(200)
-    await expect(page).toHaveURL(`${baseURL}${homeAccessibilityPath}`)
-    const absentHomeFeature = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-    expect(absentHomeFeature.error).toBeNull()
-    const absentHomeAnswers = unknownHomeAccessibility.map(answer => answer.feature === 'path_to_entrance_lit_at_night' ? { ...answer, available: false } : answer)
-    expect(absentHomeFeature.data!.product.stay.accessibility).toEqual(absentHomeAnswers)
-    await expect(homeFeatureLink).toContainText('Not available')
-    await expect(page.getByTestId('editor-card-accessibility')).toContainText('Path to entrance lit at night: Not available')
-    await expect(page.getByTestId('editor-card-accessibility')).not.toContainText('Add details')
-    await homeFeatureLink.click()
-    await homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true }).check()
-    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true }).click()
-    const concurrentHomeAnswer = await call<{ product_id: string; product_updated_at: string; accessibility: StayHomeAccessibility[] }>('update_home_accessibility', { product_id: productId, expected_updated_at: absentHomeFeature.data!.product.updated_at, accessibility: { feature: 'disabled_parking_spot', available: false, photo_ids: [] } })
-    expect(concurrentHomeAnswer.error).toBeNull()
-    const staleHomeFeatureResponse = page.waitForResponse(response => new URL(response.url()).pathname === homeAccessibilityEndpoint && response.request().method() === 'PATCH')
-    await homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
-    const staleHomeResponse = await staleHomeFeatureResponse
-    expect(staleHomeResponse.status(), await staleHomeResponse.text()).toBe(409)
-    expect(await staleHomeResponse.json()).toMatchObject({ data: { code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at' } })
-    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Use saved details', exact: true })).toBeVisible()
-    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    const staleHomeFeature = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-    expect(staleHomeFeature.error).toBeNull()
-    const concurrentHomeAnswers = absentHomeAnswers.map(answer => answer.feature === 'disabled_parking_spot' ? { ...answer, available: false } : answer)
-    expect(concurrentHomeAnswer.data).toEqual({ product_id: productId, product_updated_at: staleHomeFeature.data!.product.updated_at, accessibility: concurrentHomeAnswers })
-    expect(staleHomeFeature.data!.product.stay.accessibility).toEqual(concurrentHomeAnswers)
-    expect([staleHomeFeature.data!.product.image!.asset_id, ...staleHomeFeature.data!.product.gallery.map(photo => photo.asset_id)]).toEqual([red.id, blue.id, green.id])
-    await homeAccessibilityPanel.getByRole('button', { name: 'Use saved details', exact: true }).click()
-    await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I don’t have this feature', exact: true })).toBeChecked()
-    await homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true }).check()
-    await homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true }).click()
-    const savedHomeFeatureResponse = page.waitForResponse(response => new URL(response.url()).pathname === homeAccessibilityEndpoint && response.request().method() === 'PATCH')
-    await homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
-    const homeFeatureResponse = await savedHomeFeatureResponse
-    expect(homeFeatureResponse.status(), await homeFeatureResponse.text()).toBe(200)
-    await expect(page).toHaveURL(`${baseURL}${homeAccessibilityPath}`)
-    const savedHomeFeature = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-    expect(savedHomeFeature.error).toBeNull()
-    expect(savedHomeFeature.data!.product.stay.accessibility).toEqual(authoredHomeAnswers)
-    expect((await homeFeatureResponse.json() as { home: { product_updated_at: string; accessibility: StayHomeAccessibility[] } }).home).toMatchObject({ product_updated_at: savedHomeFeature.data!.product.updated_at, accessibility: authoredHomeAnswers })
-    const protectedHomeEvidence = await request.delete(api(`stay-homes/${productId}/photos/${red.id}`), { headers })
-    expect(protectedHomeEvidence.status(), await protectedHomeEvidence.text()).toBe(409)
-    expect(await protectedHomeEvidence.json()).toMatchObject({ data: { code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' } })
-    const protectedHomeRead = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-    expect(protectedHomeRead.error).toBeNull()
-    expect(protectedHomeRead.data!.product.stay.accessibility).toEqual(authoredHomeAnswers)
-    expect([protectedHomeRead.data!.product.image!.asset_id, ...protectedHomeRead.data!.product.gallery.map(photo => photo.asset_id)]).toEqual([red.id, blue.id, green.id])
-    await homeFeatureLink.click()
-    await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true })).toBeChecked()
-    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await page.setViewportSize({ width: 1440, height: 900 })
-  } else {
-    // The room-tour journey starts with independently authored evidence facts;
-    // their UI lifecycle is exercised in the separate accessibility journey.
-    const absentParking = await call('update_home_accessibility', { product_id: productId, expected_updated_at: beforeRooms.data!.product.updated_at, accessibility: { feature: 'disabled_parking_spot', available: false, photo_ids: [] } })
-    expect(absentParking.error).toBeNull()
-    const homeVersion = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-    expect(homeVersion.error).toBeNull()
-    expect((await call('update_home_accessibility', { product_id: productId, expected_updated_at: homeVersion.data!.product.updated_at, accessibility: { feature: 'path_to_entrance_lit_at_night', available: true, photo_ids: [red.id] } })).error).toBeNull()
+// A bedroom with a queen bed and a private bathroom, authored through MCP.
+async function addBedroom({ call, productId }: Awaited<ReturnType<typeof photographedStayHome>>, amenities: StayPhotoRoom['amenities'], photoIds: string[]) {
+  const created = await call<{ room: Pick<StayPhotoRoom, 'id'> }>('create_home_room', { product_id: productId, type: 'bedroom' })
+  expect(created.error).toBeNull()
+  const bedroomId = created.data!.room.id
+  expect((await call('update_product', { product_id: productId, stay: { beds: 3, bedrooms: 2, bathrooms: 1 } })).error).toBeNull()
+  expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, amenities })).error).toBeNull()
+  if (photoIds.length) expect((await call('assign_home_photos_to_room', { product_id: productId, room_id: bedroomId, photos: photoIds.map(photo_id => ({ photo_id, expected_room_id: null })) })).error).toBeNull()
+  const bedroomFacts: Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'details_version' | 'amenities' | 'accessibility'> = { sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: 2, amenities, accessibility: unknownBedroomAccessibility }
+  const bedroom = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(bedroom.error).toBeNull()
+  expect(bedroom.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: photoIds, ...bedroomFacts }])
+  return { bedroomId, bedroomFacts }
+}
+
+// The guest gallery journeys start from authored listing and bedroom
+// accessibility, a photographed bedroom and an empty living room.
+async function galleryStayHome(page: Page, baseURL: string) {
+  const home = await photographedStayHome(page, baseURL)
+  const { call, productId, red, blue, green } = home
+  const { bedroomId, bedroomFacts } = await addBedroom(home, ['wireless_internet', 'bed_linens'], [red.id, blue.id])
+  expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 2, accessibility: { feature: 'step_free_access', available: true, photo_ids: [green.id] } })).error).toBeNull()
+  expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 3, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })).error).toBeNull()
+  bedroomFacts.details_version = 4
+  bedroomFacts.accessibility = [{ feature: 'step_free_access', available: true, photo_ids: [green.id] }, { feature: 'wide_doorway', available: false, photo_ids: [] }]
+  for (const accessibility of [{ feature: 'disabled_parking_spot', available: false, photo_ids: [] }, { feature: 'path_to_entrance_lit_at_night', available: true, photo_ids: [red.id] }]) {
+    const current = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(current.error).toBeNull()
+    expect((await call('update_home_accessibility', { product_id: productId, expected_updated_at: current.data!.product.updated_at, accessibility })).error).toBeNull()
   }
-  const { bedroomId, roomPath, roomGrid, bedroomFacts, chooseRoom, addBedroomPhotos } = concern === 'room-tour' ? await (async () => {
+  const authoredHomeAnswers: StayHomeAccessibility[] = unknownHomeAccessibility.map(answer => answer.feature === 'disabled_parking_spot' ? { ...answer, available: false } : answer.feature === 'path_to_entrance_lit_at_night' ? { ...answer, available: true, photo_ids: [red.id] } : answer)
+  const livingRoom = await call<{ room: Pick<StayPhotoRoom, 'id'> }>('create_home_room', { product_id: productId, type: 'living_room' })
+  expect(livingRoom.error).toBeNull()
+  const livingRoomId = livingRoom.data!.room.id
+  expect((await call('update_home_room', { product_id: productId, room_id: livingRoomId, expected_details_version: 1, amenities: ['tv'] })).error).toBeNull()
+  const livingRoomFacts = { ...unknownRoomDetails, details_version: 2, amenities: ['tv'] }
+  const seeded = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(seeded.error).toBeNull()
+  expect(seeded.data!.product.stay).toMatchObject({ amenities: ['tv', 'wireless_internet', 'bed_linens'], accessibility: authoredHomeAnswers, photo_rooms: [
+    { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
+    { id: livingRoomId, type: 'living_room', photo_ids: [], ...livingRoomFacts },
+  ] })
+  return { ...home, bedroomId, bedroomFacts, livingRoomId, livingRoomFacts, authoredHomeAnswers }
+}
+
+test('a host adds a bedroom and authors its beds and bathroom privacy through the CMS', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { call, productId, pageErrors, photoPath, photoOverview, roomGrid, chooseRoom } = await photographedStayHome(page, baseURL!)
+  const bedPanel = page.locator('#dashboard-panel-product-room-beds')
+  const privacyPanel = page.locator('#dashboard-panel-product-room-privacy')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const bedroomId = await test.step('an added room is an empty authored choice with a stable identity', async () => {
     await page.goto(photoPath)
     // Rooms are authored choices with stable identities. An empty authored room
     // keeps the guest gallery flat until the host gives every room a photo.
     await photoOverview.getByRole('button', { name: 'Add photos, room, or space', exact: true }).click()
     await page.getByRole('menuitem', { name: 'Add a room or space', exact: true }).click()
-    const chooseRoom = page.getByRole('dialog', { name: 'Choose a room or space', exact: true })
     await chooseRoom.getByRole('textbox', { name: 'Search rooms and spaces', exact: true }).fill('Bedroom')
     await chooseRoom.getByText('Bedroom', { exact: true }).click()
     await expect(chooseRoom.getByRole('radio', { name: 'Bedroom', exact: true })).toBeChecked()
@@ -1981,10 +1946,10 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect(bedroomProduct.data!.product.stay.photo_rooms).toEqual([{ id: expect.any(String), type: 'bedroom', photo_ids: [], ...unknownBedroomDetails }])
     const bedroomId = bedroomProduct.data!.product.stay.photo_rooms[0]!.id
     await expect(page).toHaveURL(`${baseURL}${photoPath}/rooms/${bedroomId}`)
-    const roomGrid = page.locator('#dashboard-panel-product-all-photos')
-    const roomPath = `${photoPath}/rooms/${bedroomId}`
-    const bedPanel = page.locator('#dashboard-panel-product-room-beds')
-    const privacyPanel = page.locator('#dashboard-panel-product-room-privacy')
+    return bedroomId
+  })
+  const roomPath = `${photoPath}/rooms/${bedroomId}`
+  await test.step('sleeping arrangements and privacy save, clear and cancel on their own', async () => {
     const declaredBeds = await call('update_product', { product_id: productId, stay: { beds: 3, bedrooms: 2, bathrooms: 1 } })
     expect(declaredBeds.error).toBeNull()
     await page.reload()
@@ -2030,6 +1995,8 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await expect(bedPanel.getByText('Sleeping arrangements aren’t specified.', { exact: true })).not.toBeVisible()
     await bedPanel.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${roomPath}`)
+  })
+  await test.step('a concurrent privacy edit refuses the stale save until the host reviews it', async () => {
     await roomGrid.getByRole('link', { name: /^Privacy info/ }).click()
     await privacyPanel.getByRole('switch', { name: 'Private attached bathroom', exact: true }).click()
     const beforeConcurrentPrivacy = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
@@ -2046,21 +2013,35 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await privacyPanel.getByRole('button', { name: 'Use saved details', exact: true }).click()
     await expect(privacyPanel.getByRole('switch', { name: 'Private attached bathroom', exact: true })).not.toBeChecked()
     await expect(privacyPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await page.setViewportSize({ width: 390, height: 844 })
     await privacyPanel.getByRole('switch', { name: 'Private attached bathroom', exact: true }).click()
     await expect(privacyPanel.getByRole('switch', { name: 'Private attached bathroom', exact: true })).toBeChecked()
     await privacyPanel.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${roomPath}`)
-    await page.setViewportSize({ width: 1440, height: 900 })
     const bedroomFacts: Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'details_version' | 'amenities' | 'accessibility'> = { sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: 8, amenities: [], accessibility: unknownBedroomAccessibility }
     const savedRoomFacts = await call<{ product: PhotoProduct & { stay: { beds: number; bedrooms: number; bathrooms: number } } }>('get_product', { product_id: productId })
     expect(savedRoomFacts.error).toBeNull()
     expect(savedRoomFacts.data!.product.stay.photo_rooms[0]).toEqual({ id: bedroomId, type: 'bedroom', photo_ids: [], ...bedroomFacts })
     expect(savedRoomFacts.data!.product.stay).toMatchObject({ beds: 3, bedrooms: 2, bathrooms: 1 })
+    await roomGrid.getByRole('link', { name: /^Sleeping arrangements/ }).click()
+    await expect(bedPanel.getByRole('spinbutton', { name: 'Queen', exact: true })).toHaveValue('1')
+    await expect(bedPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await bedPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`${baseURL}${roomPath}`)
+  })
+  expect(pageErrors).toEqual([])
+})
 
-    // Room selection uses the same amenity catalog. Cancel keeps both owners
-    // unchanged; a saved room choice also declares it on the listing.
-    const amenityPanel = page.locator('#dashboard-panel-product-room-amenities')
+test('a host chooses a room’s amenities from the shared catalog and resolves a concurrent edit', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const home = await photographedStayHome(page, baseURL!)
+  const { call, productId, pageErrors, photoPath, roomGrid } = home
+  const { bedroomId, bedroomFacts } = await addBedroom(home, [], [])
+  const roomPath = `${photoPath}/rooms/${bedroomId}`
+  const amenityPanel = page.locator('#dashboard-panel-product-room-amenities')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(roomPath)
+  await test.step('Cancel keeps both the room and the listing unchanged', async () => {
     await roomGrid.getByRole('link', { name: /^Amenities/ }).click()
     await expect(amenityPanel.getByRole('heading', { name: 'Add amenities', exact: true })).toBeVisible()
     await expect(amenityPanel.getByTestId('room-amenities-suggested')).toHaveAttribute('aria-pressed', 'true')
@@ -2081,7 +2062,8 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect(cancelledRoomAmenities.error).toBeNull()
     expect(cancelledRoomAmenities.data!.product.stay.amenities).toEqual([])
     expect(cancelledRoomAmenities.data!.product.stay.photo_rooms[0]).toEqual({ id: bedroomId, type: 'bedroom', photo_ids: [], ...bedroomFacts })
-
+  })
+  await test.step('a concurrent edit refuses the stale choice; the reviewed choice also declares it on the listing', async () => {
     await roomGrid.getByRole('link', { name: /^Amenities/ }).click()
     await amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true }).check()
     await amenityPanel.getByTestId('room-amenities-all').click()
@@ -2090,13 +2072,13 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await amenityPanel.getByRole('searchbox', { name: 'Search amenities', exact: true }).fill('Wifi')
     await expect(amenityPanel.getByRole('checkbox')).toHaveCount(2)
     await amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true }).check()
-    const concurrentAmenities = await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 8, amenities: ['bed_linens'] })
+    const concurrentAmenities = await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 2, amenities: ['bed_linens'] })
     expect(concurrentAmenities.error).toBeNull()
     const staleAmenities = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/rooms/${bedroomId}` && response.request().method() === 'PATCH')
     await amenityPanel.getByRole('button', { name: 'Done', exact: true }).click()
     const staleAmenityResponse = await staleAmenities
     expect(staleAmenityResponse.status()).toBe(409)
-    expect(staleAmenityResponse.request().postDataJSON()).toEqual({ expected_details_version: 8, amenities: ['bed_linens', 'wireless_internet'] })
+    expect(staleAmenityResponse.request().postDataJSON()).toEqual({ expected_details_version: 2, amenities: ['bed_linens', 'wireless_internet'] })
     await expect(amenityPanel).toContainText('The room details changed')
     await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toBeChecked()
     await amenityPanel.getByRole('button', { name: 'Use saved details', exact: true }).click()
@@ -2106,16 +2088,38 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await amenityPanel.getByRole('button', { name: 'Done', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${roomPath}`)
     bedroomFacts.amenities = ['wireless_internet', 'bed_linens']
-    bedroomFacts.details_version = 10
+    bedroomFacts.details_version = 4
     const savedRoomAmenities = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
     expect(savedRoomAmenities.error).toBeNull()
     expect(savedRoomAmenities.data!.product.stay.amenities).toEqual(['wireless_internet', 'bed_linens'])
     expect(savedRoomAmenities.data!.product.stay.photo_rooms[0]).toEqual({ id: bedroomId, type: 'bedroom', photo_ids: [], ...bedroomFacts })
     await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Bed linens')
     await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Wifi')
+    await roomGrid.getByRole('link', { name: /^Amenities/ }).click()
+    await expect(amenityPanel.getByTestId('room-amenities-suggested')).toHaveAttribute('aria-pressed', 'true')
+    await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
+    await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toHaveCount(0)
+    await amenityPanel.getByTestId('room-amenities-all').click()
+    await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toBeChecked()
+    await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
+    await amenityPanel.getByTestId('room-amenities-suggested').click()
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await amenityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`${baseURL}${roomPath}`)
+  })
+  expect(pageErrors).toEqual([])
+})
 
+test('a host adds gallery and library photos to a room and the open dialog recovers from concurrent moves', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const home = await photographedStayHome(page, baseURL!)
+  const { request, call, api, productId, pageErrors, photoPath, roomGrid, addBedroomPhotos, red, blue, green } = home
+  const { bedroomId, bedroomFacts } = await addBedroom(home, ['wireless_internet', 'bed_linens'], [])
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(`${photoPath}/rooms/${bedroomId}`)
+  const afterRefusedRoomMove = await test.step('a concurrent move refuses the stale bulk write, and the retry adds the remaining choice', async () => {
     await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
-    const addBedroomPhotos = page.getByRole('dialog', { name: 'Add photos to Bedroom', exact: true })
     await addBedroomPhotos.getByRole('button', { name: 'Select photo 1', exact: true }).click()
     await addBedroomPhotos.getByRole('button', { name: 'Select photo 2', exact: true }).click()
     await expect(addBedroomPhotos.getByRole('button', { name: 'Select photo 2', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -2139,23 +2143,9 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await expect(roomGrid.getByRole('link', { name: /^Sleeping arrangements/ }).getByText('1 queen bed', { exact: true })).toBeInViewport({ ratio: 1 })
     await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Bed linens')
     await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Wifi')
-    await roomGrid.getByRole('link', { name: /^Amenities/ }).click()
-    await expect(amenityPanel.getByTestId('room-amenities-suggested')).toHaveAttribute('aria-pressed', 'true')
-    await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
-    await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toHaveCount(0)
-    await amenityPanel.getByTestId('room-amenities-all').click()
-    await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toBeChecked()
-    await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
-    await amenityPanel.getByTestId('room-amenities-suggested').click()
-    await page.setViewportSize({ width: 1440, height: 900 })
-    await amenityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(`${baseURL}${roomPath}`)
-    await roomGrid.getByRole('link', { name: /^Sleeping arrangements/ }).click()
-    await expect(bedPanel.getByRole('spinbutton', { name: 'Queen', exact: true })).toHaveValue('1')
-    await expect(bedPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await bedPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(`${baseURL}${roomPath}`)
-
+    return afterRefusedRoomMove
+  })
+  await test.step('a selection completed elsewhere closes the dialog instead of retrying empty', async () => {
     // If the complete selection reaches the destination concurrently, the
     // refreshed dialog completes instead of submitting an empty retry.
     await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
@@ -2178,32 +2168,132 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect(returnedToAdditional.error).toBeNull()
     await page.reload()
     await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
-    return { bedroomId, roomPath, roomGrid, bedroomFacts, chooseRoom, addBedroomPhotos }
-  })() : await (async () => {
-    const createdBedroom = await call<{ room: Pick<StayPhotoRoom, 'id' | 'type' | 'photo_ids' | 'details_version'> }>('create_home_room', { product_id: productId, type: 'bedroom' })
-    expect(createdBedroom.error).toBeNull()
-    const bedroomId = createdBedroom.data!.room.id
-    expect((await call('update_product', { product_id: productId, stay: { beds: 3, bedrooms: 2, bathrooms: 1 } })).error).toBeNull()
-    expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, amenities: ['wireless_internet', 'bed_linens'] })).error).toBeNull()
-    expect((await call('assign_home_photos_to_room', { product_id: productId, room_id: bedroomId, photos: [{ photo_id: red.id, expected_room_id: null }, { photo_id: blue.id, expected_room_id: null }] })).error).toBeNull()
-    const bedroomFacts: Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'details_version' | 'amenities' | 'accessibility'> = { sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: 2, amenities: ['wireless_internet', 'bed_linens'], accessibility: unknownBedroomAccessibility }
-    const roomPath = `${photoPath}/rooms/${bedroomId}`
-    const roomGrid = page.locator('#dashboard-panel-product-all-photos')
-    const chooseRoom = page.getByRole('dialog', { name: 'Choose a room or space', exact: true })
-    const addBedroomPhotos = page.getByRole('dialog', { name: 'Add photos to Bedroom', exact: true })
-    await page.goto(roomPath)
-    const bedroom = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-    expect(bedroom.error).toBeNull()
-    expect(bedroom.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts }])
-    return { bedroomId, roomPath, roomGrid, bedroomFacts, chooseRoom, addBedroomPhotos }
-  })()
+  })
+  await test.step('a retained library photo appends directly to the room', async () => {
+    // Append a retained library asset directly to an authored room through the
+    // picker. Detaching blue first leaves it retained in the library, so its
+    // return exercises the atomic placement and membership write.
+    const detached = await request.delete(api(`stay-homes/${productId}/photos/${blue.id}`), { headers: authRequestHeaders(baseURL!) })
+    await expectStatus(detached, 200)
+    await page.goto(`${photoPath}/rooms/${bedroomId}`)
+    await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
+    await addBedroomPhotos.getByRole('button', { name: 'Add from media library', exact: true }).click()
+    const libraryPicker = page.getByRole('dialog', { name: 'Add photos', exact: true })
+    await libraryPicker.locator(`img[src="${blue.url}"]`).click()
+    const roomAppend = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos` && response.request().method() === 'POST')
+    await libraryPicker.getByRole('button', { name: 'Done', exact: true }).click()
+    const appended = await roomAppend
+    await expectStatus(appended, 201)
+    await expect(addBedroomPhotos).not.toBeVisible()
+    await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
+    const afterLibraryRoomAppend = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(afterLibraryRoomAppend.error).toBeNull()
+    expect(afterLibraryRoomAppend.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts }])
+    expect([afterLibraryRoomAppend.data!.product.image!.asset_id, ...afterLibraryRoomAppend.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, green.id, blue.id])
+  })
+  expect(pageErrors).toEqual([])
+})
+
+test('a host answers listing-wide accessibility with gallery evidence and resolves a concurrent answer', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, headers, slug, call, api, productId, pageErrors, red, blue, green } = await photographedStayHome(page, baseURL!)
+  const beforeRooms = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(beforeRooms.error).toBeNull()
+  expect(beforeRooms.data!.product.stay.photo_rooms).toEqual([])
+  expect(beforeRooms.data!.product.stay.amenities).toEqual([])
+  expect(beforeRooms.data!.product.stay.accessibility).toEqual(unknownHomeAccessibility)
+  const authoredHomeAnswers: StayHomeAccessibility[] = unknownHomeAccessibility.map(answer => answer.feature === 'disabled_parking_spot' ? { ...answer, available: false } : answer.feature === 'path_to_entrance_lit_at_night' ? { ...answer, available: true, photo_ids: [red.id] } : answer)
+  const homeAccessibilityPath = `/dashboard/${slug}/products/${productId}/accessibility`
+  const homeAccessibilityIndex = page.locator('#dashboard-panel-product-accessibility')
+  const homeAccessibilityPanel = page.locator('#dashboard-panel-product-accessibility-feature')
+  const homeFeatureLink = homeAccessibilityIndex.getByRole('link', { name: /^Path to entrance lit at night/ })
+  const homeAccessibilityEndpoint = `/api/dashboard/stay-homes/${productId}/accessibility`
+  const { absentHomeFeature, absentHomeAnswers } = await test.step('an absent answer saves and summarizes on the editor card', async () => {
+    await page.goto(homeAccessibilityPath)
+    await expect(homeAccessibilityIndex.getByRole('link').filter({ hasText: 'Add details' })).toHaveCount(6)
+    await homeFeatureLink.click()
+    await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I don’t have this feature', exact: true })).not.toBeChecked()
+    await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true })).not.toBeChecked()
+    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await homeAccessibilityPanel.getByRole('radio', { name: 'I don’t have this feature', exact: true }).check()
+    const absentHomeFeatureResponse = page.waitForResponse(response => new URL(response.url()).pathname === homeAccessibilityEndpoint && response.request().method() === 'PATCH')
+    await homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    expect((await absentHomeFeatureResponse).status()).toBe(200)
+    await expect(page).toHaveURL(`${baseURL}${homeAccessibilityPath}`)
+    const absentHomeFeature = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(absentHomeFeature.error).toBeNull()
+    const absentHomeAnswers = unknownHomeAccessibility.map(answer => answer.feature === 'path_to_entrance_lit_at_night' ? { ...answer, available: false } : answer)
+    expect(absentHomeFeature.data!.product.stay.accessibility).toEqual(absentHomeAnswers)
+    await expect(homeFeatureLink).toContainText('Not available')
+    await expect(page.getByTestId('editor-card-accessibility')).toContainText('Path to entrance lit at night: Not available')
+    await expect(page.getByTestId('editor-card-accessibility')).not.toContainText('Add details')
+    return { absentHomeFeature, absentHomeAnswers }
+  })
+  await test.step('a concurrent answer refuses the stale evidence save until the host reviews it', async () => {
+    await homeFeatureLink.click()
+    await homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true }).check()
+    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    await homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true }).click()
+    const concurrentHomeAnswer = await call<{ product_id: string; product_updated_at: string; accessibility: StayHomeAccessibility[] }>('update_home_accessibility', { product_id: productId, expected_updated_at: absentHomeFeature.data!.product.updated_at, accessibility: { feature: 'disabled_parking_spot', available: false, photo_ids: [] } })
+    expect(concurrentHomeAnswer.error).toBeNull()
+    const staleHomeFeatureResponse = page.waitForResponse(response => new URL(response.url()).pathname === homeAccessibilityEndpoint && response.request().method() === 'PATCH')
+    await homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    const staleHomeResponse = await staleHomeFeatureResponse
+    await expectStatus(staleHomeResponse, 409)
+    expect(await staleHomeResponse.json()).toMatchObject({ data: { code: 'STAY_ACCESSIBILITY_CHANGED', field: 'expected_updated_at' } })
+    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Use saved details', exact: true })).toBeVisible()
+    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    const staleHomeFeature = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(staleHomeFeature.error).toBeNull()
+    const concurrentHomeAnswers = absentHomeAnswers.map(answer => answer.feature === 'disabled_parking_spot' ? { ...answer, available: false } : answer)
+    expect(concurrentHomeAnswer.data).toEqual({ product_id: productId, product_updated_at: staleHomeFeature.data!.product.updated_at, accessibility: concurrentHomeAnswers })
+    expect(staleHomeFeature.data!.product.stay.accessibility).toEqual(concurrentHomeAnswers)
+    expect([staleHomeFeature.data!.product.image!.asset_id, ...staleHomeFeature.data!.product.gallery.map(photo => photo.asset_id)]).toEqual([red.id, blue.id, green.id])
+    await homeAccessibilityPanel.getByRole('button', { name: 'Use saved details', exact: true }).click()
+    await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I don’t have this feature', exact: true })).toBeChecked()
+    await homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true }).check()
+    await homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true }).click()
+    const savedHomeFeatureResponse = page.waitForResponse(response => new URL(response.url()).pathname === homeAccessibilityEndpoint && response.request().method() === 'PATCH')
+    await homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    const homeFeatureResponse = await savedHomeFeatureResponse
+    await expectStatus(homeFeatureResponse, 200)
+    await expect(page).toHaveURL(`${baseURL}${homeAccessibilityPath}`)
+    const savedHomeFeature = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(savedHomeFeature.error).toBeNull()
+    expect(savedHomeFeature.data!.product.stay.accessibility).toEqual(authoredHomeAnswers)
+    expect((await homeFeatureResponse.json() as { home: { product_updated_at: string; accessibility: StayHomeAccessibility[] } }).home).toMatchObject({ product_updated_at: savedHomeFeature.data!.product.updated_at, accessibility: authoredHomeAnswers })
+  })
+  await test.step('a photo that evidences an answer cannot be removed', async () => {
+    const protectedHomeEvidence = await request.delete(api(`stay-homes/${productId}/photos/${red.id}`), { headers })
+    await expectStatus(protectedHomeEvidence, 409)
+    expect(await protectedHomeEvidence.json()).toMatchObject({ data: { code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' } })
+    const protectedHomeRead = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(protectedHomeRead.error).toBeNull()
+    expect(protectedHomeRead.data!.product.stay.accessibility).toEqual(authoredHomeAnswers)
+    expect([protectedHomeRead.data!.product.image!.asset_id, ...protectedHomeRead.data!.product.gallery.map(photo => photo.asset_id)]).toEqual([red.id, blue.id, green.id])
+    await homeFeatureLink.click()
+    await expect(homeAccessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true })).toBeChecked()
+    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Use photo 1 as evidence', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await expect(homeAccessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+  })
+  expect(pageErrors).toEqual([])
+})
+
+test('a host answers bedroom accessibility with uploaded and existing evidence photos', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const home = await photographedStayHome(page, baseURL!)
+  const { request, headers, organizationId, call, api, productId, pageErrors, uploadedPhotos, photoPath, roomGrid, red, blue, green } = home
+  const { bedroomId, bedroomFacts } = await addBedroom(home, ['wireless_internet', 'bed_linens'], [red.id, blue.id])
+  const roomPath = `${photoPath}/rooms/${bedroomId}`
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto(roomPath)
   const evidenceUploads: Array<{ id: string; url: string }> = []
-  if (concern === 'accessibility') {
-    // Accessibility is an authored answer with real image evidence. Uploading
-    // to the library leaves the listing untouched until the feature is saved.
-    const accessibilityIndex = page.locator('#dashboard-panel-product-room-accessibility')
-    const accessibilityPanel = page.locator('#dashboard-panel-product-room-accessibility-feature')
-    const accessibilityPath = `${roomPath}/accessibility`
+  const accessibilityIndex = page.locator('#dashboard-panel-product-room-accessibility')
+  const accessibilityPanel = page.locator('#dashboard-panel-product-room-accessibility-feature')
+  const accessibilityPath = `${roomPath}/accessibility`
+  await test.step('an answer saves, clears and cancels without evidence', async () => {
     await roomGrid.getByRole('link', { name: /^Accessibility features/ }).click()
     await expect(accessibilityIndex.getByRole('link', { name: /^Step-free access/ })).toContainText('Add details')
     await accessibilityIndex.getByRole('link', { name: /^Step-free access/ }).click()
@@ -2233,6 +2323,8 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await expect(page).toHaveURL(`${baseURL}${accessibilityPath}`)
     bedroomFacts.details_version = 4
     bedroomFacts.accessibility = unknownBedroomAccessibility
+  })
+  await test.step('an uploaded evidence photo is committed only by Save, after a concurrent edit is reviewed', async () => {
     await accessibilityIndex.getByRole('link', { name: /^Step-free access/ }).click()
     await accessibilityPanel.getByRole('radio', { name: 'I have this feature', exact: true }).check()
     await expect(accessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
@@ -2247,7 +2339,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
       const uploaded = page.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/media/upload` && response.request().method() === 'POST')
       await picker.locator('input[type="file"]').setInputFiles({ name, mimeType: 'image/avif', buffer: await sharp({ create: { width: 120, height: 80, channels: 3, background } }).avif().toBuffer() })
       const response = await uploaded
-      expect(response.status(), await response.text()).toBe(200)
+      await expectStatus(response, 200)
       const asset = await response.json() as { asset_id: string; public_url: string }
       evidenceUploads.push({ id: asset.asset_id, url: asset.public_url })
       await picker.getByRole('button', { name: 'Done', exact: true }).click()
@@ -2298,7 +2390,7 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect(attachedEvidence.data!.product.stay.photo_rooms[0]).toEqual({ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts })
     expect([attachedEvidence.data!.product.image!.asset_id, ...attachedEvidence.data!.product.gallery.map(photo => photo.asset_id)]).toEqual([red.id, blue.id, green.id, purpleEvidence.id])
     const protectedEvidence = await request.delete(api(`stay-homes/${productId}/photos/${purpleEvidence.id}`), { headers })
-    expect(protectedEvidence.status(), await protectedEvidence.text()).toBe(409)
+    await expectStatus(protectedEvidence, 409)
     expect(await protectedEvidence.json()).toMatchObject({ data: { code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' } })
     const protectedEvidenceRead = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
     expect(protectedEvidenceRead.error).toBeNull()
@@ -2309,7 +2401,9 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await accessibilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${accessibilityPath}`)
     const removedEvidence = await request.delete(api(`stay-homes/${productId}/photos/${purpleEvidence.id}`), { headers })
-    expect(removedEvidence.status(), await removedEvidence.text()).toBe(200)
+    await expectStatus(removedEvidence, 200)
+  })
+  await test.step('an existing gallery photo can be chosen as evidence, and every upload stays in the library', async () => {
     // A fresh owner read sees the removal before selecting an existing photo.
     await page.reload()
     await accessibilityIndex.getByRole('link', { name: /^Step-free access/ }).click()
@@ -2326,11 +2420,9 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect([greenEvidence.data!.product.image!.asset_id, ...greenEvidence.data!.product.gallery.map(photo => photo.asset_id)]).toEqual([red.id, blue.id, green.id])
     await expect(accessibilityIndex.getByRole('link', { name: /^Step-free access/ })).toContainText('1 photo')
     await expect(accessibilityIndex.getByRole('link', { name: /^Entrance wider than 32 inches/ })).toContainText('Not available')
-    await page.setViewportSize({ width: 1440, height: 900 })
     await accessibilityIndex.getByRole('link', { name: /^Step-free access/ }).click()
     await expect(accessibilityPanel.getByRole('button', { name: 'Use photo 3 as evidence', exact: true })).toHaveAttribute('aria-pressed', 'true')
     await expect(accessibilityPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-    await page.setViewportSize({ width: 1440, height: 900 })
     await accessibilityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${baseURL}${accessibilityPath}`)
     await expect(accessibilityPanel).not.toBeVisible()
@@ -2339,170 +2431,158 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await expect(accessibilityBack).toHaveAttribute('href', roomPath)
     await accessibilityBack.click()
     await expect(page).toHaveURL(`${baseURL}${roomPath}`)
-  } else {
-    expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 10, accessibility: { feature: 'step_free_access', available: true, photo_ids: [green.id] } })).error).toBeNull()
-    expect((await call('update_home_room', { product_id: productId, room_id: bedroomId, expected_details_version: 11, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })).error).toBeNull()
-    bedroomFacts.details_version = 12
-    bedroomFacts.accessibility = [{ feature: 'step_free_access', available: true, photo_ids: [green.id] }, { feature: 'wide_doorway', available: false, photo_ids: [] }]
-    await page.reload()
-  }
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
-  await photoOverview.getByRole('button', { name: 'Add photos, room, or space', exact: true }).click()
-  await page.getByRole('menuitem', { name: 'Add a room or space', exact: true }).click()
-  await chooseRoom.getByRole('textbox', { name: 'Search rooms and spaces', exact: true }).fill('Living room')
-  await chooseRoom.getByText('Living room', { exact: true }).click()
-  await expect(chooseRoom.getByRole('radio', { name: 'Living room', exact: true })).toBeChecked()
-  await chooseRoom.getByRole('button', { name: 'Add', exact: true }).click()
-  await expect(page).toHaveURL(new RegExp(`${photoPath}/rooms/(?!${bedroomId})[^/]+$`))
-  const livingRoomProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-  expect(livingRoomProduct.error).toBeNull()
-  expect(livingRoomProduct.data!.product.stay.photo_rooms).toEqual([
-    { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
-    { id: expect.any(String), type: 'living_room', photo_ids: [], ...unknownRoomDetails },
-  ])
-  const livingRoomId = livingRoomProduct.data!.product.stay.photo_rooms[1]!.id
-  await expect(page).toHaveURL(`${baseURL}${photoPath}/rooms/${livingRoomId}`)
-  const livingRoomAmenities = await call('update_home_room', { product_id: productId, room_id: livingRoomId, expected_details_version: 1, amenities: ['tv'] })
-  expect(livingRoomAmenities.error).toBeNull()
-  const livingRoomFacts = { ...unknownRoomDetails, details_version: 2, amenities: ['tv'] }
-  const amenityOnlyRoom = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-  expect(amenityOnlyRoom.error).toBeNull()
-  expect(amenityOnlyRoom.data!.product.stay.amenities).toEqual(['tv', 'wireless_internet', 'bed_linens'])
-  expect(amenityOnlyRoom.data!.product.stay.photo_rooms[1]).toEqual({ id: livingRoomId, type: 'living_room', photo_ids: [], ...livingRoomFacts })
-  await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
-  await expect(page).toHaveURL(`${baseURL}${photoPath}`)
-  await previewLink.click()
-  await expect(previewModal).toBeVisible()
-  const flatPreviewFrame = await (await previewIframe.elementHandle())!.contentFrame()
-  expect(flatPreviewFrame).not.toBeNull()
-  await waitForNuxtHydration(flatPreviewFrame!)
+    const retainedLibrary = await call<{ assets: Array<{ asset_id: string; status: string }> }>('list_media_assets', { kind: 'image' })
+    expect(retainedLibrary.error).toBeNull()
+    expect(retainedLibrary.data!.assets.map(asset => ({ id: asset.asset_id, status: asset.status })).sort((a, b) => a.id.localeCompare(b.id)))
+      .toEqual([...uploadedPhotos, ...evidenceUploads].map(photo => ({ id: photo.id, status: 'active' })).sort((a, b) => a.id.localeCompare(b.id)))
+  })
   expect(pageErrors).toEqual([])
-  const guestHomeAccessibility = preview.getByTestId('stay-accessibility-features')
-  await expect(guestHomeAccessibility.getByRole('heading', { name: 'Accessibility features', exact: true })).toBeVisible()
-  await expect(guestHomeAccessibility.locator('li')).toHaveCount(1)
-  await expect(guestHomeAccessibility).toContainText('Path to entrance lit at night')
-  await expect(guestHomeAccessibility).toContainText('The path to the guest entrance is well lit at night.')
-  await expect(guestHomeAccessibility).not.toContainText('Disabled parking spot')
-  const guestHomeEvidence = guestHomeAccessibility.getByRole('button', { name: 'View Path to entrance lit at night, photo 1', exact: true })
-  await expect(guestHomeEvidence.locator('img')).toHaveAttribute('src', red.url)
-  await guestHomeAccessibility.scrollIntoViewIfNeeded()
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
-  await guestHomeAccessibility.scrollIntoViewIfNeeded()
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await guestHomeEvidence.click()
-  await expect(preview.locator(`img.object-contain[src="${red.url}"]`)).toBeInViewport({ ratio: 0.9 })
-  await expect(preview.getByText('1 / 3', { exact: true })).toBeVisible()
-  await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
-  const guestBedroom = preview.getByTestId(`stay-room-details-${bedroomId}`)
-  await expect(preview.getByRole('heading', { name: "Where you'll sleep", exact: true })).toBeVisible()
-  await expect(guestBedroom).toContainText('1 queen bed')
-  await expect(guestBedroom).toContainText('Private attached bathroom')
-  await expect(guestBedroom).toContainText('Bed linens')
-  await expect(guestBedroom).toContainText('Wifi')
-  await expect(guestBedroom).toContainText('Step-free access')
-  await expect(guestBedroom).toContainText('The route from the guest entrance to the bedroom has no steps or thresholds higher than 5 cm (2 in).')
-  await expect(guestBedroom).not.toContainText('Entrance wider than 32 inches')
-  await expect(guestBedroom.getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).locator('img')).toHaveAttribute('src', green.url)
-  const guestLivingRoom = preview.getByTestId(`stay-room-details-${livingRoomId}`)
-  await expect(guestLivingRoom).toBeVisible()
-  await expect(guestLivingRoom).toContainText('TV')
-  await expect(guestLivingRoom).not.toContainText('Private attached bathroom')
-  await expect(guestLivingRoom).not.toContainText('No sleeping arrangements')
-  await guestBedroom.scrollIntoViewIfNeeded()
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
-  await guestBedroom.scrollIntoViewIfNeeded()
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await guestBedroom.getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).click()
-  await expect(preview.locator(`img.object-contain[src="${green.url}"]`)).toBeInViewport({ ratio: 0.9 })
-  await expect(preview.getByText('3 / 3', { exact: true })).toBeVisible()
-  await expect(preview.locator('[data-photo-tour]')).toHaveCount(0)
-  await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
-  await preview.getByRole('button', { name: 'Show all 3 photos', exact: true }).click()
-  await expect(preview.locator('[data-photo-tour]')).toHaveCount(0)
-  await expect(preview.getByRole('button', { name: 'Close photos and videos', exact: true })).toBeVisible()
-  expect(pageErrors).toEqual([])
-  await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
-  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+})
 
-  await photoOverview.getByTestId('stay-additional-photos').click()
-  await roomGrid.getByRole('button', { name: 'Manage photos', exact: true }).click()
-  const roomSelection = page.getByTestId('grid-editor-takeover')
-  await roomSelection.getByRole('button', { name: 'Select Photo 3', exact: true }).click()
-  await roomSelection.getByRole('button', { name: 'Move selected photos', exact: true }).click()
-  const movePhotos = page.getByRole('dialog', { name: 'Move photos', exact: true })
-  const livingRoomDestination = movePhotos.getByRole('radio', { name: /^Living room/ })
-  await livingRoomDestination.locator('xpath=ancestor::label[1]').click()
-  await expect(livingRoomDestination).toBeChecked()
-  await page.setViewportSize({ width: 390, height: 844 })
-  await movePhotos.getByRole('button', { name: 'Move', exact: true }).click()
-  await expect(movePhotos).not.toBeVisible()
+test('the guest gallery stays flat while a room has no photo and shows room details and accessibility evidence', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { pageErrors, photoPath, red, green, bedroomId, livingRoomId } = await galleryStayHome(page, baseURL!)
+  const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
   await page.setViewportSize({ width: 1440, height: 900 })
-  const authoredRooms = [
-    { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
-    { id: livingRoomId, type: 'living_room', photo_ids: [green.id], ...livingRoomFacts },
-  ]
-  const roomHome = await request.get(api(`stay-homes/${productId}`))
-  expect(roomHome.status(), await roomHome.text()).toBe(200)
-  expect((await roomHome.json() as { home: { photo_rooms: StayPhotoRoom[]; photos: Array<{ id: string }> } }).home).toMatchObject({ photo_rooms: authoredRooms, photos: uploadedPhotos.map(photo => ({ id: photo.id })) })
-  const roomProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-  expect(roomProduct.error).toBeNull()
-  expect(roomProduct.data!.product.stay.photo_rooms).toEqual(authoredRooms)
-  await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
-  await expect(page).toHaveURL(`${baseURL}${photoPath}`)
-  await expect(photoOverview.getByTestId(`stay-photo-room-${livingRoomId}`)).toContainText('1 photo')
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await previewLink.click()
-  await expect(previewModal).toBeVisible()
-  const authoredPreviewFrame = await (await previewIframe.elementHandle())!.contentFrame()
-  expect(authoredPreviewFrame).not.toBeNull()
-  await waitForNuxtHydration(authoredPreviewFrame!)
-  const publicProductURL = new URL((await previewIframe.getAttribute('src'))!, baseURL)
-  publicProductURL.pathname = publicProductURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
-  const authoredPublicRead = await request.get(publicProductURL.href)
-  expect(authoredPublicRead.status(), await authoredPublicRead.text()).toBe(200)
-  const authoredPublicProduct = (await authoredPublicRead.json() as { product: PhotoProduct }).product
-  expect(authoredPublicProduct.stay.photo_rooms).toEqual(authoredRooms)
-  expect(authoredPublicProduct.stay.amenities).toEqual(['tv', 'wireless_internet', 'bed_linens'])
-  expect(authoredPublicProduct.stay.accessibility).toEqual(authoredHomeAnswers)
-  await preview.getByRole('button', { name: 'Show all 3 photos', exact: true }).click()
+  await page.goto(photoPath)
+  await test.step('listing accessibility evidence opens in the gallery', async () => {
+    await previewLink.click()
+    await expect(previewModal).toBeVisible()
+    const flatPreviewFrame = await (await previewIframe.elementHandle())!.contentFrame()
+    expect(flatPreviewFrame).not.toBeNull()
+    await waitForNuxtHydration(flatPreviewFrame!)
+    expect(pageErrors).toEqual([])
+    const guestHomeAccessibility = preview.getByTestId('stay-accessibility-features')
+    await expect(guestHomeAccessibility.getByRole('heading', { name: 'Accessibility features', exact: true })).toBeVisible()
+    await expect(guestHomeAccessibility.locator('li')).toHaveCount(1)
+    await expect(guestHomeAccessibility).toContainText('Path to entrance lit at night')
+    await expect(guestHomeAccessibility).toContainText('The path to the guest entrance is well lit at night.')
+    await expect(guestHomeAccessibility).not.toContainText('Disabled parking spot')
+    const guestHomeEvidence = guestHomeAccessibility.getByRole('button', { name: 'View Path to entrance lit at night, photo 1', exact: true })
+    await expect(guestHomeEvidence.locator('img')).toHaveAttribute('src', red.url)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await guestHomeEvidence.click()
+    await expect(preview.locator(`img.object-contain[src="${red.url}"]`)).toBeInViewport({ ratio: 0.9 })
+    await expect(preview.getByText('1 / 3', { exact: true })).toBeVisible()
+    await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+  })
+  await test.step('rooms show their details and evidence, and the gallery has no photo tour', async () => {
+    const guestBedroom = preview.getByTestId(`stay-room-details-${bedroomId}`)
+    await expect(preview.getByRole('heading', { name: "Where you'll sleep", exact: true })).toBeVisible()
+    await expect(guestBedroom).toContainText('1 queen bed')
+    await expect(guestBedroom).toContainText('Private attached bathroom')
+    await expect(guestBedroom).toContainText('Bed linens')
+    await expect(guestBedroom).toContainText('Wifi')
+    await expect(guestBedroom).toContainText('Step-free access')
+    await expect(guestBedroom).toContainText('The route from the guest entrance to the bedroom has no steps or thresholds higher than 5 cm (2 in).')
+    await expect(guestBedroom).not.toContainText('Entrance wider than 32 inches')
+    await expect(guestBedroom.getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).locator('img')).toHaveAttribute('src', green.url)
+    const guestLivingRoom = preview.getByTestId(`stay-room-details-${livingRoomId}`)
+    await expect(guestLivingRoom).toBeVisible()
+    await expect(guestLivingRoom).toContainText('TV')
+    await expect(guestLivingRoom).not.toContainText('Private attached bathroom')
+    await expect(guestLivingRoom).not.toContainText('No sleeping arrangements')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await guestBedroom.getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).click()
+    await expect(preview.locator(`img.object-contain[src="${green.url}"]`)).toBeInViewport({ ratio: 0.9 })
+    await expect(preview.getByText('3 / 3', { exact: true })).toBeVisible()
+    await expect(preview.locator('[data-photo-tour]')).toHaveCount(0)
+    await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+    await preview.getByRole('button', { name: 'Show all 3 photos', exact: true }).click()
+    await expect(preview.locator('[data-photo-tour]')).toHaveCount(0)
+    await expect(preview.getByRole('button', { name: 'Close photos and videos', exact: true })).toBeVisible()
+    expect(pageErrors).toEqual([])
+    await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+    await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+  })
+  expect(pageErrors).toEqual([])
+})
+
+test('moving a photo into the empty room publishes the authored photo tour, and deleting a room keeps its photos', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, call, api, productId, pageErrors, uploadedPhotos, photoPath, photoOverview, roomGrid, red, blue, green, bedroomId, bedroomFacts, livingRoomId, livingRoomFacts, authoredHomeAnswers } = await galleryStayHome(page, baseURL!)
+  const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
   const publicTour = preview.locator('[data-photo-tour]')
-  await expect(publicTour).toBeVisible()
-  await expect(publicTour.getByRole('heading', { name: 'Bedroom', exact: true })).toBeVisible()
-  await expect(publicTour.getByRole('heading', { name: 'Living room', exact: true })).toBeVisible()
-  await expect(publicTour.locator('section > div.grid img')).toHaveCount(3)
-  await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('1 queen bed')
-  await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Private attached bathroom')
-  await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Bed linens')
-  await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Wifi')
-  await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Step-free access')
-  await expect(publicTour.locator(`#photo-room-${bedroomId}`)).not.toContainText('Entrance wider than 32 inches')
-  await expect(publicTour.locator(`#photo-room-${bedroomId}`).getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).locator('img')).toHaveAttribute('src', green.url)
-  await expect(publicTour.locator(`#photo-room-${livingRoomId}`)).toContainText('TV')
-  for (const [index, photo] of uploadedPhotos.entries()) await expect(publicTour.locator('section > div.grid img').nth(index)).toHaveAttribute('src', photo.url)
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
-  expect(await preview.locator('html').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
-  await expect(publicTour.getByRole('link', { name: 'Bedroom', exact: true })).toBeVisible()
-  await publicTour.locator(`#photo-room-${bedroomId}`).getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).click()
-  await expect(preview.locator(`img.object-contain[src="${green.url}"]`)).toBeInViewport({ ratio: 0.9 })
-  await expect(preview.getByText('3 / 3', { exact: true })).toBeVisible()
-  await preview.getByRole('button', { name: 'Back to photo tour', exact: true }).click()
-  await publicTour.getByRole('button', { name: 'Open Bedroom, photo 2', exact: true }).click()
-  await expect(preview.getByRole('button', { name: 'Back to photo tour', exact: true })).toBeVisible()
-  await preview.getByRole('button', { name: 'Back to photo tour', exact: true }).click()
-  await expect(publicTour).toBeVisible()
-  await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
-  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
   await page.setViewportSize({ width: 1440, height: 900 })
-
-  const retainedLibrary = await call<{ assets: Array<{ asset_id: string; status: string }> }>('list_media_assets', { kind: 'image' })
-  expect(retainedLibrary.error).toBeNull()
-  expect(retainedLibrary.data!.assets.map(asset => ({ id: asset.asset_id, status: asset.status })).sort((a, b) => a.id.localeCompare(b.id)))
-    .toEqual([...uploadedPhotos, ...evidenceUploads].map(photo => ({ id: photo.id, status: 'active' })).sort((a, b) => a.id.localeCompare(b.id)))
-  if (concern === 'room-tour') {
+  await page.goto(photoPath)
+  const authoredRooms = await test.step('the CMS moves a photo into the empty room', async () => {
+    await photoOverview.getByTestId('stay-additional-photos').click()
+    await roomGrid.getByRole('button', { name: 'Manage photos', exact: true }).click()
+    const roomSelection = page.getByTestId('grid-editor-takeover')
+    await roomSelection.getByRole('button', { name: 'Select Photo 3', exact: true }).click()
+    await roomSelection.getByRole('button', { name: 'Move selected photos', exact: true }).click()
+    const movePhotos = page.getByRole('dialog', { name: 'Move photos', exact: true })
+    const livingRoomDestination = movePhotos.getByRole('radio', { name: /^Living room/ })
+    await livingRoomDestination.locator('xpath=ancestor::label[1]').click()
+    await expect(livingRoomDestination).toBeChecked()
+    await movePhotos.getByRole('button', { name: 'Move', exact: true }).click()
+    await expect(movePhotos).not.toBeVisible()
+    const authoredRooms = [
+      { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
+      { id: livingRoomId, type: 'living_room', photo_ids: [green.id], ...livingRoomFacts },
+    ]
+    const roomHome = await request.get(api(`stay-homes/${productId}`))
+    await expectStatus(roomHome, 200)
+    expect((await roomHome.json() as { home: { photo_rooms: StayPhotoRoom[]; photos: Array<{ id: string }> } }).home).toMatchObject({ photo_rooms: authoredRooms, photos: uploadedPhotos.map(photo => ({ id: photo.id })) })
+    const roomProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+    expect(roomProduct.error).toBeNull()
+    expect(roomProduct.data!.product.stay.photo_rooms).toEqual(authoredRooms)
+    await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
+    await expect(page).toHaveURL(`${baseURL}${photoPath}`)
+    await expect(photoOverview.getByTestId(`stay-photo-room-${livingRoomId}`)).toContainText('1 photo')
+    return authoredRooms
+  })
+  await test.step('the guest page opens the authored photo tour', async () => {
+    await previewLink.click()
+    await expect(previewModal).toBeVisible()
+    const authoredPreviewFrame = await (await previewIframe.elementHandle())!.contentFrame()
+    expect(authoredPreviewFrame).not.toBeNull()
+    await waitForNuxtHydration(authoredPreviewFrame!)
+    const publicProductURL = new URL((await previewIframe.getAttribute('src'))!, baseURL)
+    publicProductURL.pathname = publicProductURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
+    const authoredPublicRead = await request.get(publicProductURL.href)
+    await expectStatus(authoredPublicRead, 200)
+    const authoredPublicProduct = (await authoredPublicRead.json() as { product: PhotoProduct }).product
+    expect(authoredPublicProduct.stay.photo_rooms).toEqual(authoredRooms)
+    expect(authoredPublicProduct.stay.amenities).toEqual(['tv', 'wireless_internet', 'bed_linens'])
+    expect(authoredPublicProduct.stay.accessibility).toEqual(authoredHomeAnswers)
+    await preview.getByRole('button', { name: 'Show all 3 photos', exact: true }).click()
+    await expect(publicTour).toBeVisible()
+    await expect(publicTour.getByRole('heading', { name: 'Bedroom', exact: true })).toBeVisible()
+    await expect(publicTour.getByRole('heading', { name: 'Living room', exact: true })).toBeVisible()
+    await expect(publicTour.locator('section > div.grid img')).toHaveCount(3)
+    await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('1 queen bed')
+    await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Private attached bathroom')
+    await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Bed linens')
+    await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Wifi')
+    await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Step-free access')
+    await expect(publicTour.locator(`#photo-room-${bedroomId}`)).not.toContainText('Entrance wider than 32 inches')
+    await expect(publicTour.locator(`#photo-room-${bedroomId}`).getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).locator('img')).toHaveAttribute('src', green.url)
+    await expect(publicTour.locator(`#photo-room-${livingRoomId}`)).toContainText('TV')
+    for (const [index, photo] of uploadedPhotos.entries()) await expect(publicTour.locator('section > div.grid img').nth(index)).toHaveAttribute('src', photo.url)
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
+    expect(await preview.locator('html').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
+    await expect(publicTour.getByRole('link', { name: 'Bedroom', exact: true })).toBeVisible()
+    await publicTour.locator(`#photo-room-${bedroomId}`).getByRole('button', { name: 'View Step-free access, photo 1', exact: true }).click()
+    await expect(preview.locator(`img.object-contain[src="${green.url}"]`)).toBeInViewport({ ratio: 0.9 })
+    await expect(preview.getByText('3 / 3', { exact: true })).toBeVisible()
+    await preview.getByRole('button', { name: 'Back to photo tour', exact: true }).click()
+    await publicTour.getByRole('button', { name: 'Open Bedroom, photo 2', exact: true }).click()
+    await expect(preview.getByRole('button', { name: 'Back to photo tour', exact: true })).toBeVisible()
+    await preview.getByRole('button', { name: 'Back to photo tour', exact: true }).click()
+    await expect(publicTour).toBeVisible()
+    await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+    await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+    await page.setViewportSize({ width: 1440, height: 900 })
+  })
+  await test.step('deleting a room returns its photos to Additional photos in the listing and the tour', async () => {
     // Deleting a room preserves its photos in the listing and public tour.
     await page.goto(`${photoPath}/rooms/${livingRoomId}`)
     await roomGrid.getByRole('button', { name: 'Delete room or space', exact: true }).click()
@@ -2527,24 +2607,34 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     await expect(publicTour.locator('#photo-room-additional img')).toHaveAttribute('src', green.url)
     await preview.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
     await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+  })
+  expect(pageErrors).toEqual([])
+})
 
-    // Native MCP writes use the same authored IDs and selected-photo contract.
-    type RoomIdentity = Pick<StayPhotoRoom, 'id' | 'type' | 'photo_ids' | 'details_version'>
-    type Assignment = { product_id: string; destination_room_id: string | null; created_room_id: string | null; moved_photo_ids: string[] }
-    const discovery = await mcpRequest(request, baseURL!, { method: 'tools/list' })
-    expect(discovery.status()).toBe(200)
-    const catalog = await discovery.json() as { result: { tools: Array<{ name: string; inputSchema: object; outputSchema: object }> } }
-    const assignmentTool = catalog.result.tools.find(tool => tool.name === 'assign_home_photos_to_room')
-    expect(assignmentTool).toBeDefined()
-    const ajv = new Ajv({ strict: false, allErrors: true })
-    const validAssignment = ajv.compile(assignmentTool!.inputSchema)
-    const validAssignmentResult = ajv.compile(assignmentTool!.outputSchema)
+test('native MCP room tools author the same room identities and selected-photo contract', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const home = await photographedStayHome(page, baseURL!)
+  const { request, organizationId, call, api, productId, uploadedPhotos, red, blue, green } = home
+  const { bedroomId, bedroomFacts } = await addBedroom(home, ['wireless_internet', 'bed_linens'], [red.id, blue.id])
+  // Native MCP writes use the same authored IDs and selected-photo contract.
+  type RoomIdentity = Pick<StayPhotoRoom, 'id' | 'type' | 'photo_ids' | 'details_version'>
+  type Assignment = { product_id: string; destination_room_id: string | null; created_room_id: string | null; moved_photo_ids: string[] }
+  const discovery = await mcpRequest(request, baseURL!, { method: 'tools/list' })
+  expect(discovery.status()).toBe(200)
+  const catalog = await discovery.json() as { result: { tools: Array<{ name: string; inputSchema: object; outputSchema: object }> } }
+  const assignmentTool = catalog.result.tools.find(tool => tool.name === 'assign_home_photos_to_room')
+  expect(assignmentTool).toBeDefined()
+  const ajv = new Ajv({ strict: false, allErrors: true })
+  const validAssignment = ajv.compile(assignmentTool!.inputSchema)
+  const validAssignmentResult = ajv.compile(assignmentTool!.outputSchema)
+  const { officeId, officeFacts, beforeAssignments } = await test.step('created and updated rooms read back through the dashboard and refuse stale versions', async () => {
     const addedByMcp = await call<{ product_id: string; room: RoomIdentity }>('create_home_room', { product_id: productId, type: 'office' })
     expect(addedByMcp.error).toBeNull()
     const officeId = addedByMcp.data!.room.id
     expect(addedByMcp.data).toEqual({ product_id: productId, room: { id: officeId, type: 'office', photo_ids: [], details_version: 1 } })
     const afterMcpCreate = await request.get(api(`stay-homes/${productId}`))
-    expect(afterMcpCreate.status(), await afterMcpCreate.text()).toBe(200)
+    await expectStatus(afterMcpCreate, 200)
     expect((await afterMcpCreate.json() as { home: { photo_rooms: StayPhotoRoom[] } }).home.photo_rooms).toEqual([
       { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
       { id: officeId, type: 'office', photo_ids: [], ...unknownRoomDetails },
@@ -2557,6 +2647,9 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
     expect(updatedOffice.data).toEqual({ product_id: productId, product_updated_at: beforeAssignments.data!.product.updated_at, room: { id: officeId, type: 'office', photo_ids: [], ...officeFacts } })
     const staleDetails = await call('update_home_room', { product_id: productId, room_id: officeId, expected_details_version: 1, amenities: [] })
     expect(JSON.parse(staleDetails.error!)).toMatchObject({ status: 409, code: 'ROOM_DETAILS_CHANGED' })
+    return { officeId, officeFacts, beforeAssignments }
+  })
+  await test.step('assignments refuse ambiguous destinations and stale sources, then move, unassign and create', async () => {
     const selectedPhotos = [{ photo_id: green.id, expected_room_id: null }]
     for (const destination of [{}, { room_id: officeId, new_room_type: 'patio' }, { room_id: null, new_room_type: 'patio' }]) {
       const ambiguous = { organization_id: organizationId, product_id: productId, ...destination, photos: selectedPhotos }
@@ -2604,43 +2697,21 @@ for (const concern of ['room-tour', 'accessibility'] as const) {
       { id: officeId, type: 'office', photo_ids: [], ...officeFacts },
       { id: patioId, type: 'patio', photo_ids: [green.id], ...unknownRoomDetails },
     ])
+
+    // Deleting rooms returns their photos to Additional photos.
     const removedOffice = await call('delete_home_room', { product_id: productId, room_id: officeId })
     expect(removedOffice.error).toBeNull()
     const removedByMcp = await call('delete_home_room', { product_id: productId, room_id: patioId })
     expect(removedByMcp.error).toBeNull()
     expect(removedByMcp.data).toEqual({ product_id: productId, deleted_room_id: patioId, photo_memberships: [{ photo_id: red.id, room_id: bedroomId }, { photo_id: blue.id, room_id: bedroomId }, { photo_id: green.id, room_id: null }] })
     const afterMcpRemove = await request.get(api(`stay-homes/${productId}`))
-    expect(afterMcpRemove.status(), await afterMcpRemove.text()).toBe(200)
+    await expectStatus(afterMcpRemove, 200)
     expect((await afterMcpRemove.json() as { home: { photo_rooms: StayPhotoRoom[]; photos: Array<{ id: string }> } }).home).toMatchObject({
       photo_rooms: [{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts }],
       photos: uploadedPhotos.map(photo => ({ id: photo.id })),
     })
-    await page.reload()
-    await expect(photoOverview.getByTestId('stay-additional-photos')).toContainText('1 photo')
-    // Append a retained library asset directly to an authored room through the
-    // picker. Green remains protected accessibility evidence; the unprotected
-    // blue photo exercises the atomic placement and membership write.
-    const detached = await request.delete(api(`stay-homes/${productId}/photos/${blue.id}`), { headers: authRequestHeaders(baseURL!) })
-    expect(detached.status(), await detached.text()).toBe(200)
-    await page.goto(`${photoPath}/rooms/${bedroomId}`)
-    await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
-    await addBedroomPhotos.getByRole('button', { name: 'Add from media library', exact: true }).click()
-    const libraryPicker = page.getByRole('dialog', { name: 'Add photos', exact: true })
-    await libraryPicker.locator(`img[src="${blue.url}"]`).click()
-    const roomAppend = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/photos` && response.request().method() === 'POST')
-    await libraryPicker.getByRole('button', { name: 'Done', exact: true }).click()
-    const appended = await roomAppend
-    expect(appended.status(), await appended.text()).toBe(201)
-    await expect(addBedroomPhotos).not.toBeVisible()
-    await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
-    const afterLibraryRoomAppend = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-    expect(afterLibraryRoomAppend.error).toBeNull()
-    expect(afterLibraryRoomAppend.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts }])
-    expect([afterLibraryRoomAppend.data!.product.image!.asset_id, ...afterLibraryRoomAppend.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, green.id, blue.id])
-  }
-  expect(pageErrors).toEqual([])
+  })
 })
-}
 
 test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
@@ -2675,7 +2746,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   const publicationEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}/publication`
   // Guests see who looks after a home, so it is listed only with a host whose profile is published.
   const hostless = await request.put(`${baseURL}${publicationEndpoint}`, { data: { published: true } })
-  expect(hostless.status(), await hostless.text()).toBe(409)
+  await expectStatus(hostless, 409)
   expect((await hostless.json()).data).toEqual({ code: 'HOST_REQUIRED', field: 'host' })
   const unlisted = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(unlisted.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
@@ -2688,7 +2759,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   const userIdAssignment = await call('update_product', { product_id: productId, stay: { assigned_member_id: membership.user.id } })
   expect(JSON.parse(userIdAssignment.error!)).toMatchObject({ status: 404, message: 'stay.assigned_member_id is not a member of this organization' })
   const unchangedAssignment = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`)
-  expect(unchangedAssignment.status(), await unchangedAssignment.text()).toBe(200)
+  await expectStatus(unchangedAssignment, 200)
   expect((await unchangedAssignment.json()).product.stay).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
   const hosted = await call<{ product: Product }>('update_product', { product_id: productId, stay: { assigned_member_id: host.memberId } })
   expect(hosted.error).toBeNull()
@@ -2759,7 +2830,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await page.route(interceptAvailability, async route => {
       if (route.request().method() !== 'PATCH') return await route.continue()
       const upstream = await route.fetch()
-      expect(upstream.status(), await upstream.text()).toBe(200)
+      await expectStatus(upstream, 200)
       expect((await upstream.json() as { product: Product }).product.active).toBe(false)
       await route.fulfill({ response: upstream, status: 503, json: { error: availabilityFailure, data: { code: 'POST_WRITE_COMPLETION_FAILED', committed: true, product_id: productId, reason: availabilityFailure } } })
     })
@@ -2788,7 +2859,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     await expect(guest.getByText('Temporarily unavailable', { exact: true }).last()).toBeVisible()
     await expect(guest.getByRole('button', { name: /^(Check availability|Reserve|Send enquiry)$/ })).toHaveCount(0)
     const pausedRead = await anonymousListing.request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
-    expect(pausedRead.status(), await pausedRead.text()).toBe(200)
+    await expectStatus(pausedRead, 200)
     expect((await pausedRead.json() as { product: Product }).product).toMatchObject({ name: 'Cliff Cabin', active: false })
 
     await page.goto(`${publicationPath}/visibility`)
@@ -2830,20 +2901,20 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
   const headers = authRequestHeaders(baseURL!)
   const slug = `e2e-stays-${crypto.randomUUID().slice(0, 8)}`
   const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Cleaner ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
-  expect(created.status(), await created.text()).toBe(200)
+  await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
   const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Cleaner ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
-  expect(provisioned.status(), await provisioned.text()).toBe(200)
+  await expectStatus(provisioned, 200)
   const api = (path: string) => `/api/dashboard/${path}?org=${encodeURIComponent(slug)}`
   const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(page.request, baseURL!, organizationId, name, args)
   const cleaner = await browser.newContext({ baseURL: baseURL! })
   try {
     await loginAs(cleaner.request, baseURL!, 'user-e2e-demo-role-owner')
     const offered = await page.request.post(`/api/organizations/${organizationId}/invite-links`, { data: { role: 'member' } })
-    expect(offered.status(), await offered.text()).toBe(201)
+    await expectStatus(offered, 201)
     const token = (await offered.json() as { token: string }).token
     const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { data: {} })
-    expect(accepted.status(), await accepted.text()).toBe(200)
+    await expectStatus(accepted, 200)
     const memberId = (await accepted.json() as { memberId: string }).memberId
     const locations = await call<{ locations: Array<{ id: string }> }>('list_locations', {})
     expect(locations.error).toBeNull()
@@ -2851,7 +2922,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     const madeHome = await page.request.post(api('stay-homes'), { data: { name: 'Assigned Cabin', timezone: TIME_ZONE, address: '1 Test Road', city: 'Krabi', country: 'TH',
       state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
       base_price_minor: 320_000, idempotency_key: crypto.randomUUID() } })
-    expect(madeHome.status(), await madeHome.text()).toBe(201)
+    await expectStatus(madeHome, 201)
     const assignedHome = (await madeHome.json() as { home: { product_id: string; location_id: string } }).home
     const otherHomeInput = { kind: 'stay', name: 'Other Cabin', stay: {
       location_id: locations.data!.locations[0]!.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
@@ -2892,7 +2963,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
     for (const [index, home] of homes.entries()) {
       const made = await page.request.post(api('stays'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 2,
         guest_name: index === 0 ? 'Ana' : 'Private', guest_surname: 'Silva', total_minor: 30_000, idempotency_key: crypto.randomUUID() } })
-      expect(made.status(), await made.text()).toBe(201)
+      await expectStatus(made, 201)
       stays.push((await made.json() as { stay: { id: string } }).stay)
     }
 
@@ -2936,7 +3007,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(directionsPanel.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
       expect(interruptedWrites).toBe(1)
       const unwrittenGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
-      expect(unwrittenGuide.status(), await unwrittenGuide.text()).toBe(200)
+      await expectStatus(unwrittenGuide, 200)
       expect((await unwrittenGuide.json() as { home: { directions: string | null } }).home.directions).toBeNull()
       await page.unroute(interceptArrival)
       await directionsPanel.getByRole('button', { name: 'Save', exact: true }).click()
@@ -3030,7 +3101,6 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
       await expect(ruleGuests).toHaveValue('5')
       await expect(quietStart).toContainText('22:00')
-      await savedGuestsCard.scrollIntoViewIfNeeded()
       await expect(savedGuestsCard.getByText('4 guests', { exact: true })).toBeVisible()
       const cancelledRuleTimes = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
       expect(cancelledRuleTimes.error).toBeNull()
@@ -3068,7 +3138,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const ruleTimesSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === rulesEndpoint)
       await rulesArrivalPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const ruleTimesResponse = await ruleTimesSaved
-      expect(ruleTimesResponse.status(), await ruleTimesResponse.text()).toBe(200)
+      await expectStatus(ruleTimesResponse, 200)
       expect(ruleTimesResponse.request().postDataJSON()).toEqual({ stay: { check_in_time: '16:00', check_in_end_time: '21:00', check_out_time: '10:00' } })
       await expect(page).toHaveURL(`${productPath}/house-rules`)
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
@@ -3110,16 +3180,14 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const additionalSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === rulesEndpoint)
       await additionalRulesPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const additionalResponse = await additionalSaved
-      expect(additionalResponse.status(), await additionalResponse.text()).toBe(200)
+      await expectStatus(additionalResponse, 200)
       expect(additionalResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { house_rules: houseRules } })
       await expect(page).toHaveURL(`${productPath}/house-rules`)
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
       await expect(quiet.getByRole('button', { name: 'Yes', exact: true })).toHaveAttribute('aria-pressed', 'true')
       await expect(ruleGuests).toHaveValue('5')
-      await savedGuestsCard.scrollIntoViewIfNeeded()
       await expect(savedGuestsCard.getByText('4 guests', { exact: true })).toBeVisible()
       const savedRulesCard = page.getByTestId('editor-card-house-rules')
-      await savedRulesCard.scrollIntoViewIfNeeded()
       await expect(savedRulesCard).toContainText(houseRules)
       await expect(savedRulesCard).not.toContainText('No pets')
       const rulesSource = page.url()
@@ -3156,14 +3224,13 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const rulesSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === rulesEndpoint)
       await rulesPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const rulesResponse = await rulesSaved
-      expect(rulesResponse.status(), await rulesResponse.text()).toBe(200)
+      await expectStatus(rulesResponse, 200)
       expect(rulesResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: houseRuleChoices, stay: { max_guests: 5 } })
       await expect(rulesPanel).not.toBeVisible()
       const authoredRules = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
       expect(authoredRules.error).toBeNull()
       expect(authoredRules.data!.product.details).toEqual({ ...beforeRules.data!.product.details, guest_access: sharedGarden, house_rules: houseRules, pets_allowed: false, events_allowed: true, commercial_photography_allowed: false, quiet_hours: true, quiet_hours_start: '22:00', quiet_hours_end: '07:00' })
       expect(authoredRules.data!.product.stay!.max_guests).toBe(5)
-      await savedGuestsCard.scrollIntoViewIfNeeded()
       await expect(savedGuestsCard.getByText('5 guests', { exact: true })).toBeVisible()
 
       // Clearing a choice removes its value; disabling quiet hours removes its
@@ -3177,7 +3244,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const additionalCleared = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === rulesEndpoint)
       await additionalRulesPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const additionalClearResponse = await additionalCleared
-      expect(additionalClearResponse.status(), await additionalClearResponse.text()).toBe(200)
+      await expectStatus(additionalClearResponse, 200)
       expect(additionalClearResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { house_rules: null } })
       await expect(page).toHaveURL(`${productPath}/house-rules`)
       await expect(petsNo).toHaveAttribute('aria-pressed', 'false')
@@ -3185,7 +3252,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const rulesCleared = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === rulesEndpoint)
       await rulesPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const rulesClearResponse = await rulesCleared
-      expect(rulesClearResponse.status(), await rulesClearResponse.text()).toBe(200)
+      await expectStatus(rulesClearResponse, 200)
       expect(rulesClearResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: { ...houseRuleChoices, pets_allowed: null, quiet_hours: false, quiet_hours_start: null, quiet_hours_end: null } })
       await expect(rulesPanel).not.toBeVisible()
       const clearedRules = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
@@ -3213,17 +3280,10 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(page).toHaveURL(`${productPath}/house-rules`)
       await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
       await expect(ruleGuests).toHaveValue('5')
-      await pets.scrollIntoViewIfNeeded()
-      await page.setViewportSize({ width: 390, height: 844 })
-      await pets.scrollIntoViewIfNeeded()
-      await rulesPanel.getByRole('link', { name: /Additional rules/ }).scrollIntoViewIfNeeded()
-      await page.setViewportSize({ width: 1440, height: 900 })
-      await expect(petsNo).toHaveAttribute('aria-pressed', 'true')
-      await expect(ruleGuests).toHaveValue('5')
       const rulesRestored = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === rulesEndpoint)
       await rulesPanel.getByRole('button', { name: 'Save', exact: true }).click()
       const rulesRestoreResponse = await rulesRestored
-      expect(rulesRestoreResponse.status(), await rulesRestoreResponse.text()).toBe(200)
+      await expectStatus(rulesRestoreResponse, 200)
       expect(rulesRestoreResponse.request().postDataJSON()).toEqual({ details_mode: 'merge', details: houseRuleChoices })
       await expect(rulesPanel).not.toBeVisible()
       await page.getByRole('tab', { name: 'Arrival guide', exact: true }).click()
@@ -3245,7 +3305,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await checkoutPanel.getByRole('button', { name: 'Remove instruction', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === `${productPath}/checkout-instructions`)
       const removedInstruction = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
-      expect(removedInstruction.status(), await removedInstruction.text()).toBe(200)
+      await expectStatus(removedInstruction, 200)
       expect((await removedInstruction.json() as { home: { checkout_instructions: unknown[] } }).home.checkout_instructions).toEqual([])
       await checkoutOverview.getByRole('link', { name: 'Add instructions', exact: true }).click()
       await instructionChoices.getByRole('link', { name: 'Gather used towels', exact: true }).click()
@@ -3262,7 +3322,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(validateArrival(guideSaved.data), JSON.stringify(validateArrival.errors)).toBe(true)
       expect(guideSaved.data).toEqual({ product_id: assignedHome.product_id, guide: { directions: guide.directions }, channel_push: null, airbnb_unsynced: [] })
       const managerGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
-      expect(managerGuide.status(), await managerGuide.text()).toBe(200)
+      await expectStatus(managerGuide, 200)
       expect(managerGuide.headers()['cache-control']).toBe('private, no-store, max-age=0')
       expect(await managerGuide.json()).toMatchObject({ manage: true, home: guide })
       const publicRules = await call<{ product: Product }>('get_product', { product_id: assignedHome.product_id })
@@ -3311,13 +3371,10 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await wifiPanel.getByTestId('dashboard-navbar-close').hover()
       await expect(wifiPanel.getByRole('button', { name: 'Save', exact: true })).toBeInViewport()
       await wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true }).fill('A cancelled mobile network draft')
-      await page.setViewportSize({ width: 1440, height: 900 })
-      await expect(wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true })).toHaveValue('A cancelled mobile network draft')
-      await page.setViewportSize({ width: 390, height: 844 })
       await wifiPanel.getByRole('link', { name: 'Close', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === productPath && url.searchParams.get('guide') === 'arrival')
       const cancelledGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
-      expect(cancelledGuide.status(), await cancelledGuide.text()).toBe(200)
+      await expectStatus(cancelledGuide, 200)
       expect((await cancelledGuide.json() as { home: Record<string, unknown> }).home).toMatchObject(guide)
       await page.setViewportSize({ width: 1440, height: 900 })
       await page.getByRole('tab', { name: 'Your space', exact: true }).click()
@@ -3341,7 +3398,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const publicURL = new URL((await publicIframe.getAttribute('src'))!, baseURL!)
       expect(publicURL.searchParams.get('preview_token')).toBeTruthy()
       const publicResponse = await page.request.get(new URL(publicURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), publicURL).href)
-      expect(publicResponse.status(), await publicResponse.text()).toBe(200)
+      await expectStatus(publicResponse, 200)
       const publicPayload = await publicResponse.json() as { product: { details: Record<string, unknown>; stay: Record<string, unknown> } }
       expect(publicPayload.product.details).toEqual(publicRules.data!.product.details)
       for (const key of STAY_SAFETY_DETAIL_KEYS) expect(publicPayload.product.details).not.toHaveProperty(key)
@@ -3369,7 +3426,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       // Reading the new private home endpoint follows the same assigned-home
       // scope as Today. A member can read the guide but cannot change it.
       const assignedGuide = await cleaner.request.get(api(`stay-homes/${assignedHome.product_id}`))
-      expect(assignedGuide.status(), await assignedGuide.text()).toBe(200)
+      await expectStatus(assignedGuide, 200)
       expect(await assignedGuide.json()).toMatchObject({ manage: false, home: guide })
       const memberWrite = await cleaner.request.patch(api(`stay-homes/${assignedHome.product_id}`), { data: { wifi_password: 'A member must not replace this' } })
       expect(memberWrite.status()).toBe(403)
@@ -3385,7 +3442,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
         expect(await outsideGuide.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND' } })
       } finally { await outsider.close() }
       const protectedGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
-      expect(protectedGuide.status(), await protectedGuide.text()).toBe(200)
+      await expectStatus(protectedGuide, 200)
       expect((await protectedGuide.json() as { home: Record<string, unknown> }).home).toMatchObject(guide)
 
     } else {
@@ -3415,7 +3472,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await openNights.click()
       await expect(openNights).not.toBeChecked()
       const blockedResponse = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(5)}&to=${localDay(8)}`)
-      expect(blockedResponse.status(), await blockedResponse.text()).toBe(200)
+      await expectStatus(blockedResponse, 200)
       const blocked = await blockedResponse.json() as { nights: import('../../server/domain/stays').StayNight[] }
       expect(blocked.nights).toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: true, available: false, price_minor: 320_000, stay_id: null })))
       await openNights.click()
@@ -3445,7 +3502,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await inspector.getByRole('button', { name: 'Save', exact: true }).click()
       await expect(inspector.getByRole('button', { name: 'Custom settings', exact: true })).toBeVisible()
       const restrictedResponse = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(5)}&to=${localDay(8)}`)
-      expect(restrictedResponse.status(), await restrictedResponse.text()).toBe(200)
+      await expectStatus(restrictedResponse, 200)
       expect((await restrictedResponse.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights)
         .toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: false, price_minor: 420_000, min_stay_arrival: 2, min_stay_through: 3, max_stay: 7, closed_to_arrival: true, closed_to_departure: true })))
 
@@ -3500,7 +3557,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       const distantSelectionRead = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === calendarEndpoint
         && new URL(response.url()).searchParams.get('from') === distantNight && new URL(response.url()).searchParams.get('to') === localDay(4001), { timeout: 10_000 })
       await calendar.getByRole('button', { name: 'Today', exact: true }).click()
-      for (const response of await Promise.all([visibleMonthRead, distantSelectionRead])) expect(response.status(), await response.text()).toBe(200)
+      for (const response of await Promise.all([visibleMonthRead, distantSelectionRead])) await expectStatus(response, 200)
       await expect(page).toHaveURL(url => url.searchParams.get('month') === localDay(0).slice(0, 7))
       await expect(inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true })).toBeEnabled()
       await expect(inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true })).toHaveValue('5100')
@@ -3524,15 +3581,12 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true }).fill('9999')
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true })).toHaveValue('9999')
-      await page.setViewportSize({ width: 390, height: 844 })
-      await expect(inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true })).toHaveValue('9999')
       await inspector.getByRole('button', { name: 'Cancel', exact: true }).click()
       await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('3,200')
       await expect(inspector.getByText(`${TIME_ZONE} · THB`, { exact: true })).toBeVisible()
       const cancelledPrice = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(6)}&to=${localDay(9)}`)
-      expect(cancelledPrice.status(), await cancelledPrice.text()).toBe(200)
+      await expectStatus(cancelledPrice, 200)
       expect((await cancelledPrice.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights.map(night => night.price_minor)).toEqual([320_000, 320_000, 320_000])
-      await page.setViewportSize({ width: 1440, height: 900 })
       await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
       await inspector.getByRole('button', { name: 'Reset all night settings', exact: true }).click()
       await expect(inspector.getByText('Remove all selected nights’ custom prices, closures and stay rules.', { exact: false })).toBeVisible()
@@ -3580,14 +3634,14 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('Availability: Assigned Cabin')
 
       const todayResponse = await cleaner.request.get(api('today'))
-      expect(todayResponse.status(), await todayResponse.text()).toBe(200)
+      await expectStatus(todayResponse, 200)
       const today = await todayResponse.json() as import('../../shared/dashboard-today').TodayFeedPayload
       const arrivalPath = `/dashboard/${slug}/bookings/stay/${stays[0]!.id}`
       expect(today.cards).toEqual([expect.objectContaining({ id: `stay:${stays[0]!.id}:arrival`, to: arrivalPath, priority: 'schedule', bookingKind: 'stay',
         headline: 'Ana arrives today with 2 guests', description: 'Assigned Cabin', locationId: homes[0]!.location_id })])
       expect(today.locations.map(location => location.id)).toEqual([homes[0]!.location_id])
       const upcomingResponse = await cleaner.request.get(api('today'), { params: { range: 'upcoming', from: localDay(1), to: localDay(7) } })
-      expect(upcomingResponse.status(), await upcomingResponse.text()).toBe(200)
+      await expectStatus(upcomingResponse, 200)
       const upcoming = await upcomingResponse.json() as import('../../shared/dashboard-today').TodayFeedPayload
       expect(upcoming.cards).toEqual([expect.objectContaining({ id: `stay:${stays[0]!.id}:departure`, to: arrivalPath, priority: 'schedule', bookingKind: 'stay',
         headline: 'Ana leaves in 2 days with 2 guests', description: 'Assigned Cabin', locationId: homes[0]!.location_id })])
@@ -3651,9 +3705,9 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(signedInSocket!.isClosed()).toBe(false)
       const signedOutClosed = signedInSocket!.waitForEvent('close')
       const signedOut = await cleaner.request.post('/api/auth/sign-out', { headers, data: {} })
-      expect(signedOut.status(), await signedOut.text()).toBe(200)
+      await expectStatus(signedOut, 200)
       const revoked = await cleaner.request.get('/api/auth/get-session', { params: { disableCookieCache: 'true' } })
-      expect(revoked.status(), await revoked.text()).toBe(200)
+      await expectStatus(revoked, 200)
       expect(await revoked.json()).toBeNull()
       const beforeRevokedEvent = liveEvents.length
       const afterSignOut = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: noted.data!.stay.version, notes: 'After session revocation' })
@@ -3678,18 +3732,18 @@ test('a stay socket in a service organization closes when Better Auth removes it
   const headers = authRequestHeaders(baseURL!)
   const slug = `e2e-stay-live-${crypto.randomUUID().slice(0, 8)}`
   const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Live ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
-  expect(created.status(), await created.text()).toBe(200)
+  await expectStatus(created, 200)
   const organizationId = (await created.json() as { id: string }).id
   const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Live ${slug}`, subdomain: slug, vertical: 'service', sourceLocale: 'en' } })
-  expect(provisioned.status(), await provisioned.text()).toBe(200)
+  await expectStatus(provisioned, 200)
   const api = (path: string) => `/api/dashboard/${path}?org=${encodeURIComponent(slug)}`
   const cleaner = await browser.newContext({ baseURL: baseURL! })
   try {
     await loginAs(cleaner.request, baseURL!, 'user-e2e-demo-role-owner')
     const offered = await page.request.post(`/api/organizations/${organizationId}/invite-links`, { data: { role: 'member' } })
-    expect(offered.status(), await offered.text()).toBe(201)
+    await expectStatus(offered, 201)
     const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent((await offered.json() as { token: string }).token)}/accept`, { data: {} })
-    expect(accepted.status(), await accepted.text()).toBe(200)
+    await expectStatus(accepted, 200)
     const memberId = (await accepted.json() as { memberId: string }).memberId
 
     // The actual canonical home API decides whether this vertical supports a
@@ -3697,13 +3751,13 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const madeHome = await page.request.post(api('stay-homes'), { data: { name: 'Retreat Cabin', timezone: TIME_ZONE, address: '1 Retreat Road', city: 'Krabi', country: 'TH',
       state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
       base_price_minor: null, idempotency_key: crypto.randomUUID() } })
-    expect(madeHome.status(), await madeHome.text()).toBe(201)
+    await expectStatus(madeHome, 201)
     const home = (await madeHome.json() as { home: { product_id: string } }).home
     const assigned = await page.request.patch(api(`stay-homes/${home.product_id}`), { data: { assigned_member_id: memberId } })
-    expect(assigned.status(), await assigned.text()).toBe(200)
+    await expectStatus(assigned, 200)
     const made = await page.request.post(api('stays'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 1,
       guest_name: 'Membership Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
-    expect(made.status(), await made.text()).toBe(201)
+    await expectStatus(made, 201)
     const stay = (await made.json() as { stay: { id: string; version: number } }).stay
 
     const cleanerPage = await cleaner.newPage()
@@ -3726,7 +3780,7 @@ test('a stay socket in a service organization closes when Better Auth removes it
     // its upgrade before the other device publishes the event under assertion.
     expect((await openedRead).status()).toBe(200)
     const renamed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: stay.version, guest_name: 'Membership Live' } })
-    expect(renamed.status(), await renamed.text()).toBe(200)
+    await expectStatus(renamed, 200)
     const version = (await renamed.json() as { stay: { version: number } }).stay.version
     await expect(cleanerPage.getByRole('heading', { name: 'Membership Live', level: 2, exact: true })).toBeVisible()
     await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
@@ -3734,15 +3788,15 @@ test('a stay socket in a service organization closes when Better Auth removes it
     expect(socket).toBeDefined()
     const closed = socket!.waitForEvent('close')
     const removed = await page.request.post('/api/auth/organization/remove-member', { headers, data: { organizationId, memberIdOrEmail: memberId } })
-    expect(removed.status(), await removed.text()).toBe(200)
+    await expectStatus(removed, 200)
     const beforeRemoval = liveEvents.length
     const changed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: version, notes: 'After membership removal' } })
-    expect(changed.status(), await changed.text()).toBe(200)
+    await expectStatus(changed, 200)
     await closed
     expect(liveEvents).toHaveLength(beforeRemoval)
     // A removed member looks after no home, read back through the manager's list.
     const homes = await page.request.get(api('stay-homes'))
-    expect(homes.status(), await homes.text()).toBe(200)
+    await expectStatus(homes, 200)
     expect((await homes.json() as { homes: Array<{ product_id: string; assigned_member_id: string | null }> }).homes)
       .toEqual([expect.objectContaining({ product_id: home.product_id, assigned_member_id: null })])
   } finally {

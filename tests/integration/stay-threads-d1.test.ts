@@ -101,12 +101,21 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(14), check_out_date: day(16), adults: 1, guest_name: 'Cy', total_minor: 30_000 })
     const raced = await Promise.allSettled([{ adults: 2 }, { guest_email: 'cy@example.test' }].map(change => updateStay(db, env, manager, cy.id, { expected_version: cy.version, ...change })))
     assert.deepEqual(raced.map(result => result.status).sort(), ['fulfilled', 'rejected'])
-    const saved = await db.prepare('SELECT guest_email, request_id FROM stays WHERE id = ?').bind(cy.id).first<{ guest_email: string | null; request_id: string | null }>()
-    if (saved!.guest_email === null) assert.equal(saved!.request_id, null)
-    else assert.equal(JSON.parse((await thread(saved!.request_id!))!.payload_json).guest.email, saved!.guest_email)
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM requests WHERE kind = 'stay' AND json_extract(payload_json, '$.guest.name') = 'Cy'").first('n'), saved!.request_id ? 1 : 0)
-    // Bring the address in so Cy's stay has its thread for the rest of the proof.
-    const cyThread = (await updateStay(db, env, manager, cy.id, { expected_version: (await db.prepare('SELECT version FROM stays WHERE id = ?').bind(cy.id).first<number>('version'))!, guest_email: 'cy@example.test' })).request_id!
+    const saved = await db.prepare('SELECT guest_email, request_id, version FROM stays WHERE id = ?').bind(cy.id).first<{ guest_email: string | null; request_id: string | null; version: number }>()
+    assert.ok(saved)
+    if (saved.guest_email === null) assert.equal(saved.request_id, null)
+    else {
+      assert.equal(saved.guest_email, 'cy@example.test')
+      assert.ok(saved.request_id)
+      assert.equal(JSON.parse((await thread(saved.request_id))!.payload_json).guest.email, saved.guest_email)
+    }
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM requests WHERE kind = 'stay' AND json_extract(payload_json, '$.guest.name') = 'Cy'").first('n'), saved.request_id ? 1 : 0)
+    // Add the address only if its racing edit lost; reuse the winning thread otherwise.
+    const cyThread = saved.guest_email === null
+      ? (await updateStay(db, env, manager, cy.id, { expected_version: saved.version, guest_email: 'cy@example.test' })).request_id
+      : saved.request_id
+    assert.ok(cyThread)
+    assert.deepEqual(await db.prepare('SELECT guest_email, request_id FROM stays WHERE id = ?').bind(cy.id).first(), { guest_email: 'cy@example.test', request_id: cyThread })
 
     // The inbox lists them with their nights; the member who looks after the home sees them, another member does not.
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG }, { env })

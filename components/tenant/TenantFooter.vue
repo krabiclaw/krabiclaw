@@ -136,7 +136,7 @@ const footerGroups = computed(() => [
       ...(!legalPractice.value && (props.locations || []).filter(location => !location.home_slug).length > 1 ? [{ path: '/locations', title: t('site.footer.all_locations') }] : []),
     ],
   },
-  { label: t('site.footer.legal'), items: linksFor(['/third-party-notices', '/policies/privacy', '/policies/terms']) },
+  { label: t('site.footer.legal'), items: linksFor(['/third-party-notices', '/policies/privacy', '/policies/terms', '/policies/acceptable-use']) },
 ].filter(group => group.items.length))
 
 const formattedLocations = computed(() =>

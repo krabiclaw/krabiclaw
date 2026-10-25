@@ -30,20 +30,20 @@ const calendarMutation = { ...locationMutation, properties: { ...locationMutatio
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'create_location',
-      description: 'Add an active location to the selected business website. Every plan includes 2 locations. Growth and Business include 2 locations, then $49 per additional location per month, billed at the end of the period; Basic refuses a third location. Repeat the same idempotency key with the same details on retry. Returns its identity, status, timezone and saved timestamp; use get_location for its full details.',
+      description: 'Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status inactive takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business\'s one subscription, billed at the end of the period for the active locations at that time. Inactive locations and the locations of places to stay are not counted. Basic refuses a third active location. Returns its identity, status, timezone and saved timestamp; use get_location for its full details.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
         title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
-        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
+        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'One key per new location, kept by this business and never expired. Retrying with the same key and details returns the location it created. The same key with different details fails with IDEMPOTENCY_CONFLICT; if that location has been deleted it fails with LOCATION_DELETED and nothing is created.' },
         address: postalAddressSchema,
         phone: { type: 'string', description: PHONE_FORMAT },
         email: { type: 'string', format: 'email' },
         website_url: { type: 'string', format: 'uri' },
         description: { type: 'string' },
         timezone: timezoneSchema,
-        opening_hours: openingHoursInputSchema,
-        special_hours: specialHoursInputSchema,
+        opening_hours: { ...openingHoursInputSchema, description: `${openingHoursInputSchema.description} Omitted is the same as null.` },
+        special_hours: { ...specialHoursInputSchema, description: `${specialHoursInputSchema.description} Omitted, null and [] all mean no special hours.` },
       },
       required: ['title', 'idempotency_key', 'timezone'],
       outputSchema: {
@@ -55,7 +55,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
               id: locationObject.properties.id,
               slug: locationObject.properties.slug,
               title: locationObject.properties.title,
-              status: { type: 'string', description: 'Current operational status. New locations are active; a retry returns the saved location’s current status.' },
+              status: { ...locationObject.properties.status, description: 'Current operational status. New locations are active; a retry returns the saved location’s current status.' },
               timezone: { type: 'string', description: 'Saved IANA timezone for this location.' },
               updated_at: { type: 'string', description: 'Saved location update timestamp.' },
             },
@@ -106,7 +106,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
-        status: { type: 'string', enum: ['published', 'draft', 'active', 'inactive'], description: 'published/active keeps the location on the website; draft/inactive takes the location off the website and frees its plan slot.' },
+        status: { type: 'string', enum: ['active', 'inactive'], description: 'active keeps the location on the website; inactive takes it off the website and frees its plan slot.' },
         stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'Public map precision for every place to stay at this location. General shows the area; specific shows its precise pin. Both keep the street address private until a confirmed booking. Omit to keep the saved choice.' },
         address: postalAddressSchema,
         latitude: { ...locationObject.properties.latitude, description: 'Saved map latitude. Supply longitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.' },
@@ -140,7 +140,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
           items: { type: 'array', items: agendaItem },
           available_kinds: { type: 'array', items: { type: 'string' } },
           unavailable_dates: { type: 'array', items: { type: 'object', properties: { date: text, location_id: text, reason: { type: 'string', enum: ['inactive', 'closure', 'dated_hours', 'regular_hours'] }, note: nullableText }, required: ['date', 'location_id', 'reason'] } },
-          context: { type: 'object' },
+          context: workspaceContextObject,
         },
         required: ['items', 'available_kinds', 'unavailable_dates'],
       },
@@ -235,11 +235,6 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
     case "update_location": {
       const locationId = requiredString(args, "location_id");
       const updateFields = omit(args, ["location_id"]) as Record<string, unknown>;
-      if (updateFields.status === 'published') {
-        updateFields.status = 'active';
-      } else if (updateFields.status === 'draft') {
-        updateFields.status = 'inactive';
-      }
       const result = await updateLocation(
         organization.db,
         organization.organizationId,

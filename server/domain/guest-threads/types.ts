@@ -40,6 +40,8 @@ export interface GuestThreadDeliveryRow {
   status: GuestThreadDeliveryStatus
   provider_message_id: string | null
   error: string | null
+  /** Internal dispatch proof: null for unclassified/old-writer receipts. Only 1 permits a failed retry. */
+  non_delivery_confirmed: 0 | 1 | null
   created_at: string
   updated_at: string
 }
@@ -210,6 +212,7 @@ export interface GuestThreadDetailViewModel {
   manuallyArchived: boolean
   archivedAt: string | null
   archivedByUserId: string | null
+  blockedAt: string | null
   canArchive: boolean
   canUnarchive: boolean
   deliveryFailures: GuestThreadDeliveryFailureViewModel[]

@@ -391,6 +391,34 @@ export interface OnboardingCompletedInput {
 }
 
 /** Tells the KrabiClaw operator a new business finished onboarding and is live. */
+export interface ContentReportedInput {
+  organizationName: string
+  reporter: string
+  subject: 'guest_thread' | 'team_message'
+  blocked: boolean
+  reason: string
+  excerpt: string
+  reviewUrl: string
+}
+
+/** A member reported a guest or a teammate; KrabiClaw acts on it within 24 hours. */
+export function contentReportedMessage(input: ContentReportedInput): NotificationMessage {
+  const what = input.subject === 'guest_thread' ? 'a guest conversation' : 'a team message'
+  return {
+    title: `${input.blocked ? 'Guest blocked and reported' : 'Content reported'} in ${input.organizationName}`,
+    preheader: `${input.reporter} reported ${what}. Review it within 24 hours.`,
+    hero: null,
+    facts: facts(
+      fact('business', 'Business', input.organizationName, true),
+      fact('reporter', 'Reported by', input.reporter, true),
+      fact('reason', 'Reason', input.reason, true),
+      fact('excerpt', 'Reported content', input.excerpt),
+    ),
+    primaryAction: { url: input.reviewUrl, label: 'Review report' },
+    category: 'account_security',
+  }
+}
+
 export function onboardingCompletedMessage(input: OnboardingCompletedInput): NotificationMessage {
   return {
     title: `${input.organizationName} is live on KrabiClaw`,

@@ -56,7 +56,7 @@
               <span v-if="item.compareAtPrice" class="font-normal text-sm text-muted line-through">{{ item.compareAtPrice }}</span>
               <span>{{ item.price }}</span>
             </p>
-            <span v-if="item.href" class="border-b border-current pb-0.5 text-xs uppercase tracking-widest text-default">
+            <span v-if="item.href && item.kind !== 'stay'" class="border-b border-current pb-0.5 text-xs uppercase tracking-widest text-default">
               {{ item.ctaText || t('site.common.view_item') }} →
             </span>
           </div>
@@ -108,6 +108,7 @@ const NuxtLinkComponent = resolveComponent('NuxtLink')
 interface Props {
   data?: {
     items?: Array<{
+      kind?: string | null
       name: string
       image?: string | null
       alt?: string
