@@ -656,10 +656,10 @@ test('financial notification replay preserves per-recipient receipts and isolate
     }
     const own = { userId: 'buyer', ...buildNotificationVisibilityFilter({ userId: 'buyer', platformAdmin: false, organization: null }) }
     const other = { userId: 'other-user', ...buildNotificationVisibilityFilter({ userId: 'other-user', platformAdmin: false, organization: null }) }
-    assert.equal(await acknowledgeNotification(db, other, String(buyer.id)), false)
-    assert.equal(await acknowledgeNotification(db, own, String(merchant.id)), false)
+    assert.equal(await acknowledgeNotification(db, other, String(buyer.id)), null)
+    assert.equal(await acknowledgeNotification(db, own, String(merchant.id)), null)
     assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE kind='acknowledgement'").first('n'), 0)
-    assert.equal(await acknowledgeNotification(db, own, String(buyer.id)), true)
+    assert.deepEqual(await acknowledgeNotification(db, own, String(buyer.id)), { newlyRead: true })
     assert.deepEqual((await db.prepare("SELECT parent_id,actor_user_id FROM activity_entries WHERE kind='acknowledgement'").all()).results, [{ parent_id: buyer.id, actor_user_id: 'buyer' }])
     // One key names one alert: a replay with a different audience returns the first write and changes nothing.
     assert.equal(await createCanonicalNotification(db, { scope: 'organization', organizationId: 'other-merchant', template: eventKey, title: 'Changed audience', idempotencyKey: String(merchant.id) }), String(merchant.id))
