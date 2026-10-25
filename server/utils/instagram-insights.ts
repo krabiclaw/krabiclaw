@@ -5,7 +5,7 @@ import { readIntegration } from '~/server/utils/organization-integrations'
 import { resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
 import { localDateBounds, parseAnalyticsRange } from '~/server/utils/analytics-calendar'
 import { ACCOUNT_INSIGHT_METRICS, MEDIA_INSIGHT_METRICS, instagramAccessToken, listMedia, readAccountInsights, readMediaInsights, type InstagramTarget } from '~/server/utils/instagram'
-import { MetaDeadline, MetaGraphError } from '~/server/utils/meta-graph'
+import { MetaGraphError } from '~/server/utils/meta-graph'
 import { failureOf } from '~/server/utils/social-publication'
 import type { InstagramInsights } from '~/shared/instagram-insights'
 
@@ -30,13 +30,12 @@ export async function loadInstagramInsights(env: CloudflareEnv, organizationId: 
   const range = parseAnalyticsRange({ startDate: query.startDate, endDate: query.endDate, timeZone: context.timezone, now: new Date() })
   const since = new Date(localDateBounds(range.startDate, context.timezone).start)
   const until = new Date(localDateBounds(range.endDate, context.timezone).end)
-  const deadline = new MetaDeadline(25_000)
   try {
     const target: InstagramTarget = { userId: connection.target_id, accessToken: await instagramAccessToken(env, connection.account_id) }
-    const [totals, posted] = await Promise.all([readAccountInsights(target, { since, until }, deadline), mediaPostedIn(target, since, until, deadline)])
+    const [totals, posted] = await Promise.all([readAccountInsights(target, { since, until }), mediaPostedIn(target, since, until)])
     const media = await inBatches(posted.items, 10, async (item) => {
       const carousel = item.media_type === 'CAROUSEL_ALBUM'
-      const insights = carousel ? null : await readMediaInsights(target, item.id, deadline)
+      const insights = carousel ? null : await readMediaInsights(target, item.id)
       return {
         id: item.id, permalink: item.permalink ?? null, caption: item.caption ?? null, mediaType: item.media_type,
         productType: item.media_product_type ?? null, postedAt: item.timestamp, thumbnailUrl: item.thumbnail_url ?? item.media_url ?? null,
@@ -57,11 +56,11 @@ export async function loadInstagramInsights(env: CloudflareEnv, organizationId: 
 }
 
 /** The account's own media posted in [since, until), newest first, up to MEDIA_LIMIT. */
-async function mediaPostedIn(target: InstagramTarget, since: Date, until: Date, deadline: MetaDeadline) {
+async function mediaPostedIn(target: InstagramTarget, since: Date, until: Date) {
   const items: Awaited<ReturnType<typeof listMedia>>['items'] = []
   let after: string | null = null
   do {
-    const page = await listMedia(target, { after, limit: MEDIA_PAGE }, deadline)
+    const page = await listMedia(target, { after, limit: MEDIA_PAGE })
     for (const item of page.items) {
       const postedAt = new Date(item.timestamp)
       if (postedAt < since) return { items, more: false }

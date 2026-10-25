@@ -1,7 +1,6 @@
 import type { OrganizationIntegration } from '~/shared/organization-settings'
 import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { formBody, metaGraphRequest } from './meta-graph'
-import type { MetaDeadline } from './meta-graph'
 
 /**
  * A Facebook Page as an organization's integration, and the Page Graph calls
@@ -40,7 +39,7 @@ export interface FacebookPageTarget {
   pageToken: string
 }
 
-type GraphInit = RequestInit & { deadline?: MetaDeadline }
+type GraphInit = RequestInit
 
 const authorized = (target: FacebookPageTarget, init: GraphInit = {}): GraphInit => ({
   ...init, headers: { ...(init.headers as Record<string, string> | undefined), authorization: `Bearer ${target.pageToken}` },
@@ -86,9 +85,9 @@ export const facebookPageToken = async (env: CloudflareEnv, connection: Pick<Org
 // ── Publication primitives ────────────────────────────────────────────────
 
 /** An unpublished photo on the Page, for a post to attach. Facebook fetches `url` itself. */
-export async function createUnpublishedPhoto(target: FacebookPageTarget, input: { url: string; altText: string | null }, deadline: MetaDeadline): Promise<string> {
+export async function createUnpublishedPhoto(target: FacebookPageTarget, input: { url: string; altText: string | null }): Promise<string> {
   const result = await metaGraphRequest<{ id?: string }>(`${GRAPH_BASE}/${target.pageId}/photos`, authorized(target, {
-    ...formBody({ url: input.url, published: false, ...(input.altText ? { alt_text_custom: input.altText } : {}) }), deadline,
+    ...formBody({ url: input.url, published: false, ...(input.altText ? { alt_text_custom: input.altText } : {}) }),
   }))
   if (!result.id) throw new Error('Facebook created no photo')
   return result.id
@@ -101,21 +100,21 @@ export async function createUnpublishedPhoto(target: FacebookPageTarget, input: 
  * `is_published=true` on one answers `(#10) Failed to publish post` — so the post
  * gets its identity only from this call's answer.
  */
-export async function publishPagePost(target: FacebookPageTarget, input: { message: string; link: string | null; photoIds: readonly string[] }, deadline: MetaDeadline): Promise<string> {
+export async function publishPagePost(target: FacebookPageTarget, input: { message: string; link: string | null; photoIds: readonly string[] }): Promise<string> {
   const fields: Record<string, string> = {}
   if (input.message) fields.message = input.message
   if (input.link && input.photoIds.length === 0) fields.link = input.link
   input.photoIds.forEach((id, index) => { fields[`attached_media[${index}]`] = JSON.stringify({ media_fbid: id }) })
-  const result = await metaGraphRequest<{ id?: string }>(`${GRAPH_BASE}/${target.pageId}/feed`, authorized(target, { ...formBody(fields), deadline }))
+  const result = await metaGraphRequest<{ id?: string }>(`${GRAPH_BASE}/${target.pageId}/feed`, authorized(target, { ...formBody(fields) }))
   if (!result.id) throw new Error('Facebook created no Page post')
   return result.id
 }
 
 export interface FacebookPostState { id: string; isPublished: boolean; permalink: string | null; createdTime: string | null }
 
-export async function readPagePost(target: FacebookPageTarget, postId: string, deadline: MetaDeadline): Promise<FacebookPostState> {
+export async function readPagePost(target: FacebookPageTarget, postId: string): Promise<FacebookPostState> {
   const result = await metaGraphRequest<{ id?: string; is_published?: boolean; permalink_url?: string; created_time?: string }>(
-    `${GRAPH_BASE}/${postId}?fields=id,is_published,permalink_url,created_time`, authorized(target, { deadline }))
+    `${GRAPH_BASE}/${postId}?fields=id,is_published,permalink_url,created_time`, authorized(target, {}))
   if (!result.id || typeof result.is_published !== 'boolean') throw new Error('Facebook did not say whether the post is published')
   return { id: result.id, isPublished: result.is_published, permalink: result.permalink_url ?? null, createdTime: result.created_time ?? null }
 }
@@ -125,9 +124,9 @@ export async function readPagePost(target: FacebookPageTarget, postId: string, d
  * upload: Facebook posts it to the Page when processing completes, and
  * `readVideo` says when that has happened.
  */
-export async function createVideo(target: FacebookPageTarget, input: { fileUrl: string; description: string; title: string | null }, deadline: MetaDeadline): Promise<string> {
+export async function createVideo(target: FacebookPageTarget, input: { fileUrl: string; description: string; title: string | null }): Promise<string> {
   const result = await metaGraphRequest<{ id?: string }>(`${GRAPH_BASE}/${target.pageId}/videos`, authorized(target, {
-    ...formBody({ file_url: input.fileUrl, ...(input.description ? { description: input.description } : {}), ...(input.title ? { title: input.title } : {}) }), deadline,
+    ...formBody({ file_url: input.fileUrl, ...(input.description ? { description: input.description } : {}), ...(input.title ? { title: input.title } : {}) }),
   }))
   if (!result.id) throw new Error('Facebook created no video')
   return result.id
@@ -140,24 +139,24 @@ export function isFacebookReel(video: { width: number | null; height: number | n
 }
 
 /** A Reel upload session: the video id Facebook will publish under, and nothing public yet. */
-export async function startReel(target: FacebookPageTarget, deadline: MetaDeadline): Promise<string> {
-  const result = await metaGraphRequest<{ video_id?: string; upload_url?: string }>(`${GRAPH_BASE}/${target.pageId}/video_reels`, authorized(target, { ...formBody({ upload_phase: 'start' }), deadline }))
+export async function startReel(target: FacebookPageTarget): Promise<string> {
+  const result = await metaGraphRequest<{ video_id?: string; upload_url?: string }>(`${GRAPH_BASE}/${target.pageId}/video_reels`, authorized(target, { ...formBody({ upload_phase: 'start' }) }))
   if (!result.video_id) throw new Error('Facebook started no Reel upload')
   return result.video_id
 }
 
 /** Facebook fetches the hosted file into the Reel upload session itself. */
-export async function uploadReelFromUrl(target: FacebookPageTarget, videoId: string, fileUrl: string, deadline: MetaDeadline): Promise<void> {
+export async function uploadReelFromUrl(target: FacebookPageTarget, videoId: string, fileUrl: string): Promise<void> {
   const result = await metaGraphRequest<{ success?: boolean }>(`https://rupload.facebook.com/video-upload/${FACEBOOK_GRAPH_VERSION}/${videoId}`, {
-    method: 'POST', headers: { authorization: `OAuth ${target.pageToken}`, file_url: fileUrl }, deadline,
+    method: 'POST', headers: { authorization: `OAuth ${target.pageToken}`, file_url: fileUrl },
   })
   if (result.success !== true) throw new Error('Facebook did not accept the Reel upload')
 }
 
 /** The irreversible Reel call: finish the session as a published Reel with its caption. Facebook answers with the Page post it made. */
-export async function finishReel(target: FacebookPageTarget, videoId: string, input: { description: string; title: string | null }, deadline: MetaDeadline): Promise<{ postId: string | null }> {
+export async function finishReel(target: FacebookPageTarget, videoId: string, input: { description: string; title: string | null }): Promise<{ postId: string | null }> {
   const result = await metaGraphRequest<{ success?: boolean; post_id?: string }>(`${GRAPH_BASE}/${target.pageId}/video_reels`, authorized(target, {
-    ...formBody({ upload_phase: 'finish', video_id: videoId, video_state: 'PUBLISHED', ...(input.description ? { description: input.description } : {}), ...(input.title ? { title: input.title } : {}) }), deadline,
+    ...formBody({ upload_phase: 'finish', video_id: videoId, video_state: 'PUBLISHED', ...(input.description ? { description: input.description } : {}), ...(input.title ? { title: input.title } : {}) }),
   }))
   if (result.success !== true) throw new Error('Facebook did not confirm the Reel was published')
   return { postId: typeof result.post_id === 'string' && result.post_id ? result.post_id : null }
@@ -172,10 +171,10 @@ export interface FacebookVideoState {
   error: string | null
 }
 
-export async function readVideo(target: FacebookPageTarget, videoId: string, deadline: MetaDeadline): Promise<FacebookVideoState> {
+export async function readVideo(target: FacebookPageTarget, videoId: string): Promise<FacebookVideoState> {
   type Phase = { status?: string; errors?: Array<{ message?: string }> }
   const result = await metaGraphRequest<{ id?: string; published?: boolean; post_id?: string; permalink_url?: string; status?: { video_status?: string; processing_phase?: Phase; publishing_phase?: Phase } }>(
-    `${GRAPH_BASE}/${videoId}?fields=id,published,post_id,permalink_url,status`, authorized(target, { deadline }))
+    `${GRAPH_BASE}/${videoId}?fields=id,published,post_id,permalink_url,status`, authorized(target, {}))
   if (!result.id || typeof result.published !== 'boolean') throw new Error('Facebook did not say whether the video is published')
   const status = result.status?.video_status
   const processing = status === 'ready' ? 'ready' : status === 'error' ? 'error' : 'processing'
@@ -186,8 +185,8 @@ export async function readVideo(target: FacebookPageTarget, videoId: string, dea
 }
 
 /** Deletes the explicitly addressed Page object and requires Meta's confirmation. */
-export async function deletePageObject(target: FacebookPageTarget, objectId: string, deadline: MetaDeadline): Promise<void> {
-  const result = await metaGraphRequest<{ success?: boolean }>(`${GRAPH_BASE}/${objectId}`, authorized(target, { method: 'DELETE', deadline }))
+export async function deletePageObject(target: FacebookPageTarget, objectId: string): Promise<void> {
+  const result = await metaGraphRequest<{ success?: boolean }>(`${GRAPH_BASE}/${objectId}`, authorized(target, { method: 'DELETE' }))
   if (result.success !== true) throw new Error(`Facebook did not confirm ${objectId} was deleted`)
 }
 
@@ -216,21 +215,21 @@ export interface FacebookPagePostRecord {
 const ATTACHMENT_FIELDS = 'type,media_type,url,unshimmed_url,title,description,target{id,url},media{image,source}'
 
 /** One page of the Page's own posts, newest first, and Meta's cursor for the next. */
-export async function listPagePosts(target: FacebookPageTarget, input: { after: string | null; limit: number }, deadline: MetaDeadline): Promise<{ items: FacebookPagePostRecord[]; after: string | null }> {
+export async function listPagePosts(target: FacebookPageTarget, input: { after: string | null; limit: number }): Promise<{ items: FacebookPagePostRecord[]; after: string | null }> {
   const params = new URLSearchParams({
     fields: `id,message,created_time,permalink_url,attachments{${ATTACHMENT_FIELDS},subattachments.limit(100){${ATTACHMENT_FIELDS}}}`,
     limit: String(input.limit),
     ...(input.after ? { after: input.after } : {}),
   })
   const page = await metaGraphRequest<{ data?: FacebookPagePostRecord[]; paging?: { cursors?: { after?: string }; next?: string } }>(
-    `${GRAPH_BASE}/${target.pageId}/posts?${params}`, authorized(target, { deadline }))
+    `${GRAPH_BASE}/${target.pageId}/posts?${params}`, authorized(target, {}))
   if (!Array.isArray(page.data)) throw new Error('Meta returned no post inventory')
   if (page.paging?.next && !page.paging.cursors?.after) throw new Error('Meta returned another page without its cursor')
   return { items: page.data, after: page.paging?.next ? page.paging.cursors!.after! : null }
 }
 
 /** One Page post by id, for reconciliation of an exact identity. */
-export async function readPagePostRecord(target: FacebookPageTarget, postId: string, deadline: MetaDeadline): Promise<FacebookPagePostRecord> {
+export async function readPagePostRecord(target: FacebookPageTarget, postId: string): Promise<FacebookPagePostRecord> {
   const params = new URLSearchParams({ fields: `id,message,created_time,permalink_url,attachments{${ATTACHMENT_FIELDS},subattachments.limit(100){${ATTACHMENT_FIELDS}}}` })
-  return await metaGraphRequest<FacebookPagePostRecord>(`${GRAPH_BASE}/${postId}?${params}`, authorized(target, { deadline }))
+  return await metaGraphRequest<FacebookPagePostRecord>(`${GRAPH_BASE}/${postId}?${params}`, authorized(target, {}))
 }
