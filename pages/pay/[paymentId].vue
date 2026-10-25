@@ -29,10 +29,17 @@
             <img v-if="handoff.image_url" :src="handoff.image_url" alt="" class="size-24 shrink-0 rounded-xl object-cover">
             <h2 class="min-w-0 text-lg font-semibold leading-snug text-highlighted">{{ handoff.title }}</h2>
           </div>
-          <p v-if="policySummary" id="booking-policy" class="scroll-mt-8 text-sm text-default">
-            <span :class="handoff.stay ? undefined : 'line-clamp-3'">{{ policySummary }}</span>
-            <NuxtLink v-if="termsPath && !handoff.stay" :to="termsPath" class="font-semibold underline">{{ t('payment.full_policy') }}</NuxtLink>
-          </p>
+          <section v-if="policySummary" id="booking-policy" class="scroll-mt-8 text-sm text-default">
+            <p>
+              <span :class="handoff.stay ? undefined : 'line-clamp-3'">{{ policySummary }}</span>
+              <NuxtLink v-if="termsPath && !handoff.stay" :to="termsPath" class="font-semibold underline">{{ t('payment.full_policy') }}</NuxtLink>
+            </p>
+            <details v-if="stayPolicy" class="mt-2">
+              <summary class="cursor-pointer font-semibold underline">{{ t('payment.full_policy') }}</summary>
+              <ul class="mt-2 list-disc space-y-1 pl-5"><li v-for="term in stayPolicy.terms" :key="term">{{ term }}</li></ul>
+              <p v-if="'detail' in stayPolicy" class="mt-2">{{ stayPolicy.detail }}</p>
+            </details>
+          </section>
 
           <!-- Airbnb's Change goes back to what was picked; here that is the offering's own page. -->
           <div v-if="handoff.stay" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-stay>
@@ -209,10 +216,11 @@ const guests = computed(() => {
   if (value.stay) return guestsLabel(value.stay.adults + value.stay.children)
   return value.kind === 'experience' || value.kind === 'reservation' ? guestsLabel(value.quantity) : ''
 })
-const policySummary = computed(() => {
+const stayPolicy = computed(() => {
   const policy = handoff.value?.stay?.cancellation_policy
-  return policy ? bookedPolicyTerms(policy).summary : handoff.value?.cancellation_policy ?? ''
+  return policy ? bookedPolicyTerms(policy) : null
 })
+const policySummary = computed(() => stayPolicy.value?.summary ?? handoff.value?.cancellation_policy ?? '')
 // The offering's own page: where its full terms are stated and what was picked can be changed.
 const offeringPath = computed(() => {
   const value = handoff.value
