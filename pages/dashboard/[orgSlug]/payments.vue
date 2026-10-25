@@ -32,5 +32,5 @@ const rows = computed<EditorNavigationItem[]>(() => [
   ...(account.value?.status === 'ready' ? [{ id: 'surcharge', label: 'Card surcharge', to: to('surcharge'), summary: account.value.surchargeBasisPoints === null ? 'Off. Pass credit card fees on to the buyer.' : `On at ${account.value.surchargeBasisPoints / 100}%.` }] : []),
 ])
 const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'payouts', items: rows.value }])
-const firstRow = computed(() => connectPending.value || connectError.value ? null : rows.value[0]?.to ?? null)
+const firstRow = computed(() => rows.value[0]?.to ?? null)
 </script>

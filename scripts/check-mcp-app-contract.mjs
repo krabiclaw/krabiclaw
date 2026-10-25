@@ -108,6 +108,22 @@ async function main() {
     const welcome = await client.callTool({ name: 'list_organizations', arguments: {} })
     if (toolStatus === 200 && !welcome.isError && Array.isArray(welcome.structuredContent?.organizations) && welcome.structuredContent.organizations.length > 0) {
       pass('current MCP client decodes authenticated list_organizations with tenant data')
+      for (const [index, organization] of welcome.structuredContent.organizations.entries()) {
+        if (typeof organization.id !== 'string' || !organization.id.trim()) {
+          fail('list_organizations returned an invalid organization ID', { index })
+          continue
+        }
+        const scoped = await client.callTool({ name: 'get_organization', arguments: { organization_id: organization.id } })
+        if (toolStatus === 200 && !scoped.isError
+          && scoped.structuredContent?.organization?.id === organization.id
+          && scoped.structuredContent?.context?.organization_id === organization.id) {
+          pass(`current MCP client reads the exact explicit organization target (${index + 1}/${welcome.structuredContent.organizations.length})`)
+        } else fail('current MCP client failed the explicit organization read', {
+          status: toolStatus, isError: scoped.isError,
+          identityMatches: scoped.structuredContent?.organization?.id === organization.id,
+          contextMatches: scoped.structuredContent?.context?.organization_id === organization.id,
+        })
+      }
     } else fail('current MCP client did not receive organizations', { status: toolStatus, result: welcome })
 
     for (const [label, credentials] of [
