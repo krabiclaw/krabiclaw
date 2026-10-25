@@ -249,7 +249,7 @@ try {
         headers: { authorization: `Bearer ${apiToken}`, 'content-type': 'application/json' },
         body: JSON.stringify({ sql: readFileSync(payloadPath, 'utf8') }),
       })
-      if (!response.ok) throw new Error(`${target} delta query failed: HTTP ${response.status}`)
+      if (!response.ok) throw new Error(`${target} delta query failed: HTTP ${response.status}: ${await response.text()}`)
       const applied = await response.json().catch(() => {
         throw new Error(`${target} delta query returned invalid JSON: HTTP ${response.status}`)
       }) as { success?: boolean; result?: Array<{ success?: boolean } | null> } | null
