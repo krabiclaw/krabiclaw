@@ -940,6 +940,33 @@ test('a failed verification read retains the completed provider write for review
   }
 })
 
+test('a full sync Channex took without naming its task is logged as failed and held for review', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (input, init = {}) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url)
+    const answer = await channex.fetch(input, init)
+    return init.method === 'POST' && url.pathname === '/api/v1/restrictions' ? Response.json({ data: [], meta: { message: 'Success', warnings: [] } }) : answer
+  }
+  try {
+    const connection = await connected(db, env, channex)
+    const { product_id: productId } = await connection.prepare(LISTING, form)
+    let failure: { data?: { code?: string } } | undefined
+    for (let step = 0; step < 6 && !failure; step++) {
+      await track(db, channex, productId)
+      await connection.advance(productId).catch((error: { data?: { code?: string } }) => { failure = error })
+    }
+    assert.equal(failure?.data?.code, 'INVALID_PROVIDER_RESPONSE')
+    assert.deepEqual(await db.prepare("SELECT kind, status, task_id FROM channel_sync_log WHERE direction = 'outbound' AND product_id = ?").bind(productId).all().then(rows => rows.results),
+      [{ kind: 'restrictions', status: 'failed', task_id: null }])
+    assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'needs_review', pending_step: 'import_calendar' })
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
 test('an in-flight stop cannot mark a newer sync request done', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()

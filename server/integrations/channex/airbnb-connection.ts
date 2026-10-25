@@ -591,11 +591,21 @@ export class AirbnbConnection {
           let rejected = false
           for (const [kind, ariPath, values] of calls) {
             const result = await channexRequest(this.env, ariPath, 'POST', { values })
-            const meta = provided(() => object(result.meta, 'Inventory result'))
-            const refused = meta.message !== 'Success' || (meta.warnings !== undefined && (!Array.isArray(meta.warnings) || meta.warnings.length > 0))
-            await logAriCall(this.db, { organizationId: this.organizationId, productId, propertyId: string(mapping.property_id, 'property_id'), kind,
-              status: refused ? 'needs_review' : 'pushed', detail: refused ? `Channex rejected part of the full sync: ${JSON.stringify(meta).slice(0, 500)}` : `full sync ${days[0]!.date}..${days.at(-1)!.date}`,
-              taskId: provided(() => ariTask(result, refused)) })
+            const propertyId = string(mapping.property_id, 'property_id')
+            // The call reached Channex, so it is logged whatever its answer: an unreadable one as failed, then raised.
+            let answer: { refused: boolean; detail: string; task: string | null }
+            try {
+              const meta = object(result.meta, 'Inventory result')
+              const refused = meta.message !== 'Success' || (meta.warnings !== undefined && (!Array.isArray(meta.warnings) || meta.warnings.length > 0))
+              answer = { refused, task: ariTask(result, refused),
+                detail: refused ? `Channex rejected part of the full sync: ${JSON.stringify(meta).slice(0, 500)}` : `full sync ${days[0]!.date}..${days.at(-1)!.date}` }
+            } catch (error) {
+              if (!(error instanceof ChannexDataError)) throw error
+              await logAriCall(this.db, { organizationId: this.organizationId, productId, propertyId, kind, status: 'failed', detail: `Channex's answer to the full sync was not readable: ${error.message}`, taskId: null })
+              fail(502, 'INVALID_PROVIDER_RESPONSE', `Channex returned an invalid response: ${error.message}`)
+            }
+            const { refused } = answer
+            await logAriCall(this.db, { organizationId: this.organizationId, productId, propertyId, kind, status: refused ? 'needs_review' : 'pushed', detail: answer.detail, taskId: answer.task })
             rejected ||= refused
           }
           if (rejected) fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex rejected part of the calendar. The import needs review before connecting Airbnb.')
