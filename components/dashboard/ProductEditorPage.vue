@@ -888,8 +888,8 @@ const creationSubmitted = useState(`${draftKey}:submitted`, () => false)
 const creationPhoto = useState<CoverPhotoAsset | null>(`${draftKey}:photo`, () => null)
 const creationPrice = useState(`${draftKey}:price`, () => '')
 let commitNavigation = false
-onBeforeRouteLeave(() => !saving.value || commitNavigation)
-onBeforeRouteUpdate((to, from) => !saving.value || commitNavigation || to.path === from.path
+onBeforeRouteLeave(() => !isNew.value || !saving.value || commitNavigation)
+onBeforeRouteUpdate((to, from) => !isNew.value || !saving.value || commitNavigation || to.path === from.path
   && JSON.stringify([to.query.kind, to.query.location_id, to.query.collection_id]) === JSON.stringify([from.query.kind, from.query.location_id, from.query.collection_id]))
 onUnmounted(() => {
   if (productId.value === 'new' && !creationSubmitted.value) clearNuxtState([draftKey, createKeyName, `${draftKey}:created`, `${draftKey}:submitted`, `${draftKey}:photo`, `${draftKey}:price`])
@@ -1878,11 +1878,8 @@ async function commit(concern?: ProductConcern) {
       })
     }
     if (removesOnlineScope) {
-      commitNavigation = true
-      try {
-        const result = await navigateTo({ path: route.path, query: { ...route.query, location_id: undefined }, hash: route.hash }, { replace: true })
-        if (isNavigationFailure(result)) throw result
-      } finally { commitNavigation = false }
+      const result = await navigateTo({ path: route.path, query: { ...route.query, location_id: undefined }, hash: route.hash }, { replace: true })
+      if (isNavigationFailure(result)) throw result
       if (closeTo.value) {
         const destination = router.resolve(closeTo.value)
         closeTo.value = router.resolve({ path: destination.path, query: { ...destination.query, location_id: undefined }, hash: destination.hash }).fullPath
@@ -1893,11 +1890,10 @@ async function commit(concern?: ProductConcern) {
     // A booking write changes what the schedule is: its start times, whether the
     // product has a calendar at all, or the time zone an online one runs in.
     if (concern !== undefined && concern !== 'publication-visibility' && concern !== 'publication-availability' && concern !== 'house-rules' && concern !== 'additional-rules' && concern !== 'arrival-time' && !isSafetyConcern(concern)) await reloadSchedule()
-    commitNavigation = true
-    try {
+    if (!closeTo.value || router.resolve(closeTo.value).fullPath !== router.currentRoute.value.fullPath) {
       const result = await (closeTo.value ? navigateTo(closeTo.value) : level.close())
       if (isNavigationFailure(result)) throw result
-    } finally { commitNavigation = false }
+    }
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
     // Only the canonical planner can prove the request never reached its write.

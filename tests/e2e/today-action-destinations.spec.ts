@@ -438,7 +438,7 @@ test('a prepared article photo post preserves concurrent media and publishes onl
       await expect(visitor.getByRole('heading', { name: title, level: 1, exact: true })).toBeVisible()
       await expect(visitor.getByText(publishedCaption, { exact: true })).toBeVisible()
       await expect(visitor.locator('article section img').filter({ visible: true }).first()).toHaveAttribute('src', photo.public_url)
-      await visitor.getByRole('button', { name: 'Photos and video (2)', exact: true }).click()
+      await visitor.getByRole('button', { name: `Open media, ${title}`, exact: true }).first().click()
       const publicGallery = visitor.getByRole('dialog')
       await publicGallery.getByRole('button', { name: 'Next photo or video', exact: true }).click()
       const publicSecondPhoto = publicGallery.locator('section').nth(1).locator('img:not([aria-hidden="true"])')

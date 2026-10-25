@@ -49,7 +49,7 @@
       </fieldset>
       <section class="hidden min-w-0 lg:sticky lg:top-0 lg:block" aria-label="Post preview">
         <h2 class="mb-4 text-sm font-semibold text-muted">Preview</h2>
-        <SocialPostMedia v-if="previewMedia.length" :media="previewMedia" :title="editor.form.title || undefined" :description="editor.form.body" fit="contain" frame-class="aspect-square overflow-hidden rounded-xl bg-elevated" eager />
+        <MediaGallery v-if="previewMedia.length" :items="previewMedia" :title="editor.form.title || 'Post preview'" />
         <h3 v-if="editor.form.title" class="mt-5 break-words text-xl font-semibold text-highlighted">{{ editor.form.title }}</h3>
         <p v-if="editor.form.body" class="mt-4 whitespace-pre-line break-words text-base leading-relaxed [overflow-wrap:anywhere]">{{ editor.form.body }}</p>
         <p v-if="!previewMedia.length && !editor.form.title && !editor.form.body" class="py-12 text-muted">Your photo and caption will appear here.</p>
@@ -71,9 +71,8 @@ import { isNavigationFailure, onBeforeRouteLeave, onBeforeRouteUpdate } from 'vu
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import DashboardContentPreview from '~/components/dashboard/DashboardContentPreview.vue'
 import PostMediaFields from '~/components/dashboard/PostMediaFields.vue'
-import SocialPostMedia from '~/components/social/SocialPostMedia.vue'
+import MediaGallery from '~/components/MediaGallery.vue'
 import { normalizePostMediaForForm, usePostEditor, type PostMediaFormItem, type PublishOutcome, type PublishTarget, type SocialChannel } from '~/composables/usePostEditor'
-import type { PublicPostMedia } from '~/server/utils/post-management'
 import { parsePostInput, POST_BODY_MAX, POST_TITLE_MAX, POST_CALL_TO_ACTION_LABEL_MAX, type PostCallToAction } from '~/shared/posts'
 import { isBlogPostResponse } from '~/lib/components/workspace/blog/blog-response-contracts'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
@@ -139,7 +138,7 @@ function writeAction(field: 'label' | 'url', value: string) {
 const WHOLE_WEBSITE = 'whole-website'
 const locationItems = computed(() => [{ label: 'Whole website', value: WHOLE_WEBSITE }, ...organizationLocations.value.map(location => ({ label: location.title, value: location.id }))])
 const locationChoice = computed({ get: () => editor.form.location_id ?? WHOLE_WEBSITE, set: (value: string) => { editor.form.location_id = value === WHOLE_WEBSITE ? null : value; selected.value = selected.value.filter(channel => channel === 'organization') } })
-const previewMedia = computed<PublicPostMedia[]>(() => editor.form.media.filter((item): item is PostMediaFormItem & { public_url: string } => Boolean(item.asset_id && item.public_url)).map(item => ({ asset_id: item.asset_id, public_url: item.public_url, thumbnail_url: item.thumbnail_url ?? null, kind: item.kind === 'video' ? 'video' : 'image', alt_text: item.alt_text, width: null, height: null })))
+const previewMedia = computed(() => editor.form.media.filter((item): item is PostMediaFormItem & { public_url: string } => Boolean(item.asset_id && item.public_url)).map(item => ({ asset_id: item.asset_id, url: item.public_url, poster: item.thumbnail_url ?? undefined, kind: item.kind === 'video' ? 'video' as const : 'image' as const, alt: item.alt_text, description: editor.form.body })))
 
 interface Channel { channel: SocialChannel; connected: boolean; target_id: string | null; target_name: string | null; connection_revision: string | null; problems: Array<{ code: string; message: string }>; connect_url: string }
 const { data: connections, error: connectionFailure, status: connectionStatus, refresh: refreshConnections } = await useAsyncData(
