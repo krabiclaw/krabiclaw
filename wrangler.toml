@@ -213,7 +213,10 @@ routes = [
 # data: scanning a growing, never-cleaned non-production database every few
 # minutes once drove a 93B-row D1 billing spike.
 [env.staging.triggers]
-crons = []
+# Only the Channex queues run on staging, on expressions production does not use
+# (see SCHEDULED_TASKS): airbnb_sync_jobs, channel_night_pushes and the Channex
+# revision feed, which Channex certification requires. Nothing scans tenant data.
+crons = ["1-59/2 * * * *", "3-59/10 * * * *"]
 
 [env.staging.vars]
 # Channex staging, where the Airbnb test accounts live. CHANNEX_API_KEY is a secret.
