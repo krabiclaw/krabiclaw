@@ -20,7 +20,7 @@
         <h1 class="text-2xl sm:text-[32px] font-semibold tracking-tight text-highlighted">{{ t('payment.title') }}</h1>
       </div>
 
-      <USkeleton v-if="status === 'idle' || status === 'pending'" class="h-64 w-full rounded-2xl" />
+      <USkeleton v-if="status === 'pending' || (status === 'idle' && !(mounted && !claim))" class="h-64 w-full rounded-2xl" />
       <UAlert v-else-if="loadError" color="error" :title="t('payment.unavailable')" :description="loadError" />
       <!-- Airbnb's Confirm and pay: the method and the one button on the left, what is being bought on the right. -->
       <div v-else-if="handoff" class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16 items-start">
@@ -138,6 +138,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMounted } from '@vueuse/core'
 import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement, type StripePaymentMethodMessagingElementOptions } from '@stripe/stripe-js'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { ProductKind } from '~/shared/product-details'
@@ -171,6 +172,8 @@ const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && 
   || ((value.kind === 'booking' || value.kind === 'reservation') && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
 
 const { data: handoff, status, error } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) })
+// The fragment never reaches the server, so a missing claim is known only once mounted.
+const mounted = useMounted()
 const loadError = computed(() => !claim.value ? t('payment.unavailable') : error.value ? getErrorMessage(error.value, t('payment.unavailable')) : '')
 useSocialMetadata(() => ({ path: route.path, title: t('payment.title'), description: t('payment.title'), socialImage: null, discoverability: 'private' }))
 
