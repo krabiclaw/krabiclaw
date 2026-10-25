@@ -10,6 +10,9 @@ import { getPublishedBlogPost, listPublishedArticles } from '../../server/utils/
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { createDb } from '../../server/db/index.ts'
 import { recordTenantPageview, resolvePublicPageIdentity } from '../../server/utils/pageview-tracking.ts'
+import { putResourceLocalization, resolveLocalizedPublicRoute } from '../../server/utils/localization.ts'
+import { createProduct, setProductLocation } from '../../server/utils/product-management.ts'
+import { disableOrganizationLanguage } from '../../server/utils/organization-languages.ts'
 
 test('public discovery resolves translations through current publication owners', { timeout: 60_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -68,6 +71,26 @@ test('public discovery resolves translations through current publication owners'
     assert.equal(await getPublishedBlogPost(db, 'platform', 'blog', 'guide', 'en', env), null)
     // A translated list is readable only where the language is published on a Growth site.
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('sub-tenant','growth','tenant','active',4102444800)").run()
+    await db.prepare("INSERT INTO user (id,name,email) VALUES ('discovery-owner','Discovery owner','discovery@example.test')").run()
+    for (const [id, org, slug, status] of [
+      ['branch', 'tenant', 'branch', 'active'], ['empty', 'tenant', 'empty', 'active'],
+      ['hidden-branch', 'tenant', 'hidden', 'inactive'], ['foreign-branch', 'other', 'foreign', 'active'],
+    ]) await db.prepare('INSERT INTO business_locations (id,organization_id,slug,title,status,timezone) VALUES (?,?,?,?,?,?)')
+      .bind(id, org, slug, slug, status, 'UTC').run()
+    for (const id of ['branch', 'empty', 'hidden-branch']) await putResourceLocalization(env, createDb(db), {
+      organizationId: 'tenant', resourceType: 'business_location', resourceId: id, locale: 'th',
+      values: { title: `Translated ${id}` }, userId: 'discovery-owner',
+    })
+    const experience = await createProduct(createDb(db), { env, organizationId: 'tenant', actor: { actorId: 'discovery-owner' },
+      product: { kind: 'experience', name: 'Branch workshop', active: true, order_url: 'https://booking.example/workshop' }, publication: { published: true } })
+    await setProductLocation(createDb(db), { env, organizationId: 'tenant', productId: experience.id, locationId: 'branch',
+      active: true, published: true, actor: { actorId: 'discovery-owner' } })
+    await putResourceLocalization(env, createDb(db), { organizationId: 'tenant', resourceType: 'product', resourceId: experience.id,
+      locale: 'th', values: { name: 'Translated branch workshop' }, userId: 'discovery-owner' })
+    await createContentDocumentWithBlocks(db, { id: 'branch-qa', organizationId: 'tenant', kind: 'qa', rowRole: 'root', locale: 'en',
+      locationId: 'branch', title: 'Where is the workshop?', summary: 'At this branch.', status: 'published', source: 'manual' }, [])
+    await createContentDocumentWithBlocks(db, { id: 'branch-qa-th', organizationId: 'tenant', kind: 'qa', rowRole: 'representation', rootId: 'branch-qa',
+      locale: 'th', title: 'Translated question', summary: 'Translated answer' }, [])
     // Complete built-in routes derive their localized paths; authored pages still
     // require a published representation. The collector stores the actual visit.
     const identityInput = { organizationId: 'tenant', requestedLocale: null, themeId: 'tenant-theme-v1', vertical: 'restaurant' }
@@ -90,6 +113,35 @@ test('public discovery resolves translations through current publication owners'
       assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: path }), null, path)
     }
     assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, organizationId: 'other', pagePath: '/th/menu' }), null)
+    // A section is owned by the location's translation, not by a second
+    // resource_localizations row for every child URL. Both readers use it.
+    for (const section of ['experiences', 'qa', 'contact']) {
+      const path = `/th/locations/branch/${section}`
+      const route = await resolveLocalizedPublicRoute(env, createDb(db), 'tenant', path)
+      assert.equal(route.representation.resource_id, 'branch')
+      assert.equal(route.representation.resource_type, 'business_location')
+      assert.deepEqual(route.locale_representations.map(item => [item.locale, item.route_path, item.source]), [
+        ['en', `/locations/branch/${section}`, 'source'], ['th', path, 'localized'],
+      ])
+      const identity = await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: path })
+      assert.deepEqual(identity, { publicPath: path, sourcePath: `/locations/branch/${section}`, locale: 'th',
+        locationId: 'branch', pageId: null, pageType: null, recipe: null, documentId: null, productId: null })
+      assert(identity)
+      const eventId = crypto.randomUUID()
+      await recordTenantPageview(db, { eventId, organizationId: 'tenant', pagePath: identity.publicPath,
+        sourcePath: identity.sourcePath, locale: identity.locale, referrerHost: null, attribution: {}, internalHosts: [],
+        userAgent: 'Desktop', ipHash: 'proof', sessionId: 'localized-visit', visitorId: 'localized-visitor',
+        country: null, region: null, city: null, locationId: identity.locationId, pageId: identity.pageId,
+        documentId: identity.documentId, pageType: identity.pageType, recipe: identity.recipe, productId: identity.productId,
+        now: '2026-10-13T00:00:00.000Z' })
+      assert.deepEqual(await db.prepare("SELECT page_path, location_id, payload_json ->> '$.source_path' AS source_path, payload_json ->> '$.locale' AS locale FROM analytics_events WHERE id = ?").bind(eventId).first(),
+        { page_path: path, location_id: 'branch', source_path: `/locations/branch/${section}`, locale: 'th' })
+    }
+    for (const path of ['/th/locations/branch/unknown', '/th/locations/branch/photos', '/th/locations/empty/experiences',
+      '/th/locations/hidden/contact', '/th/locations/foreign/contact', '/fr/locations/branch/experiences']) {
+      assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: path }), null, path)
+    }
+    assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, requestedLocale: 'en', pagePath: '/th/locations/branch/experiences' }), null)
     const translated = await listPublishedArticles(db, env, 'tenant', 'blog', 'th')
     assert.deepEqual(translated.map(row => [row.id, row.title, row.excerpt, row.slug]), [
       ['tenant-story', 'Translated story', 'Translated summary', 'translated'],
@@ -99,6 +151,8 @@ test('public discovery resolves translations through current publication owners'
     await updateContentDocument(db, 'tenant-story', { expected_updated_at: source, changes: { visibility: 'unlisted' } })
     assert.deepEqual(await listPublishedArticles(db, env, 'tenant', 'blog', 'th'), [])
     assert(!(await buildTenantBlogDocuments(db)).some(record => record.id === 'tenant-blog:tenant-story'))
+    await disableOrganizationLanguage(createDb(db), { organizationId: 'tenant', locale: 'th' })
+    assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: '/th/locations/branch/experiences' }), null)
     assert.deepEqual((await db.prepare('PRAGMA foreign_key_check').all()).results, [])
   } finally {
     await runtime.dispose()

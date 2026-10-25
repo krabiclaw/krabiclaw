@@ -1330,6 +1330,22 @@ test.describe('stateless MCP server', () => {
         const starter = written[0]!
         const dessert = written[1]!
         const movedDish = starter.products[0]!
+        const dishEndpoint = `${baseURL}/api/editor/organizations/${organizationId}/products/${movedDish.id}`
+        const beforeInvalidRead = await request.get(dishEndpoint)
+        expect(beforeInvalidRead.status(), await beforeInvalidRead.text()).toBe(200)
+        const beforeInvalid = await beforeInvalidRead.json()
+        const invalidMenu = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_menu', args: {
+          organization_id: organizationId, location_id: locationId, idempotency_key: `${stamp}-invalid`,
+          sections: [{ collection_id: starter.collection.id, name: starter.collection.name, items: [{ product_id: movedDish.id, name: movedDish.name, details: { house_rules: 'This home-only field cannot edit a dish.' } }] }],
+        } })
+        expect(invalidMenu.status(), await invalidMenu.text()).toBe(200)
+        const invalidMenuResult = (await invalidMenu.json()).result
+        expect(invalidMenuResult.isError).toBe(true)
+        expect(invalidMenuResult.structuredContent).toBeUndefined()
+        expect(invalidMenuResult.content[0].text).toContain('Invalid arguments for tool update_menu')
+        const afterInvalidRead = await request.get(dishEndpoint)
+        expect(afterInvalidRead.status(), await afterInvalidRead.text()).toBe(200)
+        expect(await afterInvalidRead.json()).toEqual(beforeInvalid)
         await call<Menu>('update_menu', { location_id: locationId, idempotency_key: crypto.randomUUID(), sections: [
           { collection_id: dessert.collection.id, name: dessert.collection.name, items: [{ product_id: movedDish.id, name: movedDish.name }] },
         ] })
