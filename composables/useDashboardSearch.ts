@@ -33,16 +33,18 @@ export function useDashboardSearch() {
   const router = useRouter()
   const dashboard = useDashboardOrganization()
   const menu = useDashboardMenu()
+  const navigation = useOrganizationSettingsNavigation(menu.organization, menu.scopeModel)
   const searchTerm = ref('')
   const loading = ref(false)
   /** Why the last search failed; the palette shows it in place of results. */
-  const error = ref<string | null>(null)
+  const requestError = ref<string | null>(null)
+  const error = computed(() => navigation.error.value ? getErrorMessage(navigation.error.value, 'The Menu could not be loaded.') : requestError.value)
   const results = shallowRef<PaletteGroup[]>([])
 
   // The Menu's rows, for the palette's own filter to work through.
   function navigationGroups(): PaletteGroup[] {
     const groups: PaletteGroup[] = []
-    for (const group of menu.groups.value) {
+    for (const group of navigation.groups.value) {
       const items: CommandPaletteItem[] = []
       for (const item of group.items) {
         const to = item.to
@@ -94,7 +96,7 @@ export function useDashboardSearch() {
     if (!normalized || !organization?.subdomain) {
       requestSequence += 1
       results.value = []
-      error.value = null
+      requestError.value = null
       loading.value = false
       return
     }
@@ -103,7 +105,7 @@ export function useDashboardSearch() {
     const controller = new AbortController()
     activeController = controller
     loading.value = true
-    error.value = null
+    requestError.value = null
     try {
       const response = await dashboardApi<SearchResponse>('/api/dashboard/search', {
         signal: controller.signal,
@@ -116,7 +118,7 @@ export function useDashboardSearch() {
       // A search the next keystroke cancelled was replaced, not failed.
       if (requestId !== requestSequence || controller.signal.aborted) return
       results.value = []
-      error.value = getErrorMessage(failure, 'Search failed')
+      requestError.value = getErrorMessage(failure, 'Search failed')
     } finally {
       if (activeController === controller) activeController = null
       if (requestId === requestSequence) loading.value = false
@@ -135,5 +137,5 @@ export function useDashboardSearch() {
     activeController = null
   })
 
-  return { searchTerm, loading, error, groups }
+  return { searchTerm, loading: computed(() => loading.value || navigation.pending.value), error, groups }
 }

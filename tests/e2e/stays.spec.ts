@@ -233,6 +233,11 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   if (!signingSecret) throw new Error('The local receipt signing secret is not configured')
   const signed = await createReplayableReservationCancelToken(signingSecret, activityId!)
   const guest = await browser.newContext()
+  const personalOrganizationReads: string[] = []
+  guest.on('request', request => {
+    const path = new URL(request.url()).pathname
+    if (path === '/api/auth/organization/get-active-member-role' || path === '/api/auth/organization/has-permission') personalOrganizationReads.push(path)
+  })
   try {
     await loginAs(guest.request, baseURL!, 'user-e2e-buyer')
     const claimed = await guest.request.post(`${baseURL}/api/guest-invites/${inviteToken}/claim`, { headers, data: {} })
@@ -381,6 +386,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   } finally {
     await guest.close()
   }
+  expect(personalOrganizationReads, 'A Personal account without an organization must not request organization roles or permissions').toEqual([])
 
   const later = [localDay(10), localDay(13)] as const
   await page.goto(`/dashboard/${slug}/bookings/stay/new?${new URLSearchParams({ product_id: productId, check_in_date: later[0], check_out_date: later[1] })}`)
