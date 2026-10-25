@@ -52,6 +52,8 @@
 
       <TenantButton v-if="ctaLabel && ctaTo" :to="ctaTo" variant="outline" block class="mt-10">{{ ctaLabel }}</TenantButton>
 
+      <slot name="details" />
+
       <GuestAccountPrompt class="mt-10" :email="guestEmail" />
     </div>
   </div>
@@ -93,5 +95,6 @@ defineSlots<{
   title(): unknown
   subtitle(): unknown
   actions?(): unknown
+  details?(): unknown
 }>()
 </script>

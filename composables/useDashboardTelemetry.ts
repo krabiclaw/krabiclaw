@@ -11,24 +11,15 @@ export interface DashboardTelemetryPayload {
 }
 
 export function useDashboardTelemetry() {
+  const scope = useDashboardRouteScope()
+  const dashboardApi = useDashboardApi(scope)
+  const nuxtApp = useNuxtApp()
   const track = (payload: DashboardTelemetryPayload) => {
-    try {
-      if (typeof window === 'undefined') return
-      const body = JSON.stringify(payload)
-      if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-        const blob = new Blob([body], { type: 'application/json' })
-        if (navigator.sendBeacon('/api/dashboard/telemetry', blob)) return
-      }
-      void fetch('/api/dashboard/telemetry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        keepalive: true,
-      }).catch(() => {})
-    } catch {
-      // Telemetry must never throw or break user workflow.
-    }
+    if (import.meta.server || !scope.value) return
+    void dashboardApi<{ ok: true }>('/api/dashboard/telemetry', {
+      method: 'POST', body: payload,
+      validate: (value): value is { ok: true } => typeof value === 'object' && value !== null && 'ok' in value && value.ok === true,
+    }).catch(error => nuxtApp.callHook('vue:error', error, null, 'dashboard-telemetry'))
   }
-
   return { track }
 }

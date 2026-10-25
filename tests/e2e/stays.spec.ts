@@ -91,7 +91,7 @@ function previewLocators(page: Page) {
   return { previewLink, previewModal, previewIframe, preview: previewIframe.contentFrame() }
 }
 
-test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, browser, baseURL }) => {
+test('a host creates a stay and its buyer returns to arrival details, messages, notifications and cancellation', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!)
@@ -119,7 +119,9 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   // Today's card names the guest by first name and the moment: arriving, at the home's check-in time.
   const arrival = page.getByRole('link', { name: /3:00\sPM Ana arrives today with 2 guests/ })
   await expect(arrival).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
-  await arrival.click()
+  const [cardTelemetry] = await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/telemetry' && response.request().postDataJSON()?.action === 'today_card_click'), arrival.click()])
+  await expectStatus(cardTelemetry, 200)
+  expect(new URL(cardTelemetry.url()).searchParams.get('org')).toBe(slug)
   await expect(page.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
 
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
@@ -179,6 +181,11 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(restoredPaymentRead.status()).toBe(200)
   expect((await restoredPaymentRead.json()).stay).toEqual(paid.data!.stay)
 
+  const guide = { check_in_method: 'lockbox', check_in_instructions: 'Use the garden lockbox.', wifi_network: 'Cabin guests', wifi_password: 'private-cabin-wifi', directions: 'Use the east entrance.', house_manual: 'Keep the gate closed.', checkout_instructions: [{ task: 'return_keys', details: 'Leave keys in the box.' }] }
+  const savedGuide = await request.patch(api(`stay-homes/${productId}`), { headers, data: guide })
+  await expectStatus(savedGuide, 200)
+  expect((await call('update_product', { product_id: productId, details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } })).error).toBeNull()
+
   // The host hands the real conversation to the guest's own signed-in account.
   // Its confirmation link signs the same activity ID the account opens.
   const activityId = paid.data!.stay.request_id
@@ -198,6 +205,13 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     const claimed = await guest.request.post(`${baseURL}/api/guest-invites/${inviteToken}/claim`, { headers, data: {} })
     await expectStatus(claimed, 200)
     expect(await claimed.json()).toEqual({ thread_id: activityId, path: `/dashboard/account/messages/${activityId}` })
+    // A returning buyer enters Personal without being sent to business onboarding.
+    await loginAs(guest.request, baseURL!, 'user-e2e-buyer')
+    const returnToAccount = await guest.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
+    await expectStatus(returnToAccount, 302)
+    expect(returnToAccount.headers().location).toBe('/dashboard/account')
+    const billingWithoutOrganization = await guest.request.get(`${baseURL}/api/post-login?plan=business`, { maxRedirects: 0 })
+    await expectStatus(billingWithoutOrganization, 409)
     const accountApi = `${baseURL}/api/account/stays/${activityId}`
     const receiptApi = `${baseURL}/api/public/guest-stays/${activityId}`
     const receiptHeaders = { 'x-preview-tenant': slug, authorization: `Bearer ${signed.token}` }
@@ -205,12 +219,14 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     await expectStatus(accountRead, 200)
     const mapUrl = 'https://maps.google.com/maps?q=8.0326%2C98.822'
     const exactLocation = { address: exactAddress, ...mapPin, maps_url: mapUrl }
-    expect(await accountRead.json()).toMatchObject({ organization_id: organizationId, stay: { id: stay.data!.stay.id, status: 'confirmed', user_id: 'user-e2e-buyer' }, home: { location: exactLocation } })
+    expect(await accountRead.json()).toMatchObject({ organization_id: organizationId, stay: { id: stay.data!.stay.id, status: 'confirmed', user_id: 'user-e2e-buyer' }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
     const receiptRead = await guest.request.get(receiptApi, { headers: receiptHeaders })
     await expectStatus(receiptRead, 200)
-    expect(await receiptRead.json()).toMatchObject({ stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation } })
+    expect(await receiptRead.json()).toMatchObject({ stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
 
     const receiptPage = await guest.newPage()
+    const receiptPageviews: string[] = []
+    receiptPage.on('request', outgoing => { if (new URL(outgoing.url()).pathname === '/api/analytics/track') receiptPageviews.push(outgoing.url()) })
     const receiptUrl = new URL('/bookings/stay', baseURL!)
     receiptUrl.searchParams.set('id', activityId!)
     receiptUrl.hash = signed.token
@@ -222,13 +238,60 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     await expect(addressTerm).toBeVisible()
     await expect(addressTerm.locator('..').getByRole('definition')).toHaveText(addressText)
     await expect(receiptHome.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveAttribute('href', mapUrl)
+    await expect(receiptHome.getByRole('link', { name: 'Message host', exact: true })).toHaveAttribute('href', `${baseURL}/dashboard/account/messages/${activityId}`)
     const accountPage = await guest.newPage()
-    expect((await accountPage.goto(`${baseURL}/dashboard/account/bookings/stay/${activityId}`))?.status()).toBe(200)
+    const buyerTelemetry: string[] = []
+    accountPage.on('request', outgoing => { if (new URL(outgoing.url()).pathname === '/api/dashboard/telemetry') buyerTelemetry.push(outgoing.url()) })
+    expect((await accountPage.goto(`${baseURL}/api/post-login`))?.status()).toBe(200)
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account`)
+    await accountPage.locator(`[data-testid=today-card][href="/dashboard/account/activity/stay/${activityId}"]`).click()
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/activity/stay/${activityId}`)
+    await accountPage.goto(`${baseURL}/dashboard/account/calendar?view=list&month=${localDay(1).slice(0, 7)}`)
+    await accountPage.locator(`[data-day="${localDay(1)}"] a[href="/dashboard/account/activity/stay/${activityId}"]`).click()
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/activity/stay/${activityId}`)
     const accountHome = accountPage.locator('#dashboard-panel-stay-details')
     await expect(accountHome.getByRole('heading', { name: "Where you'll be", exact: true })).toBeVisible()
     await expect(accountHome.getByText(addressText, { exact: true })).toBeVisible()
     await expect(accountHome.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveAttribute('href', mapUrl)
-    await receiptPage.setViewportSize({ width: 390, height: 844 })
+    for (const guestPage of [receiptPage, accountPage]) {
+      for (const width of [1280, 390]) {
+        await guestPage.setViewportSize({ width, height: 844 })
+        const arrivalGuide = guestPage.locator('[data-stay-arrival-guide]')
+        await arrivalGuide.getByText(guide.check_in_instructions, { exact: true }).scrollIntoViewIfNeeded()
+        await expect(arrivalGuide.getByText(guide.check_in_instructions, { exact: true })).toBeInViewport()
+        await expect(arrivalGuide.getByText(guide.wifi_password, { exact: true })).toBeVisible()
+        await expect(arrivalGuide.getByText('No pets', { exact: true })).toBeVisible()
+        await expect(arrivalGuide.getByText('Guests must climb stairs\nTwo steps at the entrance.', { exact: true })).toBeVisible()
+        await expect(arrivalGuide.getByText('Leave keys in the box.', { exact: true })).toBeVisible()
+      }
+    }
+    await accountPage.getByRole('heading', { name: 'Arrival guide', exact: true }).scrollIntoViewIfNeeded()
+    const guideScreenshot = test.info().outputPath('buyer-arrival-guide-mobile.png')
+    await accountPage.screenshot({ path: guideScreenshot, fullPage: true })
+    await test.info().attach('buyer-arrival-guide-mobile', { path: guideScreenshot, contentType: 'image/png' })
+    await accountHome.getByRole('link', { name: 'Message host', exact: true }).click()
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/messages/${activityId}`)
+    await accountPage.getByRole('textbox', { name: 'Write a message…', exact: true }).fill('Can I arrive at 4 pm?')
+    const [buyerReply] = await Promise.all([accountPage.waitForResponse(response => response.url().includes(`/api/account/messages/${activityId}/reply`) && response.request().method() === 'POST'), accountPage.getByRole('button', { name: 'Send reply', exact: true }).click()])
+    await expectStatus(buyerReply, 200)
+    await expect(accountPage.locator('#dashboard-panel-account-message-thread').getByText('Can I arrive at 4 pm?', { exact: true })).toBeVisible()
+    await page.goto(`/dashboard/${slug}/messages/${activityId}`)
+    await expect(page.locator('#dashboard-panel-organization-messages-thread').getByText('Can I arrive at 4 pm?', { exact: true })).toBeVisible()
+    await page.getByRole('textbox', { name: 'Write a message…', exact: true }).fill('Yes, the lockbox is ready at 4 pm.')
+    const [hostReply] = await Promise.all([page.waitForResponse(response => response.url().includes(`/guest-threads/${activityId}/operations/reply`) && response.request().method() === 'POST'), page.getByRole('button', { name: 'Send reply', exact: true }).click()])
+    await expectStatus(hostReply, 200)
+    await expect(page.locator('#dashboard-panel-organization-messages-thread').getByText('Yes, the lockbox is ready at 4 pm.', { exact: true })).toBeVisible()
+    const alertsRead = await guest.request.get(`${baseURL}/api/dashboard/notifications?scope=personal`)
+    await expectStatus(alertsRead, 200)
+    const alerts = (await alertsRead.json() as { notifications: Array<{ id: string; template: string; deep_link: string }> }).notifications.filter(alert => alert.template === 'guest_thread_event' && alert.deep_link === `/dashboard/account/messages/${activityId}`)
+    expect(alerts).toHaveLength(1)
+    await accountPage.goto(`${baseURL}/dashboard/account/notifications`)
+    await accountPage.getByTestId(`notification-${alerts[0]!.id}`).click()
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/messages/${activityId}`)
+    await expect(accountPage.locator('#dashboard-panel-account-message-thread').getByText('Yes, the lockbox is ready at 4 pm.', { exact: true })).toBeVisible()
+    await accountPage.getByRole('link', { name: 'Show stay', exact: true }).click()
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/activity/stay/${activityId}`)
+    await page.goto(`/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
 
     await page.getByRole('button', { name: 'Cancel stay' }).click()
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
@@ -246,13 +309,18 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
       const cancelledGuest = await response.json() as GuestStay
       expect(cancelledGuest.stay.status).toBe('cancelled')
       expect(cancelledGuest.home.location).toBeNull()
+      expect(cancelledGuest.home.arrival_guide).toBeNull()
+      expect(JSON.stringify(cancelledGuest)).not.toContain(guide.wifi_password)
     }
     await Promise.all([receiptPage.reload(), accountPage.reload()])
     await expect(receiptPage.getByRole('heading', { name: 'Booking Cancelled', exact: true })).toBeVisible()
     await expect(accountHome.getByText('Cancelled', { exact: true })).toBeVisible()
     await expect(addressTerm).toHaveCount(0)
     await expect(accountHome.getByRole('heading', { name: "Where you'll be", exact: true })).toHaveCount(0)
+    expect(receiptPageviews).toEqual([])
+    expect(buyerTelemetry).toEqual([])
     for (const guestPage of [receiptPage, accountPage]) {
+      await expect(guestPage.locator('[data-stay-arrival-guide]')).toHaveCount(0)
       await expect(guestPage.getByText(addressText, { exact: true })).toHaveCount(0)
       await expect(guestPage.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveCount(0)
     }

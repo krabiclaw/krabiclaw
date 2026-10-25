@@ -520,7 +520,15 @@ async function resetMonths(): Promise<void> {
 const itemsByDay = computed(() => {
   const groups = new Map<string, CalendarItem[]>()
   for (const block of monthData.value.values()) {
-    for (const item of block.items) groups.set(item.dayKey, [...(groups.get(item.dayKey) ?? []), item])
+    for (const item of block.items) {
+      const days = item.kind === 'stay' && item.endsAt
+        ? monthDays.value.filter(day => day >= item.dayKey && day <= localNow(item.timeZone, new Date(item.endsAt!)).date)
+        : [item.dayKey]
+      for (const day of days) {
+        const rows = groups.get(day) ?? []
+        if (!rows.some(row => row.id === item.id)) groups.set(day, [...rows, item])
+      }
+    }
   }
   return groups
 })

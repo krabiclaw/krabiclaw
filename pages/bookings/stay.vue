@@ -23,10 +23,17 @@
       <template #subtitle>
         {{ receiptDescription }}
       </template>
-      <template v-if="guestStay.home.location?.maps_url" #actions>
-        <TenantButton :href="guestStay.home.location.maps_url" variant="outline" target="_blank" rel="noopener noreferrer">
+      <template #actions>
+        <TenantButton v-if="guestStay.home.location?.maps_url" :href="guestStay.home.location.maps_url" variant="outline" target="_blank" rel="noopener noreferrer">
           {{ t('site.experience_detail.open_in_maps') }}
         </TenantButton>
+        <TenantButton v-if="guestStay.stay.request_id" :href="messageHostUrl" variant="outline">{{ t('stay.message_host') }}</TenantButton>
+      </template>
+      <template v-if="guestStay.home.arrival_guide" #details>
+        <section class="mt-10 border-t border-default pt-8">
+          <h2 class="mb-6 text-xl font-semibold text-default">{{ t('stay.arrival_guide') }}</h2>
+          <StayArrivalGuideView :guide="guestStay.home.arrival_guide" :rules="guestStay.home.house_rules" :safety="guestStay.home.safety" />
+        </section>
       </template>
     </BookingConfirmation>
 
@@ -43,11 +50,13 @@
 <script setup lang="ts">
 // The guest's own stay, opened by the confirmation link that names and signs it.
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
+import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
+import { isGuestStay } from '~/shared/stay-arrival'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { paymentMoney } from '~/shared/payment-display'
 import { formatCalendarDate, formatTime } from '~/utils/timezone'
 import { formatPostalAddress } from '~/utils/postal-address'
-import { isRecord, publicApiRequest } from '~/utils/api-clients'
+import { publicApiRequest } from '~/utils/api-clients'
 import type { GuestStay } from '~/server/domain/stays'
 
 definePageMeta({ layout: false })
@@ -59,10 +68,9 @@ const { organization } = useTenantOrganization()
 const { template } = organization
 const copy = computed(() => getVerticalCopy(organization.vertical, locale.value))
 
-const isGuestStay = (value: unknown): value is GuestStay => isRecord(value) && typeof value.organization_id === 'string' && isRecord(value.stay) && isRecord(value.home)
-  && typeof value.stay.check_in_date === 'string' && typeof value.stay.check_out_date === 'string' && typeof value.home.name === 'string'
-  && (value.home.location === null || isRecord(value.home.location))
 const guestStay = ref<GuestStay | null>(null)
+const platformDomain = useRuntimeConfig().public.platformDomain
+const messageHostUrl = computed(() => new URL(`/dashboard/account/messages/${encodeURIComponent(guestStay.value!.stay.request_id!)}`, platformDomain).toString())
 const pending = ref(true)
 const loadError = ref<string | null>(null)
 

@@ -19,6 +19,7 @@ import { isBookingComplete } from '~/shared/bookings'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { guestPresentation } from '~/server/utils/notifications'
 import { platformLocale } from '~/shared/platform-locales'
+import { notifyBuyerThread } from '~/server/utils/notification-center'
 import { formatTimestamp } from '~/utils/timezone'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { getChannelThreadMapping, replyThroughChannex } from './channel-messages'
@@ -536,13 +537,8 @@ async function executeReply(
   const deliveryKey = deliveryDedupeKey(input)
   let entry = await findEntryByDedupeKey(db, dedupeKey)
   if (entry && !matchesReply(entry)) return conflict()
-  if (entry) {
+  if (entry && entry.channel !== 'web') {
     const earlier = await getDeliveryById(db, deliveryKey)
-    // A reply that reached only the guest's account inbox has no delivery to look for.
-    if (!earlier && entry.channel === 'web') {
-      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
-      return successfulOutcome(db, context)
-    }
     if (!earlier || earlier.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
     if (isDeliverySent(earlier)) {
       await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
@@ -613,6 +609,8 @@ async function executeReply(
   if (!entry) return { ok: false, status: 404, reason: 'thread_not_found' }
   if (!matchesReply(entry)) return conflict()
   if (entry.channel === 'web') {
+    const fromName = await getOrganizationBrandName(db, context.thread.organization_id)
+    await notifyBuyerThread(db, { threadId: context.thread.id, entryId: entry.id, title: replySubject(context.thread.kind, fromName), message: fromName, conversation: true })
     await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
     return await successfulOutcome(db, context)
   }
