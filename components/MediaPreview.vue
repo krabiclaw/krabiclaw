@@ -60,7 +60,7 @@ export function provideMediaPreviews(paused: Ref<boolean>) {
 </script>
 
 <script setup lang="ts">
-import { useDocumentVisibility, useIntersectionObserver } from '@vueuse/core'
+import { useDocumentVisibility, useIntersectionObserver, usePreferredReducedMotion } from '@vueuse/core'
 
 const props = withDefaults(defineProps<{ item: MediaPreviewItem; fit?: 'cover' | 'contain'; loading?: 'lazy' | 'eager'; fill?: boolean; showPlayIndicator?: boolean; controls?: boolean }>(), { fit: 'cover', loading: 'eager', fill: true, showPlayIndicator: true, controls: false })
 const { t } = useI18n()
@@ -72,7 +72,8 @@ const ready = ref(false)
 const playing = ref(false)
 const failure = ref<string | null>(null)
 const documentVisibility = useDocumentVisibility()
-const shouldPlay = computed(() => !props.controls && group.selected.value === id && !group.paused.value && documentVisibility.value === 'visible')
+const reducedMotion = usePreferredReducedMotion()
+const shouldPlay = computed(() => !props.controls && reducedMotion.value !== 'reduce' && group.selected.value === id && !group.paused.value && documentVisibility.value === 'visible')
 
 useIntersectionObserver(video, (entries) => {
   for (const entry of entries) group.visibility.set(id, entry.isIntersecting ? entry.intersectionRatio : 0)

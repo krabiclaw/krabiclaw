@@ -85,6 +85,10 @@ test('Kikuzuki home → menu → menu item and published experience branch', asy
     await expect(preview).toHaveAttribute('poster', /\S/)
     await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
     await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
     if (path === '/reservations') {
       await page.getByRole('button', { name: 'Request Reservation', exact: true }).first().click()
       await expect(page.getByRole('dialog')).toBeVisible()

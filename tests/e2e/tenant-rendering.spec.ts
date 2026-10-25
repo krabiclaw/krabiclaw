@@ -687,6 +687,17 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
   await expect.poll(() => playingPreview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
   const resumedTime = await playingPreview.evaluate(element => (element as HTMLVideoElement).currentTime)
   await expect.poll(() => playingPreview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(resumedTime)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(0)
+  await trigger.click()
+  await expect(viewer).toBeVisible()
+  await expect(video).toHaveJSProperty('controls', true)
+  await video.focus()
+  await video.press('Space')
+  await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).paused)).toBe(false)
+  await expect.poll(() => video.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
+  await viewer.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+  await expect.poll(() => previews.evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(0)
 })
 
 for (const tenant of tenants) {
