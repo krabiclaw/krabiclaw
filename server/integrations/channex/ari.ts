@@ -3,6 +3,7 @@ import type { StayHome, StayNight } from '~/server/domain/stays'
 import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
 import { channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object, string } from './data'
+import { CALENDAR_NIGHTS } from './airbnb-listing'
 import { HTTPError } from 'nitro'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 
@@ -42,9 +43,17 @@ export async function completeChannelPush<T extends object>(outcome: ChannelPush
  * pending nights as they are now and sends Channex only what differs from
  * what Channex last confirmed for each (sent_json), contiguous nights with
  * the same change as one date range: at most one restrictions call and one
- * availability call per home. A booking or hold changes availability alone;
- * stop_sell is the host closing a night (docs.channex.io ARI: availability is
- * the room's inventory, stop_sell a rate plan restriction).
+ * availability call per home. Availability is the room's inventory: 0 while a
+ * booking, a checkout hold or a linked calendar takes the night, else 1. A
+ * host closing a night is stop_sell on the rate plan alone, and opening it
+ * stop_sell false alone; neither touches availability (docs.channex.io ARI
+ * and its certification: a stop sell is one restrictions update). The two
+ * minimum-stay fields travel together: a change to either sends both, and a
+ * night without its own minimum carries the home's minimum nights in both.
+ *
+ * A home's full sync is the same delivery over every night of the calendar
+ * ahead, with nothing confirmed yet: an import's inventory, and a home that
+ * syncs again after it stopped.
  *
  * One delivery runs per property at a time, under a lease on its mapping.
  * Channex takes 10 restrictions and 10 availability calls per property per
@@ -68,7 +77,8 @@ const LEASE_MS = 120_000
 /** A delivery sends again for nights changed while it ran, this many rounds at most. */
 const ROUNDS = 3
 
-interface Mapping { property_id: string; room_type_id: string; rate_plan_id: string }
+export interface ChannexMapping { property_id: string; room_type_id: string; rate_plan_id: string }
+type Mapping = ChannexMapping
 
 /** A night's values as Channex takes them: availability on the room, price and rules on the rate plan. */
 interface AriValues {
@@ -83,6 +93,7 @@ interface AriValues {
 }
 type SentValues = Partial<AriValues>
 const RESTRICTION_FIELDS = ['rate', 'min_stay_arrival', 'min_stay_through', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'stop_sell'] as const
+const MIN_STAY_FIELDS: ReadonlyArray<typeof RESTRICTION_FIELDS[number]> = ['min_stay_arrival', 'min_stay_through']
 
 interface OutboxRow { date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null; sent_json: string | null; attempts: number; retry_at: string | null; updated_at: string }
 type Outcome = { state: 'pending'; detail: string; attempts: number; retry_at: string } | { state: 'needs_review'; detail: string }
@@ -110,10 +121,10 @@ function clock(instant: string): string {
 
 function ariValues(night: StayNight, home: StayHome): AriValues {
   return {
-    availability: night.available ? 1 : 0,
+    availability: night.stay_id !== null || night.held_until !== null || night.calendar !== null ? 0 : 1,
     rate: night.price_minor === null ? null : rate(night.price_minor, home.currency),
     min_stay_arrival: night.min_stay_arrival ?? home.min_nights,
-    min_stay_through: night.min_stay_through ?? 1,
+    min_stay_through: night.min_stay_through ?? home.min_nights,
     max_stay: night.max_stay ?? 0,
     closed_to_arrival: night.closed_to_arrival,
     closed_to_departure: night.closed_to_departure,
@@ -218,12 +229,44 @@ export async function requireChannelPush(db: DbClient, env: ChannexEnv, organiza
 export async function pushStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
   const mapping = await connectedMapping(db, env, organizationId, home.product_id)
   if (!mapping) return null
+  return queueAndDeliver(db, env, organizationId, home, mapping, dates, read)
+}
+
+/**
+ * Every night of the calendar ahead to the property the home is mapped to,
+ * whether or not the mapping is enabled yet: an import's full sync, before the
+ * listing syncs, and the full sync of a home that syncs again. What Channex
+ * last confirmed is what the outbox holds; a caller whose property knows
+ * nothing yet (a new rate plan, a home that stopped syncing) empties it first.
+ */
+export async function pushStayCalendar(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: ChannexMapping, read: StayNightReader): Promise<ChannelPush> {
+  const from = today(home.timezone)
+  const outcome = await queueAndDeliver(db, env, organizationId, home, mapping, Array.from({ length: CALENDAR_NIGHTS }, (_, offset) => addDays(from, offset)), read)
+  if (!outcome) throw new Error(`The calendar of ${home.product_id} has no night from ${from} to send`)
+  return outcome
+}
+
+/** Forget what Channex confirmed for a home: its next delivery sends every night whole. */
+export async function forgetConfirmedNights(db: DbClient, productId: string): Promise<void> {
+  await execute(db, "DELETE FROM channel_night_pushes WHERE product_id = ? AND provider = 'channex'", [productId])
+}
+
+function addDays(date: string, count: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + count * 86_400_000).toISOString().slice(0, 10)
+}
+
+async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, dates: readonly string[], read: StayNightReader): Promise<ChannelPush | null> {
   const from = today(home.timezone)
   const queued = [...new Set(dates.filter(date => date >= from))].sort()
   if (!queued.length) return null
+  // A night already pending keeps its attempt count and retry time: the property's pause holds, and the change goes
+  // with the retry. Its updated_at still moves, so a delivery that read the night before this change leaves it pending.
   await execute(db, `INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, attempts, retry_at, updated_at)
     SELECT ?, ?, 'channex', value, 'pending', NULL, 0, NULL, ? FROM json_each(?) WHERE true
-    ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending', detail = NULL, attempts = 0, retry_at = NULL, updated_at = excluded.updated_at`,
+    ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending', updated_at = excluded.updated_at,
+      detail = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.detail ELSE NULL END,
+      attempts = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.attempts ELSE 0 END,
+      retry_at = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.retry_at ELSE NULL END`,
   [organizationId, home.product_id, new Date().toISOString(), JSON.stringify(queued)])
   await deliver(db, env, organizationId, home, mapping, read)
   const rows = await queryAll<{ state: OutboxRow['state']; detail: string | null }>(db, `SELECT state, detail FROM channel_night_pushes
@@ -247,7 +290,7 @@ export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizat
 async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader): Promise<void> {
   const lease = crypto.randomUUID()
   const claimed = await execute(db, `UPDATE product_channel_mappings SET delivery_lease = ?, delivery_lease_until = ?
-    WHERE product_id = ? AND provider = 'channex' AND enabled = 1 AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)`,
+    WHERE product_id = ? AND provider = 'channex' AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)`,
   [lease, new Date(Date.now() + LEASE_MS).toISOString(), home.product_id, new Date().toISOString()])
   if (claimed.meta.changes !== 1) return
   try {
@@ -280,7 +323,11 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
     const before = sent.get(row.date)!
     // A night without a price sends its other values; the price is what needs review.
     if (values.rate === null) outcomes.set(row.date, { state: 'needs_review', detail: `${row.date} has no nightly price; Channex needs one for every night` })
-    return { row, values, restrictions: RESTRICTION_FIELDS.filter(field => before[field] !== values[field] && values[field] !== null), availability: before.availability !== values.availability }
+    const changed = (field: typeof RESTRICTION_FIELDS[number]) => before[field] !== values[field] && values[field] !== null
+    // Channex reads the two minimum-stay fields as one rule: a change to either sends both.
+    const minStay = MIN_STAY_FIELDS.some(changed)
+    return { row, values, restrictions: RESTRICTION_FIELDS.filter(field => changed(field) || (minStay && MIN_STAY_FIELDS.includes(field))), availability: before.availability !== values.availability }
+
   })
 
   const log = async (kind: 'availability' | 'restrictions', status: 'pushed' | 'needs_review' | 'failed', detail: string, taskId: string | null = null) =>

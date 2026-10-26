@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { executeWithinCapacity, requireHomeCapacity } from '~/server/utils/billing'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { createStayHome, importStayNights, placeStayHomePhotosFirst, readStayHome, stayHomeInput, updateStayHome, type StayAccess } from '~/server/domain/stays'
+import { createStayHome, importStayNights, placeStayHomePhotosFirst, readStayHome, stayHomeInput, syncStayCalendar, updateStayHome, type StayAccess } from '~/server/domain/stays'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
 import { memberAccessPrincipal, resolveOrganizationMembership } from '~/server/utils/member-access'
@@ -20,7 +20,7 @@ import { channexCreate, channexGet, channexRequest, ChannexError, type ChannexEn
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
 import { CALENDAR_NIGHTS, DETAIL_FIELDS, PHOTO_WIDTH, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DescriptionField, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
-import { ariTask, logAriCall } from './ari'
+import { forgetConfirmedNights, type ChannexMapping } from './ari'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 
 /**
@@ -482,9 +482,11 @@ export class AirbnbConnection {
         // A completed import cleared its source inputs. Re-read and validate
         // them above before resuming the same home's inventory on this channel.
         await importStayNights(this.db, this.env, this.manager(), existing.product_id, provided(() => calendar.map(night => importedNight(night, organization.default_currency))))
+        // The new account's property has nothing confirmed: the inventory stage sends the calendar whole.
+        await forgetConfirmedNights(this.db, existing.product_id)
         const [reconnected] = await executeWithinCapacity(this.env, this.db, this.organizationId, [{
-          query: "UPDATE product_channel_mappings SET channel_id = ?, import_stage = 'inventory', import_property = ?, import_calendar = ?, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND enabled = 0",
-          params: [channelId, JSON.stringify(property), JSON.stringify(calendar), now(), existing.product_id],
+          query: "UPDATE product_channel_mappings SET channel_id = ?, import_stage = 'inventory', import_property = ?, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND enabled = 0",
+          params: [channelId, JSON.stringify(property), now(), existing.product_id],
         }, ...(contact ? [contact] : [])], { operation: 'Reconnect an imported Airbnb listing', action: 'reconnect it' })
         if (!reconnected?.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
         return { product_id: existing.product_id, stage: 'inventory', waiting: false }
@@ -503,9 +505,9 @@ export class AirbnbConnection {
       // one write: until both land a retry runs this step again with the same
       // form, and a refused import leaves the details missing.
       await executeBatch(this.db, [{
-        query: `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_calendar)
-          VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
-        params: [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)],
+        query: `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property)
+          VALUES (?, ?, 'channex', ?, ?, 'property', ?) ON CONFLICT (product_id, provider) DO NOTHING`,
+        params: [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property)],
       }, ...(contact ? [contact] : [])], { operation: 'Map an imported Airbnb listing' })
       return { product_id: home.product_id, stage: 'property', waiting: false }
     })
@@ -532,8 +534,7 @@ export class AirbnbConnection {
       const required = stage === 'property' ? [] : stage === 'room' ? [mapping.property_id] : stage === 'rate' ? [mapping.property_id, mapping.room_type_id] : [mapping.property_id, mapping.room_type_id, mapping.rate_plan_id]
       if (required.some(id => !id)) throw new Error(`Import of ${productId} at ${stage} is missing a Channex id`)
       const property = mapping.import_property ? JSON.parse(mapping.import_property) as ImportProperty : null
-      const calendar = mapping.import_calendar ? JSON.parse(mapping.import_calendar) as ListingNight[] : null
-      const save = async (values: Partial<Pick<MappingRow, 'property_id' | 'room_type_id' | 'rate_plan_id' | 'import_stage' | 'import_property' | 'import_calendar' | 'import_content' | 'import_written' | 'enabled'>>) => {
+      const save = async (values: Partial<Pick<MappingRow, 'property_id' | 'room_type_id' | 'rate_plan_id' | 'import_stage' | 'import_property' | 'import_content' | 'import_written' | 'enabled'>>) => {
         const entries = Object.entries(values)
         const result = await execute(this.db, `UPDATE product_channel_mappings SET ${entries.map(([column]) => `${column} = ?`).join(', ')}, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = ?`,
           [...entries.map(([, value]) => value ?? null), now(), productId, stage])
@@ -549,7 +550,8 @@ export class AirbnbConnection {
           const created = await channexCreate(this.env, '/properties', { property: {
             title: property.title, currency: property.currency, timezone: property.timezone, group_id: groupId, property_type: property.property_type,
             email: property.email, phone: property.phone, country: property.country, state: property.state, city: property.city,
-            address: property.address, zip_code: property.zip_code, settings: { state_length: CALENDAR_NIGHTS, min_stay_type: 'arrival' },
+            // KrabiClaw keeps minimum stay on arrival and through stay apart and sends both (docs.channex.io Properties: `both`).
+            address: property.address, zip_code: property.zip_code, settings: { state_length: CALENDAR_NIGHTS, min_stay_type: 'both' },
           } }, 'property')
           await save({ property_id: created.id, import_stage: 'room' })
           break
@@ -576,45 +578,18 @@ export class AirbnbConnection {
           break
         }
         case 'inventory': {
-          if (!property) throw new Error(`Import of ${productId} has no approved listing details`)
-          const days = calendar ?? await listingCalendar(this.env, channelId, mapping.listing_id, property.timezone)
-          if (!calendar) await save({ import_calendar: JSON.stringify(days) })
-          await wrote('import_calendar')
-          // The full sync: one restrictions and one availability call, each logged with its task like every ARI call.
-          const calls = [
-            ['restrictions', '/restrictions', days.map(day => ({
-              property_id: mapping.property_id, rate_plan_id: mapping.rate_plan_id, date: day.date, rate: day.rate, min_stay_arrival: day.minStay,
-              max_stay: day.maxStay, closed_to_arrival: day.closedToArrival, closed_to_departure: day.closedToDeparture, stop_sell: day.availability === 0,
-            }))],
-            ['availability', '/availability', days.map(day => ({ property_id: mapping.property_id, room_type_id: mapping.room_type_id, date: day.date, availability: day.availability }))],
-          ] as const
-          let rejected = false
-          for (const [kind, ariPath, values] of calls) {
-            const result = await channexRequest(this.env, ariPath, 'POST', { values })
-            const propertyId = string(mapping.property_id, 'property_id')
-            // The call reached Channex, so it is logged whatever its answer: an unreadable one as failed, then raised.
-            let answer: { refused: boolean; detail: string; task: string | null }
-            try {
-              const meta = object(result.meta, 'Inventory result')
-              const refused = meta.message !== 'Success' || (meta.warnings !== undefined && (!Array.isArray(meta.warnings) || meta.warnings.length > 0))
-              answer = { refused, task: ariTask(result, refused),
-                detail: refused ? `Channex rejected part of the full sync: ${JSON.stringify(meta).slice(0, 500)}` : `full sync ${days[0]!.date}..${days.at(-1)!.date}` }
-            } catch (error) {
-              if (!(error instanceof ChannexDataError)) throw error
-              await logAriCall(this.db, { organizationId: this.organizationId, productId, propertyId, kind, status: 'failed', detail: `Channex's answer to the full sync was not readable: ${error.message}`, taskId: null })
-              fail(502, 'INVALID_PROVIDER_RESPONSE', `Channex returned an invalid response: ${error.message}`)
-            }
-            const { refused } = answer
-            await logAriCall(this.db, { organizationId: this.organizationId, productId, propertyId, kind, status: refused ? 'needs_review' : 'pushed', detail: answer.detail, taskId: answer.task })
-            rejected ||= refused
-          }
-          if (rejected) fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex rejected part of the calendar. The import needs review before connecting Airbnb.')
+          // The full sync: the home's calendar ahead through the delivery outbox, as every
+          // night change goes, to a rate plan Channex has nothing confirmed for yet (a new
+          // property has no outbox rows; a reconnect emptied them). One restrictions and
+          // one availability call, each logged with its task; a stage asked again sends
+          // what is due, honouring the outbox's retry times.
+          const waiting = await this.syncCalendar(mapping)
+          if (waiting) return { product_id: productId, stage, waiting: true, content: null }
           await save({ import_stage: 'verify_inventory' })
           break
         }
         case 'verify_inventory': {
-          if (!calendar?.length) throw new Error(`Import of ${productId} has no source calendar to verify`)
-          const matches = await this.inventoryMatches(mapping as MappingRow & { property_id: string; room_type_id: string; rate_plan_id: string }, calendar)
+          const matches = await this.inventoryMatches(mapping as MappingRow & ChannexMapping)
           if (!matches) return { product_id: productId, stage, waiting: true, content: null }
           await save({ import_stage: 'content' })
           break
@@ -637,6 +612,10 @@ export class AirbnbConnection {
         case 'mapping': {
           // The listing syncs from here on: the plan must take one more live home before Channex maps it.
           await requireHomeCapacity(this.env, this.db, this.organizationId, productId)
+          // Channex has the calendar ahead before it maps the listing. A home that stopped
+          // syncing forgot what Channex confirmed, so this is its full sync; a home just
+          // imported changed nothing since its inventory and sends nothing.
+          if (await this.syncCalendar(mapping)) return { product_id: productId, stage, waiting: true, content: null }
           await wrote('map_airbnb_listing')
           await channexCreate(this.env, `${path}/mappings`, { mapping: { rate_plan_id: mapping.rate_plan_id, settings: { listing_id: mapping.listing_id } } }, 'channel_rate_plan')
           const channel = await channexGet(this.env, path, 'channel')
@@ -687,7 +666,7 @@ export class AirbnbConnection {
           await installChannexMessages(this.env, string(mapping.property_id, 'property_id'))
           await wrote(null)
           await backfillChannexMessages(this.db, this.env, string(mapping.property_id, 'property_id'), this.organizationId)
-          await save({ import_stage: 'complete', import_property: null, import_calendar: null })
+          await save({ import_stage: 'complete', import_property: null })
           break
         }
         case 'complete':
@@ -725,8 +704,10 @@ export class AirbnbConnection {
    * channel (Channex passes the removal on to Airbnb) and verified gone, then
    * its property's Messages installation is removed; the channel stays active
    * for the account's other listings. The home, its photos, texts, rates,
-   * calendar and stays are kept, and Activate syncs it again. A home already a
-   * draft answers as it is; one being imported or activated is refused.
+   * calendar and stays are kept, and Activate syncs it again, starting with a
+   * full sync: a stopped home sends Channex nothing, so what Channex last
+   * confirmed is forgotten here. A home already a draft answers as it is; one
+   * being imported or activated is refused.
    */
   async deactivate(productId: string): Promise<{ product_id: string; stage: ImportStage; waiting: false }> {
     return await this.locked(async (row) => {
@@ -752,7 +733,7 @@ export class AirbnbConnection {
       const [stopped] = await executeWithinCapacity(this.env, this.db, this.organizationId, [{
         query: "UPDATE product_channel_mappings SET import_stage = 'draft', enabled = 0, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = 'complete'",
         params: [now(), productId],
-      }], { operation: 'Stop syncing an Airbnb listing', action: 'stop syncing it' })
+      }, { query: "DELETE FROM channel_night_pushes WHERE product_id = ? AND provider = 'channex'", params: [productId] }], { operation: 'Stop syncing an Airbnb listing', action: 'stop syncing it' })
       if (!stopped?.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
       return { product_id: productId, stage: 'draft', waiting: false }
     })
@@ -1040,23 +1021,38 @@ export class AirbnbConnection {
   }
 
   /** Whether Channex now holds exactly the calendar the import pushed. */
-  private async inventoryMatches(mapping: MappingRow & { property_id: string; room_type_id: string; rate_plan_id: string }, days: ListingNight[]): Promise<boolean> {
-    const query = new URLSearchParams({ 'filter[property_id]': mapping.property_id, 'filter[date][gte]': days[0]!.date, 'filter[date][lte]': days.at(-1)!.date })
+  /**
+   * The home's calendar ahead, delivered to its Channex property through the
+   * outbox. True while Channex holds part of it (a rate limit or a pause after
+   * a call it did not confirm): the stage is asked again later. A refusal
+   * fails the import for review with Channex's reason.
+   */
+  private async syncCalendar(mapping: MappingRow): Promise<boolean> {
+    const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, { property_id: string(mapping.property_id, 'property_id'), room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') })
+    if (pushed.state === 'needs_review') fail(502, 'PROVIDER_VERIFICATION_FAILED', `Channex rejected part of the calendar: ${pushed.detail} The import needs review before connecting Airbnb.`)
+    return pushed.state === 'pending'
+  }
+
+  /** Whether Channex now reads every night the full sync sent it; a new rate plan reads zero until its update is applied, which is "not yet", not an error. */
+  private async inventoryMatches(mapping: MappingRow & ChannexMapping): Promise<boolean> {
+    const sent = await queryAll<{ date: string; sent_json: string }>(this.db, "SELECT date, sent_json FROM channel_night_pushes WHERE product_id = ? AND provider = 'channex' AND state = 'pushed' AND sent_json IS NOT NULL ORDER BY date", [mapping.product_id])
+    if (!sent.length) throw new Error(`Import of ${mapping.product_id} has no delivered calendar to verify`)
+    const query = new URLSearchParams({ 'filter[property_id]': mapping.property_id, 'filter[date][gte]': sent[0]!.date, 'filter[date][lte]': sent.at(-1)!.date })
     const availability = await channexRequest(this.env, `/availability?${query}`)
-    query.set('filter[restrictions]', 'rate,min_stay_arrival,max_stay,closed_to_arrival,closed_to_departure,stop_sell')
+    query.set('filter[restrictions]', 'rate,min_stay_arrival,min_stay_through,max_stay,closed_to_arrival,closed_to_departure,stop_sell')
     const restrictions = await channexRequest(this.env, `/restrictions?${query}`)
     return provided(() => {
       const available = object(object(availability.data, 'availability')[mapping.room_type_id], 'room type availability')
       const rates = object(object(restrictions.data, 'restrictions')[mapping.rate_plan_id], 'rate plan restrictions')
-      return days.every((day) => {
-        const count = available[day.date]
-        if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) throw new ChannexDataError(`availability on ${day.date} must be a non-negative integer`)
-        const rule = object(rates[day.date], `restrictions on ${day.date}`)
+      return sent.every((night) => {
+        const values = object(JSON.parse(night.sent_json), `sent values for ${night.date}`)
+        const count = available[night.date]
+        if (typeof count !== 'number' || !Number.isInteger(count) || count < 0) throw new ChannexDataError(`availability on ${night.date} must be a non-negative integer`)
+        const rule = object(rates[night.date], `restrictions on ${night.date}`)
         const rate = Number(rule.rate)
-        if (!Number.isFinite(rate) || rate < 0) throw new ChannexDataError(`rate on ${day.date} must be a non-negative number`)
-        // A new rate plan reads zero until its inventory update is applied, which is "not yet", not an error.
-        return count === day.availability && rate === Number(day.rate) && rule.min_stay_arrival === day.minStay && rule.max_stay === day.maxStay
-          && rule.closed_to_arrival === day.closedToArrival && rule.closed_to_departure === day.closedToDeparture && rule.stop_sell === (day.availability === 0)
+        if (!Number.isFinite(rate) || rate < 0) throw new ChannexDataError(`rate on ${night.date} must be a non-negative number`)
+        return count === values.availability && rate === Number(values.rate) && rule.min_stay_arrival === values.min_stay_arrival && rule.min_stay_through === values.min_stay_through
+          && rule.max_stay === values.max_stay && rule.closed_to_arrival === values.closed_to_arrival && rule.closed_to_departure === values.closed_to_departure && rule.stop_sell === values.stop_sell
       })
     })
   }
@@ -1194,7 +1190,8 @@ function minorUnits(decimal: string, currency: string): number {
 
 function importedNight(night: ListingNight, currency: string) {
   return {
-    date: night.date, available: night.availability === 1, price_minor: minorUnits(night.rate, currency), min_stay_arrival: night.minStay,
+    date: night.date, available: night.availability === 1, price_minor: minorUnits(night.rate, currency), min_stay_arrival: night.minStay, min_stay_through: night.minStay,
+
     max_stay: night.maxStay === 0 ? null : night.maxStay, closed_to_arrival: night.closedToArrival, closed_to_departure: night.closedToDeparture,
   }
 }

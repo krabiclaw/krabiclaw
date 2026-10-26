@@ -172,17 +172,29 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     const states = async (productId: string, from: string, to: string) => (await readStayCalendar(db, manager, { productId, from, to })).nights.map(night => night.channel)
     const log = async () => (await db.prepare("SELECT kind, external_id, status, detail, task_id FROM channel_sync_log WHERE direction = 'outbound' ORDER BY created_at, rowid").all()).results
 
-    // Yesterday through two days ahead: closed and priced; yesterday is not sent.
+    // Yesterday through two days ahead: closed and priced; yesterday is not sent. Nights Channex never had go whole: a closed
+    // night is stop sell on the rate plan with the unit still in inventory, and a night without its own minimum through
+    // stay carries the home's minimum nights there.
     const closed = await setStayNights(db, env, manager, { product_id: connected, from: day(-1), to: day(3), closed: true, price_minor: 175_50, min_stay_arrival: 3 })
     assert.deepEqual(closed.channel_push, { state: 'pushed', detail: null })
-    const restriction = { property_id: 'prop-1', rate_plan_id: 'rate-1', rate: '175.50', min_stay_arrival: 3, min_stay_through: 1, max_stay: 0, closed_to_arrival: false, closed_to_departure: false, stop_sell: true }
+    const restriction = { property_id: 'prop-1', rate_plan_id: 'rate-1', rate: '175.50', min_stay_arrival: 3, min_stay_through: 2, max_stay: 0, closed_to_arrival: false, closed_to_departure: false, stop_sell: true }
     assert.deepEqual(channex.take(), [
       { path: '/restrictions', values: [{ ...restriction, date_from: day(0), date_to: day(2) }] },
-      { path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(0), date_to: day(2), availability: 0 }] },
+      { path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(0), date_to: day(2), availability: 1 }] },
     ])
     assert.deepEqual(await states(connected, day(-1), day(3)), [null, ...Array(3).fill({ state: 'pushed', detail: null })])
     // Each call keeps the task Channex created for it, which Channex's certification asks for.
     assert.deepEqual((await log()).map(row => [(row as { status: string }).status, (row as { task_id: string | null }).task_id]), [['pushed', 'task-1'], ['pushed', 'task-2']])
+    // Opening a night Channex has is one restrictions update, stop sell alone; closing it again the same.
+    await setStayNights(db, env, manager, { product_id: connected, from: day(1), to: day(2), closed: false })
+    assert.deepEqual(channex.take(), [{ path: '/restrictions', values: [{ property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(1), date_to: day(1), stop_sell: false }] }])
+    await setStayNights(db, env, manager, { product_id: connected, from: day(1), to: day(2), closed: true })
+    assert.deepEqual(channex.take(), [{ path: '/restrictions', values: [{ property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(1), date_to: day(1), stop_sell: true }] }])
+    // The two minimum-stay fields go together: a change to one sends both.
+    await setStayNights(db, env, manager, { product_id: connected, from: day(2), to: day(3), min_stay_through: 4 })
+    assert.deepEqual(channex.take(), [{ path: '/restrictions', values: [{ property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(2), date_to: day(2), min_stay_arrival: 3, min_stay_through: 4 }] }])
+    // A minute has passed since those calls, as far as Channex's limit is concerned.
+    await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
 
     // A host stay holds its nights; cancelling it releases them. The home's own minimum applies where no night sets one.
     const stay = await createStay(db, env, manager, { product_id: connected, idempotency_key: 'k1', check_in_date: day(10), check_out_date: day(12), adults: 2, guest_name: 'Ana', total_minor: 300_00 })
@@ -257,7 +269,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(channex.take(), [])
     await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND date = ?").bind(connected, day(30)).run()
     assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
-    assert.deepEqual(channex.take(), [{ path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(30), date_to: day(30), availability: 0 }] }])
+    assert.deepEqual(channex.take(), [{ path: '/availability', values: [{ property_id: 'prop-1', room_type_id: 'room-1', date_from: day(30), date_to: day(30), availability: 1 }] }])
     assert.deepEqual((await states(connected, day(30), day(31)))[0], { state: 'pushed', detail: null })
 
     // A 429 pauses the property, availability included: a minute, then twice that for the next 429.
@@ -321,12 +333,17 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.equal(capped!.attempts, 10)
     assert(Date.parse(capped!.retry_at) - Date.now() <= 3_600_000 && Date.parse(capped!.retry_at) - Date.now() > 3_500_000)
     channex.take()
-
-    // A new base price on a connected home reaches every night ahead that has no price of its own.
-    // A minute has passed since the calls above, as far as Channex's limit is concerned.
+    // A change to a waiting night keeps the property's pause: the change goes with the retry, not now.
     channex.answer['/restrictions'] = undefined
     channex.answer['/availability'] = undefined
+    const paused = await setStayNights(db, env, manager, { product_id: connected, from: day(35), to: day(36), price_minor: 155_00 })
+    assert.deepEqual([paused.channel_push?.state, channex.take()], ['pending', []])
+    assert.deepEqual(await db.prepare('SELECT attempts FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(35)).first(), { attempts: 10 })
+
+    // A new base price on a connected home reaches every night ahead that has no price of its own.
+    // A minute has passed since the calls above, as far as Channex's limit is concerned, and the pause is over.
     await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
+    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND state = 'pending'").bind(connected).run()
     const repriced = await updateStayHome(env, db, manager, connected, { base_price_minor: 160_00 })
     assert.deepEqual([repriced.home.base_price_minor, repriced.channel_push], [160_00, { state: 'pushed', detail: null }])
     const ahead = channex.take()
@@ -336,7 +353,7 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     // other values for gets only its new rate; a night it never had gets everything.
     assert.equal(sentByDate.has(day(0)), false)
     assert.deepEqual(sentByDate.get(day(10)), { rate: '160.00' })
-    assert.deepEqual(sentByDate.get(day(499)), { rate: '160.00', min_stay_arrival: 2, min_stay_through: 1, max_stay: 0, closed_to_arrival: false, closed_to_departure: false, stop_sell: false })
+    assert.deepEqual(sentByDate.get(day(499)), { rate: '160.00', min_stay_arrival: 2, min_stay_through: 2, max_stay: 0, closed_to_arrival: false, closed_to_departure: false, stop_sell: false })
     // The nights Channex never had go as one range, not one value per night.
     assert(ahead[0]!.values.some(value => value.date_from === day(36) && value.date_to === day(499)))
     const availableByDate = byNight(ahead[1]!.values)
@@ -386,8 +403,8 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     const noPrice = await readStayCalendar(db, manager, { productId: unpriced, from: day(5), to: day(6) })
     assert.deepEqual(noPrice.nights.map(night => [night.date, night.closed, night.price_minor, night.channel]), [[day(5), true, null, noPriceOutcome]])
     assert.deepEqual(channex.take(), [
-      { path: '/restrictions', values: [{ property_id: 'prop-2', rate_plan_id: 'rate-2', date_from: day(5), date_to: day(5), min_stay_arrival: 2, min_stay_through: 1, max_stay: 0, closed_to_arrival: false, closed_to_departure: false, stop_sell: true }] },
-      { path: '/availability', values: [{ property_id: 'prop-2', room_type_id: 'room-2', date_from: day(5), date_to: day(5), availability: 0 }] },
+      { path: '/restrictions', values: [{ property_id: 'prop-2', rate_plan_id: 'rate-2', date_from: day(5), date_to: day(5), min_stay_arrival: 2, min_stay_through: 2, max_stay: 0, closed_to_arrival: false, closed_to_departure: false, stop_sell: true }] },
+      { path: '/availability', values: [{ property_id: 'prop-2', room_type_id: 'room-2', date_from: day(5), date_to: day(5), availability: 1 }] },
     ])
     // Without the Channex configuration a connected home's nights are not changed at all.
     await assert.rejects(setStayNights(db, {}, manager, { product_id: connected, from: day(40), to: day(41), closed: true }),
@@ -721,7 +738,9 @@ test('catalog price and minimum-stay writes use the same channel completion and 
     assert.deepEqual(reconciled[0]!.channel_push, { state: 'pushed', detail: null })
     const minimum = channex.take()
     assert.deepEqual(minimum.map(request => [request.path, request.values.length]), [['/restrictions', 1]])
-    assert.deepEqual(minimum[0]!.values, [{ property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(0), date_to: day(499), rate: '180.00', min_stay_arrival: 3 }])
+    // The home's minimum nights is both minimum-stay fields of a night without its own.
+    assert.deepEqual(minimum[0]!.values, [{ property_id: 'prop-1', rate_plan_id: 'rate-1', date_from: day(0), date_to: day(499), rate: '180.00', min_stay_arrival: 3, min_stay_through: 3 }])
+
     const calendar = await readStayCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
     assert.deepEqual(calendar.nights[0]!.channel, { state: 'pushed', detail: null })
 

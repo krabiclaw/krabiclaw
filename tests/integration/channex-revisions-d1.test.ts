@@ -16,16 +16,16 @@ const ORG = 'org'
 const OWNER = 'owner-user'
 const channexEnv = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests' }
 
-// A booking keeps its creation time across modifications and cancellation;
-// only its revisions carry later times.
+// A booking is its revisions: each carries the booking whole at its own time,
+// and only that time tells a later state from an earlier one.
 interface Booking { id: string; property_id: string; status: string; arrival: string; departure: string; amount: string; revision: string; code?: string }
-const CREATED = '2026-10-14T00:00:00Z'
 
 class FakeChannex {
-  bookings = new Map<string, Booking>()
-  revisions = new Map<string, { booking_id: string; property_id: string; inserted_at: string }>()
+  /** Each revision as Channex serves it: the booking as the channel sent it, at that revision's time. */
+  revisions = new Map<string, Record<string, unknown>>()
   acked: string[] = []
-  failBooking = false
+  /** Channex's revision reads (by id and the feed) answer 503. */
+  failRevisions = false
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
@@ -36,33 +36,31 @@ class FakeChannex {
     let match = path.match(/^\/booking_revisions\/([^/]+)\/ack$/)
     if (method === 'POST' && match) { this.acked.push(match[1]!); return json({ meta: { message: 'Success' } }) }
     if (method === 'GET' && path === '/booking_revisions/feed') {
+      if (this.failRevisions) return new Response('upstream', { status: 503 })
       const pending = [...this.revisions.keys()].filter(id => !this.acked.includes(id))
       return json({ data: pending.map(id => ({ id, type: 'booking_revision', attributes: this.revisions.get(id) })), meta: { total: pending.length } })
     }
     match = path.match(/^\/booking_revisions\/([^/]+)$/)
-    if (method === 'GET' && match) return json({ data: { id: match[1], type: 'booking_revision', attributes: this.revisions.get(match[1]!) } })
-    match = path.match(/^\/bookings\/([^/]+)$/)
     if (method === 'GET' && match) {
-      if (this.failBooking) return new Response('upstream', { status: 503 })
-      const booking = this.bookings.get(match[1]!)!
-      return json({ data: { id: booking.id, type: 'booking', attributes: {
-        property_id: booking.property_id, status: booking.status, ota_name: 'AirBNB', ota_reservation_code: booking.code ?? `HM${booking.id}`, revision_id: booking.revision,
-        inserted_at: CREATED, arrival_date: booking.arrival, departure_date: booking.departure, amount: booking.amount, currency: 'USD',
-        customer: { name: 'Lee', surname: 'Park', mail: 'lee@example.test', phone: null }, occupancy: { adults: 2, children: 1, infants: 0 },
-      } } })
+      if (this.failRevisions) return new Response('upstream', { status: 503 })
+      return json({ data: { id: match[1], type: 'booking_revision', attributes: this.revisions.get(match[1]!) } })
     }
+    // Channex's certification refuses a booking read by id: nothing here answers one.
     return new Response(`unexpected ${method} ${path}`, { status: 404 })
   }
 
-  /** A new revision: the booking's current state becomes `booking`, revised at `at`. */
+  /** A revision: the booking as the channel states it, revised at `at`. */
   revise(revision: string, booking: Booking, at: string) {
-    this.bookings.set(booking.id, { ...booking, revision })
-    this.revisions.set(revision, { booking_id: booking.id, property_id: booking.property_id, inserted_at: at })
+    this.revisions.set(revision, {
+      booking_id: booking.id, property_id: booking.property_id, status: booking.status, ota_name: 'AirBNB', ota_reservation_code: booking.code ?? `HM${booking.id}`,
+      inserted_at: at, arrival_date: booking.arrival, departure_date: booking.departure, amount: booking.amount, currency: 'USD',
+      customer: { name: 'Lee', surname: 'Park', mail: 'lee@example.test', phone: null }, occupancy: { adults: 2, children: 1, infants: 0 },
+    })
   }
 
-  /** A revision Channex still lists but that is no longer the booking's current state. */
+  /** A revision delivered after a later one of the same booking landed: its time is older, so it changes nothing. */
   superseded(revision: string, booking: Booking, at: string) {
-    this.revisions.set(revision, { booking_id: booking.id, property_id: booking.property_id, inserted_at: at })
+    this.revise(revision, booking, at)
   }
 }
 
@@ -210,18 +208,18 @@ test('an unknown home is logged and acknowledged; a failed read is not acknowled
     assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM stays').first<{ n: number }>())!.n, 0)
 
     channex.revise('rev-y', { id: 'bk-y', property_id: 'prop-1', status: 'new', arrival: '2027-03-05', departure: '2027-03-07', amount: '300', revision: '' }, '2026-10-15T01:00:00Z')
-    channex.failBooking = true
+    channex.failRevisions = true
     await assert.rejects(applyBookingRevision(db, env, 'rev-y'), (error: unknown) => (error as { providerStatus?: number; status?: number }).providerStatus === 503 && (error as { status?: number }).status === 502)
     assert.deepEqual(channex.acked, ['rev-x'])
-    await assert.rejects(runRevisionFeed(db, env), /1 Channex booking revision\(s\) did not land: rev-y/)
+    await assert.rejects(runRevisionFeed(db, env), (error: unknown) => (error as { providerStatus?: number }).providerStatus === 503)
 
-    channex.failBooking = false
+    channex.failRevisions = false
     assert.deepEqual(await runRevisionFeed(db, env), { acknowledged: 1, ignored: 0 })
     assert.deepEqual(channex.acked, ['rev-x', 'rev-y'])
     assert.deepEqual(await logged(db), [
-      { external_id: 'rev-x', status: 'ignored_disconnected' }, { external_id: 'rev-y', status: 'failed' },
-      { external_id: 'rev-y', status: 'failed' }, { external_id: 'rev-y', status: 'acknowledged' },
+      { external_id: 'rev-x', status: 'ignored_disconnected' }, { external_id: 'rev-y', status: 'failed' }, { external_id: 'rev-y', status: 'acknowledged' },
     ])
+
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
