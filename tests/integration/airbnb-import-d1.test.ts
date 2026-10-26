@@ -998,8 +998,14 @@ test('a full sync Channex took without naming its task is logged as failed and t
     assert.partialDeepStrictEqual(pending[0], { state: 'pending', nights: 500 })
     assert.match(String(pending[0]!.detail), /Channex did not confirm the restrictions update .* Attempt 1; sending again at/)
     assert.deepEqual(await db.prepare('SELECT status, pending_step FROM channex_connections').first(), { status: 'connected', pending_step: null })
-    // Channex naming its task on the retry lets the import on: one restrictions and one availability call, both confirmed.
+    // Asked again before the retry time, the stage sends nothing and the nights wait on.
     unnamed = false
+    const calls = channex.seen.length
+    await track(db, channex, productId)
+    assert.deepEqual(await connection.advance(productId), { product_id: productId, stage: 'inventory', waiting: true, content: null })
+    assert.deepEqual(channex.seen.slice(calls).filter(request => request.method === 'POST'), [])
+    assert.deepEqual(await db.prepare("SELECT state, COUNT(*) AS nights, MIN(attempts) AS attempts FROM channel_night_pushes WHERE product_id = ? GROUP BY state").bind(productId).all().then(rows => rows.results), [{ state: 'pending', nights: 500, attempts: 1 }])
+    // Channex naming its task on the retry lets the import on: one restrictions and one availability call, both confirmed.
     await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ?").bind(productId).run()
     await track(db, channex, productId)
     assert.deepEqual(await connection.advance(productId), { product_id: productId, stage: 'verify_inventory', waiting: false, content: null })

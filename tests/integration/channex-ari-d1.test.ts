@@ -333,12 +333,17 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.equal(capped!.attempts, 10)
     assert(Date.parse(capped!.retry_at) - Date.now() <= 3_600_000 && Date.parse(capped!.retry_at) - Date.now() > 3_500_000)
     channex.take()
-
-    // A new base price on a connected home reaches every night ahead that has no price of its own.
-    // A minute has passed since the calls above, as far as Channex's limit is concerned.
+    // A change to a waiting night keeps the property's pause: the change goes with the retry, not now.
     channex.answer['/restrictions'] = undefined
     channex.answer['/availability'] = undefined
+    const paused = await setStayNights(db, env, manager, { product_id: connected, from: day(35), to: day(36), price_minor: 155_00 })
+    assert.deepEqual([paused.channel_push?.state, channex.take()], ['pending', []])
+    assert.deepEqual(await db.prepare('SELECT attempts FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(connected, day(35)).first(), { attempts: 10 })
+
+    // A new base price on a connected home reaches every night ahead that has no price of its own.
+    // A minute has passed since the calls above, as far as Channex's limit is concerned, and the pause is over.
     await db.prepare("UPDATE channel_sync_log SET created_at = '2000-01-01T00:00:00.000Z' WHERE direction = 'outbound'").run()
+    await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ? AND state = 'pending'").bind(connected).run()
     const repriced = await updateStayHome(env, db, manager, connected, { base_price_minor: 160_00 })
     assert.deepEqual([repriced.home.base_price_minor, repriced.channel_push], [160_00, { state: 'pushed', detail: null }])
     const ahead = channex.take()

@@ -482,6 +482,8 @@ export class AirbnbConnection {
         // A completed import cleared its source inputs. Re-read and validate
         // them above before resuming the same home's inventory on this channel.
         await importStayNights(this.db, this.env, this.manager(), existing.product_id, provided(() => calendar.map(night => importedNight(night, organization.default_currency))))
+        // The new account's property has nothing confirmed: the inventory stage sends the calendar whole.
+        await forgetConfirmedNights(this.db, existing.product_id)
         const [reconnected] = await executeWithinCapacity(this.env, this.db, this.organizationId, [{
           query: "UPDATE product_channel_mappings SET channel_id = ?, import_stage = 'inventory', import_property = ?, updated_at = ? WHERE product_id = ? AND provider = 'channex' AND enabled = 0",
           params: [channelId, JSON.stringify(property), now(), existing.product_id],
@@ -577,9 +579,10 @@ export class AirbnbConnection {
         }
         case 'inventory': {
           // The full sync: the home's calendar ahead through the delivery outbox, as every
-          // night change goes, to a rate plan Channex has nothing confirmed for yet. One
-          // restrictions and one availability call, each logged with its task.
-          await forgetConfirmedNights(this.db, productId)
+          // night change goes, to a rate plan Channex has nothing confirmed for yet (a new
+          // property has no outbox rows; a reconnect emptied them). One restrictions and
+          // one availability call, each logged with its task; a stage asked again sends
+          // what is due, honouring the outbox's retry times.
           const waiting = await this.syncCalendar(mapping)
           if (waiting) return { product_id: productId, stage, waiting: true, content: null }
           await save({ import_stage: 'verify_inventory' })
