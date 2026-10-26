@@ -5,7 +5,7 @@
       <div class="py-6">
         <div class="flex items-center justify-between gap-4">
           <div class="flex min-w-0 items-center gap-4">
-            <UAvatar :src="account.photoPreview.value ?? account.sessionData.value?.user?.image ?? undefined" icon="i-lucide-user" alt="" class="size-24" :ui="{ icon: 'size-10' }" />
+            <UAvatar :src="account.photoPreview.value ?? account.sessionData.value?.user?.image ?? undefined" :alt="account.sessionData.value?.user?.name ?? ''" :icon="account.sessionData.value?.user?.name ? undefined : 'i-lucide-user'" class="size-24" :ui="{ icon: 'size-10', fallback: 'text-2xl' }" />
             <div class="min-w-0">
               <p class="font-semibold text-highlighted">Photo</p>
               <p class="mt-1 text-sm leading-relaxed text-muted">A familiar face for your account.</p>
