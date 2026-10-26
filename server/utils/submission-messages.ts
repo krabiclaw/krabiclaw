@@ -1,5 +1,4 @@
 import { queryFirst, type DbClient } from '~/server/db'
-import { sendEmail } from '~/server/utils/email-delivery'
 import {
   buildReplyLocalPart,
   buildReplyToken,
@@ -90,42 +89,4 @@ export async function findSubmissionByPhone(db: DbClient, phone: string, organiz
       AND NOT EXISTS (SELECT 1 FROM stays st WHERE st.request_id = r.id AND st.status = 'cancelled')
     ${organizationId ? 'AND r.organization_id = ?' : ''}
     ORDER BY r.created_at DESC LIMIT 1`, [phone, phone, ...(organizationId ? [organizationId] : [])])
-}
-
-export interface SendReplyEmailResult {
-  status: 'sent' | 'failed'
-  messageId?: string
-  error?: string
-}
-
-// Sends an owner's typed reply to a customer, with reply-to set so the customer's own reply
-// lands back on the same thread. This is a one-off message, not a fixed notification template,
-// so it bypasses the `notifications` table logging sendEmailNotification does for system emails.
-//
-// The caller renders the message through server/emails: this used to take a raw
-// string and post it as the text body with no HTML at all, which is why every
-// guest-facing inbox email arrived unstyled (#969).
-export async function sendReplyEmail(env: ReplyEmailEnv, opts: {
-  to: string
-  fromName: string
-  subject: string
-  email: { html: string; text: string }
-  submissionType: SubmissionType
-  submissionId: string
-  idempotencyKey?: string
-}): Promise<SendReplyEmailResult> {
-  const replyTo = await buildReplyToAddress(env, opts.submissionType, opts.submissionId)
-  const result = await sendEmail(env, {
-    to: opts.to,
-    fromName: opts.fromName,
-    subject: opts.subject,
-    html: opts.email.html,
-    text: opts.email.text,
-    emailPurpose: 'transactional',
-    replyTo,
-    idempotencyKey: opts.idempotencyKey,
-  })
-  return result.status === 'sent'
-    ? { status: 'sent', ...(result.messageId ? { messageId: result.messageId } : {}) }
-    : { status: result.status, error: result.error }
 }

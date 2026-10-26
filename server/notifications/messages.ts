@@ -46,7 +46,7 @@ export interface NotificationMessage {
   emailReason: string
   /** The guest's selected website language; owner alerts keep their existing locale. */
   locale?: string
-  /** The email subject and the H1. One sentence; the body never restates it. */
+  /** The event headline and initial subject; replies retain the email conversation's subject. */
   title: string
   /** The line a client shows beside the subject. */
   preheader: string

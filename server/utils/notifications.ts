@@ -6,7 +6,7 @@ import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~
 import { getGuestRequest, requestSummary, type cancelBookingRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { getEmailDeliveryMode, hashEmail, sendEmail } from '~/server/utils/email-delivery'
+import { getEmailDeliveryMode, hashEmail, sendEmail, type EmailSendResult } from '~/server/utils/email-delivery'
 import { buildWhatsAppTemplatePayload, sendWhatsAppNotification, WhatsAppTemplateRefusal, type WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getWhatsAppDeliveryMode } from '~/server/utils/whatsapp-delivery'
@@ -51,7 +51,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
-import { createDeliveryReceipt, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
+import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
@@ -404,25 +404,23 @@ async function sendEmailNotification(
   // Resend idempotency key, so a concurrent replay cannot send it twice.
   if (delivery && isDeliverySent(delivery)) return
 
-  const result = await sendEmail(env, {
-    to: opts.to,
-    replyTo: opts.replyTo,
-    subject: opts.email.subject,
-    html: opts.email.html,
-    text: opts.email.text,
-    emailPurpose: opts.email.emailPurpose,
+  const email = {
+    to: opts.to, replyTo: opts.replyTo, subject: opts.email.subject,
+    html: opts.email.html, text: opts.email.text, emailPurpose: opts.email.emailPurpose,
     unsubscribeOneClickUrl: opts.unsubscribeOneClickUrl ?? null,
-    idempotencyKey: delivery?.id,
-  })
-  if (delivery) {
-    await recordDeliveryOutcome(db, {
-      deliveryId: delivery.id,
-      status: result.status,
-      providerMessageId: result.status === 'sent' ? result.messageId : null,
-      error: result.status === 'sent' ? null : result.error,
-    })
-    if (deliveryContext?.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: deliveryContext.threadId, type: 'delivery.changed' })
   }
+  let result: EmailSendResult
+  if (delivery) {
+    const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.threadId, email })
+    if (isDeliverySent(outcome)) {
+      if (!outcome.provider_message_id) throw new Error('Sent email delivery has no provider identity')
+      result = { status: 'sent', messageId: outcome.provider_message_id }
+    } else {
+      if (!outcome.error) throw new Error('Incomplete email delivery has no recorded failure reason')
+      result = { status: 'failed', code: 'EMAIL_DELIVERY_FAILED', error: outcome.error }
+    }
+  } else result = await sendEmail(env, email)
+  if (deliveryContext?.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: deliveryContext.threadId, type: 'delivery.changed' })
   if (result.status === 'sent') {
     console.info(provider === 'log_only' ? 'email_delivery_log_only' : 'email_delivery_sent', {
       organizationId: opts.organizationId,
@@ -948,7 +946,7 @@ export async function notifyReservationCreated(
     guestName: opts.guestName, organizationLogoUrl: logoUrl,
     date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale), partySize: opts.guests, notes: opts.requests,
     contactPhone: opts.contactPhone, contactEmail: opts.contactEmail,
-    receiptUrl: opts.receiptUrl,
+    receiptUrl: opts.receiptUrl, heroImageUrl: hero?.imageUrl ?? null,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1281,7 +1279,7 @@ export async function notifyBookingCreated(
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
     time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: String(opts.partySize),
     notes: opts.notes, contactPhone: opts.contactPhone ?? null, contactEmail: opts.contactEmail ?? null,
-    receiptUrl: opts.receiptUrl ?? null,
+    receiptUrl: opts.receiptUrl ?? null, heroImageUrl: hero?.imageUrl ?? null,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1361,6 +1359,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     checkIn: when(stay.check_in_date, home.check_in_time, guest.locale), checkOut: when(stay.check_out_date, home.check_out_time, guest.locale),
     nights: String(nights), guests: String(stay.adults + stay.children), total: formatMinorAmount(paid.amount, paid.currency, guest.locale),
     checkInInstructions: home.check_in_instructions, contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null,
+    heroImageUrl: hero?.imageUrl ?? null,
     receiptUrl: organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/stay', guest.locale, sourceLocale.locale)}?id=${encodeURIComponent(stay.request_id)}#${(await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.request_id)).token}` : null,
   })
   const payload = {

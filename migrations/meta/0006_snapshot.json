@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cc9ec47c-fafc-4224-8119-8d79fd4982e9",
+  "id": "baae872a-a86e-40d8-a66d-7f3c574f2b92",
   "prevId": "18b50b72-82cb-47c7-a217-f88092908cde",
   "tables": {
     "account": {
@@ -2219,7 +2219,7 @@
       "checkConstraints": {
         "channel_sync_log_provider_check": {
           "name": "channel_sync_log_provider_check",
-          "value": "provider IN ('channex', 'google_calendar')"
+          "value": "provider = 'channex'"
         },
         "channel_sync_log_direction_check": {
           "name": "channel_sync_log_direction_check",
@@ -2227,7 +2227,7 @@
         },
         "channel_sync_log_kind_check": {
           "name": "channel_sync_log_kind_check",
-          "value": "kind IN ('booking_revision', 'availability', 'restrictions', 'calendar_event')"
+          "value": "kind IN ('booking_revision', 'availability', 'restrictions')"
         },
         "channel_sync_log_status_check": {
           "name": "channel_sync_log_status_check",
@@ -4256,123 +4256,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "google_calendar_sync": {
-      "name": "google_calendar_sync",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "integration_revision": {
-          "name": "integration_revision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_token": {
-          "name": "channel_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "resource_id": {
-          "name": "resource_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "channel_expires_at": {
-          "name": "channel_expires_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sync_token": {
-          "name": "sync_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reschedules": {
-          "name": "reschedules",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "last_pulled_at": {
-          "name": "last_pulled_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "google_calendar_sync_channel_unique": {
-          "name": "google_calendar_sync_channel_unique",
-          "columns": [
-            "channel_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "google_calendar_sync_organization_id_organization_id_fk": {
-          "name": "google_calendar_sync_organization_id_organization_id_fk",
-          "tableFrom": "google_calendar_sync",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "guest_thread_deliveries": {
       "name": "guest_thread_deliveries",
       "columns": {
@@ -4421,6 +4304,20 @@
         },
         "provider_message_id": {
           "name": "provider_message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "email_json": {
+          "name": "email_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "email_message_id": {
+          "name": "email_message_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

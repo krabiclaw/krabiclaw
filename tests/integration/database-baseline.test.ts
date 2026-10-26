@@ -878,7 +878,7 @@ test('a v18 export preserves its conversations and receipts unchanged in the cha
     try {
       assert.deepEqual(target.pragma('foreign_key_check'), [])
       assert.deepEqual(['requests', 'activity_entries', 'guest_thread_deliveries'].map(table => target.prepare(`SELECT * FROM ${table}`).all()),
-        [before[0]!.map(request => ({ ...request as Record<string, unknown>, blocked_at: null })), before[1], before[2]!.map(receipt => ({ ...receipt as Record<string, unknown>, non_delivery_confirmed: null }))])
+        [before[0]!.map(request => ({ ...request as Record<string, unknown>, blocked_at: null })), before[1], before[2]!.map(receipt => ({ ...receipt as Record<string, unknown>, non_delivery_confirmed: null, email_json: null, email_message_id: null }))])
       assert.equal(target.prepare('SELECT count(*) AS n FROM channel_threads').get()!.n, 0)
       assert.deepEqual(target.prepare('SELECT category, email_enabled, whatsapp_enabled, push_enabled FROM user_notification_preferences ORDER BY category').all(),
         [{ category: 'guest_messages', email_enabled: 0, whatsapp_enabled: 1, push_enabled: 1 }, { category: 'reviews', email_enabled: 1, whatsapp_enabled: 0, push_enabled: 0 }])
