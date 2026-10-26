@@ -28,11 +28,11 @@
         <!-- The business reads who is coming; the account reads what it booked and where. A purchase is what was bought, for both. -->
         <div class="text-center">
           <img v-if="booking.resourceImageUrl" :src="booking.resourceImageUrl" alt="" class="mx-auto mb-6 aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover">
-          <div v-if="!personalScope && !purchase && booking.guestName" class="mb-3 flex items-center justify-center -space-x-2">
-            <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" size="xl" class="ring-2 ring-default" />
-            <span v-if="booking.partySize && booking.partySize > 1" class="flex size-10 items-center justify-center rounded-full bg-elevated text-sm font-medium text-highlighted ring-2 ring-default" :aria-label="`${booking.partySize - 1} other guests`">+{{ booking.partySize - 1 }}</span>
+          <div v-if="!personalScope && !purchase && booking.guestName" class="relative mx-auto mb-8" :class="booking.partySize && booking.partySize > 1 ? 'h-30 w-38' : 'size-22'">
+            <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" :text="booking.guestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0 size-22 text-4xl" :ui="{ fallback: 'text-highlighted' }" />
+            <span v-if="booking.partySize && booking.partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-2xl font-semibold text-highlighted" :aria-label="`${booking.partySize - 1} other guests`">+{{ booking.partySize - 1 }}</span>
           </div>
-          <h2 class="break-words text-2xl font-semibold text-highlighted">{{ personalScope || purchase ? booking.resourceTitle : partyTitle }}</h2>
+          <h2 class="break-words font-semibold text-highlighted" :class="personalScope || purchase ? 'text-2xl' : 'mx-auto max-w-sm text-3xl leading-tight'">{{ personalScope || purchase ? booking.resourceTitle : partyTitle }}</h2>
           <p class="mt-2 break-words text-base text-muted">{{ subline }}</p>
         </div>
 
@@ -281,7 +281,7 @@ const editorPath = computed(() => props.editorPath)
 // Owning the column means owning its header; inside the thread's leaf it is that leaf's body.
 const chrome = computed(() => (props.embedded
   ? {}
-  : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value, column: 'leaf' as const }))
+  : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value, column: 'record' as const }))
 /** Which note a leaf is editing, or none for a new one. */
 const openNoteId = ref<string | null>(null)
 const selectedNote = computed(() => booking.value?.notes.find(note => note.id === openNoteId.value))

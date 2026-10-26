@@ -547,7 +547,8 @@ and desktop widths before treating a mapping as complete.
 **Everything starts at the gutter.** Nuxt UI's panel gutter (`px-4 sm:px-6`,
 `dashboardGutterClass`) is the one horizontal edge, the same as the top nav's:
 Back or ✕, the title, the rows, the fields and Cancel all start on it, and
-nothing is centred. A component inside a panel adds no outer padding, scroll
+editing content keeps that edge. A record summary centres its bounded content
+and contact actions within its own pane. A component inside a panel adds no outer padding, scroll
 container or column of its own; a row whose highlight reaches the pane's edge
 pulls itself into the gutter (`-mx-4`) so its text keeps the edge. A level that
 scrolls itself (`fill`) pads its own rows with the gutter. Every footer is
@@ -587,7 +588,8 @@ Plan and billing and Earnings do: its rows are leaves beside it and `autoOpen` n
 Only a list of records with nothing of its own to open — Notifications, Past
 activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
 booking's notes, a calendar day) stands alone as a column, and says which in
-`DashboardIndexPanel column`: `reading` for the records, `leaf` for the screen.
+`DashboardIndexPanel column`: `reading` for lists of records, `leaf` for the
+screen, `record` for a booking or stay summary with its column centred in the pane.
 Beside a child every index fills its own pane. Standalone widths live in
 `dashboardColumnWidths`; a page never states one. A column's title heads it,
 as a leaf's does. Every level title is `dashboardTitleClass`.
@@ -1092,8 +1094,11 @@ nowhere to put.
 
 **The picture leads.** Rows lead with a thumbnail; a leaf leads with the image
 large when editing the photo itself. A booking or stay summary places its real
-resource photo in a substantial square cover above the guest avatar and party identity,
-then dates and arrival facts. Private team notes precede guest details and the
+resource photo in a large square cover above the guest avatar and party identity.
+The host's primary avatar is prominent, with a smaller guest-count circle
+raised beside it; the party name leads the dates and resource name. The whole
+header shares the record column's centre within its visible pane. Arrival
+facts follow the identity. Private team notes precede guest details and the
 cancellation policy; payment, management and booking metadata follow. Message
 and Call remain at the foot of the pane while its facts scroll. Embedded thread
 details retain those actions at the end of their existing leaf. Guest requests

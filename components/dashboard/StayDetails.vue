@@ -1,7 +1,7 @@
 <template>
   <!-- One stay at a place to stay: who is coming, when, and what the host has collected. -->
   <!-- Inside the guest thread's leaf, which owns the column, it is the body alone. -->
-  <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="embedded ? {} : { id: 'stay-details', title, column: 'leaf' }">
+  <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="embedded ? {} : { id: 'stay-details', title, column: 'record' }">
     <template #right>
       <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close stay details" class="max-lg:hidden" />
     </template>
@@ -21,9 +21,12 @@
       <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
       <div class="flex flex-col items-center text-center">
         <img v-if="homeImageUrl" :src="homeImageUrl" :alt="recordHome?.name ?? ''" class="mb-6 aspect-square w-full max-w-80 shrink-0 rounded-2xl object-cover">
-        <UAvatar v-if="guest.state === 'named'" :alt="guest.name" size="xl" class="mb-4 shrink-0" />
+        <div v-if="!personalScope && guest.state === 'named'" class="relative mb-8 shrink-0" :class="guestCount > 1 ? 'h-30 w-38' : 'size-22'">
+          <UAvatar :alt="guest.name" :text="guest.name.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0 size-22 text-4xl" :ui="{ fallback: 'text-highlighted' }" />
+          <span v-if="guestCount > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-2xl font-semibold text-highlighted" :aria-label="`${guestCount - 1} other guests`">+{{ guestCount - 1 }}</span>
+        </div>
         <h2 v-if="personalScope && home" class="text-2xl font-semibold text-highlighted">{{ home.name }}</h2>
-        <h2 v-else-if="guest.state === 'named'" class="text-2xl font-semibold text-highlighted">{{ guest.name }}</h2>
+        <h2 v-else-if="guest.state === 'named'" class="max-w-sm text-3xl font-semibold leading-tight text-highlighted">{{ guest.name }}</h2>
         <h2 v-else-if="guest.state === 'not-provided'" class="text-2xl font-semibold text-muted">Name not provided by {{ channelName }}</h2>
         <h2 v-else-if="guest.state === 'missing'" class="text-2xl font-semibold text-error">Guest name missing</h2>
         <p v-if="personalScope && home" class="mt-1 text-base text-muted">{{ home.organization_name }}</p>
@@ -290,6 +293,7 @@ const partyLabel = computed(() => {
   if (value.infants) parts.push(`${value.infants} ${value.infants === 1 ? 'infant' : 'infants'}`)
   return parts.join(', ')
 })
+const guestCount = computed(() => stay.value ? stay.value.adults + stay.value.children + stay.value.infants : 0)
 const statusLabel = computed(() => !stay.value ? 'Stay' : stay.value.status === 'cancelled' ? 'Cancelled' : stay.value.status === 'pending' ? 'Pending' : 'Confirmed')
 
 function money(minor: number): string {

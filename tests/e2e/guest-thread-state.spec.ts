@@ -563,7 +563,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expectStatus(await page.request.put(reservationConfig,{data:{duration_minutes:60,expected_updated_at:policy.updated_at}}),200)
 
   const now = Date.now()
-  const firstName = `Maya${now}`
+  const firstName = 'Maya'
   const guestName = `${firstName} Chen`
   const guestEmail = `maya-${now}@example.test`
   const availability = await page.request.get('/api/public/reservations/availability', {
@@ -595,7 +595,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const bookingIds: string[] = []
   for (const [name, email, plan] of [
     [guestName, guestEmail, todaySlot!],
-    [`Priya${now} Patel`, `priya-${now}@example.test`, now + 86_400_000],
+    ['Priya Patel', `priya-${now}@example.test`, now + 86_400_000],
   ] as const) {
     let date: string
     let time: string
@@ -658,7 +658,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(localDateAt(new Date(upcomingCard!.occurrenceAt!), timezone) > localToday.date).toBe(true)
   expect(upcomingFeed.cards.some(card => card.id === `reservation:${bookingIds[0]}`)).toBe(false)
 
-  await page.getByTestId('today-card').filter({ hasText: reviewCard!.headline }).click()
+  await page.locator(`[data-card-id="${reviewCard!.id}"]`).click()
   await expect(page.getByRole('heading', { name: 'Currently hosting', exact: true })).toBeVisible()
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
@@ -685,18 +685,34 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     await expect(picture).toHaveAttribute('src', summary.resourceImageUrl!)
     await expect(picture).toHaveJSProperty('complete', true)
     expect(await picture.evaluate(image => (image as HTMLImageElement).naturalWidth), 'The actual location picture loads').toBeGreaterThan(0)
-    const guestGroup = detailPanel.getByLabel(`${summary.partySize! - 1} other guests`, { exact: true }).locator('..')
+    const otherGuests = detailPanel.getByLabel(`${summary.partySize! - 1} other guests`, { exact: true })
+    const guestGroup = otherGuests.locator('..')
+    const mainAvatar = guestGroup.locator(':scope > [data-slot="root"]')
     await expect(guestGroup).toBeInViewport()
+    await expect(mainAvatar).toHaveCount(1)
     if (summary.guestImageUrl) await expect(guestGroup.getByAltText(summary.guestName!, { exact: true })).toHaveAttribute('src', summary.guestImageUrl)
+    else await expect(mainAvatar).toHaveText(summary.guestName!.trim().slice(0, 1))
     const pictureBounds = (await picture.boundingBox())!
     const guestBounds = (await guestGroup.boundingBox())!
+    const avatarBounds = (await mainAvatar.boundingBox())!
+    const countBounds = (await otherGuests.boundingBox())!
     const identityBounds = (await identity.boundingBox())!
+    const paneBounds = (await detailPanel.boundingBox())!
+    const paneCenter = paneBounds.x + paneBounds.width / 2
+    expect(avatarBounds.width, 'The guest is dominant within the group').toBeGreaterThan(countBounds.width)
+    expect(avatarBounds.height).toBeGreaterThan(countBounds.height)
+    expect(avatarBounds.height).toBe(avatarBounds.width)
+    expect(countBounds.height).toBe(countBounds.width)
+    expect(countBounds.y, 'The smaller guest count is raised beside the guest').toBeLessThan(avatarBounds.y)
+    expect(countBounds.x + countBounds.width / 2).toBeGreaterThan(avatarBounds.x + avatarBounds.width / 2)
     expect(pictureBounds.width, 'The property photo leads as a substantial cover, not an avatar thumbnail').toBeGreaterThanOrEqual(280)
     expect(pictureBounds.width).toBeLessThanOrEqual((await detailPanel.boundingBox())!.width)
     expect(pictureBounds.height).toBe(pictureBounds.width)
     expect(pictureBounds.y + pictureBounds.height).toBeLessThanOrEqual(guestBounds.y)
     expect(guestBounds.y + guestBounds.height).toBeLessThanOrEqual(identityBounds.y)
-    expect(Math.abs(pictureBounds.x + pictureBounds.width / 2 - identityBounds.x - identityBounds.width / 2)).toBeLessThanOrEqual(1)
+    expect(Math.abs(pictureBounds.x + pictureBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
+    expect(Math.abs(guestBounds.x + guestBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
+    expect(Math.abs(identityBounds.x + identityBounds.width / 2 - paneCenter), 'The record header centers in its visible pane').toBeLessThanOrEqual(1)
     expect(await identity.evaluate(element => getComputedStyle(element).textAlign)).toBe('center')
     const paymentInfo = detailPanel.getByRole('heading', { name: 'Payment info', exact: true })
     await expect(paymentInfo).toHaveCount(summary.payments?.length ?? 0)
@@ -732,7 +748,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     const footerBounds = (await footer.boundingBox())!
     const messageBefore = await message.boundingBox()
     const callBefore = await call.boundingBox()
-    expect(Math.abs((messageBefore!.x + callBefore!.x + callBefore!.width) / 2 - identityBounds.x - identityBounds.width / 2), 'Contact actions align with the bounded record, including beside Today').toBeLessThanOrEqual(1)
+    expect(Math.abs((messageBefore!.x + callBefore!.x + callBefore!.width) / 2 - paneCenter), 'Contact actions center in the same visible pane as the record header').toBeLessThanOrEqual(1)
     const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
     expect(maximum, 'The actual reservation summary has a scroll end at this viewport').toBeGreaterThan(0)
     await page.mouse.move(bodyBounds.x + 4, bodyBounds.y + bodyBounds.height / 2)
@@ -752,7 +768,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     // Show the actual desktop detail pane without publishing copied
     // conversations elsewhere in Today's local fixture. Mobile is this record.
     const detailBounds = (await detailPanel.boundingBox())!
-    await page.screenshot({ path: capture, ...(width === 1728 ? { clip: { x: detailBounds.x, y: 0, width: detailBounds.width, height: 940 } } : { fullPage: false }) })
+    await page.screenshot({ path: capture, ...(width === 1728 ? { clip: detailBounds } : { fullPage: false }) })
     await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
   }
   await page.setViewportSize(priorViewport)

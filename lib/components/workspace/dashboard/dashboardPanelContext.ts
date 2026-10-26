@@ -7,13 +7,15 @@ import type { ComputedRef, InjectionKey } from 'vue'
  * A grid, a table, a calendar or a chart names none and takes the frame, as
  * Airbnb's listings, calendar and insights do.
  *
- * Content always starts at the panel's gutter, the same edge as the top nav,
- * and is never centred. Below `lg` a level is the whole screen or a drawer and
+ * Editing content starts at the panel's gutter, the same edge as the top nav.
+ * A record summary centres its bounded column inside its own pane. Below `lg`
+ * a level is the whole screen or a drawer and
  * uses all of it; from `lg` a standalone column stops a line running on.
  */
 export const dashboardColumnWidths = {
   leaf: 'lg:max-w-xl',
   reading: 'lg:max-w-3xl',
+  record: 'lg:mx-auto lg:max-w-xl',
 } as const
 
 export type DashboardColumn = keyof typeof dashboardColumnWidths
