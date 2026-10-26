@@ -117,15 +117,17 @@ export async function readBusinessProgressReference(
   }
   const request = await getGuestRequest(db, input.subjectId, principal.organizationId)
   if (!request) throw missing()
-  const [commitment, latestGuest, latestReply] = await Promise.all([
+  const [commitment, latestGuest, latestReply, latestMember] = await Promise.all([
     getThreadOperationalRecord(db, request.id),
     queryFirst<{ id: string }>(db, `SELECT id FROM activity_entries WHERE request_id = ? AND actor_kind = 'guest' AND kind IN ('submission', 'message') ORDER BY sequence DESC LIMIT 1`, [request.id]),
     queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE request_id = ? AND actor_kind = 'member' AND kind = 'message' AND event_name = 'thread.member_reply' ORDER BY sequence DESC LIMIT 1", [request.id]),
+    queryFirst<{ id: string }>(db, "SELECT id FROM activity_entries WHERE request_id = ? AND actor_kind = 'member' AND kind = 'message' ORDER BY sequence DESC LIMIT 1", [request.id]),
   ])
   const deliveries = latestReply ? await queryAll<GuestThreadDeliveryRow>(db, "SELECT * FROM guest_thread_deliveries WHERE entry_id = ? AND purpose = 'member_reply' ORDER BY id", [latestReply.id]) : []
   const evidence = {
     kind: 'guest_thread' as const, conversationState: request.conversation_state, archivedAt: request.archived_at, blockedAt: request.blocked_at,
     latestGuestEntryId: latestGuest?.id ?? null, latestReplyEntryId: latestReply?.id ?? null,
+    latestMemberEntryId: latestMember?.id ?? null,
     commitment: commitment ? { kind: commitment.kind, id: commitment.id, status: commitment.status, startsAt: commitment.starts_at, endsAt: commitment.ends_at } : null,
   }
   return { ...input, evidenceRevision: await creationRequestHash({ operation: input.operation, evidence, commitment, deliveries }), evidence }

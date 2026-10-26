@@ -54,6 +54,7 @@ export interface BusinessProgressReference {
     blockedAt: string | null
     latestGuestEntryId: string | null
     latestReplyEntryId: string | null
+    latestMemberEntryId: string | null
     commitment: { kind: 'booking' | 'reservation' | 'stay'; id: string; status: string; startsAt: string; endsAt: string } | null
   }
 }
