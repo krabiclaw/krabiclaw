@@ -159,16 +159,17 @@ export async function pullCalendarChanges(env: CloudflareEnv, organizationId: st
 }
 /** The destination a Google event's new interval names: the same product's session that starts then, or the reservation's new date and time. */
 async function moveFieldsFor(db: DbClient, organizationId: string, subject: CalendarSubject, startsAt: string, endsAt: string) {
-  const record = await queryFirst<{ party_size: number; product_id: string | null; location_id: string | null; timezone: string }>(db, subject.booking_kind === 'booking'
-    ? 'SELECT b.party_size, b.product_id, s.location_id, s.timezone FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?'
-    : 'SELECT party_size, NULL AS product_id, location_id, timezone FROM reservations WHERE id=? AND organization_id=?', [subject.operational_id, organizationId])
+  const record = await queryFirst<{ party_size: number; product_id: string | null; location_id: string | null; timezone: string; assigned_member_id: string | null }>(db, subject.booking_kind === 'booking'
+    ? 'SELECT b.party_size, b.product_id, s.location_id, s.timezone, b.assigned_member_id FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id WHERE b.id=? AND b.organization_id=?'
+    : 'SELECT party_size, NULL AS product_id, location_id, timezone, NULL AS assigned_member_id FROM reservations WHERE id=? AND organization_id=?', [subject.operational_id, organizationId])
   if (!record) throw new HTTPError({ statusCode: 409, message: 'The booking behind this event is gone' })
   const when = new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(startsAt))
   if (subject.booking_kind === 'booking') {
     const sessions = await listSessions(db, { organizationId, productId: record.product_id!, fromInstant: new Date(Date.parse(startsAt) - 60_000).toISOString(), toInstant: new Date(Date.parse(startsAt) + 60_000).toISOString() })
-    const exact = sessions.filter(session => Date.parse(session.starts_at) === Date.parse(startsAt))
+    // The booking keeps its team member and, where it can, its location; a session held by someone else is not its session.
+    const exact = sessions.filter(session => Date.parse(session.starts_at) === Date.parse(startsAt) && (!record.assigned_member_id || session.assigned_member_id === record.assigned_member_id))
     const target = exact.find(session => session.location_id === record.location_id) ?? exact[0]
-    if (!target) throw new HTTPError({ statusCode: 409, message: `Nothing can be booked at ${when}; the website offers the times that can` })
+    if (!target) throw new HTTPError({ statusCode: 409, message: `Nothing can be booked at ${when}${record.assigned_member_id ? ' with the same team member' : ''}; the website offers the times that can` })
     if (Date.parse(target.ends_at) !== Date.parse(endsAt)) throw new HTTPError({ statusCode: 409, message: 'Only the start can move; the booking keeps its length' })
     return { kind: 'booking' as const, sessionId: target.id, partySize: record.party_size }
   }
@@ -209,6 +210,9 @@ async function applyCalendarEvent(env: CloudflareEnv, organizationId: string, in
   const start = item.start?.dateTime ? Date.parse(item.start.dateTime) : Number.NaN
   const end = item.end?.dateTime ? Date.parse(item.end.dateTime) : Number.NaN
   if (!deleted && start === Date.parse(subject.starts_at) && end === Date.parse(subject.ends_at)) return 'unchanged'
+  // The event is behind a booking that already changed: what the feed shows is the old
+  // event, not a move. The outbound pass owns it until it has written the booking back.
+  if (!deleted && (subject.revision !== link.booking_revision || link.booking_revision !== link.synced_revision)) return 'unchanged'
   // The booking decides what the event says; writing it back is the outbound pass's job, asked for here.
   const restore = () => execute(db, "UPDATE google_calendar_event_links SET state='pending', synced_revision=NULL, next_attempt_at=NULL, updated_at=? WHERE id=? AND state<>'deleted'", [new Date().toISOString(), link.id])
   const change = `${item.id}:${item.updated ?? new Date().toISOString()}`

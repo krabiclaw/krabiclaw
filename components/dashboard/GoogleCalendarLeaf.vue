@@ -55,11 +55,14 @@ watch(error, value => { if(value) failure.value = getErrorMessage(value, 'Could 
 // Who checks their calendar for conflicts: each member turns it on for themselves under My account.
 type MemberRow = { id: string; name: string; self: boolean; scheduling: { calendar_ids: string[]; calendar_status: string } | null }
 const isMembers = (value: unknown): value is { members: MemberRow[] } => isRecord(value) && Array.isArray(value.members) && value.members.every(member => isRecord(member) && typeof member.name === 'string')
-const { data: members } = await useAsyncData(`google-calendar-members:${organizationId}`, () => applicationFetch(`/api/organizations/${organizationId}/members/scheduling`, { validate: isMembers }))
+const { data: members, error: membersError } = await useAsyncData(`google-calendar-members:${organizationId}`, () => applicationFetch(`/api/organizations/${organizationId}/members/scheduling`, { validate: isMembers }))
 const checking = computed(() => (members.value?.members ?? []).filter(member => member.scheduling?.calendar_ids.length))
+// A count only when the read answered; a failed read says so rather than counting nobody.
 const conflictRows = computed<EditorNavigationItem[]>(() => [{
-  id: 'members', label: `${checking.value.length} of ${members.value?.members.length ?? 0} team members checking their calendar`, icon: 'i-lucide-users',
-  summary: 'Times someone is busy in Google Calendar can’t be booked with them. Only busy times are read, never what an event is. Each member turns this on under My account → Google Calendar sync.',
+  id: 'members', icon: 'i-lucide-users',
+  label: members.value ? `${checking.value.length} of ${members.value.members.length} team members checking their calendar` : 'Team members checking their calendar',
+  ...(membersError.value ? { status: 'error' as const, summary: getErrorMessage(membersError.value, 'The team could not be read.') } : {}),
+  ...(membersError.value ? {} : { summary: 'Times someone is busy in Google Calendar can’t be booked with them. Only busy times are read, never what an event is. Each member turns this on under My account → Google Calendar sync.' }),
 }])
 const bookingRows = computed<EditorNavigationItem[]>(() => [{
   id: 'calendar', label: calendar.value?.calendar_name ?? 'KrabiClaw', icon: 'i-lucide-calendar-check',

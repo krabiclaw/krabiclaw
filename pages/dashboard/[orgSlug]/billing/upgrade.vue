@@ -68,8 +68,10 @@ const choices = computed<Choice[]>(() => ([GROWTH_PLAN_ID, BUSINESS_PLAN_ID] as 
   // The plan's own tagline, from its Stripe product.
   description: plans.value.find(plan => plan.id === id)?.tagline,
 })))
-// The plan the catalog recommends starts chosen, so Continue is live.
-const chosen = ref<NewSalePlanId>(choices.value.find(choice => plans.value.find(plan => plan.id === choice.value)?.highlighted)?.value ?? GROWTH_PLAN_ID)
+// The plan an offer named starts chosen; otherwise the one the catalog recommends, so Continue is live.
+const route = useRoute()
+const offered = choices.value.find(choice => choice.value === route.query.plan)?.value
+const chosen = ref<NewSalePlanId>(offered ?? choices.value.find(choice => plans.value.find(plan => plan.id === choice.value)?.highlighted)?.value ?? GROWTH_PLAN_ID)
 
 const busy = ref(false)
 const error = ref('')

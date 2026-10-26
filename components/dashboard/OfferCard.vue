@@ -60,7 +60,8 @@ const open = ref(false)
 const base = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}`)
 const planName = (plan: string) => plan.charAt(0).toUpperCase() + plan.slice(1)
 const summary = computed(() => props.summary ?? ('plan' in props.offer.unlock ? `${props.offer.name} comes with ${planName(props.offer.unlock.plan)}.` : props.offer.line))
-const actionTo = computed(() => 'plan' in props.offer.unlock ? `${base.value}/billing/upgrade` : `${base.value}/${props.offer.path}`)
+// The offered plan travels to the upgrade leaf, so a Starter organization following a Business offer is not handed Growth.
+const actionTo = computed(() => 'plan' in props.offer.unlock ? `${base.value}/billing/upgrade?plan=${props.offer.unlock.plan}` : `${base.value}/${props.offer.path}`)
 const actionLabel = computed(() => 'plan' in props.offer.unlock ? `Upgrade to ${planName(props.offer.unlock.plan)}` : `See ${props.offer.name.toLowerCase()}`)
 const priceLine = computed(() => {
   const unlock = props.offer.unlock

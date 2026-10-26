@@ -628,21 +628,17 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     const cron = async () => { for (let run = 0; run < 6; run++) await runAirbnbSyncJobs(env, Date.now() + 60_000) }
     const job = () => db.prepare('SELECT action, state, product_id, last_error_code, attempts FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first<Record<string, unknown>>()
 
-    // Basic with two live homes: syncing a third is refused before anything is queued, with the quote.
+    // Airbnb sync is Business: on Basic the request is refused before anything is queued, and nothing reaches Channex.
     const writesBefore = channex.seen.filter(request => request.method !== 'GET').length
     const refused = await call('POST', { sync: [{ listing_id: LISTING }] })
-    assert.equal(refused.status, 402)
-    const data = (refused.body as { data: Record<string, unknown> }).data
-    assert.deepEqual({ ...data, quote: (data.quote as { adding: unknown }).adding }, {
-      error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 },
-      quote: { count: 1, additional_homes: 1, amount_minor: 900, allowed: false },
-    })
+    assert.equal(refused.status, 403)
+    assert.deepEqual(refused.body, { error: 'Airbnb sync comes with the Business plan', code: 'ENTITLEMENT_REQUIRED', entitlement: 'channel_sync' })
     assert.equal(await job(), null)
     assert.equal(channex.seen.filter(request => request.method !== 'GET').length, writesBefore)
 
-    // On Growth it stays queued until the cron runs. The organization has no contact email or phone and the
+    // On Business it stays queued until the cron runs. The organization has no contact email or phone and the
     // request names none: the listing fails with the field, and nothing is made.
-    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-org', 'growth', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-org', 'business', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
     const queued = await call('POST', { sync: [{ listing_id: LISTING }] })
     assert.equal(queued.status, 202)
     assert.deepEqual((queued.body.listings as Array<Record<string, unknown>>).map(listing => [listing.listing_id, listing.action, listing.status]), [[LISTING, 'sync', 'queued']])
@@ -743,9 +739,10 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     assert.deepEqual(await db.prepare('SELECT import_stage, enabled FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { import_stage: 'draft', enabled: 0 })
     assert.deepEqual([channex.channel.ratePlans, await countActiveHomes(db, ORG)], [[], 2])
 
-    // On Basic, making it live once more would be the third: refused at the request.
-    assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 402)
-    // A request naming nothing, an unknown listing or a home not from Airbnb is refused.
+    // On Basic, syncing it again is a Business feature: refused at the request.
+    assert.equal((await call('POST', { sync: [{ listing_id: LISTING }] })).status, 403)
+    // Back on Business, a request naming nothing, an unknown listing or a home not from Airbnb is refused.
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-org-again', 'business', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
     assert.equal((await call('POST', {})).status, 422)
     assert.equal((await call('POST', { sync: [{ listing_id: 'listing-404' }] })).status, 404)
     assert.equal((await call('POST', { stop: ['not-a-home'] })).status, 404)
@@ -874,7 +871,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     const prepared = await connection.prepare(LISTING, form)
     await advanceTo(connection, db, channex, prepared.product_id, 'draft')
     await db.prepare('UPDATE organization SET stripeCustomerId = ? WHERE id = ?').bind('cus_paid_host', ORG).run()
-    await db.prepare("INSERT INTO subscription (id, plan, referenceId, stripeCustomerId, stripeSubscriptionId, status, seats, periodEnd) VALUES ('sub-paid', 'growth', ?, 'cus_paid_host', 'sub-paid', 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, stripeCustomerId, stripeSubscriptionId, status, seats, periodEnd) VALUES ('sub-paid', 'business', ?, 'cus_paid_host', 'sub-paid', 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
     let stalled = true
     let refused = false
     let requests = 0

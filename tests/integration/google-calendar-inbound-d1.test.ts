@@ -135,7 +135,7 @@ test('an event moved in Google moves its booking; a refused move or a deletion i
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.get(eventId)?.status, 'confirmed')
     assert.deepEqual(events.get(eventId)?.start, { dateTime: at('15:00'), timeZone: 'America/New_York' })
-    assert.deepEqual((await db.prepare("SELECT status, detail FROM channel_sync_log WHERE status='needs_review' ORDER BY rowid").all()).results.map(row => String(row.detail).split(';')[0]), [`Nothing can be booked at ${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at('16:00')))}`, 'deleted in Google Calendar'])
+    assert.deepEqual((await db.prepare("SELECT status, detail FROM channel_sync_log WHERE status='needs_review' ORDER BY rowid").all()).results.map(row => String(row.detail).split(';')[0]), [`Nothing can be booked at ${new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at('16:00')))} with the same team member`, 'deleted in Google Calendar'])
     // The owners were told once each, by the one notification path.
     assert.deepEqual((await db.prepare("SELECT event_name FROM activity_entries WHERE kind='notification' AND organization_id='org' ORDER BY rowid").all()).results.map(row => row.event_name), ['calendar_sync.move_refused', 'calendar_sync.event_deleted'])
 

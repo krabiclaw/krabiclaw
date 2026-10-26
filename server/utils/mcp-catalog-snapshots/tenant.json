@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:1a3716d2c6e43c7de2009f9fdfc46f6c5dfd9086d70f20a58bda2f4c4d6c34f2",
-  "documentationFingerprint": "sha256:7ce410da19a935786cf83fb417f6714b5e6107dac24ac613cae0df4f6b8d7906",
+  "fingerprint": "sha256:d8440e39eb7df1aa37d9b8d5e38ac4c78e30c34bf700744cfc385095f3922bc5",
+  "documentationFingerprint": "sha256:c2d44574fa93ce3c991e6ecfc34b3b7382761d69d37bb9531ee6fbad9faae5dc",
   "tools": [
     {
       "name": "add_organization_language",
@@ -96931,7 +96931,7 @@
     {
       "name": "set_member_busy_calendars",
       "title": "Set member busy calendars",
-      "description": "Google Calendar sync, included with the Business plan. After working hours are authored, select busy-input calendars using the member’s already-linked Google account and known calendar IDs. Only that member may select their linked account; an administrator can disconnect it. This tool does not connect Google or discover calendars. Returns the saved selection and check status. Stale or disconnected selected calendars block availability; no selected calendars uses internal scheduling.",
+      "description": "Google Calendar sync. Selecting calendars needs the Business plan; disconnecting never does. After working hours are authored, select busy-input calendars using the member’s already-linked Google account and known calendar IDs. Only that member may select their linked account; an administrator can disconnect it. This tool does not connect Google or discover calendars. Returns the saved selection and check status. Stale or disconnected selected calendars block availability; no selected calendars uses internal scheduling.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -97064,7 +97064,7 @@
       ],
       "domain": "providers",
       "minimumRole": "member",
-      "requiredEntitlement": "calendar_sync",
+      "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
     },
