@@ -120,7 +120,7 @@ export const locationObject = {
     review_count: { type: ['number', 'null'] },
     description: { type: ['string', 'null'] },
     short_description: { type: ['string', 'null'] },
-    status: { type: 'string', enum: ['active', 'inactive'], description: 'active is on the website and counts toward the plan\'s locations; inactive is off the website and not counted. A new location is active.' },
+    status: { type: 'string', enum: ['active', 'inactive'], description: 'Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.' },
     timezone: timezoneSchema,
     max_capacity: { type: ['number', 'null'], description: 'Stored location capacity metadata; does not limit reservations. Reservation capacity uses location_reservation_configs.slot_capacity.' },
     seo_title: { type: ['string', 'null'] },
