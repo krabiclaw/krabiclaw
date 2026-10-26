@@ -172,8 +172,9 @@ const props = defineProps<{
   disabled?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   submit: []
+  uploading: [value: boolean]
 }>()
 
 const fontItems = [...ORGANIZATION_FONT_OPTIONS]
@@ -193,6 +194,7 @@ const section = computed(() => props.section)
 const showBrand = computed(() => section.value === 'brand' || section.value === 'look')
 const showHero = computed(() => section.value === 'hero' || section.value === 'look')
 const activeUploadInProgress = computed(() => showBrand.value && logoUploading.value ? true : showHero.value && heroUploading.value)
+watch(activeUploadInProgress, value => emit('uploading', value), { flush: 'sync' })
 
 async function uploadDraftImage(event: Event, target: 'logo' | 'hero') {
   const input = event.target as HTMLInputElement

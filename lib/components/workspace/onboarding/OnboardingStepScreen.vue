@@ -61,7 +61,7 @@
 
     <OnboardingProductsCard v-else-if="step.id === 'products'" />
 
-    <DraftBrandCard v-else-if="step.id === 'look'" v-model:form="state.brand" v-model:revision="state.draftRevision" section="look" :draft-id="state.draftId" />
+    <DraftBrandCard v-else-if="step.id === 'look'" v-model:form="state.brand" v-model:revision="state.draftRevision" section="look" :draft-id="state.draftId" @uploading="emit('uploading', $event)" />
 
     <OnboardingReviewCard v-else-if="step.id === 'review'" />
   </div>
@@ -91,7 +91,7 @@ import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
  * the server calls and where "next" goes.
  */
 const props = defineProps<{ step: OnboardingStep }>()
-const emit = defineEmits<{ advance: [] }>()
+const emit = defineEmits<{ advance: []; uploading: [value: boolean] }>()
 
 const state = useOnboardingState()
 
