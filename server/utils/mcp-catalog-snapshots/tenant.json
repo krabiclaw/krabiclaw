@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:c526920abc16e86d30dc3f7ee3cf33df7e9d36a7487b8bf87f53f624855a933f",
-  "documentationFingerprint": "sha256:fad015b391ae8b010a78133ebcfb02232c8974339a524342aa84d049927fa8de",
+  "fingerprint": "sha256:1bb517006632360749b589f4be087a3b054c1c116eb5a4ce63bf7d165664054a",
+  "documentationFingerprint": "sha256:be0eb5c56ff10b0de1190c392ba33b4105a8031e777a5cce85ea2f1825d9402d",
   "tools": [
     {
       "name": "add_organization_language",
@@ -11772,6 +11772,12 @@
                     "null"
                   ]
                 },
+                "productId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "requestId": {
                   "type": [
                     "string",
@@ -11799,6 +11805,19 @@
                 "status": {
                   "type": "string"
                 },
+                "stayChannel": {
+                  "enum": [
+                    "airbnb",
+                    "vrbo",
+                    "booking_com",
+                    "direct",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "stayId": {
                   "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
                   "type": [
@@ -11810,6 +11829,8 @@
                   "enum": [
                     "arrival",
                     "departure",
+                    "turnover",
+                    "current",
                     null
                   ],
                   "type": [
@@ -11840,6 +11861,8 @@
                 "operationalBookingId",
                 "operationalReservationId",
                 "stayId",
+                "productId",
+                "stayChannel",
                 "stayMoment",
                 "startsAt",
                 "endsAt",
@@ -45236,6 +45259,12 @@
                     "null"
                   ]
                 },
+                "productId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "requestId": {
                   "type": [
                     "string",
@@ -45263,6 +45292,19 @@
                 "status": {
                   "type": "string"
                 },
+                "stayChannel": {
+                  "enum": [
+                    "airbnb",
+                    "vrbo",
+                    "booking_com",
+                    "direct",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "stayId": {
                   "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
                   "type": [
@@ -45274,6 +45316,8 @@
                   "enum": [
                     "arrival",
                     "departure",
+                    "turnover",
+                    "current",
                     null
                   ],
                   "type": [
@@ -45304,6 +45348,8 @@
                 "operationalBookingId",
                 "operationalReservationId",
                 "stayId",
+                "productId",
+                "stayChannel",
                 "stayMoment",
                 "startsAt",
                 "endsAt",
@@ -69443,6 +69489,12 @@
                     "null"
                   ]
                 },
+                "productId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "requestId": {
                   "type": [
                     "string",
@@ -69470,6 +69522,19 @@
                 "status": {
                   "type": "string"
                 },
+                "stayChannel": {
+                  "enum": [
+                    "airbnb",
+                    "vrbo",
+                    "booking_com",
+                    "direct",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "stayId": {
                   "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
                   "type": [
@@ -69481,6 +69546,8 @@
                   "enum": [
                     "arrival",
                     "departure",
+                    "turnover",
+                    "current",
                     null
                   ],
                   "type": [
@@ -69511,6 +69578,8 @@
                 "operationalBookingId",
                 "operationalReservationId",
                 "stayId",
+                "productId",
+                "stayChannel",
                 "stayMoment",
                 "startsAt",
                 "endsAt",

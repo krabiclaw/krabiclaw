@@ -122,6 +122,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const listed = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay' })
     assert.deepEqual(listed.map(row => row.id).sort(), [ana.request_id, boWithEmail.request_id, cyThread, dee.request_id].sort())
     const anaRow = listed.find(row => row.id === ana.request_id)!
+    assert.equal(anaRow.productId, cabin.id)
+    assert.equal(anaRow.stayChannel, 'direct')
     const nights = (from: string, to: string) => [from, to].map(date => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${date}T00:00:00Z`)))
     const [anaIn, anaOut] = nights(day(3), day(6))
     assert.deepEqual([anaRow.submissionType, anaRow.whenLabel, anaRow.operationalStatusLabel, anaRow.mailbox], ['stay', `${anaIn} – ${anaOut} · 2 guests`, 'Confirmed', 'current'])

@@ -3,7 +3,11 @@
     <template #right>
       <div class="flex w-[calc(100vw-2rem)] flex-wrap items-center gap-2 sm:w-auto">
         <CalendarOfferingFilter :items="offeringItems" :disabled="busy || Boolean(level.child.value)" />
+        <UButton v-if="manage" label="Add stay" icon="i-lucide-plus" :to="addStayTo" :disabled="busy || Boolean(level.child.value)" />
         <UButton v-if="data && level.mode.value === 'index'" label="Select nights" color="neutral" variant="outline" class="hidden sm:inline-flex" :disabled="busy" @click="openDates" />
+        <UDropdownMenu :items="viewItems" :content="{ align: 'end' }">
+          <UButton :icon="views[view].icon" color="neutral" variant="soft" square :aria-label="`View: ${views[view].label}`" :disabled="busy" />
+        </UDropdownMenu>
       </div>
     </template>
     <UAlert v-if="offeringsError" class="m-6" color="error" variant="soft" title="Offerings could not be loaded" :description="offeringsError" />
@@ -20,11 +24,11 @@
         <UAlert v-if="error" class="mb-4" color="error" variant="soft" :description="getErrorMessage(error, 'Calendar request failed')" />
         <UAlert v-if="writeError && !selectedNights.length" class="mb-4" color="error" variant="soft" :description="writeError" />
         <UCalendar
-          v-model="selection"
+          v-if="view === 'month'"
+          v-model="selectedDates"
           :placeholder="placeholder"
-          range
+          multiple
           :min-value="currentDay ?? undefined"
-          :maximum-days="500"
           :year-controls="false"
           :view-control="false"
           :week-starts-on="0"
@@ -47,13 +51,53 @@
                 <span class="block text-sm sm:text-base" :class="night(day)?.available === false ? 'line-through' : ''">{{ day.day }}</span>
                 <span v-if="channelState(day)" class="size-2 shrink-0 rounded-full" :class="channelState(day) === 'pending' ? 'bg-warning' : 'bg-error'" :data-testid="`stay-night-channel-${channelState(day)}`" aria-hidden="true" />
               </span>
-              <span v-if="night(day)?.stay_id || night(day)?.held_until" class="hidden truncate text-xs sm:block">{{ night(day)?.stay_id ? 'Reserved' : 'Checkout hold' }}</span>
+              <span v-if="night(day)?.stay_id || night(day)?.held_until || night(day)?.calendar" class="hidden truncate text-xs sm:block">{{ stayLabel(day) }}</span>
               <span class="block break-all text-[10px] leading-tight tabular-nums sm:hidden">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : compactMoney(night(day)!.price_minor!) : '…' }}</span>
               <span class="hidden truncate text-sm sm:block">{{ night(day) ? night(day)!.price_minor === null ? 'No price' : money(night(day)!.price_minor!) : '…' }}</span>
             </span>
           </template>
         </UCalendar>
-        <p v-if="selection.start && !selection.end" class="mt-4 text-sm text-muted">Choose an end date to select more nights, or edit this night.</p>
+        <template v-else>
+          <header class="mb-6 flex items-center justify-between gap-3">
+            <h2 class="text-3xl font-semibold text-highlighted">{{ placeholder?.year }}</h2>
+            <div class="flex gap-1">
+              <UButton icon="i-lucide-chevron-left" aria-label="Previous year" color="neutral" variant="ghost" square :disabled="busy" @click="stepYear(-1)" />
+              <UButton icon="i-lucide-chevron-right" aria-label="Next year" color="neutral" variant="ghost" square :disabled="busy" @click="stepYear(1)" />
+            </div>
+          </header>
+          <div v-if="view === 'year'" class="grid gap-8 sm:grid-cols-2 xl:grid-cols-3">
+            <UCalendar
+              v-for="month in yearMonths"
+              :key="month.toString()"
+              :placeholder="month"
+              :month-controls="false"
+              :year-controls="false"
+              :view-control="false"
+              :week-starts-on="0"
+              color="neutral"
+              :disabled="busy || status === 'pending'"
+              :ui="{ grid: 'w-full', cellTrigger: 'relative w-full' }"
+              @update:model-value="openYearDate"
+            >
+              <template #heading><UButton :label="formatCalendarDate(month.toString(), 'en', { month: 'long' })" color="neutral" variant="link" @click="openYearDate(month)" /></template>
+              <template #day="{ day }">
+                <span :class="night(day)?.available === false ? 'font-semibold underline decoration-2 underline-offset-4' : ''" :title="nightTitle(day)">{{ day.day }}</span>
+                <span v-if="channelState(day)" class="absolute right-0 top-0 size-1.5 rounded-full" :class="channelState(day) === 'pending' ? 'bg-warning' : 'bg-error'" />
+              </template>
+            </UCalendar>
+          </div>
+          <div v-else-if="data" class="divide-y divide-default border-y border-default">
+            <p v-if="!listedStays.length" class="py-10 text-center text-sm text-muted">No stays in {{ placeholder?.year }}.</p>
+            <NuxtLink v-for="stay in listedStays" :key="stay.id" :to="{ path: `/dashboard/${route.params.orgSlug}/calendar/stay/${encodeURIComponent(stay.id)}`, query: route.query }" class="flex items-center justify-between gap-4 py-5">
+              <div>
+                <p class="font-medium text-highlighted">{{ [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided' }}</p>
+                <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en', { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(stay.check_out_date, 'en', { month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
+              </div>
+              <span class="text-sm text-muted">{{ channels[stay.channel] }}</span>
+            </NuxtLink>
+          </div>
+        </template>
+        <p v-if="view === 'month' && selectedCount" class="mt-4 text-sm text-muted">{{ selectedCount }} {{ selectedCount === 1 ? 'night selected' : 'nights selected' }}. Select more dates individually, or use Select nights for a date range.</p>
       </div>
       <aside v-if="pane && level.mode.value === 'index'" class="min-w-0 overflow-y-auto border-l border-default p-6 xl:p-8">
         <StayNightInspector v-if="selectedNights.length && data" v-bind="inspectorProps" @dates="openDates" @clear="clearSelection" @edit="edit" @cancel="cancelConcern" @field="setField" @patch="write" @save="save" />
@@ -96,8 +140,8 @@
 
 <script setup lang="ts">
 import { parseDate, today, type DateValue } from '@internationalized/date'
-import type { DateRange } from 'reka-ui'
-import type { StayHome, StayNight } from '~/server/domain/stays'
+import type { Stay, StayHome, StayNight } from '~/server/domain/stays'
+import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 import StayNightInspector, { type NightConcern, type NightDraft, type NightEditField } from './StayNightInspector.vue'
 import EditorNavigationList from './EditorNavigationList.vue'
 import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
@@ -109,12 +153,16 @@ import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidInstant, 
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'cancellation_policy' | 'long_term_cancellation_policy'>
-interface CalendarPayload { home: Home; nights: StayNight[]; channel_push?: SuccessfulChannelPush | null }
+type CalendarStay = Pick<Stay, 'id' | 'product_id' | 'check_in_date' | 'check_out_date' | 'guest_name' | 'guest_surname' | 'channel' | 'status'>
+interface CalendarPayload { home: Home; nights: StayNight[]; stays: CalendarStay[]; channel_push?: SuccessfulChannelPush | null }
 const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'timezone'>[]; manage: boolean; homeError: string; offeringItems: { label: string; value: string }[]; offeringsError?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
 const router = useRouter()
-const api = useDashboardApi()
+const orgSlug = String(route.params.orgSlug)
+const api = useDashboardApi(computed(() => ({ orgSlug })))
+const mutation = new AbortController()
+onScopeDispose(() => mutation.abort())
 const pane = useDashboardPane()
 const homeOption = computed(() => props.homes.find(home => home.product_id === props.productId))
 const initialError = computed(() => props.homeError || (!homeOption.value ? 'That place to stay is not available in this organization.' : ''))
@@ -122,35 +170,62 @@ const currentDay = computed(() => homeOption.value ? today(homeOption.value.time
 const requestedMonth = typeof route.query.month === 'string' ? `${route.query.month}-01` : null
 if (route.query.month !== undefined && (!requestedMonth || !isValidCalendarDate(requestedMonth))) throw createError({ statusCode: 400, statusMessage: 'Choose a valid calendar month.' })
 const placeholder = shallowRef<DateValue | undefined>(requestedMonth ? parseDate(requestedMonth) : currentDay.value ?? undefined)
-const selection = shallowRef<DateRange>({ start: undefined, end: undefined })
-const selectedRange = computed(() => selection.value.start ? { from: selection.value.start.toString(), to: addLocalDays((selection.value.end ?? selection.value.start).toString(), 1) } : null)
-const selectedCount = computed(() => selectedRange.value ? parseDate(selectedRange.value.to).compare(parseDate(selectedRange.value.from)) : 0)
+const views = { month: { label: 'Month', icon: 'i-lucide-layout-grid' }, year: { label: 'Year', icon: 'i-lucide-grid-3x3' }, list: { label: 'List', icon: 'i-lucide-list' } } as const
+type CalendarView = keyof typeof views
+const view = computed<CalendarView>(() => {
+  if (route.query.view === undefined) return 'month'
+  if (typeof route.query.view !== 'string' || !Object.hasOwn(views, route.query.view)) throw createError({ statusCode: 400, statusMessage: 'Choose Month, Year or List.' })
+  return route.query.view as CalendarView
+})
+const channels = STAY_CHANNEL_LABELS
+const viewItems = computed(() => [Object.entries(views).map(([key, value]) => ({ ...value, type: 'checkbox' as const, checked: view.value === key, onSelect: () => changeView(key as CalendarView) }))])
+const selectedDates = shallowRef<DateValue[]>([])
+const selectedRanges = computed(() => {
+  const ranges: { from: string; to: string }[] = []
+  for (const date of [...new Set(selectedDates.value.map(day => day.toString()))].sort()) {
+    const last = ranges.at(-1)
+    if (last?.to === date) last.to = addLocalDays(date, 1)
+    else ranges.push({ from: date, to: addLocalDays(date, 1) })
+  }
+  return ranges
+})
+const selectedCount = computed(() => selectedDates.value.length)
+const selectedRange = computed(() => selectedRanges.value.length === 1 ? selectedRanges.value[0]! : null)
+const addStayTo = computed(() => ({ path: `/dashboard/${route.params.orgSlug}/bookings/stay/new`, query: { product_id: props.productId, ...(selectedRange.value ? { check_in_date: selectedRange.value.from, check_out_date: selectedRange.value.to } : {}) } }))
+const yearMonths = computed(() => placeholder.value ? Array.from({ length: 12 }, (_, month) => placeholder.value!.set({ month: month + 1, day: 1 })) : [])
 const monthRange = computed(() => {
   const first = placeholder.value?.set({ day: 1 })
-  return first ? { from: first.subtract({ days: 7 }).toString(), to: first.add({ months: 1, days: 7 }).toString() } : null
+  return first ? view.value === 'month' ? { from: first.subtract({ days: 7 }).toString(), to: first.add({ months: 1, days: 7 }).toString() }
+    : { from: first.set({ month: 1 }).toString(), to: first.set({ month: 1 }).add({ years: 1 }).toString() } : null
 })
 const readRanges = computed(() => {
   if (!monthRange.value) return []
-  const ranges = [monthRange.value, ...(selectedRange.value ? [selectedRange.value] : [])].sort((a, b) => a.from.localeCompare(b.from))
-  const [first, second] = ranges
-  return second && second.from <= first!.to
-    ? [{ from: first!.from, to: second.to > first!.to ? second.to : first!.to }]
-    : ranges
+  const merged: { from: string; to: string }[] = []
+  for (const range of [monthRange.value, ...selectedRanges.value].sort((a, b) => a.from.localeCompare(b.from))) {
+    const last = merged.at(-1)
+    if (last && range.from <= last.to) last.to = range.to > last.to ? range.to : last.to
+    else merged.push({ ...range })
+  }
+  return merged
 })
 const safeAmount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 const nullableAmount = (value: unknown) => value === null || safeAmount(value)
 const nullableRule = (value: unknown, maximum = Number.MAX_SAFE_INTEGER) => value === null || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 && value <= maximum)
 const nullableText = (value: unknown) => value === null || typeof value === 'string'
 function isCalendar(value: unknown): value is CalendarPayload {
-  if (!isRecord(value) || !isRecord(value.home) || !Array.isArray(value.nights)) return false
+  if (!isRecord(value) || !isRecord(value.home) || !Array.isArray(value.nights) || !Array.isArray(value.stays)) return false
   const home = value.home
   if (home.product_id !== props.productId || typeof home.name !== 'string' || typeof home.timezone !== 'string' || !isCurrencyCode(home.currency)
     || !nullableAmount(home.base_price_minor) || !nullableRule(home.min_nights, 365) || home.min_nights === null
     || !(home.cancellation_policy === null || typeof home.cancellation_policy === 'string' && Object.hasOwn(STAY_CANCELLATION_POLICIES, home.cancellation_policy))
     || !(home.long_term_cancellation_policy === null || typeof home.long_term_cancellation_policy === 'string' && Object.hasOwn(STAY_LONG_TERM_CANCELLATION_POLICIES, home.long_term_cancellation_policy))) return false
   if (!isValidTimezone(home.timezone)) return false
+  if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
+    && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
+    && nullableText(stay.guest_name) && nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(item => isRecord(item) && isValidCalendarDate(item.date)
     && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.stay_id) && nullableAmount(item.price_minor)
+    && (item.calendar === null || item.calendar === 'vrbo')
     && nullableRule(item.min_stay_arrival) && nullableRule(item.min_stay_through) && nullableRule(item.max_stay)
     && typeof item.closed_to_arrival === 'boolean' && typeof item.closed_to_departure === 'boolean'
     && [null, 'host', 'import'].includes(item.source as string | null) && (item.held_until === null || isValidInstant(item.held_until))
@@ -158,7 +233,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
 }
 const { data, error, status, refresh } = await useAsyncData(
   () => `stay-night-calendar:${String(route.params.orgSlug)}:${props.productId}:${readRanges.value.map(range => `${range.from}:${range.to}`).join('|')}`,
-  async () => {
+  async (_nuxtApp, { signal }) => {
     const ranges = readRanges.value
     if (initialError.value || !ranges.length) return null
     const chunks: CalendarPayload[] = []
@@ -166,19 +241,29 @@ const { data, error, status, refresh } = await useAsyncData(
       for (let from = range.from; from < range.to;) {
         const limit = addLocalDays(from, 500)
         const to = limit < range.to ? limit : range.to
-        const payload = await api(`/api/dashboard/stay-homes/${encodeURIComponent(props.productId)}/calendar`, { query: { from, to }, validate: isCalendar })
+        const payload = await api(`/api/dashboard/stay-homes/${encodeURIComponent(props.productId)}/calendar`, { query: { from, to }, validate: isCalendar, signal })
         if (payload.nights.length !== parseDate(to).compare(parseDate(from)) || payload.nights.some((night, index) => night.date !== addLocalDays(from, index))) throw new Error('The calendar did not return every requested night in order.')
         chunks.push(payload)
         from = to
       }
     }
-    return { home: chunks[0]!.home, nights: chunks.flatMap(chunk => chunk.nights) }
+    return { home: chunks[0]!.home, nights: chunks.flatMap(chunk => chunk.nights), stays: [...new Map(chunks.flatMap(chunk => chunk.stays).map(stay => [stay.id, stay])).values()] }
   },
 )
 const nightsByDate = computed(() => new Map((data.value?.nights ?? []).map(night => [night.date, night])))
+const staysById = computed(() => new Map((data.value?.stays ?? []).map(stay => [stay.id, stay])))
 const night = (day: DateValue) => nightsByDate.value.get(day.toString())
-const selectedNights = computed(() => selectedRange.value ? (data.value?.nights ?? []).filter(night => night.date >= selectedRange.value!.from && night.date < selectedRange.value!.to) : [])
-const selected = (day: DateValue) => Boolean(selectedRange.value && day.toString() >= selectedRange.value.from && day.toString() < selectedRange.value.to)
+function stayLabel(day: DateValue) {
+  const value = night(day)
+  if (value?.stay_id) {
+    const stay = staysById.value.get(value.stay_id)
+    return stay ? `${[stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest name not provided'} · ${channels[stay.channel]}` : 'Reserved'
+  }
+  return value?.calendar ? `Unavailable from ${channels[value.calendar]}` : 'Checkout hold'
+}
+const selectedNights = computed(() => selectedDates.value.flatMap(day => nightsByDate.value.get(day.toString()) ?? []))
+const selected = (day: DateValue) => selectedDates.value.some(date => date.toString() === day.toString())
+const listedStays = computed(() => (data.value?.stays ?? []).filter(stay => stay.status !== 'cancelled' && monthRange.value && stay.check_in_date < monthRange.value.to && stay.check_out_date > monthRange.value.from).sort((a, b) => a.check_in_date.localeCompare(b.check_in_date) || a.id.localeCompare(b.id)))
 const money = (value: number) => data.value ? formatMinorAmount(value, data.value.home.currency) : ''
 const compactMoney = (value: number) => data.value ? minorAmountToMajor(value, data.value.home.currency).replace(/\.0+$/, '') : ''
 /** A night the channel has not confirmed: still queued for it, or refused and needing review. */
@@ -191,11 +276,11 @@ const channelNote = (value: StayNight) => value.channel?.state === 'needs_review
 function nightTitle(day: DateValue) {
   const value = night(day)
   const note = value ? channelNote(value) : null
-  return value ? `${day.toString()} · ${value.stay_id ? 'Reserved' : value.held_until ? 'Checkout hold' : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
+  return value ? `${day.toString()} · ${value.stay_id ? stayLabel(day) : value.held_until ? 'Checkout hold' : value.calendar ? `Unavailable from ${channels[value.calendar]}` : value.closed ? 'Blocked' : 'Available'} · ${value.price_minor === null ? 'No price' : money(value.price_minor)}${note ? ` · ${note}` : ''}` : day.toString()
 }
 const dateLabel = computed(() => {
   const range = selectedRange.value
-  if (!range) return ''
+  if (!range) return selectedCount.value ? `${selectedCount.value} separate nights` : ''
   const end = addLocalDays(range.to, -1)
   const options: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' }
   if (range.from.slice(0, 4) !== String(placeholder.value?.year) || end.slice(0, 4) !== range.from.slice(0, 4)) options.year = 'numeric'
@@ -234,7 +319,7 @@ function setField(field: NightEditField, value: string) {
 function cancelConcern() { edit('summary') }
 function clearSelection() {
   if (busy.value) return
-  selection.value = { start: undefined, end: undefined }
+  selectedDates.value = []
   drawerOpen.value = false
   edit('summary')
 }
@@ -257,16 +342,16 @@ async function chooseDates() {
   if (!currentDay.value || start.compare(currentDay.value) < 0) { dateError.value = 'Choose today or a future night in the home’s timezone.'; return }
   if (end.compare(start) < 0 || end.compare(start) >= 500) { dateError.value = 'Choose an end night on or after the start, with at most 500 nights.'; return }
   if (!await changeMonth(start)) { dateError.value = writeError.value; return }
-  selection.value = { start, end }
+  selectedDates.value = Array.from({ length: end.compare(start) + 1 }, (_, index) => start.add({ days: index }))
   datesOpen.value = false
   if (!pane.value) drawerOpen.value = true
 }
 async function changeMonth(value: DateValue) {
   if (busy.value) { writeError.value = 'Wait for the current calendar changes to finish before choosing another month.'; return false }
-  placeholder.value = value
   const month = value.toString().slice(0, 7)
   try {
     await router.replace({ query: { ...route.query, month } })
+    placeholder.value = value
     return true
   } catch (cause) {
     writeError.value = getErrorMessage(cause, 'The month could not be opened')
@@ -274,19 +359,41 @@ async function changeMonth(value: DateValue) {
   }
 }
 function goToToday() { if (currentDay.value) void changeMonth(currentDay.value) }
+async function changeView(value: CalendarView) {
+  if (busy.value) return
+  try {
+    await router.replace({ query: { ...route.query, view: value } })
+  } catch (cause) { writeError.value = getErrorMessage(cause, 'The calendar view could not be opened') }
+}
+async function openYearDate(value: unknown) {
+  if (value == null) return
+  if (!isRecord(value) || typeof value.toString !== 'function' || !isValidCalendarDate(value.toString())) { writeError.value = 'Choose a valid calendar date.'; return }
+  if (!await changeMonth(parseDate(value.toString()))) return
+  await changeView('month')
+}
+function stepYear(direction: number) { if (placeholder.value) void changeMonth(placeholder.value.add({ years: direction })) }
 async function write(patch: Record<string, boolean | number | null>) {
-  if (busy.value || !props.manage || !selectedRange.value) return
+  if (busy.value || !props.manage || !selectedCount.value) return
   if (selectedCount.value > 500 || selectedNights.value.length !== selectedCount.value) { writeError.value = 'Choose at most 500 loaded nights.'; return }
   busy.value = true
   writeError.value = ''
+  let saved = 0
   try {
-    const response = await api(`/api/dashboard/stay-homes/${encodeURIComponent(props.productId)}/nights`, { method: 'PUT', body: { ...selectedRange.value, ...patch }, validate: isCalendar })
-    if (!Object.hasOwn(response, 'channel_push')) throw new Error('The saved nights did not report their channel outcome.')
+    for (const range of selectedRanges.value) {
+      const response = await api(`/api/dashboard/stay-homes/${encodeURIComponent(props.productId)}/nights`, { method: 'PUT', body: { ...range, ...patch }, validate: isCalendar, signal: mutation.signal })
+      if (mutation.signal.aborted) return
+      if (!Object.hasOwn(response, 'channel_push')) throw new Error('The saved nights did not report their channel outcome.')
+      saved += parseDate(range.to).compare(parseDate(range.from))
+    }
     await refresh()
     if (error.value) throw error.value
+    const expected = patch.reset ? { source: null, closed: false, price_minor: data.value!.home.base_price_minor, min_stay_arrival: null, min_stay_through: null, max_stay: null, closed_to_arrival: false, closed_to_departure: false }
+      : { ...patch, ...('price_minor' in patch && patch.price_minor === null ? { price_minor: data.value!.home.base_price_minor } : {}) }
+    if (selectedNights.value.length !== selectedCount.value || selectedNights.value.some(night => Object.entries(expected).some(([field, value]) => night[field as keyof StayNight] !== value))) throw new Error('The saved calendar does not match the selected night settings. Review the calendar before making another change.')
     edit('summary')
   } catch (cause) {
-    writeError.value = getErrorMessage(cause, 'The nights could not be saved')
+    if (mutation.signal.aborted) return
+    writeError.value = `${saved ? `${saved} of ${selectedCount.value} nights saved. ` : ''}${getErrorMessage(cause, 'The nights could not be saved')}`
     try {
       await refresh()
       if (error.value) throw error.value
@@ -313,9 +420,13 @@ async function save() {
     await write(patch)
   } catch (cause) { writeError.value = getErrorMessage(cause, 'Check the night settings') }
 }
-watch(selection, (value) => {
+watch(selectedDates, () => {
   edit('summary')
-  if (value.end && !pane.value) drawerOpen.value = true
+})
+watch(() => route.query.month, value => {
+  if (value === undefined) { placeholder.value = currentDay.value ?? undefined; return }
+  if (typeof value !== 'string' || !isValidCalendarDate(`${value}-01`)) throw createError({ statusCode: 400, statusMessage: 'Choose a valid calendar month.' })
+  placeholder.value = parseDate(`${value}-01`)
 })
 const realtime = useDashboardInvalidations()
 watch(realtime.event, event => {

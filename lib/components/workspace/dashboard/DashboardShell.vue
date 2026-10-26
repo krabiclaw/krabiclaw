@@ -180,19 +180,14 @@ const impersonationError = ref<string | null>(null)
 const stoppingImpersonation = ref(false)
 const { searchTerm: dashboardSearchTerm, loading: dashboardSearchLoading, error: dashboardSearchError, groups: dashboardSearchGroups } = useDashboardSearch()
 // The Menu's Search row and a list's search icon open the same palette ⌘K does.
-// Registered for this layout's lifetime only: a hook left behind by an earlier
-// mount toggled the palette a second time and cancelled the first.
 const dashboardSearchOpen = ref(false)
 // Below the top nav the palette is the screen, like every other sheet here; with it, a card.
 const navigationWidth = useDashboardBreakpoint('md')
 const nuxtApp = useNuxtApp()
-let unhookSearchToggle: (() => void) | null = null
 onMounted(() => {
   // Billing resumes signed in: honor the analytics choice made while signed out.
   void reconcileAnalyticsConsent().catch(error => nuxtApp.callHook('vue:error', error, null, 'analytics-consent-reconciliation'))
-  unhookSearchToggle = nuxtApp.hooks.hook('dashboard:search:toggle', () => { dashboardSearchOpen.value = !dashboardSearchOpen.value })
 })
-onBeforeUnmount(() => { unhookSearchToggle?.(); unhookSearchToggle = null })
 // The dashboard-context middleware has loaded the route's organization context
 // before the route arrives here, so a scope change keeps the previous screen
 // until the new one can render, and this layout never waits on it.

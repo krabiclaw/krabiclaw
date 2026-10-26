@@ -11,6 +11,7 @@
   >
     <template #right>
       <div class="flex items-center gap-1">
+        <UButton v-if="!personalScope && !sessionProduct && canCreateStay" label="Add stay" icon="i-lucide-plus" :to="`/dashboard/${route.params.orgSlug}/bookings/stay/new`" :disabled="Boolean(level.child.value)" />
         <UButton v-if="sessionProduct && !providerHours && canCreate" label="Add availability" icon="i-lucide-plus" :to="addAvailabilityTo" :disabled="Boolean(level.child.value)" />
         <UButton v-else-if="providerHours && sessionProduct?.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
         <UButton
@@ -291,6 +292,7 @@ const props = defineProps<{
   sessionLocations?: DashboardLocation[]
   offeringItems?: { label: string; value: string }[]
   offeringsError?: string
+  canCreateStay?: boolean
 }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.

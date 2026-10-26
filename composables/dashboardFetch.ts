@@ -52,6 +52,7 @@ async function executeApiFetch<T>(
       }
       return value as T
     } catch (error) {
+      fetchOptions.signal?.throwIfAborted()
       const failure = normalizeApiError(error, 'Dashboard API request failed')
       console.error('[Dashboard API]', { request, method, statusCode: failure.statusCode, code: failure.code, requestId: failure.requestId ?? requestId, message: failure.message })
       throw failure

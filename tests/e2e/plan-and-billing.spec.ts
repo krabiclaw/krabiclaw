@@ -286,6 +286,7 @@ test.describe('Plan and billing', () => {
           await admin.getByTestId('dashboard-top-nav-menu-button').click()
           const menu = admin.getByRole('dialog', { name: 'Menu', exact: true })
           await expect(menu.getByRole('link', { name: 'Website', exact: true })).toBeVisible()
+          await expect(menu.getByTestId('dashboard-menu-error')).toHaveCount(0)
           await expect(menu.getByRole('link', { name: 'Plan and billing', exact: true })).toHaveCount(0)
         } finally {
           await setRole(actor!.role)
