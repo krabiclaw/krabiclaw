@@ -194,6 +194,15 @@ read again after inference, including when the decision proposes nothing. A
 changed context returns 409 for a new preview. Execution still rechecks canonical
 authorization and source revision through the existing operation.
 
+The provider and application use the same discriminated decision schema:
+recommendations contain actions and no questions, `no_suggestion` contains
+neither, and `needs_context` contains questions and no actions. This prevents a
+no-suggestion result from adding an unnecessary readiness question after work
+is complete. Candidate action meaning comes only from canonical operations and
+their existing MCP descriptions; a second review-oriented label must not turn
+publication into a review task. Approval and readiness are prerequisites, while
+actual publication requires the recorded published state.
+
 A missing AI binding is 503. Inference errors fail visibly; invalid or
 ungrounded model output is 502. No rules fallback manufactures a recommendation
 after an inference failure. Oversized reasoning context produces `needs_context`

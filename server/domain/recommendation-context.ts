@@ -21,7 +21,6 @@ export interface RecommendationCandidate {
   id: string
   operation: BusinessProgressOperation
   reference: BusinessProgressReference
-  label: string
   facts: Record<string, unknown>
   eligibility: { available: boolean; reasons: string[] }
 }
@@ -34,8 +33,8 @@ function text(value: unknown, limit: number): string | null {
   return value.slice(0, limit)
 }
 
-function candidate(operation: BusinessProgressOperation, reference: BusinessProgressReference, label: string, facts: Record<string, unknown>, reasons: string[]): RecommendationCandidate {
-  return { id: `${operation}:${reference.subjectId}`, operation, reference, label, facts, eligibility: { available: reasons.length === 0, reasons } }
+function candidate(operation: BusinessProgressOperation, reference: BusinessProgressReference, facts: Record<string, unknown>, reasons: string[]): RecommendationCandidate {
+  return { id: `${operation}:${reference.subjectId}`, operation, reference, facts, eligibility: { available: reasons.length === 0, reasons } }
 }
 
 /** Read authorized facts and explicit technical eligibility; goals never become keyword rules here. */
@@ -68,8 +67,8 @@ export async function loadRecommendationCandidates(db: DbClient, principal: Memb
     if (initialReference.evidenceRevision !== updateReference.evidenceRevision) throw new HTTPError({ statusCode: 409, message: 'An article changed while recommendation context was being read' })
     const publication = blogPublicationReadiness({ status, categoryId })
     return [
-      candidate('article.update', updateReference, 'Review and update this article', facts, canUpdateArticle ? [] : ['permission_denied']),
-      candidate('article.publish', publishReference, 'Review this article for publication', facts, [...publication.reasons, ...(canPublishArticle ? [] : ['permission_denied'])]),
+      candidate('article.update', updateReference, facts, canUpdateArticle ? [] : ['permission_denied']),
+      candidate('article.publish', publishReference, facts, [...publication.reasons, ...(canPublishArticle ? [] : ['permission_denied'])]),
     ]
   }))
   const threadCandidates = await Promise.all(threads.slice(0, THREAD_SCAN_LIMIT).map(async (summary) => {
@@ -125,7 +124,7 @@ export async function loadRecommendationCandidates(db: DbClient, principal: Memb
     const entry = (value: ContextEntry | null | undefined) => value == null ? null : { id: value.id, kind: value.kind, text: text(value.body, 400), occurredAt: value.occurred_at }
     const reference = await readBusinessProgressReference(db, principal, { operation: 'guest_thread.reply', subjectId: thread.id })
     if (initialReference.evidenceRevision !== reference.evidenceRevision) throw new HTTPError({ statusCode: 409, message: 'A conversation changed while recommendation context was being read' })
-    return candidate('guest_thread.reply', reference, 'Consider whether this conversation needs a reply', {
+    return candidate('guest_thread.reply', reference, {
       kind: 'guest_thread', conversationState: thread.conversation_state, mailbox: mailbox.mailbox,
       latestGuest: entry(latestGuest), latestMember: entry(latestMember),
       openingMessage: thread.kind === 'contact' ? text(thread.payload.message, 400) : null,
