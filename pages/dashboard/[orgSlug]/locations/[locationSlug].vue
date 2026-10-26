@@ -4,7 +4,7 @@
     page shows it, each stating what it holds now. Every card is a level below
     this one; the gear opens the settings that a guest never sees.
   -->
-  <DashboardIndexPanel id="location-index" :title="isNew ? newLocation.title.value : location?.title || 'Location'" :auto-open="atLimit ? null : cards[0]?.to ?? null" :create="atLimit ? null : newLocation.firstStep.value">
+  <DashboardIndexPanel id="location-index" :title="isNew ? newLocation.title.value : location?.title || 'Location'" :auto-open="cards[0]?.to ?? null" :create="newLocation.firstStep.value">
     <template v-if="!isNew" #right>
       <UButton
         :to="`${level.path.value}/settings`"
@@ -18,22 +18,11 @@
 
     <!--
       The location before it exists: the sections creating it will not go
-      without, walked in order. Basic includes its locations and no more; a paid
-      plan bills each one past those at the end of the period.
+      without, walked in order.
     -->
     <template v-if="isNew">
-      <div v-if="atLimit" data-location-limit class="space-y-4">
-        <h2 class="text-xl font-bold leading-snug text-highlighted">Choose a plan for more locations</h2>
-        <p class="text-base text-muted">
-          Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Business include {{ INCLUDED_LOCATIONS }},
-          then {{ additionalLocationPrice() }}.
-        </p>
-        <UButton label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/billing/upgrade`" />
-      </div>
-      <template v-else>
-        <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />
-        <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
-      </template>
+      <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />
+      <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
     </template>
 
     <UAlert
@@ -60,7 +49,6 @@ import { catalogLabel, catalogSummary, type CatalogCounts } from '~/utils/produc
 import { formatPostalAddress } from '~/utils/postal-address'
 import type { LocationReservationConfig } from '~/server/utils/reservations'
 import { NEW_LOCATION_SECTIONS, useNewLocation } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
 import { timezoneLabel } from '~/utils/timezone'
 
 // A location is a tile on Locations, a row on Menu; Locations is its pane and its Back.
@@ -104,7 +92,6 @@ const level = useRouteLevel()
 const locationPath = level.path
 
 const organizationId = await useDashboardOrganizationId()
-const route = useRoute()
 const newLocation = useNewLocation(organizationId, null)
 const isNew = newLocation.isNew
 
@@ -115,19 +102,6 @@ watchEffect(() => {
     showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
   }
 })
-
-// The plan and its locations in use, read when a location is about to be added.
-type LocationBilling = { plan: string; usage: { locations: number } }
-const isLocationBilling = (value: unknown): value is { success: true; billing: LocationBilling } =>
-  isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.plan === 'string'
-  && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.locations)
-const { data: billingResponse, error: billingError } = await useAsyncData(
-  computed(() => `location-new-billing:${organizationId}:${isNew.value}`),
-  async () => isNew.value ? await dashboardApi('/api/billing/status', { validate: isLocationBilling }) : null,
-)
-if (billingError.value) throw billingError.value
-const atLimit = computed(() => isNew.value && !!billingResponse.value && !isKnownRecurringPlan(billingResponse.value.billing.plan)
-  && billingResponse.value.billing.usage.locations >= INCLUDED_LOCATIONS)
 
 const locationId = computed(() => dashboardLocation.currentLocationId.value)
 

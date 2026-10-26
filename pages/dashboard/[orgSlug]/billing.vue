@@ -43,7 +43,7 @@
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
 import { classifyStripePlanChange } from '~/shared/stripe-ga4'
-import { BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, additionalLocationPrice, isNewSalePlan } from '~/shared/billing-model'
+import { BUSINESS_PLAN_ID, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, isNewSalePlan } from '~/shared/billing-model'
 import { cardBrandLabel, useHomesQuote, useOrganizationBilling, useOrganizationServices, usePaymentMethods } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
@@ -133,12 +133,6 @@ const pending = computed(() => !!billing.value && (!!billing.value.cancelAtPerio
 // Beside a pane the index opens a way up; Business, with nothing above it, opens its first service.
 const firstLeaf = computed(() => !dashboard.canUpdateBilling.value ? null : change.value && !change.value.outline ? change.value.to : to('managed-ads'))
 
-// Stripe's phrasing: the locations in use, the included allowance, then the charge per additional one.
-const locationsRow = computed<EditorNavigationItem | null>(() => {
-  const used = billing.value?.usage.locations
-  if (used === undefined) return null
-  return { id: 'locations', label: dashboard.organization.value?.vertical === 'service' ? 'Offices' : 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
-})
 // Homes from the quote the capacity check answers by: live (billed), drafts
 // (free), included, and what the live ones past those cost each month. A
 // subscription from before homes were priced carries no homes price and is
@@ -179,7 +173,6 @@ const portalRow = computed<EditorNavigationItem | null>(() => billing.value?.str
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'billing',
   items: [
-    ...(locationsRow.value ? [locationsRow.value] : []),
     ...(homesRow.value ? [homesRow.value] : []),
     ...serviceRows.value,
     ...(portalRow.value ? [portalRow.value] : []),

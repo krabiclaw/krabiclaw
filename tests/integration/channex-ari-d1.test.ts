@@ -616,7 +616,7 @@ test('paid home product receipts repair failed billing reports before channel wo
     refused = false
     assert.deepEqual((await updateProduct(db, update)).channel_push, { state: 'pushed', detail: null })
     assert.deepEqual(await getProduct(db, ORG, connected), saved)
-    assert.deepEqual(meters.splice(0), ['krabiclaw_locations=0', 'krabiclaw_locations=0', 'krabiclaw_locations=0', 'krabiclaw_homes=1'])
+    assert.deepEqual(meters.splice(0), ['krabiclaw_homes=1', 'krabiclaw_homes=1', 'krabiclaw_homes=1'])
     assert.equal(channex.settings.length, 1)
 
     refused = true
@@ -631,14 +631,14 @@ test('paid home product receipts repair failed billing reports before channel wo
     refused = false
     assert.deepEqual((await reconcileProducts(db, reconcile))[0]!.channel_push, { state: 'pushed', detail: null })
     assert.deepEqual(await getProduct(db, ORG, connected), savedCatalog)
-    assert.deepEqual(meters.splice(0), ['krabiclaw_locations=0', 'krabiclaw_locations=0', 'krabiclaw_homes=2'])
+    assert.deepEqual(meters.splice(0), ['krabiclaw_homes=2', 'krabiclaw_homes=2'])
     assert.equal(channex.settings.length, 2)
 
     const home = { kind: 'stay' as const, stay, variants: [{ name: 'Night', prices: [{ unit_amount: 150_00, currency: 'USD' }] }] }
     refused = true
     const create = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'billing-create', publication: { published: true }, product: { ...home, name: 'Creek Cabin' } }
     await assert.rejects(createProduct(db, create), billingFailure)
-    assert.deepEqual(meters, ['krabiclaw_locations=0'], 'a failed completion is reported once; only the caller retries its committed receipt')
+    assert.deepEqual(meters, ['krabiclaw_homes=3'], 'a failed completion is reported once; only the caller retries its committed receipt')
     const createdId = await db.prepare("SELECT json_extract(payload_json, '$.entityId') AS id FROM activity_entries WHERE dedupe_key=?").bind(`create:product:${ORG}:billing-create`).first<string>('id')
     const created = await getProduct(db, ORG, createdId!)
     assert.equal(created.name, 'Creek Cabin')
@@ -648,7 +648,7 @@ test('paid home product receipts repair failed billing reports before channel wo
     assert.equal((await createProduct(db, create)).id, createdId)
     assert.deepEqual(await getProduct(db, ORG, createdId!), created)
     assert.equal(await db.prepare('SELECT count(*) AS n FROM products').first('n'), 4)
-    assert.deepEqual(meters.splice(0), ['krabiclaw_locations=0', 'krabiclaw_locations=0', 'krabiclaw_homes=3'])
+    assert.deepEqual(meters.splice(0), ['krabiclaw_homes=3', 'krabiclaw_homes=3'])
 
     refused = true
     const createBatch = { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'billing-create-batch', publication: { published: true }, products: [{ ...home, name: 'Forest Cabin' }, { ...home, name: 'River Cabin' }] }
@@ -662,7 +662,7 @@ test('paid home product receipts repair failed billing reports before channel wo
     assert.deepEqual((await createProductsBatch(db, createBatch)).map(product => product.id), createdIds)
     assert.deepEqual(await Promise.all(createdIds.map(id => getProduct(db, ORG, id))), createdCatalog)
     assert.equal(await db.prepare('SELECT count(*) AS n FROM products').first('n'), 6)
-    assert.deepEqual(meters.splice(0), ['krabiclaw_locations=0', 'krabiclaw_locations=0', 'krabiclaw_homes=5'])
+    assert.deepEqual(meters.splice(0), ['krabiclaw_homes=5', 'krabiclaw_homes=5'])
     assert.equal(channex.settings.length, 2)
     assert.deepEqual(channex.take(), [])
   } finally {

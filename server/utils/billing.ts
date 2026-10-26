@@ -6,7 +6,7 @@ import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
-import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
+import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, isKnownRecurringPlan, type BillingMeterKey } from '~/shared/billing-model'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
@@ -32,7 +32,7 @@ export interface OrganizationBillingStatus {
   billingInterval?: 'month'
   /** The plan item's own charge, and the metered prices the subscription carries: an earlier contract may lack one added since. */
   subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month'; meters: BillingMeterKey[]; trial: SubscriptionTrial | null }
-  /** What the plan bills by count: its active locations and live homes. */
+  /** What the plan bills by count: its live homes. */
   usage: BillingCapacity
   entitlements: EntitlementsMap
 }
@@ -65,10 +65,9 @@ export async function getOrganizationBillingStatus(
   // is entitled to. Those are different rules — a past_due row is the current
   // subscription but grants nothing — so both are applied to the same rows
   // rather than read twice.
-  const [organization, subscriptionsByOrganization, locations, homes] = await Promise.all([
+  const [organization, subscriptionsByOrganization, homes] = await Promise.all([
     adapter.findOrganizationById(organizationId),
     readOrganizationSubscriptions(env, [organizationId]),
-    countActiveLocations(db, organizationId),
     countActiveHomes(db, organizationId),
   ])
   if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
@@ -92,7 +91,7 @@ export async function getOrganizationBillingStatus(
     cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd,
     stripeScheduleId: subscription?.stripeScheduleId ?? undefined,
     billingInterval: billingInterval(subscription?.billingInterval),
-    usage: { plan, locations, homes },
+    usage: { plan, homes },
     entitlements: getPlanEntitlements(plan),
   }
 }
@@ -136,12 +135,6 @@ function billingInterval(value: string | undefined): 'month' | undefined {
   throw new Error(`Subscription billing interval ${value} is not a plan interval`)
 }
 
-// Only an active location is on the site, so only an active one is billed. A
-// location a home (a stay product) is at is the home's, not a location: the
-// home is billed in its place while it is live.
-export const HOME_LOCATIONS_SQL = "SELECT c.location_id FROM product_stay_configs c JOIN products p ON p.id = c.product_id WHERE p.organization_id = ? AND p.kind = 'stay'"
-const ACTIVE_LOCATIONS_SQL = `SELECT COUNT(*) FROM business_locations l WHERE l.organization_id = ? AND l.status = 'active' AND l.id NOT IN (${HOME_LOCATIONS_SQL})`
-
 /**
  * Whether the stay product `alias` is a live home, the one definition billing,
  * the plan's limit and every home's `live` read: an active home at its active
@@ -159,13 +152,6 @@ export function liveHomeSql(alias: string): string {
 const ACTIVE_HOMES_SQL = `SELECT COUNT(*) FROM products p WHERE p.organization_id = ? AND ${liveHomeSql('p')}`
 const DRAFT_HOMES_SQL = `SELECT COUNT(*) FROM products p WHERE p.organization_id = ? AND p.kind = 'stay' AND NOT ${liveHomeSql('p')}`
 
-/** The locations a plan bills: every active location that is not a home's. */
-export async function countActiveLocations(db: DbClient, organizationId: string): Promise<number> {
-  const row = await queryFirst<{ locations: number }>(db, `SELECT (${ACTIVE_LOCATIONS_SQL}) AS locations`, [organizationId, organizationId])
-  if (!row) throw new Error('Billing usage could not be read')
-  return row.locations
-}
-
 /** The homes a plan bills: every live home. */
 export async function countActiveHomes(db: DbClient, organizationId: string): Promise<number> {
   const row = await queryFirst<{ homes: number }>(db, `SELECT (${ACTIVE_HOMES_SQL}) AS homes`, [organizationId])
@@ -174,25 +160,24 @@ export async function countActiveHomes(db: DbClient, organizationId: string): Pr
 }
 
 /**
- * What a plan bills by count: its active locations and its live homes. A
- * paid plan bills those past the included ones at the end of the period;
- * Basic includes its locations and homes and no more.
+ * What a plan bills by count: its live homes. A paid plan bills those past
+ * the included ones at the end of the period; Basic includes its homes and no
+ * more. Locations are not counted: every plan has as many as it needs.
  */
 export interface BillingCapacity {
   plan: string
-  locations: number
   homes: number
 }
 
 /**
- * Report the organization's active locations and live homes to their Stripe
- * meters. Each meter keeps the last count reported in the billing period, and
- * the subscription's metered price bills it on the invoice at the end of the
- * period, so there is no charge in the middle of one. Called after every write
- * that can change a count and at each subscription change, which starts each
- * period with its counts. An organization on Basic has no subscription and
- * nothing to report. A subscription from before homes were metered carries no
- * homes price: Stripe keeps the count and bills nothing for it.
+ * Report the organization's live homes to their Stripe meter. The meter keeps
+ * the last count reported in the billing period, and the subscription's
+ * metered price bills it on the invoice at the end of the period, so there is
+ * no charge in the middle of one. Called after every write that can change
+ * the count and at each subscription change, which starts each period with
+ * its count. An organization on Basic has no subscription and nothing to
+ * report. A subscription from before homes were metered carries no homes
+ * price: Stripe keeps the count and bills nothing for it.
  * A caller completing an already committed write supplies that context so a
  * failed report tells it the write is saved and still needs completion.
  */
@@ -208,13 +193,11 @@ export async function reportBillingUsage(env: CloudflareEnv, db: DbClient, organ
     if (!subscription) return
     if (subscription.stripeCustomerId !== organization.customer) throw new Error(`Subscription ${subscription.id} does not belong to its organization's Stripe customer`)
     const stripe = getStripe(env)
-    const [locations, homes] = await Promise.all([countActiveLocations(db, organizationId), countActiveHomes(db, organizationId)])
-    for (const [meter, value] of [[BILLING_METERS.locations, locations], [BILLING_METERS.homes, homes]] as const) {
-      await stripe.billing.meterEvents.create({
-        event_name: meter.eventName,
-        payload: { stripe_customer_id: subscription.stripeCustomerId, value: String(value) },
-      })
-    }
+    const homes = await countActiveHomes(db, organizationId)
+    await stripe.billing.meterEvents.create({
+      event_name: BILLING_METERS.homes.eventName,
+      payload: { stripe_customer_id: subscription.stripeCustomerId, value: String(homes) },
+    })
   } catch (cause) {
     if (!context?.committed) throw cause
     const reason = cause instanceof Error ? cause.message : String(cause)
@@ -223,7 +206,7 @@ export async function reportBillingUsage(env: CloudflareEnv, db: DbClient, organ
   }
 }
 
-/** A subscription created or changed, a new period among them: its organization's counts are reported again. */
+/** A subscription created or changed, a new period among them: its organization's count is reported again. */
 export async function reportBillingUsageForSubscriptionEvent(env: CloudflareEnv, db: DbClient, event: Stripe.Event): Promise<void> {
   if (event.account || (event.type !== 'customer.subscription.created' && event.type !== 'customer.subscription.updated')) return
   const subscription = event.data.object
@@ -233,16 +216,9 @@ export async function reportBillingUsageForSubscriptionEvent(env: CloudflareEnv,
   if (organizations[0]) await reportBillingUsage(env, db, organizations[0].id)
 }
 
-// A write batch ends with guards that abort it — a NOT NULL failure on a
-// column no other statement clears — when it leaves more active locations or
-// live homes than the bound. D1 rolls the batch back whole.
-function locationGuard(organizationId: string, bound: number): BatchQuery {
-  return {
-    query: `UPDATE business_locations SET status = NULL WHERE organization_id = ? AND status = 'active' AND (${ACTIVE_LOCATIONS_SQL}) > ?`,
-    params: [organizationId, organizationId, organizationId, bound],
-  }
-}
-
+// A write batch ends with a guard that aborts it — a NOT NULL failure on a
+// column no other statement clears — when it leaves more live homes than the
+// bound. D1 rolls the batch back whole.
 function homeGuard(organizationId: string, bound: number): BatchQuery {
   return {
     query: `UPDATE products SET active = NULL WHERE organization_id = ? AND kind = 'stay' AND active = 1 AND (${ACTIVE_HOMES_SQL}) > ?`,
@@ -250,31 +226,14 @@ function homeGuard(organizationId: string, bound: number): BatchQuery {
   }
 }
 
-type GuardFailure = 'locations' | 'homes' | null
-
-function guardFailure(error: unknown): GuardFailure {
+function guardFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
-  if (/NOT NULL constraint failed: business_locations\.status/.test(message)) return 'locations'
-  if (/NOT NULL constraint failed: products\.active/.test(message)) return 'homes'
-  return null
+  return /NOT NULL constraint failed: products\.active/.test(message)
 }
 
 export interface CapacityRefusal {
   status: 402
-  data: { error: string; code: 'LOCATION_LIMIT'; locations: { used: number; covered: number } }
-    | { error: string; code: 'HOME_LIMIT'; homes: { used: number; covered: number } }
-}
-
-/** The refusal for a location past what Basic includes. */
-export function locationLimit(used: number): CapacityRefusal {
-  return {
-    status: 402,
-    data: {
-      error: `Basic includes ${INCLUDED_LOCATIONS} locations. Choose Growth or Business in Billing to add more.`,
-      code: 'LOCATION_LIMIT',
-      locations: { used, covered: INCLUDED_LOCATIONS },
-    },
-  }
+  data: { error: string; code: 'HOME_LIMIT'; homes: { used: number; covered: number } }
 }
 
 /** The refusal for a home past what Basic includes. */
@@ -297,7 +256,7 @@ export function capacityRefusalError(refusal: CapacityRefusal): HTTPError {
 export function capacityRefusalOf(error: unknown): CapacityRefusal | null {
   if (!(error instanceof HTTPError) || error.status !== 402) return null
   const data = error.data as CapacityRefusal['data'] | undefined
-  return data?.code === 'LOCATION_LIMIT' || data?.code === 'HOME_LIMIT' ? { status: 402, data } : null
+  return data?.code === 'HOME_LIMIT' ? { status: 402, data } : null
 }
 
 /** The most homes one quote may ask about: an Airbnb account's listings, not a count to bill. */
@@ -422,28 +381,26 @@ export async function requireHomeCapacity(env: CloudflareEnv, db: DbClient, orga
 }
 
 /**
- * Run a write that may make a location active or a home live: creating one,
- * turning one back on, publishing a home or enabling its Airbnb sync. It runs first guarded at the active counts now, which
- * reads nothing from billing, so a write that adds none never depends on the
- * plan. Only a write that adds one reads the plan: a paid plan bills it, so it
- * runs again unguarded; Basic runs it again guarded at the counts it includes
- * and refuses past them with the 402 naming what is past. The first attempt
- * was rolled back whole, so the second is the only write. The counts are then
- * reported to Stripe. A location written as a home's (`home`) is not guarded
- * as a location: its home's write is.
+ * Run a write that may make a home live: creating one, turning its location
+ * back on, publishing it or enabling its Airbnb sync. It runs first guarded at
+ * the live count now, which reads nothing from billing, so a write that adds
+ * none never depends on the plan. Only a write that adds one reads the plan: a
+ * paid plan bills it, so it runs again unguarded; Basic runs it again guarded
+ * at the count it includes and refuses past it with the 402. The first attempt
+ * was rolled back whole, so the second is the only write. The count is then
+ * reported to Stripe.
  */
 export async function executeWithinCapacity(
   env: CloudflareEnv,
   db: DbClient,
   organizationId: string,
   writes: BatchQuery[],
-  options: { operation?: string; action: string; home?: boolean },
+  options: { operation?: string; action: string },
 ): Promise<D1Result[]> {
-  const [locations, homes] = await Promise.all([countActiveLocations(db, organizationId), countActiveHomes(db, organizationId)])
-  const guards = (locationBound: number, homeBound: number) => [...(options.home ? [] : [locationGuard(organizationId, locationBound)]), homeGuard(organizationId, homeBound)]
+  const homes = await countActiveHomes(db, organizationId)
   let results: D1Result[] | null = null
   try {
-    results = await executeBatch(db, [...writes, ...guards(locations, homes)], { operation: options.operation })
+    results = await executeBatch(db, [...writes, homeGuard(organizationId, homes)], { operation: options.operation })
   } catch (error) {
     if (!guardFailure(error)) throw error
   }
@@ -453,11 +410,10 @@ export async function executeWithinCapacity(
       results = await executeBatch(db, writes, { operation: options.operation })
     } else {
       try {
-        results = await executeBatch(db, [...writes, ...guards(Math.max(locations, INCLUDED_LOCATIONS), Math.max(homes, INCLUDED_HOMES))], { operation: options.operation })
+        results = await executeBatch(db, [...writes, homeGuard(organizationId, Math.max(homes, INCLUDED_HOMES))], { operation: options.operation })
       } catch (error) {
-        const failed = guardFailure(error)
-        if (!failed) throw error
-        throw capacityRefusalError(failed === 'homes' ? homeLimit(homes) : locationLimit(locations))
+        if (!guardFailure(error)) throw error
+        throw capacityRefusalError(homeLimit(homes))
       }
     }
   }

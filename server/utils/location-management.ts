@@ -224,8 +224,7 @@ export async function createLocation(
   organizationId: string,
   input: CreateLocationInput,
   userId: string,
-  /** `home`: the location a place to stay is being made at. It is the home's, so it is billed and guarded as a home, not a location. */
-  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string; home?: boolean } = {},
+  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string } = {},
 ) {
   try { parseMapUrl(input.maps_url); }
   catch (cause) { return locationValidationFailure(cause, 'maps_url'); }
@@ -402,7 +401,7 @@ export async function createLocation(
       }));
       statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_created'));
 
-      await executeWithinCapacity(env, db, organizationId, statements, { action: 'create it', ...(options.home ? { home: true } : {}) });
+      await executeWithinCapacity(env, db, organizationId, statements, { action: 'create it' });
       created = await loadLocation(db, organizationId, id, true);
       if (!created) throw new HTTPError({ statusCode: 500, statusMessage: 'Created location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
       break;

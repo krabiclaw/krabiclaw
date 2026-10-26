@@ -12,7 +12,6 @@ its own product with `product_family` set to the meter key (never a `plan_id`):
 
 | `product_family` | Meter event | Formula | Price | Plans |
 | --- | --- | --- | --- | --- |
-| `locations` | `krabiclaw_locations` | `last` | graduated: 2 included, then $49 per additional location per month | Growth, Business |
 | `homes` | `krabiclaw_homes` | `last` | graduated: 2 live homes included, then $9 per additional home per month; drafts are free | Growth, Business |
 | `captured_volume` | `krabiclaw_captured_volume` | `sum` | 0.014 cents per cent (1.4% of payment volume) | Business |
 | `stripe_cost` | `krabiclaw_stripe_cost` | `sum` | 1 cent per cent (Stripe fees at cost) | Business |
