@@ -1,4 +1,13 @@
 {
+  "email.reason.reservation": "{organization}でご予約いただいたため、このメールをお送りしています。",
+  "email.reason.reservation_cancelled": "このメールは、{organization}でのご予約のキャンセルを確認するものです。",
+  "email.reason.booking": "{organization}にリクエストを送信いただいたため、このメールをお送りしています。",
+  "email.reason.stay": "{organization}で宿泊をご予約いただいたため、このメールをお送りしています。",
+  "email.reason.booking_cancelled": "このメールは、{organization}へのリクエストのキャンセルを確認するものです。",
+  "email.reason.contact": "{organization}にメッセージを送信いただいたため、このメールをお送りしています。",
+  "email.reason.reply": "{organization}から会話への返信があったため、このメールをお送りしています。",
+  "email.reason.booking_update": "{organization}へのリクエストに更新があったため、このメールをお送りしています。",
+  "email.reason.booking_change": "{organization}からリクエスト内容の変更が提案されたため、このメールをお送りしています。",
   "site.product_detail.description": "説明",
   "booking.request_declined": "予約リクエストは承認されませんでした",
   "booking.change_review": "変更内容を確認",

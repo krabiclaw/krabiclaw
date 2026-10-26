@@ -1,4 +1,13 @@
 {
+  "email.reason.reservation": "คุณได้รับอีเมลนี้เนื่องจากคุณได้จองกับ {organization}",
+  "email.reason.reservation_cancelled": "อีเมลนี้ยืนยันการยกเลิกการจองของคุณกับ {organization}",
+  "email.reason.booking": "คุณได้รับอีเมลนี้เนื่องจากคุณได้ส่งคำขอไปยัง {organization}",
+  "email.reason.stay": "คุณได้รับอีเมลนี้เนื่องจากคุณได้จองที่พักกับ {organization}",
+  "email.reason.booking_cancelled": "อีเมลนี้ยืนยันการยกเลิกคำขอของคุณกับ {organization}",
+  "email.reason.contact": "คุณได้รับอีเมลนี้เนื่องจากคุณได้ส่งข้อความไปยัง {organization}",
+  "email.reason.reply": "คุณได้รับอีเมลนี้เนื่องจาก {organization} ได้ตอบกลับในการสนทนาของคุณ",
+  "email.reason.booking_update": "คุณได้รับอีเมลนี้เนื่องจากมีการอัปเดตคำขอของคุณกับ {organization}",
+  "email.reason.booking_change": "คุณได้รับอีเมลนี้เนื่องจาก {organization} ได้เสนอการเปลี่ยนแปลงคำขอของคุณ",
   "site.product_detail.description": "รายละเอียด",
   "booking.request_declined": "คำขอจองถูกปฏิเสธ",
   "booking.change_review": "ตรวจสอบการเปลี่ยนแปลง",

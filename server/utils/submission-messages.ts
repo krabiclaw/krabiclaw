@@ -121,6 +121,7 @@ export async function sendReplyEmail(env: ReplyEmailEnv, opts: {
     subject: opts.subject,
     html: opts.email.html,
     text: opts.email.text,
+    emailPurpose: 'transactional',
     replyTo,
     idempotencyKey: opts.idempotencyKey,
   })

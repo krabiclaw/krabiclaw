@@ -2,7 +2,6 @@ import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
-import { guestAccountUrl } from '~/shared/guest-account'
 import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~/utils/timezone'
 import { getGuestRequest, requestSummary, type cancelBookingRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
@@ -19,7 +18,7 @@ import { sendApnsAlert, type ApnsAlert, type ApnsEnv, type ApnsSendResult } from
 import { isRecord } from '~/server/utils/type-guards'
 import { buildUnsubscribeUrls } from '~/server/utils/unsubscribe'
 import type { NotificationCategory, NotificationChannel } from '~/shared/notification-categories'
-import { renderNotificationEmail } from '~/server/emails/render'
+import { renderNotificationEmail, type RenderedNotificationEmail } from '~/server/emails/render'
 import { toWhatsAppVars } from '~/server/notifications/whatsapp-mapping'
 import { NOTIFICATION_CATALOG } from '~/server/notifications/catalog'
 import { loadOwnerPictures, organizationLogo } from '~/server/notifications/hero'
@@ -182,10 +181,8 @@ interface ReviewRequestNotificationInput extends OrganizationContext {
   userId: string
 }
 
-interface EmailTemplate {
+interface EmailTemplate extends RenderedNotificationEmail {
   subject: string
-  html: string
-  text: string
 }
 
 interface ThreadDeliveryContext {
@@ -335,6 +332,7 @@ async function resolveOwnerRecipients(
   opts: {
     organizationId: string
     category: NotificationCategory
+    emailPurpose: NotificationMessage['emailPurpose']
     /** The team member a booking is assigned to hears about it alongside the owners. */
     assignedMemberId?: string | null
     memberIds?: string[]
@@ -352,7 +350,7 @@ async function resolveOwnerRecipients(
         .then(wantsPush => wantsPush ? listUserDevices(db, member.userId) : []),
     ])
     if (!wantsEmail && !wantsWhatsApp && pushDevices.length === 0) return null
-    const unsubscribe = await buildUnsubscribeUrls(env, { userId: member.userId, category: opts.category })
+    const unsubscribe = wantsEmail ? await buildUnsubscribeUrls(env, { userId: member.userId, category: opts.category }, opts.emailPurpose) : null
     return {
       userId: member.userId,
       email: wantsEmail ? member.email : null,
@@ -411,6 +409,7 @@ async function sendEmailNotification(
     subject: opts.email.subject,
     html: opts.email.html,
     text: opts.email.text,
+    emailPurpose: opts.email.emailPurpose,
     unsubscribeOneClickUrl: opts.unsubscribeOneClickUrl ?? null,
     idempotencyKey: delivery?.id,
   })
@@ -719,6 +718,7 @@ export async function notifyOwner(
   const recipients = await resolveOwnerRecipients(env, db, {
     organizationId: opts.organizationId,
     category: opts.message.category,
+    emailPurpose: opts.message.emailPurpose,
     assignedMemberId: assigned?.assigned_member_id ?? null,
     memberIds: opts.memberIds ?? [],
   })
@@ -751,7 +751,7 @@ export async function notifyOwner(
         await sendEmailNotification(env, db, {
           ...opts,
           to,
-          email: { subject: sanitizeEmailHeaderValue(message.title), html: rendered.html, text: rendered.text },
+          email: { subject: sanitizeEmailHeaderValue(message.title), ...rendered },
           unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
           delivery: threadDelivery(deliveryContext, 'owner_alert', 'email', opts.template, to, opts.deliveryEventKey),
         })
@@ -804,7 +804,7 @@ export async function notifyOwner(
     await sendEmailNotification(env, db, {
       ...opts,
       to,
-      email: { subject: sanitizeEmailHeaderValue(message.title), html: rendered.html, text: rendered.text },
+      email: { subject: sanitizeEmailHeaderValue(message.title), ...rendered },
       delivery: threadDelivery(deliveryContext, 'owner_alert', 'email', opts.template, to, opts.deliveryEventKey),
     })
   }))
@@ -876,12 +876,11 @@ export async function notifyFinancialNotification(
       const emailEntryId = input.organizationId && input.ownerMessage ? await ownerDeliveryAnchor() : id
       const rendered = await renderNotificationEmail(guest.message, {
         platformDomain: getPlatformDomain(env),
-        preferencesUrl: `https://${getPlatformDomain(env)}/dashboard/account/profile/notifications`,
       })
       await sendEmailNotification(env, db, {
         organizationId: input.organizationId, organizationName: guest.message.organizationName,
         to: guest.email, template: input.eventKey, title: guest.message.title, payload: {},
-        email: { subject: sanitizeEmailHeaderValue(guest.message.title), html: rendered.html, text: rendered.text },
+        email: { subject: sanitizeEmailHeaderValue(guest.message.title), ...rendered },
         delivery: threadDelivery({ guestThreadId: input.threadId ?? null, sourceEntryId: emailEntryId }, 'status_update', 'email', input.eventKey, guest.email, `${input.eventKey}:buyer`),
       })
     })())
@@ -945,11 +944,10 @@ export async function notifyReservationCreated(
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestReservationReceivedMessage({
     ...guest,
-    accountUrl: guestAccountUrl(env.NUXT_PUBLIC_PLATFORM_DOMAIN!, '/signup', opts.email),
     guestName: opts.guestName, organizationLogoUrl: logoUrl,
     date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale), partySize: opts.guests, notes: opts.requests,
     contactPhone: opts.contactPhone, contactEmail: opts.contactEmail,
-    receiptUrl: opts.receiptUrl, heroImageUrl: hero?.imageUrl ?? null,
+    receiptUrl: opts.receiptUrl,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -972,7 +970,7 @@ export async function notifyReservationCreated(
       template: 'reservation_customer_received',
       title: guestMessage.title,
       payload,
-      email: { subject: guestMessage.title, html: guestEmail.html, text: guestEmail.text },
+      email: { subject: guestMessage.title, ...guestEmail },
       buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'reservation_customer_received', opts.email),
     })]),
@@ -1060,7 +1058,7 @@ export async function notifyReservationCancelled(
       template: 'reservation_customer_cancelled',
       title: guestMessage.title,
       payload,
-      email: { subject: guestMessage.title, html: guestEmail.html, text: guestEmail.text },
+      email: { subject: guestMessage.title, ...guestEmail },
       buyerAlert: true,
       delivery: threadDelivery(threadContext, 'status_update', 'email', 'reservation_customer_cancelled', opts.email),
     }),
@@ -1106,7 +1104,6 @@ export async function notifyContactSubmitted(
   const subjectLabel = opts.subject ? platformLocale(guest.locale)!.messages[`site.contact_page.${opts.subject}`] ?? opts.subject : null
   const guestMessage = guestContactReceivedMessage({
     ...guest,
-    accountUrl: guestAccountUrl(env.NUXT_PUBLIC_PLATFORM_DOMAIN!, '/signup', opts.email),
     guestName: opts.guestName, organizationLogoUrl: await organizationLogo(db, opts.organizationId),
     subject: subjectLabel,
     productTitle: guest.productTitle, message: opts.message,
@@ -1132,7 +1129,7 @@ export async function notifyContactSubmitted(
       template: 'contact_customer_received',
       title: guestMessage.title,
       payload,
-      email: { subject: guestMessage.title, html: guestEmail.html, text: guestEmail.text },
+      email: { subject: guestMessage.title, ...guestEmail },
       buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'contact_customer_received', opts.email),
     }),
@@ -1190,10 +1187,7 @@ export async function notifyReviewRequest(
   const restaurant = organizationName(opts)
   const platformDomain = getPlatformDomain(env)
   const logoUrl = await organizationLogo(db, opts.organizationId)
-  const unsubscribe = await buildUnsubscribeUrls(env, { userId: opts.userId, category: 'review_requests' })
-  if (!unsubscribe) throw new Error('EMAIL_REPLY_SECRET is required to send a review request')
-
-  const email = await renderNotificationEmail(reviewRequestMessage({
+  const message = reviewRequestMessage({
     guestName: opts.guestName,
     organizationName: restaurant,
     locationName: opts.locationName ?? null,
@@ -1201,7 +1195,10 @@ export async function notifyReviewRequest(
     partySize: opts.partySize,
     reviewUrl: opts.reviewUrl,
     organizationLogoUrl: logoUrl,
-  }), { platformDomain, unsubscribeUrl: unsubscribe.pageUrl })
+  })
+  const unsubscribe = await buildUnsubscribeUrls(env, { userId: opts.userId, category: message.category }, message.emailPurpose)
+  if (!unsubscribe) throw new Error('Review requests require email unsubscribe links')
+  const email = await renderNotificationEmail(message, { platformDomain, unsubscribeUrl: unsubscribe.pageUrl })
 
   await sendEmailNotification(env, db, {
     ...opts,
@@ -1224,8 +1221,7 @@ export async function notifyReviewRequest(
     unsubscribeOneClickUrl: unsubscribe.oneClickUrl,
     email: {
       subject: `How was your visit to ${restaurant}?`,
-      html: email.html,
-      text: email.text,
+      ...email,
     },
   })
 }
@@ -1279,13 +1275,12 @@ export async function notifyBookingCreated(
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestBookingReceivedMessage({
     ...guest,
-    accountUrl: guestAccountUrl(env.NUXT_PUBLIC_PLATFORM_DOMAIN!, '/signup', opts.email),
     guestName: opts.guestName, organizationLogoUrl: logoUrl, status: opts.status,
     productTitle: guest.productTitle!,
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
     time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: String(opts.partySize),
     notes: opts.notes, contactPhone: opts.contactPhone ?? null, contactEmail: opts.contactEmail ?? null,
-    receiptUrl: opts.receiptUrl ?? null, heroImageUrl: hero?.imageUrl ?? null,
+    receiptUrl: opts.receiptUrl ?? null,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1312,7 +1307,7 @@ export async function notifyBookingCreated(
       template: 'booking_customer_received',
       title: guestTitle,
       payload,
-      email: { subject: guestTitle, html: guestEmail.html, text: guestEmail.text },
+      email: { subject: guestTitle, ...guestEmail },
       buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'booking_customer_received', opts.email),
     })]),
@@ -1365,7 +1360,6 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     checkIn: when(stay.check_in_date, home.check_in_time, guest.locale), checkOut: when(stay.check_out_date, home.check_out_time, guest.locale),
     nights: String(nights), guests: String(stay.adults + stay.children), total: formatMinorAmount(paid.amount, paid.currency, guest.locale),
     checkInInstructions: home.check_in_instructions, contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null,
-    heroImageUrl: hero?.imageUrl ?? null, accountUrl: guestAccountUrl(env.NUXT_PUBLIC_PLATFORM_DOMAIN!, '/signup', stay.guest_email),
     receiptUrl: organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/stay', guest.locale, sourceLocale.locale)}?id=${encodeURIComponent(stay.request_id)}#${(await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.request_id)).token}` : null,
   })
   const payload = {
@@ -1383,7 +1377,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     sendEmailNotification(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
       template: 'stay_customer_confirmed', title: guestTitle, payload,
-      email: { subject: guestTitle, html: guestEmail.html, text: guestEmail.text },
+      email: { subject: guestTitle, ...guestEmail },
       buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_confirmed', stay.guest_email),
     }),
@@ -1471,7 +1465,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     sendEmailNotification(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,
       template: 'stay_customer_cancelled', title: recorded.subject, payload,
-      email: { subject: recorded.subject, html: recorded.email.html, text: recorded.email.text },
+      email: { subject: recorded.subject, html: recorded.email.html, text: recorded.email.text, emailPurpose: 'transactional' },
       buyerAlert: true,
       delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_cancelled', recorded.email.to),
     }),
@@ -1559,7 +1553,7 @@ export async function notifyBookingCancelled(
       template: 'booking_customer_cancelled',
       title: guestMessage.title,
       payload,
-      email: { subject: guestMessage.title, html: guestEmail.html, text: guestEmail.text },
+      email: { subject: guestMessage.title, ...guestEmail },
       buyerAlert: true,
       delivery: threadDelivery(threadContext, 'status_update', 'email', 'booking_customer_cancelled', opts.email),
     }),
@@ -1740,6 +1734,7 @@ export async function notifyGuestThreadReply(
   const recipients = await resolveOwnerRecipients(env, db, {
     organizationId: opts.organizationId,
     category: ownerMessage.category,
+    emailPurpose: ownerMessage.emailPurpose,
   })
 
   const results = await Promise.allSettled(recipients.flatMap((recipient) => {
@@ -1893,8 +1888,7 @@ export async function notifyOrganizationInvited(
     },
     email: {
       subject: `You're invited to join ${opts.organizationName} on KrabiClaw`,
-      html: rendered.html,
-      text: rendered.text,
+      ...rendered,
     },
   })
 }
@@ -1936,8 +1930,10 @@ export async function renderNotificationCatalog(origin: string): Promise<Catalog
   return Promise.all(NOTIFICATION_CATALOG.map(async (entry) => {
     const rendered = await renderNotificationEmail(entry.message, {
       platformDomain: root,
-      preferencesUrl: `${root}/dashboard/account/profile/notifications`,
-      unsubscribeUrl: entry.message.category === 'account_security'
+      preferencesUrl: entry.audience === 'guest' && entry.message.emailPurpose === 'transactional'
+        ? null
+        : `${root}/dashboard/account/profile/notifications`,
+      unsubscribeUrl: entry.message.emailPurpose === 'transactional'
         ? null
         : `${root}/unsubscribe?user=preview&category=preview&token=preview`,
     })

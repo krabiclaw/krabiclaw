@@ -7,6 +7,30 @@ KrabiClaw has two distinct records:
 
 Do not infer an external send from a dashboard notification, or an unread item from a delivery receipt.
 
+## Email purpose
+
+Every notification message declares its email purpose and a factual reason for
+sending, which appears in both HTML and plain text. Purpose is separate from
+the category's channel preferences: an optional booking alert is still a
+transactional email. Guest confirmations and payment receipts use their actual
+booking, message or billing category and go directly to the transaction's
+contact without consulting owner notification preferences.
+
+Transactional messages omit unsubscribe links and mailing-list headers. Guest
+transactional messages also omit signup prompts and decorative cover images;
+their tenant logo, transaction details, attachments and relevant actions remain.
+Subscribed review alerts and promotional review requests and product news retain
+unsubscribe controls. Product News continues to use Resend's native Broadcast
+and Topic unsubscribe lifecycle.
+
+`yarn lint:email-previews` verifies all catalog messages through the canonical
+renderer, including the reason in both bodies and purpose-specific footer
+controls. The existing `resend-native-d1.test.ts` and
+`guest-delivery-d1.test.ts` integration tests exercise SDK request headers,
+required opt-out configuration, and persisted cancellation/replay behavior.
+These checks do not establish Gmail inbox-tab placement; that requires
+inspection of an actually delivered message.
+
 ## Local verification
 
 Local development and preview use log-only delivery modes. A log-only send must still write a terminal `guest_thread_deliveries` receipt with a `log-only:` provider message ID when the send belongs to a guest thread.

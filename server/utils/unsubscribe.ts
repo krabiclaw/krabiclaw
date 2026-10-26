@@ -1,6 +1,7 @@
 import { hmacHex, timingSafeEqual } from '~/server/utils/reply-address'
-import { getPlatformDomain } from '~/server/utils/dashboard-notification-links'
+import { platformOrigin } from '~/server/utils/dashboard-notification-links'
 import { isMandatoryEmailCategory, isNotificationCategory, type NotificationCategory } from '~/shared/notification-categories'
+import type { NotificationEmailPurpose } from '~/server/notifications/messages'
 
 const TOKEN_BYTES = 16
 
@@ -38,19 +39,21 @@ export async function verifyUnsubscribeToken(secret: string, target: Unsubscribe
  * to directly — so it must address the API, not a page, and must carry the
  * signed target in the query because that POST's body is fixed by the RFC.
  *
- * Null where there is nothing to unsubscribe from: account-security email is
- * not optional, and an environment without the signing secret cannot mint a
- * link that would verify.
+ * Transactional messages are not mailing-list subscriptions. Channel
+ * preferences remain available in the dashboard. Subscribed and promotional
+ * messages must have a signing secret, rather than silently losing opt-out.
  */
 export async function buildUnsubscribeUrls(
   env: UnsubscribeEnv,
   target: UnsubscribeTarget,
+  purpose: NotificationEmailPurpose,
 ): Promise<{ pageUrl: string; oneClickUrl: string } | null> {
-  if (!env.EMAIL_REPLY_SECRET) return null
-  if (isMandatoryEmailCategory(target.category)) return null
+  if (purpose === 'transactional') return null
+  if (isMandatoryEmailCategory(target.category)) throw new Error('Mandatory account email cannot be a mailing-list subscription')
+  if (!env.EMAIL_REPLY_SECRET) throw new Error('EMAIL_REPLY_SECRET is required for email unsubscribe links')
   const token = await buildUnsubscribeToken(env.EMAIL_REPLY_SECRET, target)
   const query = new URLSearchParams({ user: target.userId, category: target.category, token }).toString()
-  const origin = `https://${getPlatformDomain(env)}`
+  const origin = platformOrigin(env)
   return {
     pageUrl: `${origin}/unsubscribe?${query}`,
     oneClickUrl: `${origin}/api/public/notifications/unsubscribe?${query}`,

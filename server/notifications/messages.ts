@@ -37,7 +37,13 @@ export interface NotificationAction {
   label: string
 }
 
+export type NotificationEmailPurpose = 'transactional' | 'subscribed' | 'promotional'
+
 export interface NotificationMessage {
+  /** Message purpose is independent of the recipient's channel preferences. */
+  emailPurpose: NotificationEmailPurpose
+  /** The actual event or relationship that explains why this email was sent. */
+  emailReason: string
   /** The guest's selected website language; owner alerts keep their existing locale. */
   locale?: string
   /** The email subject and the H1. One sentence; the body never restates it. */
@@ -63,7 +69,7 @@ export interface NotificationMessage {
   secondaryAction?: NotificationAction
   /** Shown small, under the actions — cancellation windows, link expiry. */
   finePrint?: string
-  /** Whose preference governs delivery, and which unsubscribe link applies. */
+  /** Which notification preference governs delivery, independently of email purpose. */
   category: NotificationCategory
   /** The tenant this is sent on behalf of, for the footer. Null for platform mail. */
   organizationName?: string | null

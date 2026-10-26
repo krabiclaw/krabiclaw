@@ -1,4 +1,17 @@
 export default {
+  "email": {
+    "reason": {
+      "reservation": "You received this email because you made a reservation with {organization}.",
+      "reservation_cancelled": "This email confirms the cancellation of your reservation with {organization}.",
+      "booking": "You received this email because you submitted a request to {organization}.",
+      "stay": "You received this email because you booked a stay with {organization}.",
+      "booking_cancelled": "This email confirms the cancellation of your request with {organization}.",
+      "contact": "You received this email because you sent a message to {organization}.",
+      "reply": "You received this email because {organization} replied to your conversation.",
+      "booking_update": "You received this email because there is an update to your request with {organization}.",
+      "booking_change": "You received this email because {organization} proposed changes to your request."
+    }
+  },
   "reservations": {
     "deposit_label": "Reservation deposit",
     "confirmed": "Reservation confirmed"
