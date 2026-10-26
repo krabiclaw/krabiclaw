@@ -168,6 +168,27 @@
           />
         </TransitionGroup>
 
+        <div v-if="!personalScope" class="flex flex-wrap items-center gap-2">
+          <SavedReplyPicker :disabled="!canReply || sending" @insert="insertText" />
+          <UPopover v-model:open="checkInOpen">
+            <UButton label="Check-in instructions" icon="i-lucide-key-round" color="neutral" variant="ghost" size="sm" :disabled="sending" />
+            <template #content>
+              <div class="w-80 max-w-[calc(100vw-2rem)] space-y-3 p-4">
+                <UAlert v-if="contextError" color="error" title="Check-in instructions could not be loaded" :description="getErrorMessage(contextError, 'Conversation context request failed')" />
+                <template v-else-if="messagingContext">
+                  <template v-if="messagingContext.home">
+                    <p class="font-semibold">{{ messagingContext.home.name }}</p>
+                    <p class="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-sm">{{ messagingContext.home.check_in_instructions || 'No check-in instructions saved for this home.' }}</p>
+                    <UButton v-if="messagingContext.home.check_in_instructions" label="Insert instructions" color="neutral" :disabled="!canReply || sending" @click="insertText(messagingContext.home.check_in_instructions); checkInOpen = false" />
+                    <UButton :to="`/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/products/${encodeURIComponent(messagingContext.home.product_id)}/check-in-method/instructions`" label="View home’s check-in instructions" color="neutral" variant="link" />
+                  </template>
+                  <p v-else class="text-sm text-muted">This conversation has no home linked to it.</p>
+                </template>
+                <p v-else role="status" class="text-sm text-muted">Loading check-in instructions…</p>
+              </div>
+            </template>
+          </UPopover>
+        </div>
         <MessageComposer v-model="draft" v-model:photos="chosen" :disabled="!canReply" :sending="sending" :channel="!personalScope && thread.replyChannel === 'airbnb' ? 'airbnb' : 'email'" send-label="Send reply" @send="sendReply" />
         <MessagePhotoViewer v-model="viewer" />
 
@@ -189,6 +210,8 @@ import { useDashboardInvalidations } from '~/composables/useDashboardInvalidatio
 import { authClient } from '~/lib/auth-client'
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
+import SavedReplyPicker from './SavedReplyPicker.vue'
+import { isGuestMessagingContext } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 /*
@@ -199,6 +222,7 @@ import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashb
 const props = withDefaults(defineProps<{ threadId: string; personalScope?:boolean }>(),{personalScope:false})
 
 const dashboard = useDashboardOrganization()
+const route = useRoute()
 const dashboardApi = useDashboardApi(useDashboardRouteScope())
 const realtime = useDashboardInvalidations()
 const { locale } = useI18n()
@@ -211,6 +235,14 @@ const canReply = computed(() => props.personalScope || thread.value?.replyChanne
 const threadPath = computed(() => props.personalScope ? `/api/account/messages/${encodeURIComponent(props.threadId)}` : `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
 
 const draft = ref('')
+const checkInOpen = ref(false)
+const { data: messagingContext, error: contextError, refresh: refreshContext } = await useAsyncData(
+  () => `guest-messaging-context:${dashboard.organizationId.value}:${props.threadId}`,
+  () => props.personalScope ? Promise.resolve(null) : dashboardApi(`${threadPath.value}/context`, { validate: isGuestMessagingContext }),
+  { immediate: false },
+)
+watch(checkInOpen, open => { if (open) void refreshContext() })
+function insertText(value: string) { if (!sending.value && canReply.value) draft.value = [draft.value.trimEnd(), value].filter(Boolean).join('\n\n') }
 const actionError = ref<string | null>(null)
 const readError = ref<string | null>(null)
 

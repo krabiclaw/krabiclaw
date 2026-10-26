@@ -15,7 +15,7 @@ import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
 
 // A host's place to stay, end to end through the surfaces that own it: the
-// one Product editor creates the home, MCP adds a stay, Today and the stay's
+// one Product editor creates the home, Today adds a stay, and the stay's
 // own screen show it and record a payment and a cancellation. Every write is
 // read back through a different path than the one that made it.
 
@@ -122,10 +122,28 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   // A stay arriving today holds its nights; another on them is refused.
   const checkIn = localDay(0)
   const checkOut = localDay(2)
-  const stay = await call<{ stay: { id: string; version: number; status: string } }>('create_stay', {
-    product_id: productId, check_in_date: checkIn, check_out_date: checkOut, adults: 2, guest_name: 'Ana', guest_surname: 'Silva', guest_email: `ana-${slug}@playwright.example`, total_minor: 300_00, idempotency_key: `${slug}-a`,
-  })
+  await page.goto(`/dashboard/${slug}`)
+  await page.getByRole('link', { name: 'Add stay', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'New stay', exact: true })).toBeVisible()
+  await page.getByRole('combobox', { name: 'Home', exact: true }).click()
+  await page.getByRole('option', { name: 'Cliff Cabin', exact: true }).click()
+  await page.getByLabel('Check-in', { exact: true }).fill(checkIn)
+  await page.getByLabel('Checkout', { exact: true }).fill(checkOut)
+  await page.getByLabel('First name', { exact: true }).fill('Ana')
+  await page.getByRole('textbox', { name: 'Last name', exact: true }).fill('Silva')
+  await page.getByRole('textbox', { name: 'Email', exact: true }).fill(`ana-${slug}@playwright.example`)
+  await page.getByLabel('Adults', { exact: true }).fill('2')
+  await page.getByLabel('Stay total (THB)', { exact: true }).fill('300')
+  const [stayCreated] = await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/stays' && response.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Create stay', exact: true }).click(),
+  ])
+  await expectStatus(stayCreated, 201)
+  const createdReceipt = await stayCreated.json() as { stay: StayDetail & { channel_push: unknown } }
+  await expect(page).toHaveURL(new RegExp(`/bookings/stay/${createdReceipt.stay.id}$`))
+  const stay = await call<{ stay: StayDetail }>('get_stay', { stay_id: createdReceipt.stay.id })
   expect(stay.error).toBeNull()
+  expect(stay.data!.stay).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana', guest_surname: 'Silva', guest_email: `ana-${slug}@playwright.example`, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
   const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
   expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
 
@@ -146,7 +164,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   const paid = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
   expect(paid.error).toBeNull()
   expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
-  expect(stay.data).toEqual({ stay: { id: paid.data!.stay.id, product_id: productId, request_id: paid.data!.stay.request_id, status: 'confirmed', version: 1, updated_at: paid.data!.stay.updated_at, check_in_date: checkIn, check_out_date: checkOut }, channel_push: null })
+  expect(createdReceipt.stay).toMatchObject({ id: paid.data!.stay.id, product_id: productId, request_id: paid.data!.stay.request_id, status: 'confirmed', version: 1, check_in_date: checkIn, check_out_date: checkOut, channel_push: null })
   const messagingContext = await call<{ requestId: string; home: Record<string, unknown>; stay: Record<string, unknown> }>('get_guest_messaging_context', { request_id: paid.data!.stay.request_id })
   expect(messagingContext.error).toBeNull()
   expect(messagingContext.data).toEqual({ requestId: paid.data!.stay.request_id,
@@ -215,6 +233,11 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   if (!signingSecret) throw new Error('The local receipt signing secret is not configured')
   const signed = await createReplayableReservationCancelToken(signingSecret, activityId!)
   const guest = await browser.newContext()
+  const personalOrganizationReads: string[] = []
+  guest.on('request', request => {
+    const path = new URL(request.url()).pathname
+    if (path === '/api/auth/organization/get-active-member-role' || path === '/api/auth/organization/has-permission') personalOrganizationReads.push(path)
+  })
   try {
     await loginAs(guest.request, baseURL!, 'user-e2e-buyer')
     const claimed = await guest.request.post(`${baseURL}/api/guest-invites/${inviteToken}/claim`, { headers, data: {} })
@@ -325,6 +348,19 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     expect(cancelled.data!.stay.status).toBe('cancelled')
     expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
 
+    await page.getByLabel('Amount (THB)', { exact: true }).fill('-100')
+    await page.getByLabel('Reference', { exact: true }).fill('Offline refund after cancellation')
+    const [offlineRefund] = await Promise.all([
+      page.waitForResponse(response => response.url().includes(`/stays/${stay.data!.stay.id}/payments`) && response.request().method() === 'POST'),
+      page.getByRole('button', { name: 'Record payment', exact: true }).click(),
+    ])
+    await expectStatus(offlineRefund, 201)
+    await expect(page.getByRole('listitem').filter({ hasText: 'Offline refund after cancellation' })).toBeVisible()
+    const refunded = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+    expect(refunded.error).toBeNull()
+    expect(refunded.data!.stay).toMatchObject({ status: 'cancelled', paid_minor: 0 })
+    expect(refunded.data!.stay.payments.find(payment => payment.reference === 'Offline refund after cancellation')).toMatchObject({ amount_minor: -10000 })
+
     // Cancellation withdraws the exact location from both independent reads
     // and from the receipt and account screens that previously displayed it.
     for (const response of await Promise.all([guest.request.get(accountApi), guest.request.get(receiptApi, { headers: receiptHeaders })])) {
@@ -350,15 +386,36 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   } finally {
     await guest.close()
   }
+  expect(personalOrganizationReads, 'A Personal account without an organization must not request organization roles or permissions').toEqual([])
 
   const later = [localDay(10), localDay(13)] as const
-  const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
+  await page.goto(`/dashboard/${slug}/bookings/stay/new?${new URLSearchParams({ product_id: productId, check_in_date: later[0], check_out_date: later[1] })}`)
+  await expect(page.getByRole('heading', { name: 'New stay', exact: true })).toBeVisible()
+  await expect(page.getByRole('combobox', { name: 'Home', exact: true })).toHaveCount(0)
+  await expect(page.getByLabel('Check-in', { exact: true })).toHaveValue(later[0])
+  await expect(page.getByLabel('Checkout', { exact: true })).toHaveValue(later[1])
+  await page.getByLabel('First name', { exact: true }).fill('Kai')
+  await page.getByLabel('Adults', { exact: true }).fill('2')
+  await page.getByLabel('Stay total (THB)', { exact: true }).fill('450')
+  await page.getByRole('switch', { name: 'Record a payment already received', exact: true }).click()
+  await page.getByLabel('Amount received (THB)', { exact: true }).fill('125')
+  await page.getByLabel('Method', { exact: true }).click()
+  await page.getByRole('option', { name: 'Bank transfer', exact: true }).click()
+  await page.getByLabel('Date received', { exact: true }).fill(checkIn)
+  await page.getByRole('textbox', { name: 'Reference', exact: true }).fill('Deposit on booking')
+  const [made] = await Promise.all([
+    page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/stays' && response.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Create stay', exact: true }).click(),
+  ])
   await expectStatus(made, 201)
   const native = (await made.json() as { stay: { id: string; version: number } }).stay
+  await expect(page).toHaveURL(new RegExp(`/bookings/stay/${native.id}$`))
+  await expect(page.getByRole('listitem').filter({ hasText: /125\.00 · Bank transfer/ })).toBeVisible()
   const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { expected_version: native.version, guest_name: 'Kai Mendes' } })
   await expectStatus(edited, 200)
-  const nativeRead = await call<{ stay: { guest_name: string; check_in_date: string; total_minor: number } }>('get_stay', { stay_id: native.id })
-  expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00 })
+  const nativeRead = await call<{ stay: StayDetail }>('get_stay', { stay_id: native.id })
+  expect(nativeRead.error).toBeNull()
+  expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00, paid_minor: 125_00, payment_status: 'partial', payments: [{ amount_minor: 125_00, method: 'bank_transfer', paid_on: checkIn, reference: 'Deposit on booking' }] })
 
   const listed = await request.get(api(`stays?from=${later[0]}&to=${later[1]}`))
   await expectStatus(listed, 200)
@@ -3757,6 +3814,37 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await page.setViewportSize({ width: 1440, height: 900 })
       await expect(calendar).toBeVisible()
       await expect(calendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('Availability: Assigned Cabin')
+
+      // The home's overview and agenda read the same stays as its nightly grid.
+      await calendar.getByRole('button', { name: 'View: Month', exact: true }).click()
+      await page.getByRole('menuitemcheckbox', { name: 'Year', exact: true }).click()
+      await expect(page).toHaveURL(url => url.searchParams.get('view') === 'year')
+      await expect(calendar.getByRole('button', { name: 'January', exact: true })).toBeVisible()
+      await expect(calendar.getByRole('button', { name: 'December', exact: true })).toBeVisible()
+      await calendar.getByRole('button', { name: 'View: Year', exact: true }).click()
+      await page.getByRole('menuitemcheckbox', { name: 'List', exact: true }).click()
+      await expect(calendar.getByRole('link', { name: /Ana Silva/ })).toHaveAttribute('href', new RegExp(`/calendar/stay/${stays[0]!.id}\\?`))
+      await calendar.getByRole('button', { name: 'View: List', exact: true }).click()
+      await page.getByRole('menuitemcheckbox', { name: 'Month', exact: true }).click()
+
+      // Separate-night selection must not alter the unselected night between them.
+      const separateFrom = new Date(Date.UTC(Number(localDay(0).slice(0, 4)), Number(localDay(0).slice(5, 7)), 10)).toISOString().slice(0, 10)
+      const separateMiddle = new Date(Date.parse(`${separateFrom}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)
+      const separateLast = new Date(Date.parse(`${separateFrom}T00:00:00Z`) + 2 * 86_400_000).toISOString().slice(0, 10)
+      const separateTo = new Date(Date.parse(`${separateFrom}T00:00:00Z`) + 3 * 86_400_000).toISOString().slice(0, 10)
+      await inspector.getByRole('button', { name: 'Select nights', exact: true }).click()
+      await dates.getByLabel('Start night', { exact: true }).fill(separateFrom)
+      await dates.getByLabel('End night (optional)', { exact: true }).fill(separateLast)
+      await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
+      await calendar.locator(`[data-reka-calendar-cell-trigger][data-value="${separateMiddle}"]:not([data-outside-view])`).click()
+      await expect(inspector.getByRole('button', { name: 'Select nights', exact: true })).toHaveText('2 separate nights')
+      await inspector.getByRole('button', { name: /^Nightly price/ }).click()
+      await inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true }).fill('4600')
+      await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('4,600')
+      const separate = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: separateFrom, to: separateTo })
+      expect(separate.error).toBeNull()
+      expect(separate.data!.nights.map(night => [night.date, night.price_minor])).toEqual([[separateFrom, 460_000], [separateMiddle, 320_000], [separateLast, 460_000]])
 
       const todayResponse = await cleaner.request.get(api('today'))
       await expectStatus(todayResponse, 200)

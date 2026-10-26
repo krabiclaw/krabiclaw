@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -61,10 +62,7 @@ export async function stayAccessFor(principal: MemberAccessPrincipal): Promise<S
   return { organizationId: principal.organizationId, actorId: principal.userId, manage: false, userId: principal.userId }
 }
 
-export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
 export const STAY_STATUSES = ['pending', 'confirmed', 'cancelled'] as const
-export const STAY_PAYMENT_METHODS = ['cash', 'bank_transfer', 'card_external', 'other'] as const
-export type StayPaymentMethod = typeof STAY_PAYMENT_METHODS[number]
 
 export interface Stay {
   id: string
@@ -72,7 +70,7 @@ export interface Stay {
   location_id: string
   /** The home's location timezone: its dates and times are read in it. */
   timezone: string
-  channel: typeof STAY_CHANNELS[number]
+  channel: StayChannel
   owner: 'app' | 'channel'
   status: typeof STAY_STATUSES[number]
   overbooked: boolean
@@ -278,7 +276,6 @@ export interface StayNight {
 const MAX_LIST_DAYS = 400
 const MAX_CALENDAR_DAYS = 500
 const MAX_CALENDAR_BYTES = 2_000_000
-const MAX_STAY_NIGHTS = 365
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 
@@ -1973,7 +1970,7 @@ export interface ChannelBooking {
   provider: 'channex'
   external_booking_id: string
   channel_booking_id: string | null
-  channel: (typeof STAY_CHANNELS)[number]
+  channel: StayChannel
   revision_id: string
   provider_updated_at: string
   cancelled: boolean

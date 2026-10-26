@@ -9,6 +9,14 @@ export type BookingStatus = typeof BOOKING_STATUSES[number]
 export const RESERVATION_STATUSES = ['confirmed', 'cancelled'] as const
 export type ReservationStatus = typeof RESERVATION_STATUSES[number]
 
+export const MAX_STAY_NIGHTS = 365
+export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
+export type StayChannel = typeof STAY_CHANNELS[number]
+export const STAY_CHANNEL_LABELS: Record<StayChannel, string> = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'Direct' }
+export const STAY_PAYMENT_METHODS = ['cash', 'bank_transfer', 'card_external', 'other'] as const
+export type StayPaymentMethod = typeof STAY_PAYMENT_METHODS[number]
+export const STAY_PAYMENT_METHOD_LABELS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }
+
 export const LOCATION_RESERVATION_OVERRIDE_STATUSES = ['open', 'closed'] as const
 export type LocationReservationOverrideStatus = typeof LOCATION_RESERVATION_OVERRIDE_STATUSES[number]
 

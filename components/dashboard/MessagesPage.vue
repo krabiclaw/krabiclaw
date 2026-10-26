@@ -1,7 +1,10 @@
 <template>
   <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="pastOnly && !teamScope ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
-    <template v-if="!personalScope && canSendTeam" #right>
-      <UButton :to="{ path: `${listPath}/new`, query: { view: 'team' } }" icon="i-lucide-square-pen" color="neutral" variant="ghost" aria-label="New team conversation" />
+    <template v-if="!personalScope" #right>
+      <UDropdownMenu v-if="canReadGuests" :items="[{ label: 'Saved replies', to: `${listPath}/replies`, icon: 'i-lucide-message-square-text' }, { label: 'Scheduled messages', to: `${listPath}/scheduled`, icon: 'i-lucide-clock' }]">
+        <UButton icon="i-lucide-settings-2" color="neutral" variant="ghost" aria-label="Guest messaging tools" />
+      </UDropdownMenu>
+      <UButton v-if="canSendTeam" :to="{ path: `${listPath}/new`, query: { view: 'team' } }" icon="i-lucide-square-pen" color="neutral" variant="ghost" aria-label="New team conversation" />
     </template>
     <div v-if="!personalScope && canReadTeam && canReadGuests" class="pb-2 pt-3" :class="dashboardGutterClass">
       <DashboardFilterPills v-model="messageView" id="messages-view" label="Conversations" :items="[{ value: 'guests', label: dashboard.organization.value?.vertical === 'service' ? 'Clients' : 'Guests' }, { value: 'team', label: 'Team' }]" />

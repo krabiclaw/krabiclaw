@@ -38,42 +38,57 @@
 <script setup lang="ts">
 import { NuxtLink } from '#components'
 import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
-import { authClient } from '~/lib/auth-client'
+import { dashboardFetch } from '~/composables/dashboardFetch'
+import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import { earningsFigure, isEarningsSummary, type EarningsSummary } from '~/shared/earnings-display'
 import { formatCalendarDate } from '~/utils/timezone'
 import { isAccountActivityResponse, type AccountActivityResponse } from '~/shared/account-activity'
 
 // Rendered by both the desktop slideover and the mobile menu page, off one
 // model, so the two surfaces cannot show different menus.
-const { groups, activeItem, scopeModel, logOut, personal, organization } = useDashboardMenu()
+const { scopeModel, logOut, personal, organization } = useDashboardMenu()
 // The shell's organization, whichever route it is drawn on — Account settings included.
-const dashboardApi = useDashboardApi(computed(() => organization.value ? { orgSlug: organization.value.slug } : null))
 const orgBase = computed(() => organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : null)
 const inOrganization = computed(() => Boolean(orgBase.value))
 const monthLabel = formatCalendarDate(new Date().toISOString().slice(0, 10), 'en', { month: 'long', year: 'numeric' })
-// The Earnings figure is this month's money from the payments ledger. The
-// Menu awaits it, its photos and the account's activity like any level. A
-// member Better Auth does not let read payments has no Earnings card: the
-// check is the one the payments API enforces, asked before the figure is.
+const organizationSettings = useOrganizationSettingsNavigation(organization, scopeModel)
+const { groups, activeItem } = organizationSettings
+await organizationSettings.ready
+// Only the actual Menu loads Earnings. Search reuses its navigation and
+// permission checks without reading the payments summary.
 const { data: earnings, error: earningsError } = await useAsyncData(
-  () => `menu-earnings:${orgBase.value}`,
-  async () => {
-    if (!organization.value) return null
-    const permission = await authClient.organization.hasPermission({ organizationId: organization.value.id, permissions: { payments: ['read'] } })
-    if (permission.error) throw new Error(permission.error.message || 'Your permissions could not be checked.')
-    if (permission.data.success !== true) return null
+  () => `menu-earnings:${organizationSettings.permissions.value?.userId ?? ''}:${organization.value?.id ?? ''}`,
+  async (_app, { signal }) => {
+    const target = organization.value
+    const permissions = organizationSettings.permissions.value
+    if (!target || !permissions?.payments) return null
     const now = new Date()
     const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString()
     const to = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)).toISOString()
-    return await dashboardApi<EarningsSummary>('/api/dashboard/payments', { query: { from, to }, validate: isEarningsSummary })
+    return {
+      ...await dashboardFetch<EarningsSummary>('/api/dashboard/payments', { orgSlug: target.slug }, { query: { from, to }, signal, validate: isEarningsSummary }),
+      organizationId: target.id,
+      userId: permissions.userId,
+    }
   },
+  { watch: [organizationSettings.permissions] },
 )
+const currentEarnings = computed(() => {
+  const loaded = earnings.value
+  const permissions = organizationSettings.permissions.value
+  return permissions?.payments && loaded?.organizationId === permissions.organizationId && loaded?.userId === permissions.userId ? loaded : null
+})
 // The pictures in the cards' corners: the organization's places, or the visits the account has made.
-type LocationPhotos = { success: true; locations: Array<{ id: string; imageUrl: string | null }> }
-const isLocationPhotos = (value: unknown): value is LocationPhotos => isRecord(value) && value.success === true && Array.isArray(value.locations) && value.locations.every(row => isRecord(row) && typeof row.id === 'string' && (row.imageUrl === null || typeof row.imageUrl === 'string'))
+type LocationPhotos = { success: true; locations: DashboardLocation[] }
+const isLocationPhotos = (value: unknown): value is LocationPhotos => isRecord(value) && value.success === true && Array.isArray(value.locations) && value.locations.every(row => isRecord(row) && typeof row.id === 'string' && (row.picture_url === null || typeof row.picture_url === 'string'))
 const { data: places, error: placesError } = await useAsyncData(
   () => `menu-places:${orgBase.value}`,
-  async () => inOrganization.value ? await dashboardApi<LocationPhotos>('/api/dashboard/locations', { validate: isLocationPhotos }) : null,
+  async (_app, { signal }) => {
+    const target = organization.value
+    if (!target) return null
+    const response = await dashboardFetch<LocationPhotos>('/api/dashboard/locations', { orgSlug: target.slug }, { query: { organization: 'true' }, signal, validate: isLocationPhotos })
+    return { ...response, organizationId: target.id }
+  },
 )
 const { data: activity, error: activityError } = await useAsyncData(
   () => `menu-activity:${personal.value}`,
@@ -81,10 +96,10 @@ const { data: activity, error: activityError } = await useAsyncData(
 )
 // A card whose figure or photos could not be read says so, never an empty card standing in for one.
 const cardsError = computed(() => {
-  const error = earningsError.value ?? placesError.value ?? activityError.value
+  const error = organizationSettings.error.value ?? earningsError.value ?? placesError.value ?? activityError.value
   return error ? getErrorMessage(error, 'The Menu could not be loaded.') : null
 })
-const placePhotos = computed(() => (places.value?.locations ?? []).map(row => row.imageUrl).filter((url): url is string => !!url))
+const placePhotos = computed(() => places.value?.organizationId === organization.value?.id ? places.value?.locations.map(row => row.picture_url).filter((url): url is string => !!url) ?? [] : [])
 const visitPhotos = computed(() => (activity.value?.activities ?? []).filter(item => item.imageUrl && (item.status === 'cancelled' || (item.endsAt && Date.parse(item.endsAt) < Date.now()) || item.kind === 'order' || item.kind === 'payment')).map(item => item.imageUrl as string))
 const cards = computed(() => personal.value
   ? [
@@ -93,7 +108,7 @@ const cards = computed(() => personal.value
     ]
   : inOrganization.value
     ? [
-        ...(earnings.value ? [{ to: `${orgBase.value}/earnings`, label: 'Earnings', subline: monthLabel, icon: 'i-lucide-banknote', figure: earningsFigure(earnings.value), photos: [] as string[], testId: 'dashboard-menu-earnings' }] : []),
+        ...(currentEarnings.value ? [{ to: `${orgBase.value}/earnings`, label: 'Earnings', subline: monthLabel, icon: 'i-lucide-banknote', figure: earningsFigure(currentEarnings.value), photos: [] as string[], testId: 'dashboard-menu-earnings' }] : []),
         { to: `${orgBase.value}/insights`, label: 'Insights', subline: 'Views and reviews', icon: 'i-lucide-chart-no-axes-column', figure: '', photos: placePhotos.value, testId: 'dashboard-menu-insights' },
       ]
     : [])

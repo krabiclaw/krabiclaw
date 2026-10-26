@@ -11,8 +11,9 @@
     :title="thread ? thread.participantLabel : 'Conversation'"
     fill
   >
-    <template v-if="recordTo" #right>
-      <UButton :to="recordTo" color="neutral" variant="soft" class="h-10 rounded-full px-4" :aria-label="`Show ${recordTitle.toLowerCase()}`">
+    <template #right>
+      <UButton v-if="thread" :to="{ path: `${threadPath}/scheduled`, query: route.query }" icon="i-lucide-clock" color="neutral" variant="ghost" aria-label="Scheduled messages for this conversation" />
+      <UButton v-if="recordTo" :to="recordTo" color="neutral" variant="soft" class="h-10 rounded-full px-4" :aria-label="`Show ${recordTitle.toLowerCase()}`">
         Details
       </UButton>
     </template>
@@ -25,7 +26,7 @@
 import GuestThreadDetail from '~/lib/components/workspace/messages/GuestThreadDetail.vue'
 import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
 
-definePageMeta({ layout: 'dashboard' })
+definePageMeta({ layout: 'dashboard', key: route => `guest-conversation:${route.params.orgSlug}:${route.params.threadId}` })
 
 const route = useRoute()
 const threadId = computed(() => String(route.params.threadId))

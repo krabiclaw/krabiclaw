@@ -38,7 +38,7 @@ export function parseTodayFeedQuery(query: Record<string, unknown>): TodayFeedQu
 
 function card(input: Pick<TodayCard, 'id' | 'to' | 'eyebrow' | 'headline' | 'priority'> & Partial<TodayCard>): TodayCard {
   return { description: null, imageUrl: null, imageIcon: 'i-lucide-circle-check', badgeImageUrl: null, badgeIcon: null,
-    locationId: null, assignedMemberId: null, bookingKind: null, stayId: null, occurrenceAt: null, timeZone: null, ...input }
+    locationId: null, assignedMemberId: null, bookingKind: null, stayId: null, productId: null, stayChannel: null, occurrenceAt: null, timeZone: null, ...input }
 }
 
 function attentionCard(thread: GuestThreadListItemViewModel, organization: DashboardOrganizationRow): TodayCard {
@@ -56,7 +56,7 @@ function attentionCard(thread: GuestThreadListItemViewModel, organization: Dashb
       ? `Reply to ${thread.guestName}` : `Review ${thread.guestName}’s ${noun}`,
     description: [thread.locationLabel, thread.whenLabel, reply ? thread.preview?.text : null].filter(Boolean).join(' · '),
     imageUrl: thread.imageUrl, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
-    locationId: thread.locationId, assignedMemberId: thread.assignedMemberId, bookingKind,
+    locationId: thread.locationId, productId: thread.productId, stayChannel: thread.stayChannel, assignedMemberId: thread.assignedMemberId, bookingKind,
     occurrenceAt: thread.occurrenceAt, timeZone: thread.timeZone,
   })
 }
@@ -149,7 +149,7 @@ async function contentOpportunities(db: DbClient, organization: DashboardOrganiz
       description: draft.kind === 'article' ? 'Your blog article is saved as a draft.' : 'Your post is saved as a draft.', imageUrl: picture.get(draft.id)?.imageUrl ?? null, imageIcon: 'i-lucide-file-pen-line', locationId: draft.location_id }))
   }
   if (missingPhoto) cards.push(card({ id: `photo:${missingPhoto.id}`, to: `${productEditorPath(organization.slug, missingPhoto.id)}/photo${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`,
-    priority: 'opportunity', eyebrow: 'Missing a photo', headline: `Add a photo of ${missingPhoto.name}`, description: 'This published item has no photo.', imageIcon: 'i-lucide-image-plus', locationId: locationId ?? null }))
+    priority: 'opportunity', eyebrow: 'Missing a photo', headline: `Add a photo of ${missingPhoto.name}`, description: 'This published item has no photo.', imageIcon: 'i-lucide-image-plus', locationId: locationId ?? null, productId: missingPhoto.id }))
   if (article && facebook?.status === 'active' && organization.public_url) {
     const source = await getBlogPost(db, article.id, organization.id, env)
     if (typeof source.public_path !== 'string') throw new Error('Published article has no public path')

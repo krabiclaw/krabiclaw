@@ -33,6 +33,7 @@ import { arrangeProductPhotos, attachMediaPlacement, removeMediaPlacement, setSi
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
+import { agendaToTodayCard } from '../../shared/dashboard-today.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 
 const ORG = 'org'
@@ -1121,6 +1122,31 @@ test('members see only the homes they look after and change nothing; a home with
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     const cabinStay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     const lakeStay = await createStay(db, env, manager, { product_id: lake.id, idempotency_key: 'l', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
+    // In-house guests are current work for managers, not extra cleanings for members.
+    const ownerMembership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
+    const cleanerMembership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
+    const ownerToday = (now: string) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership: ownerMembership }, organizationSlug: 'org' }, new Date(now))
+    const cleanerToday = (now: string) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership: cleanerMembership }, organizationSlug: 'org' }, new Date(now))
+    const hosting = await ownerToday('2026-11-02T18:00:00.000Z')
+    assert.deepEqual(hosting.items.map(item => [item.stayId, item.stayMoment]).sort(), [[cabinStay.id, 'current'], [lakeStay.id, 'current']].sort())
+    assert.equal((await cleanerToday('2026-11-02T18:00:00.000Z')).items.length, 0)
+    for (const [now, moment] of [['2026-11-01T18:00:00.000Z', 'arrival'], ['2026-11-03T18:00:00.000Z', 'departure']] as const) {
+      assert.deepEqual((await ownerToday(now)).items.map(item => item.stayMoment), [moment, moment])
+      assert.deepEqual((await cleanerToday(now)).items.map(item => [item.stayId, item.stayMoment]), [[cabinStay.id, moment]])
+    }
+    const hostingCard = agendaToTodayCard(hosting.items.find(item => item.stayId === cabinStay.id)!, { resolvedAt: hosting.resolvedAt })
+    assert.equal(hostingCard.eyebrow, 'Currently hosting')
+    assert.equal(hostingCard.headline, 'Ana is staying with 2 guests')
+    assert.equal(hostingCard.occurrenceAt, null)
+    assert.equal(hostingCard.productId, cabin.id)
+    assert.equal(hostingCard.stayChannel, 'direct')
+    const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
+    const turnover = await cleanerToday('2026-11-03T18:00:00.000Z')
+    const departure = turnover.items.find(item => item.stayId === cabinStay.id)!
+    assert.equal(departure.stayMoment, 'turnover')
+    assert.equal(agendaToTodayCard(departure, { resolvedAt: turnover.resolvedAt, assigned: true }).description, 'Cabin · cabin-site · Next guests arrive the same day')
+    await cancelStay(db, env, manager, next.id, { expected_version: next.version })
+    assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.stayId === cabinStay.id)!.stayMoment, 'departure')
     assert.deepEqual((await listStays(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).map(stay => stay.id), [cabinStay.id])
     assert.deepEqual(await listStays(db, outsider, { from: '2026-11-01', to: '2026-11-30' }), [])
     assert.equal((await getStay(db, cleaner, cabinStay.id)).id, cabinStay.id)

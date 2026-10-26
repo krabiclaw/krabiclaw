@@ -1,4 +1,3 @@
-import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboard/dashboardScopeHeaderContext'
 import { authClient } from '~/lib/auth-client'
 import { useMediaQuery } from '@vueuse/core'
@@ -57,7 +56,6 @@ export function useDashboardMenu() {
     return unref(organizationsState).data?.find(candidate => candidate.id === activeOrganizationId.value) ?? null
   })
   const personal = computed(() => !organization.value)
-  const organizationSettings = useOrganizationSettingsNavigation(organization)
 
   const orgBase = computed(() => organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : null)
 
@@ -73,25 +71,8 @@ export function useDashboardMenu() {
     await navigateTo({ path: '/login', query: { redirect } })
   }
 
-  // Airbnb's "Switch to hosting": one row above Log out. One organization switches straight to it;
-  // several open the list under Account settings; none offers to start one.
-  const switchRow = computed(() => {
-    const organizations = (scopeHeaderModel?.value.peers ?? []).filter(peer => peer.id)
-    if (organizations.length === 1) return organizations[0]!.to ? { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, to: organizations[0]!.to } : { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, action: {} }
-    if (organizations.length > 1) return { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: 'Switch to an organization', to: '/dashboard/account/profile/organizations' }
-    return { id: 'switch-organization', icon: 'i-lucide-plus', label: 'New organization', to: '/dashboard/onboarding' }
-  })
-  const groups = computed<EditorNavigationGroup[]>(() => personal.value ? [{
-    id: 'account', items: [
-      { id: 'account', icon: 'i-lucide-user-round-cog', label: 'Account settings', to: '/dashboard/account/profile' },
-      switchRow.value,
-      { id: 'log-out', icon: 'i-lucide-log-out', label: 'Log out', action: {} },
-    ],
-  }] : organizationSettings.groups.value)
-  const activeItem = computed(() => organizationSettings.activeItem.value)
-
   /** Organization switcher. */
   const scopeModel = computed(() => scopeHeaderModel?.value ?? null)
 
-  return { menuPageTo, notificationsTo, groups, activeItem, scopeModel, logOut, personal, organization, activeOrganizationId }
+  return { menuPageTo, notificationsTo, scopeModel, logOut, personal, organization, activeOrganizationId }
 }

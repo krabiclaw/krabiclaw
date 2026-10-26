@@ -1,4 +1,4 @@
-import {requireFinancialBrowserOrigin} from '~/server/utils/financial-browser'
+import {requireFinancialBrowserOrAppRequest} from '~/server/utils/financial-browser'
 import {defineHandler,HTTPError} from 'nitro'
 import {getDashboardContext} from '~/server/utils/dashboard-context'
 import {jsonResponse,readRequiredBody} from '~/server/utils/api-response'
@@ -11,7 +11,7 @@ import {cancelStay,stayAccessFor} from '~/server/domain/stays'
 import {memberAccessPrincipal} from '~/server/utils/member-access'
 import {notifyStayCancelled} from '~/server/utils/notifications'
 export default defineHandler(async event=>{
- requireFinancialBrowserOrigin(event)
+ requireFinancialBrowserOrAppRequest(event)
  const {env,db,organization,userId}=await getDashboardContext(event,{})
  const principal={organizationId:organization.id,userId,role:organization.role}
  const body=await readRequiredBody<{payment_id?:string;amount?:number;authorization_id?:string;action?:string;note?:string}>(event)

@@ -1,6 +1,7 @@
 import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requests'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
+import type { StayChannel } from '~/shared/bookings'
 
 export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment' | 'resolution'
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
@@ -104,6 +105,8 @@ export interface GuestThreadListItemViewModel {
   locationLabel: string | null
   locationId: string | null
   assignedMemberId: string | null
+  productId: string | null
+  stayChannel: StayChannel | null
   occurrenceAt: string | null
   timeZone: string | null
   latestMessageFromGuest: boolean

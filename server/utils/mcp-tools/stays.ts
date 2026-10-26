@@ -8,7 +8,8 @@ import { MAX_STAY_BEDS_PER_TYPE, STAY_BED_TYPES, STAY_PHOTO_ROOM_TYPES } from '~
 import { STAY_HOME_ACCESSIBILITY_FEATURES, STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import { MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
-import { cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_CHANNELS, STAY_PAYMENT_METHODS, STAY_STATUSES, type StayHome, type StayDetail } from '~/server/domain/stays'
+import { cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, recordStayPayment, removeStayPhotoRoom, setStayNights, stayAccessFor, updateStay, updateStayHomeAccessibility, updateStayPhotoRoom, STAY_STATUSES, type StayHome, type StayDetail } from '~/server/domain/stays'
+import { STAY_CHANNELS, STAY_PAYMENT_METHODS } from '~/shared/bookings'
 
 const text = { type: 'string', minLength: 1 }
 const nullableText = { type: ['string', 'null'] }
