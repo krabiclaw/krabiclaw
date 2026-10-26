@@ -3,6 +3,7 @@ import { calendarDateSchema, addLocalDays, assertCalendarDate, localNow, timezon
 import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, organizationTool, specialHoursInputSchema, workspaceContextObject, PHONE_FORMAT } from './shared'
 import { HTTPError } from 'nitro'
 import { STAY_MAP_SHARING_MODES } from '~/shared/stay-listing'
+import { STAY_CHANNELS } from '~/shared/bookings'
 import type { McpExecutorContext } from './execution'
 import { createLocation, getLocation, updateLocation, type CreateLocationInput, type LocationRecord } from '~/server/utils/location-management'
 import { AGENDA_KINDS, listAgenda, type AgendaKind } from '~/server/utils/dashboard-agenda'
@@ -17,13 +18,15 @@ const agendaItem = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...AGENDA_KINDS] }, requestId: nullableText,
   operationalBookingId: nullableText, operationalReservationId: nullableText,
   stayId: { ...nullableText, description: 'For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.' },
-  stayMoment: { type: ['string', 'null'], enum: ['arrival', 'departure', null] },
+  productId: nullableText,
+  stayChannel: { type: ['string', 'null'], enum: [...STAY_CHANNELS, null] },
+  stayMoment: { type: ['string', 'null'], enum: ['arrival', 'departure', 'turnover', 'current', null] },
   assignedMemberId: nullableText, assignedMemberName: nullableText,
   startsAt: text, endsAt: nullableText, dayKey: text, timeZone: text, showTimeZone: { type: 'boolean' },
   title: text, subtitle: nullableText, status: text, organizationId: text,
   locationId: nullableText, locationTitle: nullableText, guestImageUrl: nullableText,
   resourceImageUrl: nullableText, resourceTitle: nullableText, partySize: { type: ['integer', 'null'] }, to: text,
-}, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'operationalReservationId', 'stayId', 'stayMoment', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
+}, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'operationalReservationId', 'stayId', 'productId', 'stayChannel', 'stayMoment', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
 const locationMutation = { ...locationMutationSummaryObject, properties: { ...locationMutationSummaryObject.properties, saved_fields: { ...locationObject, required: [], description: 'Persisted values of the fields named in changed_fields.' } }, required: [...locationMutationSummaryObject.required, 'saved_fields'] }
 const calendarMutation = { ...locationMutation, properties: { ...locationMutation.properties, affected_commitments: { type: 'array', items: agendaItem } }, required: [...locationMutation.required, 'affected_commitments'] }
 
@@ -34,8 +37,8 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
-        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
-        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'One key per new location, kept by this business and never expired. Retrying with the same key and details returns the location it created. The same key with different details fails with IDEMPOTENCY_CONFLICT; if that location has been deleted it fails with LOCATION_DELETED and nothing is created.' },
+        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' },
+        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'One key per new location, kept by this business and never expired. Retrying with the same key and details returns the location it created. The same key with different details fails with IDEMPOTENCY_CONFLICT; if that location has been deleted it fails with LOCATION_DELETED and nothing is created.' },
         address: postalAddressSchema,
         phone: { type: 'string', description: PHONE_FORMAT },
         email: { type: 'string', format: 'email' },
@@ -98,7 +101,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       minimumRole: 'admin',
       inputSchema: {
         location_id: { type: 'string', description: 'Internal location ID returned by list_locations or get_workspace_context.' },
-        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
+        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
         status: { type: 'string', enum: ['active', 'inactive'], description: 'Set active to enable the location, or inactive to hide it. This can change location or home usage billed on the existing subscription.' },

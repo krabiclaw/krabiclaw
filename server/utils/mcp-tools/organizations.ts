@@ -81,7 +81,7 @@ const websiteDraftLocationSchema = {
   }, additionalProperties: false,
 } as const
 const websiteDraftProductSchema = {
-  type: 'object', properties: { name: { type: 'string', minLength: 1, pattern: '\\S' }, category: { type: 'string' }, amount_minor: { type: 'integer', minimum: 0 } },
+  type: 'object', properties: { name: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, category: { type: 'string' }, amount_minor: { type: 'integer', minimum: 0 } },
   required: ['name'], additionalProperties: false,
 } as const
 const websiteDraftOutputSchema = {
@@ -139,8 +139,8 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     domain: 'organizations', minimumRole: 'admin',
     inputSchema: { type: 'object', properties: {
       draft_id: { type: 'string', minLength: 1, description: 'Existing draft to edit; omit when creating.' }, revision: { type: 'string', format: 'date-time', description: 'Required when editing: the revision returned by get_website_draft.' },
-      idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
-      name: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Required when creating; omitted on an edit to retain it.' },
+      idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' },
+      name: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Required when creating; omitted on an edit to retain it.' },
       vertical: { type: 'string', enum: ALL_VERTICALS, description: 'Required when creating; omitted on an edit to retain it.' }, source_locale: { type: 'string', enum: PLATFORM_LOCALES.map(locale => locale.locale), description: 'Required when creating; a saved draft cannot be relabelled into another language.' },
       currency: { type: 'string', enum: SUPPORTED_CURRENCIES }, timezone: timezoneSchema,
       subdomain: { type: 'string', minLength: 1, maxLength: 63, pattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$' },
@@ -165,10 +165,10 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'create_team', description: 'Create a named team within this business using Better Auth. Existing teammates can then be added to it.',
-    domain: 'organizations', minimumRole: 'admin', inputSchema: { name: { type: 'string', minLength: 1, pattern: '\\S' } }, required: ['name'], outputSchema: teamOutput,
+    domain: 'organizations', minimumRole: 'admin', inputSchema: { name: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' } }, required: ['name'], outputSchema: teamOutput,
   }),
   organizationTool({
-    name: 'update_team', description: 'Rename a team in this business.', domain: 'organizations', minimumRole: 'admin', inputSchema: { team_id: { type: 'string' }, name: { type: 'string', minLength: 1, pattern: '\\S' } }, required: ['team_id', 'name'], outputSchema: teamOutput,
+    name: 'update_team', description: 'Rename a team in this business.', domain: 'organizations', minimumRole: 'admin', inputSchema: { team_id: { type: 'string' }, name: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' } }, required: ['team_id', 'name'], outputSchema: teamOutput,
   }),
   organizationTool({
     name: 'set_team_member', description: 'Add an existing business teammate to a team, or remove them from it. Existing bookings keep their saved provider.',

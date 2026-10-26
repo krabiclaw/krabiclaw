@@ -108,17 +108,11 @@ export function prepareStatement(db: DbClient, query: string) {
   }
 }
 
-export async function batchStatements(db: DbClient, statements: BoundCompatStatement[]) {
-  return await Promise.all(
-    statements.map(async (statement) => await statement.run()),
-  )
-}
-
 export type BatchQuery = { query: string; params?: unknown[] }
 
 /**
  * Runs multiple writes as a single atomic D1 batch (all-or-nothing), unlike
- * batchStatements/sequential execute() calls which have no transactional guarantee.
+ * sequential execute() calls, which have no transactional guarantee.
  */
 export async function executeBatch(
   db: DbClient,

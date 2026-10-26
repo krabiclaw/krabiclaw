@@ -2,6 +2,7 @@ import { z } from 'zod'
 import type { AgendaItem, AgendaLocation } from '~/server/utils/dashboard-agenda'
 import { formatTimestamp, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
+import { STAY_CHANNELS } from '~/shared/bookings'
 
 export const todayCardSchema = z.object({
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
@@ -9,6 +10,8 @@ export const todayCardSchema = z.object({
   locationId: z.string().nullable(), assignedMemberId: z.string().nullable(),
   bookingKind: z.enum(['reservation', 'booking', 'stay']).nullable(),
   stayId: z.string().nullable(),
+  productId: z.string().nullable(),
+  stayChannel: z.enum(STAY_CHANNELS).nullable(),
   occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string().nullable(),
   priority: z.enum(['attention', 'schedule', 'opportunity']),
 })
@@ -32,22 +35,25 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string;
   const distance = Math.round((Date.parse(`${item.dayKey}T00:00:00Z`) - Date.parse(`${referenceDay}T00:00:00Z`)) / 86_400_000)
   const when = distance <= 0 ? 'today' : distance === 1 ? 'tomorrow' : `in ${distance} days`
   const guests = item.partySize && item.partySize > 0 ? `${item.partySize} ${item.partySize === 1 ? 'guest' : 'guests'}` : ''
-  const firstName = item.title.trim().split(/\s+/)[0] || item.title
+  const overbooked = item.kind === 'stay' && item.title.startsWith('Overbooked · ')
+  const guestTitle = overbooked ? item.title.slice('Overbooked · '.length) : item.title
+  const firstName = guestTitle.trim().split(/\s+/)[0] || guestTitle
+  const stayGuest = `${overbooked ? 'Overbooked · ' : ''}${guestTitle.startsWith('Name not provided by ') ? guestTitle : firstName}`
   const resourceIcon = item.kind === 'booking'
     ? (input.vertical === 'service' ? 'i-lucide-calendar-clock' : 'i-lucide-ticket')
     : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin'
   const presentation = input.personal || item.kind === 'stay' ? null : resolveBookingPresentation(item.kind, input.vertical)
   const headline = input.personal ? `${item.title} ${when}${guests ? ` for ${guests}` : ''}`
-    : item.kind === 'stay' ? `${item.title.startsWith('Overbooked · ') ? item.title : firstName} ${item.stayMoment === 'departure' ? 'leaves' : 'arrives'} ${when}${guests ? ` with ${guests}` : ''}`
+    : item.kind === 'stay' ? `${stayGuest} ${item.stayMoment === 'current' ? 'is staying' : `${item.stayMoment === 'departure' || item.stayMoment === 'turnover' ? 'leaves' : 'arrives'} ${when}`}${guests ? ` with ${guests}` : ''}`
     : input.assigned || presentation?.noun === 'consultation' ? `${presentation!.label} with ${firstName} ${when}`
       : `${firstName} arrives ${when}${guests ? ` · ${guests}` : ''}`
   return {
-    id: item.id, to: item.to, eyebrow: formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }), headline,
+    id: item.id, to: item.to, eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }), headline,
     description: input.personal ? [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ')
-      : [...new Set([item.resourceTitle, item.kind === 'booking' && item.locationId === null ? 'Online' : item.locationTitle].filter((part): part is string => !!part))].join(' · '),
+      : [...new Set([item.resourceTitle, item.kind === 'booking' && item.locationId === null ? 'Online' : item.locationTitle, item.stayMoment === 'turnover' ? 'Next guests arrive the same day' : null].filter((part): part is string => !!part))].join(' · '),
     imageUrl: input.personal ? item.resourceImageUrl : item.guestImageUrl, imageIcon: input.personal ? resourceIcon : 'i-lucide-user',
     badgeImageUrl: input.personal ? null : item.resourceImageUrl, badgeIcon: input.personal ? null : resourceIcon,
-    locationId: item.locationId, assignedMemberId: item.assignedMemberId, bookingKind: item.kind, stayId: item.stayId,
-    occurrenceAt: item.startsAt, timeZone: item.timeZone, priority: 'schedule',
+    locationId: item.locationId, assignedMemberId: item.assignedMemberId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId, stayChannel: item.stayChannel,
+    occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone, priority: 'schedule',
   }
 }

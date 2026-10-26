@@ -2,6 +2,7 @@ import { isRecord } from '~/utils/api-clients'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 import { normalizeVertical } from '~/utils/vertical-copy'
+import { STAY_CHANNELS } from '~/shared/bookings'
 import type {
   GuestThreadDeliveryFailureViewModel,
   GuestThreadDetailViewModel,
@@ -68,6 +69,8 @@ export function isThreadListResponse(value: unknown): value is ThreadListPage {
     && new Set(value.threads.map(thread => isRecord(thread) ? thread.id : undefined)).size === value.threads.length
     && value.threads.every(thread =>
       isRecord(thread)
+      && (thread.productId === null || typeof thread.productId === 'string')
+      && (thread.stayChannel === null || STAY_CHANNELS.some(channel => channel === thread.stayChannel))
       && typeof thread.id === 'string'
       && (thread.guestName === null || typeof thread.guestName === 'string')
       && typeof thread.participantLabel === 'string'
@@ -92,6 +95,7 @@ function isDeliveryFailure(value: unknown): value is GuestThreadDeliveryFailureV
       || value.purpose === 'member_reply'
       || value.purpose === 'scheduled_message'
       || value.purpose === 'status_update'
+      || value.purpose === 'team_message'
     )
     && (value.error === null || typeof value.error === 'string')
     && typeof value.createdAt === 'string'

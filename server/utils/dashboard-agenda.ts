@@ -7,8 +7,7 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { postEditorPath } from '~/server/utils/dashboard-links'
 import type { Stay } from '~/server/domain/stays'
-
-const STAY_CHANNEL_NAMES = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com' } as const
+import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
 
 export const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const
 export type AgendaKind = typeof AGENDA_KINDS[number]
@@ -20,10 +19,12 @@ export interface AgendaItem {
   requestId: string | null
   operationalBookingId: string | null
   operationalReservationId: string | null
-  /** The stay a `stay` row is an arrival or departure of; one stay is two rows. */
+  /** The stay a lodging occurrence belongs to. */
   stayId: string | null
-  /** Whether a `stay` row is guests arriving or leaving; null for every other kind. */
-  stayMoment: 'arrival' | 'departure' | null
+  productId: string | null
+  stayChannel: Stay['channel'] | null
+  /** Current stays appear only on a manager's Today, never as another cleaning. */
+  stayMoment: 'arrival' | 'departure' | 'turnover' | 'current' | null
   kind: AgendaKind
   startsAt: string
   endsAt: string | null
@@ -70,6 +71,8 @@ export interface AgendaQuery {
   kinds?: AgendaKind[]
   principal?: AgendaPrincipal
   organizationSlug?: string
+  /** Today alone includes currently hosted guests for managers. Calendar keeps dated moments. */
+  currentStaysAt?: Date
 }
 
 export interface AgendaLocation {
@@ -90,6 +93,7 @@ interface SourceRow {
   assigned_member_name: string | null
   id: string
   operational_id: string | null
+  product_id: string | null
   kind: AgendaKind
   starts_at: string | null
   ends_at: string | null
@@ -122,7 +126,8 @@ function scopeParams(scope: AgendaScope, query: AgendaQuery): unknown[] {
 }
 
 // A buyer's row is one whose request they still own, which is the same
-// condition the account's activity and conversations read with.
+// condition the account's activity and conversations read with. The condition
+// names its request `r`, so no row reading it may use that alias itself.
 function scopeConditions(scope: AgendaScope, query: AgendaQuery, alias: string): string {
   return [
     scope.buyerUserId
@@ -185,8 +190,7 @@ export async function listAgenda(
           OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedHomeSql('c')})
           OR (${assignedLocationSql('l')}))` : ''}
         ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [staff.userId, staff.userId, staff.userId, staff.userId, staff.userId] : [])] },
-    // A business with a place to stay has arrivals and departures; a buyer's agenda has none.
-    { query: 'SELECT 1 AS present FROM product_stay_configs WHERE organization_id = ? LIMIT 1', params: [scope.organizationId ?? ''] },
+    { query: `SELECT 1 AS present FROM product_stay_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
   ], { operation: 'Read the agenda scope' })
   const locations = scope.organizationId ? (locationResult?.results ?? []) as LocationRow[] : []
   // A buyer has visits, not a publishing calendar.
@@ -195,7 +199,7 @@ export async function listAgenda(
   // site template says: the record exists, so the calendar shows it.
   if (bookableResult?.results?.length) available.add('booking')
   if (reservingResult?.results?.length) available.add('reservation')
-  if (scope.organizationId && hostingResult?.results?.length) available.add('stay')
+  if (hostingResult?.results?.length) available.add('stay')
   const availableKinds = AGENDA_KINDS.filter(kind => available.has(kind))
   const requestedKinds = new Set((query.kinds?.length ? query.kinds : availableKinds).filter(kind => available.has(kind)))
   if (requestedKinds.size === 0) {
@@ -216,7 +220,7 @@ export async function listAgenda(
     /** The zone the row's instant was offered in; a post has none and reads the business's. */
     timezone?: string
   } = {}) => `
-    SELECT ${enrichment.assignedMember??'NULL'} assigned_member_id, ${enrichment.assignedMember?`(SELECT u.name FROM member m JOIN user u ON u.id=m.userId WHERE m.id=${enrichment.assignedMember} AND m.organizationId=${alias}.organization_id)`:'NULL'} assigned_member_name, ${alias}.id, ${kind === 'booking' ? 'agenda_booking.id' : kind === 'reservation' ? 'agenda_reservation.id' : 'NULL'} AS operational_id, '${kind}' AS kind, ${fields}, ${alias}.organization_id,
+    SELECT ${enrichment.assignedMember??'NULL'} assigned_member_id, ${enrichment.assignedMember?`(SELECT u.name FROM member m JOIN user u ON u.id=m.userId WHERE m.id=${enrichment.assignedMember} AND m.organizationId=${alias}.organization_id)`:'NULL'} assigned_member_name, ${alias}.id, ${kind === 'booking' ? 'agenda_booking.id' : kind === 'reservation' ? 'agenda_reservation.id' : 'NULL'} AS operational_id, ${kind === 'booking' ? 'agenda_booking.product_id' : 'NULL'} AS product_id, '${kind}' AS kind, ${fields}, ${alias}.organization_id,
            s.name AS organization_name,
            ${alias}.location_id,
            l.title AS location_title,
@@ -237,9 +241,9 @@ export async function listAgenda(
   // A held table and a booked seat are their own rows, and each states one
   // instant in its own zone. The window here is deliberately broad in UTC; the
   // day a row belongs to is decided below, in that row's zone.
-  if (requestedKinds.has('reservation')) sourceQueries.push(queryAll(db, `${commonSelect('r', 'reservation', `agenda_reservation.starts_at, agenda_reservation.ends_at,
-    json_extract(r.payload_json, '$.guest.name') AS title, printf('%d%s guests', agenda_reservation.party_size, CASE json_extract(r.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END) AS subtitle, agenda_reservation.party_size, agenda_reservation.status`, {
-    joins: 'JOIN reservations agenda_reservation ON agenda_reservation.request_id = r.id',
+  if (requestedKinds.has('reservation')) sourceQueries.push(queryAll(db, `${commonSelect('rq', 'reservation', `agenda_reservation.starts_at, agenda_reservation.ends_at,
+    json_extract(rq.payload_json, '$.guest.name') AS title, printf('%d%s guests', agenda_reservation.party_size, CASE json_extract(rq.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END) AS subtitle, agenda_reservation.party_size, agenda_reservation.status`, {
+    joins: 'JOIN reservations agenda_reservation ON agenda_reservation.request_id = rq.id',
     timezone: 'agenda_reservation.timezone',
   })} ${staff ? `AND (${assignedLocationSql('l')})` : ''} AND agenda_reservation.status <> 'cancelled' AND agenda_reservation.starts_at BETWEEN ? AND ?`, [...params(), ...(staff ? [staff.userId, staff.userId] : []), broadFrom, broadTo]))
   if (requestedKinds.has('booking')) sourceQueries.push(queryAll(db, `${commonSelect('b', 'booking', `agenda_session.starts_at, agenda_session.ends_at,
@@ -261,19 +265,26 @@ export async function listAgenda(
 
   // A stay is two moments at its home: guests arrive on the check-in date at the
   // home's check-in time and leave on the checkout date at its checkout time,
-  // both in the location's zone. Members see the homes they look after.
-  const stayRows = requestedKinds.has('stay') && scope.organizationId ? queryAll<{
-    id: string; organization_id: string; product_id: string; product_name: string; status: string; overbooked: number; check_in_date: string; check_out_date: string
-    owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string; check_out_time: string
-  }>(db, `SELECT st.id, st.organization_id, st.product_id, p.name AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, st.guest_surname,
-        st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time
+  // both in the location's zone. Members see the homes they look after; buyers
+  // read their whole stay interval in Today and Calendar.
+  const stayRows = requestedKinds.has('stay') ? queryAll<{
+    id: string; request_id: string | null; organization_id: string; organization_name: string; product_id: string; product_name: string; status: string; overbooked: number; check_in_date: string; check_out_date: string
+    owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string; check_out_time: string; same_day_arrival: number
+  }>(db, `SELECT st.id, st.request_id, st.organization_id, o.name AS organization_name, st.product_id, p.name AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, st.guest_surname,
+        st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time,
+        EXISTS (SELECT 1 FROM stays next_stay WHERE next_stay.organization_id = st.organization_id AND next_stay.product_id = st.product_id
+          AND next_stay.id <> st.id AND next_stay.status <> 'cancelled' AND next_stay.check_in_date = st.check_out_date) AS same_day_arrival
       FROM stays st
+      JOIN organization o ON o.id = st.organization_id
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
       JOIN products p ON p.organization_id = st.organization_id AND p.id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
-     WHERE st.organization_id = ? AND st.status <> 'cancelled' AND (st.check_in_date BETWEEN ? AND ? OR st.check_out_date BETWEEN ? AND ?)
-       ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedHomeSql('c')}` : ''}`,
-    [scope.organizationId, query.from, query.to, query.from, query.to, ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId, staff.userId] : [])])
+     WHERE ${scope.buyerUserId ? `st.user_id = ? AND st.owner = 'app' AND (st.request_id IS NULL OR EXISTS (
+       SELECT 1 FROM requests r WHERE r.id = st.request_id AND r.organization_id = st.organization_id AND r.kind = 'stay' AND r.user_id = st.user_id AND ${REQUEST_CURRENT_BUYER_SQL}))`
+       : 'st.organization_id = ?'} AND st.status <> 'cancelled'
+       AND ${scope.buyerUserId || query.currentStaysAt && !staff ? 'st.check_in_date <= ? AND st.check_out_date >= ?' : '(st.check_in_date BETWEEN ? AND ? OR st.check_out_date BETWEEN ? AND ?)'}
+       ${query.organizationId ? 'AND st.organization_id = ?' : ''} ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedHomeSql('c')}` : ''}`,
+    [scopeParam, ...(scope.buyerUserId || query.currentStaysAt && !staff ? [query.to, query.from] : [query.from, query.to, query.from, query.to]), ...(query.organizationId ? [query.organizationId] : []), ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId, staff.userId] : [])])
     : Promise.resolve([])
 
   // The branch pictures depend on nothing the source rows carry, so they are
@@ -286,11 +297,12 @@ export async function listAgenda(
   const rows = sourceRows.flat()
   // Pictures are read per owning business; a buyer's rows span several.
   const pictures = new Map<string, string | null>()
-  await Promise.all([...new Set(rows.map(row => `${row.organization_id}\n${row.picture_owner_type}`))].map(async (group) => {
+  await Promise.all([...new Set([...rows.map(row => `${row.organization_id}\n${row.picture_owner_type}`), ...stays.map(stay => `${stay.organization_id}\nproduct`)])].map(async (group) => {
     const [organizationId, ownerType] = group.split('\n') as [string, PictureOwnerType]
-    const owners = rows.filter(row => row.organization_id === organizationId && row.picture_owner_type === ownerType)
-    const loaded = await loadOwnerPictures(db, organizationId, ownerType, owners.map(row => row.picture_owner_id))
-    for (const row of owners) pictures.set(`${group}\n${row.picture_owner_id}`, loaded.get(row.picture_owner_id)?.imageUrl ?? null)
+    const ownerIds = [...new Set([...rows.filter(row => row.organization_id === organizationId && row.picture_owner_type === ownerType).map(row => row.picture_owner_id),
+      ...(ownerType === 'product' ? stays.filter(stay => stay.organization_id === organizationId).map(stay => stay.product_id) : [])])]
+    const loaded = await loadOwnerPictures(db, organizationId, ownerType, ownerIds)
+    for (const id of ownerIds) pictures.set(`${group}\n${id}`, loaded.get(id)?.imageUrl ?? null)
   }))
   const items = rows.filter(row=>!query.assignedMemberId || row.assigned_member_id===query.assignedMemberId).flatMap<AgendaItem>((row) => {
     const timeZone = row.timezone
@@ -301,13 +313,13 @@ export async function listAgenda(
     if (dayKey < query.from || dayKey > query.to) return []
     // The business reads who is coming; the buyer reads where they are going.
     const to = scope.buyerUserId !== undefined
-      ? `/dashboard/account/bookings/${row.kind}/${encodeURIComponent(row.id)}`
+      ? `/dashboard/account/activity/${row.kind}/${encodeURIComponent(row.id)}`
       : row.kind === 'post'
         ? postEditorPath(query.organizationSlug ?? scope.organizationId, row.id)
         : `/dashboard/${query.organizationSlug ?? scope.organizationId}/bookings/${row.kind}/${encodeURIComponent(row.id)}`
     return [{
       assignedMemberId:row.assigned_member_id,assignedMemberName:row.assigned_member_name,
-      id: `${row.kind}:${row.id}`, requestId: row.kind === 'post' ? null : row.id, operationalBookingId: row.kind === 'booking' ? row.operational_id : null, operationalReservationId: row.kind === 'reservation' ? row.operational_id : null, stayId: null, stayMoment: null, kind: row.kind, startsAt,
+      id: `${row.kind}:${row.id}`, requestId: row.kind === 'post' ? null : row.id, operationalBookingId: row.kind === 'booking' ? row.operational_id : null, operationalReservationId: row.kind === 'reservation' ? row.operational_id : null, stayId: null, productId: row.product_id, stayChannel: null, stayMoment: null, kind: row.kind, startsAt,
       endsAt: row.ends_at === null ? null : instantDate(row.ends_at).toISOString(),
       dayKey, timeZone, showTimeZone: false,
       title: scope.buyerUserId ? row.resource_title ?? row.title : row.title,
@@ -325,19 +337,25 @@ export async function listAgenda(
     // Only a channel may withhold the guest's name (stays_app_guest_check).
     const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ')
     if (!named && (stay.owner !== 'channel' || stay.channel === 'direct')) throw new HTTPError({ statusCode: 500, message: `Stay ${stay.id} has no guest name`, data: { code: 'INVALID_STAY', field: 'guest_name', stay_id: stay.id } })
-    const guest = named || `Name not provided by ${STAY_CHANNEL_NAMES[stay.channel as Exclude<typeof stay.channel, 'direct'>]}`
+    const guest = named || `Name not provided by ${STAY_CHANNEL_LABELS[stay.channel]}`
     // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and departure do.
     const title = Number(stay.overbooked) === 1 ? `Overbooked · ${guest}` : guest
-    for (const [moment, day, time] of [['arrival', stay.check_in_date, stay.check_in_time], ['departure', stay.check_out_date, stay.check_out_time]] as const) {
-      if (day < query.from || day > query.to) continue
-      const instant = localDateTimeToInstant(day, time, stay.timezone, 'compatible').toISOString()
+    const moments: Array<['arrival' | 'departure' | 'current', string, string]> = scope.buyerUserId ? [['arrival', stay.check_in_date, stay.check_in_time]]
+      : [['arrival', stay.check_in_date, stay.check_in_time], ['departure', stay.check_out_date, stay.check_out_time]]
+    if (!scope.buyerUserId && !staff && query.currentStaysAt) {
+      const today = localDateAt(query.currentStaysAt, stay.timezone)
+      if (stay.check_in_date < today && today < stay.check_out_date) moments.push(['current', today, stay.check_in_time])
+    }
+    for (const [moment, day, time] of moments) {
+      if (!scope.buyerUserId && (day < query.from || day > query.to)) continue
+      const instant = localDateTimeToInstant(moment === 'current' ? stay.check_in_date : day, time, stay.timezone, 'compatible').toISOString()
       items.push({
-        assignedMemberId: null, assignedMemberName: null, id: `stay:${stay.id}:${moment}`, requestId: null, operationalBookingId: null, operationalReservationId: null,
-        stayId: stay.id, stayMoment: moment, kind: 'stay', startsAt: instant, endsAt: null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
-        title, subtitle: `${moment === 'arrival' ? 'Checking in' : 'Checking out'} · ${stay.party_size === 1 ? '1 guest' : `${stay.party_size} guests`}`,
+        assignedMemberId: null, assignedMemberName: null, id: scope.buyerUserId ? `stay:${stay.id}` : `stay:${stay.id}:${moment}`, requestId: scope.buyerUserId ? stay.request_id : null, operationalBookingId: null, operationalReservationId: null,
+        stayId: stay.id, productId: stay.product_id, stayChannel: stay.channel, stayMoment: moment === 'departure' && stay.same_day_arrival ? 'turnover' : moment, kind: 'stay', startsAt: instant, endsAt: scope.buyerUserId || moment === 'current' ? localDateTimeToInstant(stay.check_out_date, stay.check_out_time, stay.timezone, 'compatible').toISOString() : null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
+        title: scope.buyerUserId ? stay.product_name : title, subtitle: scope.buyerUserId ? stay.organization_name : [moment === 'arrival' ? 'Checking in' : moment === 'departure' ? 'Checking out' : 'Currently hosting', `${stay.party_size === 1 ? '1 guest' : `${stay.party_size} guests`}`, moment === 'departure' && stay.same_day_arrival ? 'Next guests arrive the same day' : null].filter(Boolean).join(' · '),
         status: stay.status, organizationId: stay.organization_id, locationId: stay.location_id, locationTitle: stay.location_title,
-        guestImageUrl: null, resourceImageUrl: null, resourceTitle: stay.product_name, partySize: stay.party_size,
-        to: `/dashboard/${organizationPath}/bookings/stay/${encodeURIComponent(stay.id)}`,
+        guestImageUrl: null, resourceImageUrl: pictures.get(`${stay.organization_id}\nproduct\n${stay.product_id}`) ?? null, resourceTitle: stay.product_name, partySize: stay.party_size,
+        to: scope.buyerUserId ? `/dashboard/account/activity/stay/${encodeURIComponent(stay.request_id ?? stay.id)}` : `/dashboard/${organizationPath}/bookings/stay/${encodeURIComponent(stay.id)}`,
       })
     }
   }
@@ -362,11 +380,16 @@ export async function listTodayAgenda(
     kinds: ['reservation', 'booking', 'stay'],
     organizationSlug: input.organizationSlug,
     principal: input.principal,
+    currentStaysAt: now,
   })
   return {
     ...nearby,
     availableKinds: nearby.availableKinds.filter(kind => kind === 'reservation' || kind === 'booking' || kind === 'stay'),
-    items: nearby.items.filter(item => item.dayKey === todayKeyForTimeZone(now, item.timeZone)),
+    items: nearby.items.filter(item => {
+      const today = todayKeyForTimeZone(now, item.timeZone)
+      return item.dayKey === today || (scope.buyerUserId && item.kind === 'stay' && item.endsAt !== null
+        && item.dayKey <= today && localDateAt(instantDate(item.endsAt), item.timeZone) >= today)
+    }),
     resolvedAt: now.toISOString(),
   }
 }

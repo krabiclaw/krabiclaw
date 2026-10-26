@@ -20,7 +20,7 @@ import { NOT_HANDLED, mutationContextPayload, requiredString } from './execution
 
 const localizedDocumentValues = { type: 'object', properties: {
   title: { type: ['string', 'null'] }, summary: { type: ['string', 'null'] }, seo_keywords: { type: ['string', 'null'] },
-  metadata: { type: 'object', properties: { call_to_action: { type: 'object', properties: { label: { type: 'string', pattern: '\\S' } }, required: ['label'], additionalProperties: false } }, additionalProperties: false },
+  metadata: { type: 'object', properties: { call_to_action: { type: 'object', properties: { label: { type: 'string', pattern: '^[\\s\\S]*\\S[\\s\\S]*$' } }, required: ['label'], additionalProperties: false } }, additionalProperties: false },
 }, additionalProperties: false } as const
 const resourceValueBranches = LOCALIZED_RESOURCE_TYPES.map(resourceType => ({
   properties: { resource_type: { const: resourceType }, values: localizedResourceValuesSchema(resourceType) },

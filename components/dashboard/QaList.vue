@@ -29,7 +29,7 @@
       <p class="mt-1 line-clamp-2 text-sm text-muted" :class="item.row.answer ? '' : 'italic'">{{ item.row.answer || 'No answer yet.' }}</p>
     </template>
   </DashboardListEditor>
-  <UAlert v-if="deleteError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="deleteError" />
+  <UAlert v-if="listError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="listError" />
   </div>
 </template>
 
@@ -148,7 +148,7 @@ const listItems = computed(() => qaRows.value.map(row => ({
 
 const editing = ref(false)
 const removingId = ref<string | null>(null)
-const deleteError = ref<string | null>(null)
+const listError = ref<string | null>(null)
 
 // A question opens its own level rather than a sheet over the list, so the
 // record has a URL and adding and editing are the same screen. The page the
@@ -159,7 +159,7 @@ function openNew() {
 
 async function removeItem(item: { id: string }) {
   removingId.value = item.id
-  deleteError.value = null
+  listError.value = null
   try {
     await dashboardApi(`${qaEndpoint.value}/${item.id}`, {
       method: 'DELETE',
@@ -168,7 +168,7 @@ async function removeItem(item: { id: string }) {
     })
     await refresh()
   } catch (error) {
-    deleteError.value = error instanceof Error ? error.message : 'Failed to remove question'
+    listError.value = error instanceof Error ? error.message : 'Failed to remove question'
   } finally {
     removingId.value = null
   }
@@ -179,12 +179,17 @@ async function move(item: { id: string }, direction: -1 | 1) {
   const current = qaRows.value[index]
   const target = qaRows.value[index + direction]
   if (!current || !target) return
-  await dashboardApi(`${qaEndpoint.value}/reorder`, {
-    method: 'POST',
-    body: { ...(locationScope.value ? {} : { page_path: pagePath.value }), updates: [{ id: current.id, sort_order: target.sort_order }, { id: target.id, sort_order: current.sort_order }] },
-    validate: (value): value is { updated: number } =>
-      isRecord(value) && typeof value.updated === 'number',
-  })
+  listError.value = null
+  try {
+    await dashboardApi(`${qaEndpoint.value}/reorder`, {
+      method: 'POST',
+      body: { ...(locationScope.value ? {} : { page_path: pagePath.value }), updates: [{ id: current.id, sort_order: target.sort_order }, { id: target.id, sort_order: current.sort_order }] },
+      validate: (value): value is { updated: number } =>
+        isRecord(value) && typeof value.updated === 'number',
+    })
+  } catch (error) {
+    listError.value = error instanceof Error ? error.message : 'Failed to move question'
+  }
   await refresh()
 }
 

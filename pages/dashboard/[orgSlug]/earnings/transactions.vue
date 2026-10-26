@@ -139,11 +139,13 @@ const { data, error } = await useAsyncData(
       },
       validate: isTransactionsView,
     })
-    loaded.value = after.value ? [...loaded.value, ...page.payments] : page.payments
     return page
   },
   { watch: [from, through, locationId, earningsType, after] },
 )
+// Watched rather than written in the handler, which does not run again when the
+// server-rendered page hydrates.
+watch(data, (page) => { if (page) loaded.value = after.value ? [...loaded.value, ...page.payments] : page.payments }, { immediate: true })
 // Newest first, as Airbnb lists them.
 const rows = computed(() => [...loaded.value].sort((a, b) => b.created_at.localeCompare(a.created_at)))
 const total = computed(() => {

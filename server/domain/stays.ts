@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -12,9 +13,11 @@ import { bookedPolicyFor, LONG_TERM_STAY_NIGHTS, stayCancellationRefund, type St
 import { executeRefund, requirePayment, type Payment } from '~/server/domain/payments'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
-import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
+import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT, type StayArrivalGuide } from '~/shared/stay-arrival'
 import { isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
-import { validateProductDetails, validateStayAlarmDetails } from '~/shared/product-details'
+import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
+import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
+import { formatTime, isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -23,8 +26,8 @@ import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
 import { completeChannelPush, deliverStayNights, pushAirbnbListingSettings, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
-import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
+import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import { toE164 } from '~/utils/phone'
@@ -59,10 +62,7 @@ export async function stayAccessFor(principal: MemberAccessPrincipal): Promise<S
   return { organizationId: principal.organizationId, actorId: principal.userId, manage: false, userId: principal.userId }
 }
 
-export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
 export const STAY_STATUSES = ['pending', 'confirmed', 'cancelled'] as const
-export const STAY_PAYMENT_METHODS = ['cash', 'bank_transfer', 'card_external', 'other'] as const
-export type StayPaymentMethod = typeof STAY_PAYMENT_METHODS[number]
 
 export interface Stay {
   id: string
@@ -70,7 +70,7 @@ export interface Stay {
   location_id: string
   /** The home's location timezone: its dates and times are read in it. */
   timezone: string
-  channel: typeof STAY_CHANNELS[number]
+  channel: StayChannel
   owner: 'app' | 'channel'
   status: typeof STAY_STATUSES[number]
   overbooked: boolean
@@ -276,7 +276,6 @@ export interface StayNight {
 const MAX_LIST_DAYS = 400
 const MAX_CALENDAR_DAYS = 500
 const MAX_CALENDAR_BYTES = 2_000_000
-const MAX_STAY_NIGHTS = 365
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 
@@ -1692,15 +1691,15 @@ export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
   stay: StayDetail
-  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string; image_url: string | null; location: { address: PostalAddress | null; latitude: number | null; longitude: number | null; maps_url: string | null } | null }
+  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string; image_url: string | null; location: { address: PostalAddress | null; latitude: number | null; longitude: number | null; maps_url: string | null } | null; arrival_guide: StayArrivalGuide | null; house_rules: string[]; safety: string[] }
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
 }
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
-  const owned = await queryFirst<{ id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
-    SELECT s.id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
+  const owned = await queryFirst<{ id: string; request_id: string | null; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
+    SELECT s.id, s.request_id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'stay' AND subject_id = s.id AND captured_amount > 0) AS paid_online
       FROM stays s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
       JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
@@ -1708,6 +1707,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE COALESCE(s.request_id, s.id) = ? AND s.user_id = ? AND s.owner = 'app'`, [activityId, buyerUserId])
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
+  if (owned.request_id) await ownedBuyerRequest(db, buyerUserId, owned.request_id)
   const [stay, pictures] = await Promise.all([
     getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id),
     loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id]),
@@ -1722,7 +1722,23 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
     address, latitude: owned.latitude, longitude: owned.longitude,
     maps_url: calculateMapUrl({ title: '', address, latitude: owned.latitude, longitude: owned.longitude, maps_url: owned.maps_url }),
   } : null
-  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time, image_url: pictures.get(owned.product_id)?.imageUrl ?? null, location }, cancellation }
+  let arrivalGuide: StayArrivalGuide | null = null
+  let houseRules: string[] = []
+  let safety: string[] = []
+  if (stay.status === 'confirmed') {
+    const [{ home }, product] = await Promise.all([
+      readCheckoutStay(db, owned.organization_id, owned.id),
+      getProduct(db, owned.organization_id, owned.product_id),
+    ])
+    if (!product) throw new Error(`Stay ${owned.id} has no product`)
+    const { product_id, check_in_method, check_in_instructions, wifi_network, wifi_password, directions, house_manual, checkout_instructions } = home
+    if (Date.now() < localDateTimeToInstant(stay.check_out_date, home.check_out_time, home.timezone).getTime()) {
+      arrivalGuide = { product_id, check_in_method, check_in_instructions, wifi_network, wifi_password, directions, house_manual, checkout_instructions }
+    }
+    houseRules = stayHouseRuleLines(product.details, value => formatTime(value, 'en'))
+    safety = [...staySafetyLines(product.details), ...stayAlarmLines(home.amenity_answers, product.details, { includeUnknown: true })]
+  }
+  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time, image_url: pictures.get(owned.product_id)?.imageUrl ?? null, location, arrival_guide: arrivalGuide, house_rules: houseRules, safety }, cancellation }
 }
 
 /**
@@ -1954,7 +1970,7 @@ export interface ChannelBooking {
   provider: 'channex'
   external_booking_id: string
   channel_booking_id: string | null
-  channel: (typeof STAY_CHANNELS)[number]
+  channel: StayChannel
   revision_id: string
   provider_updated_at: string
   cancelled: boolean

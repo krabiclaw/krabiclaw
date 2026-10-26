@@ -1,5 +1,6 @@
 import type { CommandPaletteGroup, CommandPaletteItem } from '@nuxt/ui'
 import type { PublicSearchResult } from '~/server/utils/public-search'
+import { dashboardFetch } from '~/composables/dashboardFetch'
 
 interface SearchResponse {
   results: PublicSearchResult[]
@@ -29,20 +30,20 @@ const RESULT_GROUP_LABEL: Partial<Record<PublicSearchResult['type'], string>> = 
  * from the same navigation the Menu shows, filtered in the palette itself.
  */
 export function useDashboardSearch() {
-  const dashboardApi = useDashboardApi()
   const router = useRouter()
-  const dashboard = useDashboardOrganization()
   const menu = useDashboardMenu()
+  const navigation = useOrganizationSettingsNavigation(menu.organization, menu.scopeModel)
   const searchTerm = ref('')
   const loading = ref(false)
   /** Why the last search failed; the palette shows it in place of results. */
-  const error = ref<string | null>(null)
+  const requestError = ref<string | null>(null)
+  const error = computed(() => navigation.error.value ? getErrorMessage(navigation.error.value, 'The Menu could not be loaded.') : requestError.value)
   const results = shallowRef<PaletteGroup[]>([])
 
   // The Menu's rows, for the palette's own filter to work through.
   function navigationGroups(): PaletteGroup[] {
     const groups: PaletteGroup[] = []
-    for (const group of menu.groups.value) {
+    for (const group of navigation.groups.value) {
       const items: CommandPaletteItem[] = []
       for (const item of group.items) {
         const to = item.to
@@ -88,13 +89,11 @@ export function useDashboardSearch() {
     activeController?.abort()
     activeController = null
     const normalized = searchTerm.value.trim()
-    // The business's site: the route's where the route has one, otherwise the
-    // organization's own — the Menu and Messages are organization screens.
-    const organization = dashboard.organization.value
-    if (!normalized || !organization?.subdomain) {
+    const organization = menu.organization.value
+    if (!normalized || !organization) {
       requestSequence += 1
       results.value = []
-      error.value = null
+      requestError.value = null
       loading.value = false
       return
     }
@@ -103,29 +102,35 @@ export function useDashboardSearch() {
     const controller = new AbortController()
     activeController = controller
     loading.value = true
-    error.value = null
+    requestError.value = null
     try {
-      const response = await dashboardApi<SearchResponse>('/api/dashboard/search', {
+      const response = await dashboardFetch<SearchResponse>('/api/dashboard/search', { orgSlug: organization.slug }, {
         signal: controller.signal,
         validate: validateApiShape({ results: 'array' }),
-        query: { q: normalized, organization: organization.subdomain },
+        query: { q: normalized },
       })
-      if (requestId !== requestSequence) return
+      if (requestId !== requestSequence || controller.signal.aborted || menu.organization.value?.id !== organization.id) return
       results.value = groupResults(response.results ?? [])
     } catch (failure) {
       // A search the next keystroke cancelled was replaced, not failed.
-      if (requestId !== requestSequence || controller.signal.aborted) return
+      if (requestId !== requestSequence || controller.signal.aborted || menu.organization.value?.id !== organization.id) return
       results.value = []
-      error.value = getErrorMessage(failure, 'Search failed')
+      requestError.value = getErrorMessage(failure, 'Search failed')
     } finally {
       if (activeController === controller) activeController = null
       if (requestId === requestSequence) loading.value = false
     }
   }
 
-  watch(searchTerm, () => {
+  watch([searchTerm, () => menu.organization.value?.id], ([_term, organizationId], [_previousTerm, previousOrganizationId]) => {
     if (debounceHandle) clearTimeout(debounceHandle)
     activeController?.abort()
+    requestSequence += 1
+    if (organizationId !== previousOrganizationId) {
+      results.value = []
+      requestError.value = null
+      loading.value = false
+    }
     debounceHandle = setTimeout(() => { void runSearch() }, 120)
   })
 
@@ -135,5 +140,5 @@ export function useDashboardSearch() {
     activeController = null
   })
 
-  return { searchTerm, loading, error, groups }
+  return { searchTerm, loading: computed(() => loading.value || navigation.pending.value), error, groups }
 }

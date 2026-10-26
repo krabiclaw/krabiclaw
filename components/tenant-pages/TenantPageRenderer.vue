@@ -26,64 +26,16 @@
         markup below is the presentation. See utils/tenant-page-presentation.ts.
       -->
       <component :is="presentationOf(block)" v-if="presentationOf(block)" :block="block" :page="page" />
-      <!--
-        A picture and the words beside it. It is one block; it used to be three
-        (`story.title`, `story.image`, `story.body`) that this renderer
-        re-assembled at display time, in the alphabetical order of the field
-        names the migration wrote.
-      -->
-      <template v-else-if="block.type === 'media_text'">
-        <div class="my-16 grid max-w-5xl gap-10 md:grid-cols-2 md:items-center">
-          <video
-            v-if="blockMedia(block, 'media')?.kind === 'video'"
-            :src="blockMedia(block, 'media')!.public_url!"
-            :poster="blockMedia(block, 'media')!.thumbnail_url ?? undefined"
-            autoplay muted loop playsinline
-            class="aspect-4/3 w-full object-cover"
-          />
-          <img
-            v-else-if="blockMedia(block, 'media')"
-            :src="blockMedia(block, 'media')!.public_url!"
-            :alt="blockMedia(block, 'media')!.alt_text ?? ''"
-            class="aspect-4/3 w-full object-cover"
-          >
-          <div>
-            <h2 v-if="text(block.data.title)" class="text-3xl font-semibold tracking-tight">{{ text(block.data.title) }}</h2>
-            <p v-if="text(block.data.body)" class="mt-6 whitespace-pre-line leading-8 text-muted">{{ text(block.data.body) }}</p>
-            <TenantPageButton v-if="text(block.data.label) && text(block.data.url)" class="mt-8" :label="text(block.data.label)" :url="text(block.data.url)" />
-          </div>
-        </div>
-      </template>
-
-      <template v-else-if="block.type === 'hero'">
-        <div class="py-12 sm:py-20">
-          <p v-if="text(block.data.eyebrow)" class="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-primary">{{ text(block.data.eyebrow) }}</p>
-          <h1 v-if="text(block.data.title)" class="text-4xl font-bold tracking-tight sm:text-6xl">{{ text(block.data.title) }}</h1>
-          <p v-if="text(block.data.subtitle)" class="mx-auto mt-6 max-w-3xl text-lg leading-8 text-muted">
-            {{ text(block.data.subtitle) }}
-          </p>
-          <TenantPageButton v-if="text(block.data.cta_label) && text(block.data.cta_url)" class="mt-8" :label="text(block.data.cta_label)" :url="text(block.data.cta_url)" />
-          <video
-            v-if="blockMedia(block, 'media')?.kind === 'video'"
-            :src="blockMedia(block, 'media')!.public_url!"
-            :poster="blockMedia(block, 'media')!.thumbnail_url ?? undefined"
-            autoplay muted loop playsinline
-            class="mx-auto mt-10 max-h-[34rem] w-full rounded-3xl object-cover shadow-xl"
-          />
-          <img v-else-if="blockMedia(block, 'media')" :src="blockMedia(block, 'media')!.public_url!" :alt="blockMedia(block, 'media')!.alt_text ?? ''" class="mx-auto mt-10 max-h-[34rem] w-full rounded-3xl object-cover shadow-xl">
-        </div>
-      </template>
-
       <TenantPageRichTextBlock v-else-if="block.type === 'heading' || block.type === 'markdown'" :block="block" />
 
       <template v-else-if="block.type === 'image'">
         <figure v-if="blockMedia(block, 'media')" class="my-12">
-          <video
+          <MediaPreview
             v-if="blockMedia(block, 'media')?.kind === 'video'"
-            :src="blockMedia(block, 'media')!.public_url!"
-            :poster="blockMedia(block, 'media')!.thumbnail_url ?? undefined"
-            autoplay muted loop playsinline
-            class="w-full rounded-2xl object-cover shadow-lg"
+            :item="{ url: blockMedia(block, 'media')!.public_url!, kind: 'video', poster: blockMedia(block, 'media')!.thumbnail_url ?? undefined, alt: blockMedia(block, 'media')!.alt_text ?? undefined }"
+            :fill="false"
+            :controls="reducedMotion === 'reduce'"
+            class="rounded-2xl shadow-lg"
           />
           <img v-else :src="blockMedia(block, 'media')!.public_url!" :alt="blockMedia(block, 'media')!.alt_text ?? ''" class="w-full rounded-2xl object-cover shadow-lg">
           <figcaption v-if="text(block.data.caption)" class="mt-3 text-center text-sm text-muted">{{ text(block.data.caption) }}</figcaption>
@@ -99,13 +51,9 @@
         <p v-if="text(block.data.caption)" class="mb-4 text-center text-sm text-muted">{{ text(block.data.caption) }}</p>
         <div v-if="galleryImages(block).length" class="my-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <figure v-for="image in galleryImages(block)" :key="image.id || image.url">
-            <video
-              v-if="image.kind === 'video'"
-              :src="image.url"
-              :poster="image.thumbnailUrl ?? undefined"
-              autoplay muted loop playsinline
-              class="aspect-[4/3] w-full rounded-2xl object-cover"
-            />
+            <div v-if="image.kind === 'video'" class="aspect-4/3 w-full overflow-hidden rounded-2xl">
+              <MediaPreview :item="{ url: image.url, kind: 'video', poster: image.thumbnailUrl ?? undefined, alt: image.alt }" :controls="reducedMotion === 'reduce'" />
+            </div>
             <img v-else :src="image.url" :alt="image.alt ?? ''" class="aspect-[4/3] w-full rounded-2xl object-cover">
             <figcaption v-if="image.caption" class="mt-2 text-sm text-muted">{{ image.caption }}</figcaption>
           </figure>
@@ -133,28 +81,24 @@
         <section v-if="text(block.data.title) || text(block.data.description) || text(block.data.label)" class="my-12 rounded-3xl bg-elevated p-8 sm:p-12">
           <h2 v-if="text(block.data.title)" class="text-3xl font-semibold">{{ text(block.data.title) }}</h2>
           <p v-if="text(block.data.description)" class="mt-3 max-w-2xl text-muted">{{ text(block.data.description) }}</p>
-          <TenantPageButton v-if="text(block.data.label) && text(block.data.url)" class="mt-6" :label="text(block.data.label)" :url="text(block.data.url)" />
+          <TenantButton v-if="text(block.data.label) && text(block.data.url)" class="mt-6" :to="route(text(block.data.url))">{{ text(block.data.label) }}</TenantButton>
         </section>
       </template>
 
       <template v-else-if="block.type === 'callout'">
         <aside v-if="text(block.data.title) || text(block.data.body)" class="my-10 rounded-2xl border border-primary/30 bg-primary/5 p-6">
           <h2 v-if="text(block.data.title)" class="text-xl font-semibold">{{ text(block.data.title) }}</h2>
-          <div v-if="text(block.data.body)" class="prose mt-2 max-w-none whitespace-pre-wrap text-muted">{{ sanitize(text(block.data.body)) }}</div>
+          <div v-if="text(block.data.body)" class="prose mt-2 max-w-none whitespace-pre-wrap text-muted">{{ text(block.data.body) }}</div>
           <div v-if="buttons(block).length" class="mt-5 flex flex-wrap gap-3">
-            <TenantPageButton v-for="button in buttons(block)" :key="button.url + button.label" :label="button.label" :url="button.url" />
+            <TenantButton v-for="button in buttons(block)" :key="button.url + button.label" :to="route(button.url)">{{ button.label }}</TenantButton>
           </div>
         </aside>
       </template>
 
       <template v-else-if="block.type === 'button_group'">
         <div v-if="buttons(block).length" class="my-8 flex flex-wrap gap-3">
-          <TenantPageButton v-for="button in buttons(block)" :key="button.url + button.label" :label="button.label" :url="button.url" />
+          <TenantButton v-for="button in buttons(block)" :key="button.url + button.label" :to="route(button.url)">{{ button.label }}</TenantButton>
         </div>
-      </template>
-
-      <template v-else-if="block.type === 'feature_grid' && calculatorRows(block).length">
-        <TenantPagePricingCalculator :rows="calculatorRows(block)" :note="calculatorNote(block)" />
       </template>
 
       <template v-else-if="block.type === 'feature_grid' || block.type === 'testimonial_grid' || block.type === 'product_grid' || block.type === 'location_grid' || block.type === 'page_grid'">
@@ -167,7 +111,7 @@
               <h3 v-if="item.title" class="text-lg font-semibold">{{ item.title }}</h3>
               <span v-if="item.featured" class="mt-2 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t('site.posts.featured') }}</span>
               <p v-if="item.description || item.address" class="mt-2 text-sm leading-6 text-muted">{{ item.description }}<br v-if="item.description && item.address">{{ item.address }}</p>
-              <TenantPageButton v-if="item.url && itemLabel(item)" class="mt-4" :label="itemLabel(item)" :url="item.url" />
+              <TenantButton v-if="item.url && itemLabel(item)" class="mt-4" :to="route(item.url)">{{ itemLabel(item) }}</TenantButton>
             </article>
           </div>
           <p v-if="!gridItems(block).length" class="rounded-2xl border border-dashed border-default p-6 text-sm text-muted">This section has no published items yet.</p>
@@ -184,7 +128,7 @@
               <h3 class="text-lg font-semibold">{{ person.name }}</h3>
               <p v-if="person.role" class="text-sm text-muted">{{ person.role }}</p>
               <p v-if="person.bio" class="mt-2 text-sm leading-6 text-muted">{{ person.bio }}</p>
-              <TenantPageButton v-if="person.url" class="mt-4" :label="person.name" :url="person.url" />
+              <TenantButton v-if="person.url" class="mt-4" :to="route(person.url)">{{ person.name }}</TenantButton>
             </article>
           </div>
         </section>
@@ -199,12 +143,12 @@
               <p v-if="item.amount" class="text-3xl font-bold text-primary">{{ item.amount }}</p>
               <h3 class="mt-2 font-semibold">{{ item.title }}</h3>
               <p v-if="item.description" class="mt-2 text-sm text-muted">{{ item.description }}</p>
-              <TenantPageButton v-if="text(block.data.destination) && item.amount" class="mt-5" :label="`Donate ${item.amount}`" :url="text(block.data.destination)" />
+              <TenantButton v-if="text(block.data.destination) && item.amount" class="mt-5" :to="route(text(block.data.destination))">{{ `Donate ${item.amount}` }}</TenantButton>
             </article>
             <article v-if="text(block.data.destination)" class="rounded-2xl border border-default p-6">
               <h3 class="font-semibold">Custom Amount</h3>
               <p class="mt-2 text-sm text-muted">Choose your own donation amount</p>
-              <TenantPageButton class="mt-5" label="Donate custom amount" :url="text(block.data.destination)" />
+              <TenantButton class="mt-5" :to="route(text(block.data.destination))">Donate custom amount</TenantButton>
             </article>
           </div>
           <p v-if="!donationItems(block).length" class="rounded-2xl border border-dashed border-default p-6 text-sm text-muted">Donation choices are not configured.</p>
@@ -221,11 +165,15 @@ import type { TenantPageBlock, TenantPageHowToStep } from '~/utils/tenant-page-b
 import { h, type Component, type FunctionalComponent } from 'vue'
 import type { PublicTemplateSlug } from '~/utils/template-registry'
 import { tenantPageBlockPresentation } from '~/utils/tenant-page-presentation'
-import { overviewProseBlockId } from '~/utils/tenant-page-block-data'
+import { isInternalRoute, overviewProseBlockId } from '~/utils/tenant-page-block-data'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import ContentVideoEmbed from '~/components/content/ContentVideoEmbed.vue'
+import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
+import { usePreferredReducedMotion } from '@vueuse/core'
 
 const props = defineProps<{ page: PublicTenantPage }>()
+provideMediaPreviews(ref(false))
+const reducedMotion = usePreferredReducedMotion()
 
 const { template: resolvedTemplate } = useTenantOrganization().organization
 const template = computed<PublicTemplateSlug>(() => resolvedTemplate.slug)
@@ -234,11 +182,8 @@ const platformHome = computed(() => template.value === 'platform' && props.page.
 function presentationOf(block: TenantPageBlock): Component | null {
   return tenantPageBlockPresentation(template.value, block.type)
 }
-import { loadDomPurify } from '~/utils/dom-purify-loader'
-import { sanitizeHtmlForSsr } from '~/utils/markdown'
-
-const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
-const { t } = useI18n()
+const { t, localePath } = useI18n()
+function route(url: string) { return isInternalRoute(url) ? localePath(url) : url }
 /**
  * The page's blocks, in the order the page carries them — less the one the
  * service overview draws inside its own column, which would otherwise appear
@@ -284,10 +229,6 @@ type GridItem = { id?: string; title?: string; description?: string; address?: s
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function sanitize(value: string): string {
-  return DOMPurify.sanitize(value)
 }
 
 /**
@@ -407,20 +348,6 @@ function donationItems(block: TenantPageBlock): GridItem[] {
 function buttons(block: TenantPageBlock): Array<{ label: string; url: string }> {
   if (!Array.isArray(block.data.buttons)) return []
   return block.data.buttons.filter((button): button is Record<string, unknown> => Boolean(button && typeof button === 'object')).map(button => ({ label: text(button.label), url: text(button.url) })).filter(button => button.label && button.url)
-}
-
-function calculatorRows(block: TenantPageBlock): unknown[][] {
-  const calculator = block.data.calculator
-  if (!calculator || typeof calculator !== 'object' || Array.isArray(calculator)) return []
-  const rows = (calculator as Record<string, unknown>).rows
-  return Array.isArray(rows) ? rows.filter(Array.isArray) as unknown[][] : []
-}
-
-function calculatorNote(block: TenantPageBlock): string | undefined {
-  const calculator = block.data.calculator
-  if (!calculator || typeof calculator !== 'object' || Array.isArray(calculator)) return undefined
-  const note = (calculator as Record<string, unknown>).note
-  return typeof note === 'string' ? note : undefined
 }
 </script>
 

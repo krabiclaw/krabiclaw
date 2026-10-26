@@ -644,7 +644,7 @@ function buildAuth(env: CloudflareEnv) {
         })
       },
       onPasswordReset: async ({ user }) => {
-        console.info('auth_password_reset_complete', { email: user.email })
+        console.info('auth_password_reset_complete', { userId: user.id })
       },
     },
     emailVerification: {

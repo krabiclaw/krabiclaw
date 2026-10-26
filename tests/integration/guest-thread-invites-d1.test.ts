@@ -117,12 +117,16 @@ test('a host invites a phone-only guest into their conversation and replies reac
     const retried = await executeGuestThreadOperation(db, { threadId: deeThread, organizationId: ORG, action: 'reply', body: 'The gate code is 1234.', actorUserId: OWNER, idempotencyKey: 'after-claim', env })
     assert.deepEqual([retried.ok, retried.status], [true, 200])
     assert.equal((await replies()).length, 1)
+    const buyerAlerts = () => db.prepare("SELECT target_user_id, json_extract(payload_json,'$.deep_link') AS destination FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND event_name='guest_thread_event' ORDER BY id").all().then(result => result.results)
+    assert.deepEqual(await buyerAlerts(), [{ target_user_id: 'anon-a', destination: `/dashboard/account/messages/${deeThread}` }])
+
 
     // Signing in links the anonymous identity, stay and all, to the account;
     // its verified email now receives the replies too.
     await db.batch(anonymousLinkQueries('anon-a', 'jane', new Date().toISOString()).map(({ query, params }) => db.prepare(query).bind(...(params ?? []))))
     assert.deepEqual(await holders(deeThread), { request_user: 'jane', stay_user: 'jane' })
     assert.equal((await guestView('jane'))?.id, deeThread)
+    assert.deepEqual(await buyerAlerts(), [{ target_user_id: 'jane', destination: `/dashboard/account/messages/${deeThread}` }])
     const emailed = await executeGuestThreadOperation(db, { threadId: deeThread, organizationId: ORG, action: 'reply', body: 'Check-in is at four.', actorUserId: OWNER, idempotencyKey: 'after-link', env })
     assert.deepEqual([emailed.ok, emailed.status], [true, 200])
     assert.deepEqual((await replies()).at(-1), { channel: 'email', body: 'Check-in is at four.', deliveries: 1 })

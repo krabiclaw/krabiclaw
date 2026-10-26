@@ -143,7 +143,7 @@ function booking(id = 'booking'): ChannelBooking {
 }
 
 test('empty greenfield collections are valid; inquiries mirror into the canonical inbox without invented guest contact or clock', async () => {
-  const { runtime, db, env } = await boot()
+  const { runtime, db, env, productId } = await boot()
   const provider = new Provider(), realFetch = globalThis.fetch
   globalThis.fetch = provider.fetch as typeof fetch
   try {
@@ -154,6 +154,8 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.deepEqual(await backfillChannexMessages(db, env, 'property', ORG), { threads: 1 })
     const rows = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay' })
     assert.equal(rows.length, 1)
+    assert.equal(rows[0]!.productId, productId)
+    assert.equal(rows[0]!.stayChannel, null)
     assert.deepEqual([rows[0]!.guestName, rows[0]!.participantLabel, rows[0]!.replyChannel, rows[0]!.mailbox], [null, 'Conversation supplied by Airbnb', 'airbnb', 'current'])
     const detail = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([detail.operationalRecord, detail.guestEmail, detail.guestPhone], [null, null, null])
@@ -175,9 +177,9 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     assert.equal(response.status, 200)
     const today = await response.json() as TodayFeedPayload
     assert.deepEqual(today.cards.filter(card => card.priority === 'attention').map(card => ({ id: card.id, headline: card.headline, to: card.to, bookingKind: card.bookingKind,
-      stayId: card.stayId, occurrenceAt: card.occurrenceAt, timeZone: card.timeZone, imageIcon: card.imageIcon })), [{
+      stayId: card.stayId, productId: card.productId, occurrenceAt: card.occurrenceAt, timeZone: card.timeZone, imageIcon: card.imageIcon })), [{
       id: `attention:${rows[0]!.id}`, headline: 'Review conversation: Conversation supplied by Airbnb', to: `/dashboard/org/messages/${rows[0]!.id}`,
-      bookingKind: null, stayId: null, occurrenceAt: null, timeZone: null, imageIcon: 'i-lucide-message-circle',
+      bookingKind: null, stayId: null, productId, occurrenceAt: null, timeZone: null, imageIcon: 'i-lucide-message-circle',
     }])
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])

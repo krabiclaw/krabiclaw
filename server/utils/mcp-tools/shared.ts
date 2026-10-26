@@ -28,6 +28,7 @@ export interface McpToolAnnotations {
   openWorldHint: boolean
   destructiveHint: boolean
   idempotentHint?: boolean
+  title?: string
 }
 
 export interface McpToolSecurityScheme {
@@ -89,7 +90,7 @@ export const postalAddressSchema = {
   type: ['object', 'null'],
   properties: {
     regionCode: { type: 'string', pattern: POSTAL_REGION_CODE_PATTERN, description: 'Two-letter uppercase country code, e.g. TH.' },
-    addressLines: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1, pattern: '\\S' }, description: 'Address lines in order, unbounded.' },
+    addressLines: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, description: 'Address lines in order, unbounded.' },
     languageCode: { type: 'string', description: 'BCP-47 tag when the address is written in a specific language.' },
     locality: { type: 'string', description: 'Town or city.' },
     sublocality: { type: 'string', description: 'Neighbourhood or sub-district.' },
@@ -746,7 +747,7 @@ export const organizationListItemObject = {
 // ---
 
 export const organizationIdSchema = {
-  organization_id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.' },
+  organization_id: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.' },
 }
 
 export const MCP_TOOL_RESULT_DESCRIPTION = 'Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.'
@@ -1025,6 +1026,9 @@ export function validateToolAnnotations(name: string, annotations: McpToolAnnota
   }
 }
 
+// Proper nouns and abbreviations in tool names, as the derived title spells them.
+const TOOL_TITLE_WORDS: Record<string, string> = { google: 'Google', ads: 'Ads', qa: 'Q&A' }
+
 export function withToolAnnotations(definition: RawMcpToolDefinition): McpToolDefinition {
   const annotations = TOOL_ANNOTATIONS_BY_NAME.get(definition.name)
   if (!annotations) {
@@ -1032,18 +1036,19 @@ export function withToolAnnotations(definition: RawMcpToolDefinition): McpToolDe
   }
 
   validateToolAnnotations(definition.name, annotations)
-  const action = definition.name.replaceAll('_', ' ')
+  const action = definition.name.split('_').map(word => TOOL_TITLE_WORDS[word] ?? word).join(' ')
+  const title = definition.title?.trim() || action.charAt(0).toUpperCase() + action.slice(1)
 
   return {
     ...definition,
-    title: definition.title?.trim() || action.charAt(0).toUpperCase() + action.slice(1),
+    title,
     inputSchema: { ...definition.inputSchema, additionalProperties: false },
     outputSchema: {
       ...definition.outputSchema,
       description: [definition.outputSchema.description, MCP_TOOL_RESULT_DESCRIPTION].filter(Boolean).join(' '),
     },
     securitySchemes: MCP_TOOL_SECURITY_SCHEMES,
-    annotations,
+    annotations: { title, ...annotations },
   }
 }
 

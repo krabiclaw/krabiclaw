@@ -1,6 +1,7 @@
 import { createReplayableReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { listAgenda, listTodayAgenda } from '../../server/utils/dashboard-agenda.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import type { UpdateProductInput } from '../../server/types/products.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
@@ -32,6 +33,7 @@ import { arrangeProductPhotos, attachMediaPlacement, removeMediaPlacement, setSi
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import { memberAccessPrincipal, resolveMembership } from '../../server/utils/member-access.ts'
 import { stayPhotoRoomName, type StayPhotoRoom } from '../../shared/stay-photos.ts'
+import { agendaToTodayCard } from '../../shared/dashboard-today.ts'
 import { STAY_HOME_ACCESSIBILITY_FEATURES } from '../../shared/stay-accessibility.ts'
 
 const ORG = 'org'
@@ -1120,6 +1122,31 @@ test('members see only the homes they look after and change nothing; a home with
     const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
     const cabinStay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     const lakeStay = await createStay(db, env, manager, { product_id: lake.id, idempotency_key: 'l', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
+    // In-house guests are current work for managers, not extra cleanings for members.
+    const ownerMembership = await resolveMembership(env, { organizationId: ORG, userId: OWNER })
+    const cleanerMembership = await resolveMembership(env, { organizationId: ORG, userId: CLEANER })
+    const ownerToday = (now: string) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership: ownerMembership }, organizationSlug: 'org' }, new Date(now))
+    const cleanerToday = (now: string) => listTodayAgenda(db, { organizationId: ORG }, { principal: { env, membership: cleanerMembership }, organizationSlug: 'org' }, new Date(now))
+    const hosting = await ownerToday('2026-11-02T18:00:00.000Z')
+    assert.deepEqual(hosting.items.map(item => [item.stayId, item.stayMoment]).sort(), [[cabinStay.id, 'current'], [lakeStay.id, 'current']].sort())
+    assert.equal((await cleanerToday('2026-11-02T18:00:00.000Z')).items.length, 0)
+    for (const [now, moment] of [['2026-11-01T18:00:00.000Z', 'arrival'], ['2026-11-03T18:00:00.000Z', 'departure']] as const) {
+      assert.deepEqual((await ownerToday(now)).items.map(item => item.stayMoment), [moment, moment])
+      assert.deepEqual((await cleanerToday(now)).items.map(item => [item.stayId, item.stayMoment]), [[cabinStay.id, moment]])
+    }
+    const hostingCard = agendaToTodayCard(hosting.items.find(item => item.stayId === cabinStay.id)!, { resolvedAt: hosting.resolvedAt })
+    assert.equal(hostingCard.eyebrow, 'Currently hosting')
+    assert.equal(hostingCard.headline, 'Ana is staying with 2 guests')
+    assert.equal(hostingCard.occurrenceAt, null)
+    assert.equal(hostingCard.productId, cabin.id)
+    assert.equal(hostingCard.stayChannel, 'direct')
+    const next = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'next', check_in_date: '2026-11-03', check_out_date: '2026-11-05', ...guest })
+    const turnover = await cleanerToday('2026-11-03T18:00:00.000Z')
+    const departure = turnover.items.find(item => item.stayId === cabinStay.id)!
+    assert.equal(departure.stayMoment, 'turnover')
+    assert.equal(agendaToTodayCard(departure, { resolvedAt: turnover.resolvedAt, assigned: true }).description, 'Cabin · cabin-site · Next guests arrive the same day')
+    await cancelStay(db, env, manager, next.id, { expected_version: next.version })
+    assert.equal((await cleanerToday('2026-11-03T18:00:00.000Z')).items.find(item => item.stayId === cabinStay.id)!.stayMoment, 'departure')
     assert.deepEqual((await listStays(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).map(stay => stay.id), [cabinStay.id])
     assert.deepEqual(await listStays(db, outsider, { from: '2026-11-01', to: '2026-11-30' }), [])
     assert.equal((await getStay(db, cleaner, cabinStay.id)).id, cabinStay.id)
@@ -1134,7 +1161,7 @@ test('members see only the homes they look after and change nothing; a home with
   }
 })
 
-test('a business’s site shows a guest the stay its signed link names, from any browser, and nothing else', { timeout: 120_000 }, async () => {
+test('a business’s site shows a guest the stay its signed link names, from any browser, and nothing else', { timeout: 120_000 }, async (context) => {
   const { runtime, db, env: bindings } = await boot()
   try {
     const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
@@ -1142,6 +1169,9 @@ test('a business’s site shows a guest the stay its signed link names, from any
     const address = { regionCode: 'US', addressLines: ['12 Test Road', 'Apartment 4', 'East building'], languageCode: 'en', locality: 'Boulder', sublocality: 'North Boulder', administrativeArea: 'Colorado', postalCode: '80301' }
     const location = { address, latitude: 40.014984, longitude: -105.270546, maps_url: 'https://maps.google.com/?cid=123456' }
     assert.equal((await updateLocation(db, ORG, 'cabin-site', location, OWNER, env)).status, 200)
+    const guide = { check_in_method: 'lockbox' as const, check_in_instructions: 'Use the garden lockbox.', wifi_network: 'Cabin guests', wifi_password: 'private-cabin-wifi', directions: 'Use the east entrance.', house_manual: 'Keep the gate closed.', checkout_instructions: [{ task: 'return_keys' as const, details: 'Leave keys in the box.' }] }
+    await updateStayHome(env, db, manager, cabin.id, guide)
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { pets_allowed: false, stairs_required: true, stairs_required_details: 'Two steps at the entrance.' } } })
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'site-stay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
     // A manual, pay-on-arrival stay is confirmed before collecting money. Its
     // existing guest invite gives the Better Auth guest their own stay.
@@ -1177,9 +1207,19 @@ test('a business’s site shows a guest the stay its signed link names, from any
     assert.equal(own.status, 200)
     assert.equal(own.headers.get('cache-control'), 'private, no-store')
     const body = await own.json() as GuestStay
-    const { location: guestLocation, ...guestHome } = body.home
+    const { location: guestLocation, arrival_guide: arrivalGuide, house_rules: rules, safety, ...guestHome } = body.home
     assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: guestHome, cancellation: body.cancellation },
       { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: null, dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null }, cancellation: null })
+    assert.deepEqual(arrivalGuide, { product_id: cabin.id, ...guide })
+    const midStay = await listAgenda(db, { buyerUserId: booker.id }, { from: '2026-11-02', to: '2026-11-02', kinds: ['stay'] })
+    assert.deepEqual(midStay.items.map(item => ({ kind: item.kind, title: item.title, requestId: item.requestId, to: item.to, startsAt: item.startsAt, endsAt: item.endsAt })), [
+      { kind: 'stay', title: 'Cabin', requestId: activityId, to: `/dashboard/account/activity/stay/${activityId}`, startsAt: '2026-11-01T23:00:00.000Z', endsAt: '2026-11-04T17:00:00.000Z' },
+    ])
+    assert.deepEqual((await listTodayAgenda(db, { buyerUserId: booker.id }, {}, new Date('2026-11-02T19:00:00.000Z'))).items.map(item => item.to), [`/dashboard/account/activity/stay/${activityId}`])
+    assert.deepEqual((await listAgenda(db, { buyerUserId: otherGuest.id }, { from: '2026-11-02', to: '2026-11-02', kinds: ['stay'] })).items, [])
+
+    assert.deepEqual(rules, ['No pets'])
+    assert.deepEqual(safety, ['Guests must climb stairs\nTwo steps at the entrance.', 'Carbon monoxide alarm not reported', 'Smoke alarm not reported'])
     assert(guestLocation?.maps_url)
     assert.deepEqual({ address: guestLocation.address, latitude: guestLocation.latitude, longitude: guestLocation.longitude }, { address, latitude: 40.014984, longitude: -105.270546 })
     assert.equal(new URL(guestLocation.maps_url).origin, 'https://maps.google.com')
@@ -1195,6 +1235,23 @@ test('a business’s site shows a guest the stay its signed link names, from any
     assert.equal((await read('another-org', link)).status, 404)
     assert.equal((await read(ORG, otherLink)).status, 404)
     assert.equal((await read(ORG)).status, 401)
+    // November checkout is 10 am in Denver (17:00 UTC): a past guest must
+    // not keep reading this home's current access instructions or Wi-Fi.
+    context.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-04T16:59:59.000Z') })
+    try {
+      const beforeCheckout = await read(ORG, link)
+      assert.equal(beforeCheckout.status, 200)
+      assert.deepEqual((await beforeCheckout.json() as GuestStay).home.arrival_guide, { product_id: cabin.id, ...guide })
+      context.mock.timers.setTime(Date.parse('2026-11-04T17:00:00.000Z'))
+      const afterCheckout = await read(ORG, link)
+      assert.equal(afterCheckout.status, 200)
+      const departed = await afterCheckout.json() as GuestStay
+      assert.equal(departed.stay.status, 'confirmed')
+      assert.equal(departed.home.arrival_guide, null)
+      assert(!JSON.stringify(departed).includes(guide.wifi_password))
+      assert(!JSON.stringify(departed).includes(guide.check_in_instructions))
+    } finally { context.mock.timers.reset() }
+
 
     // The mutation response must carry the saved pin on an address-only edit
     // and on clearing just the address, as the focused editor reads it back.
@@ -1245,6 +1302,9 @@ test('a business’s site shows a guest the stay its signed link names, from any
       const pending = await response.json() as GuestStay
       assert.equal(pending.stay.status, 'pending')
       assert.equal(pending.home.location, null)
+      assert.equal(pending.home.arrival_guide, null)
+      assert.deepEqual([pending.home.house_rules, pending.home.safety], [[], []])
+      assert(!JSON.stringify(pending).includes(guide.wifi_password))
       for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(pending).includes(exact))
     }
     await db.prepare("UPDATE stays SET status = 'confirmed' WHERE id = ?").bind(stay.id).run()
@@ -1254,6 +1314,9 @@ test('a business’s site shows a guest the stay its signed link names, from any
       const cancelled = await response.json() as GuestStay
       assert.equal(cancelled.stay.status, 'cancelled')
       assert.equal(cancelled.home.location, null)
+      assert.equal(cancelled.home.arrival_guide, null)
+      assert.deepEqual([cancelled.home.house_rules, cancelled.home.safety], [[], []])
+      assert(!JSON.stringify(cancelled).includes(guide.wifi_password))
       for (const exact of [address.addressLines[0]!, String(location.latitude), String(location.longitude), location.maps_url]) assert(!JSON.stringify(cancelled).includes(exact))
     }
     // The link lasts as a booking's does: thirty days from when the stay was booked.

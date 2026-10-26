@@ -205,7 +205,7 @@ export function guestStayConfirmedMessage(input: GuestStayInput): NotificationMe
       fact('partySize', labels['stay.guests']!, input.guests),
       fact('total', labels['payment.paid']!, input.total),
     ),
-    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: labels['booking.receipt']! } : undefined,
+    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: labels['stay.arrival_guide']! } : undefined,
     secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: [
       ...(input.checkInInstructions ? [{ title: labels['stay.check_in_instructions']!, body: input.checkInInstructions }] : []),

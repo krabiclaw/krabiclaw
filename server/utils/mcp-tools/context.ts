@@ -26,8 +26,8 @@ export const CONTEXT_TOOLS: McpToolDefinition[] = [
       inputSchema: {
         type: 'object',
         properties: {
-          organization_id: { type: 'string', minLength: 1, pattern: '\\S' },
-          location_id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Internal location ID from list_locations or get_workspace_context, within the selected business.' },
+          organization_id: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' },
+          location_id: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Internal location ID from list_locations or get_workspace_context, within the selected business.' },
         },
         anyOf: [{ required: ['organization_id'] }, { required: ['location_id'] }],
         additionalProperties: true,

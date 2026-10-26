@@ -6,9 +6,11 @@ import { publicLocationIsProtected } from '~/shared/location-sharing'
 import { projectPublicLocationReview, publicReviewLocationProtectedSql } from './public-location-privacy.ts'
 
 
-function publicReviewRow(row: Record<string, unknown>, protectedLocation: boolean): Record<string, unknown> & { publication_authorized: boolean; verified: boolean } {
+function publicReviewRow(row: Record<string, unknown>, protectedLocation: boolean, publishedOnly: boolean): Record<string, unknown> & { publication_authorized: boolean; verified: boolean } {
+  // A published review names no internal request or staff account.
+  const { review_request_id: _request, entered_by_user_id: _enteredBy, ...visible } = row
   return {
-    ...projectPublicLocationReview(row, protectedLocation),
+    ...projectPublicLocationReview(publishedOnly ? visible : row, protectedLocation),
     publication_authorized: Boolean(row.publication_authorized),
     verified: row.source === 'direct' && typeof row.review_request_id === 'string' && Boolean(row.review_request_id),
   }
@@ -26,7 +28,7 @@ export async function listOrganizationReviews(db: DbClient, organizationId: stri
     ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC
   `, options.locationId ? [organizationId, options.locationId] : [organizationId])
   return await attachReviewMedia(db, organizationId, rows.map(({ is_stay_location, ...row }) =>
-    publicReviewRow(row, options.publishedOnly === true && publicLocationIsProtected(is_stay_location))))
+    publicReviewRow(row, options.publishedOnly === true && publicLocationIsProtected(is_stay_location), options.publishedOnly === true)))
 }
 
 export async function attachReviewMedia<T extends Record<string, unknown>>(db: DbClient, organizationId: string, reviews: T[]) {

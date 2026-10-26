@@ -167,7 +167,7 @@ export function productDetailsSchema(kind?: ProductKind, localizableOnly = false
     const multiline = field.value_type === 'multi_line_text'
     const text = { type: 'string', minLength: 1,
       maxLength: field.validations.max_length ?? (multiline ? DEFAULT_MULTILINE_MAX_LENGTH : DEFAULT_TEXT_MAX_LENGTH),
-      pattern: multiline ? '\\S' : '^(?=[\\s\\S]*\\S)[^\\r\\n]*$',
+      pattern: multiline ? '^[\\s\\S]*\\S[\\s\\S]*$' : '^(?=[\\s\\S]*\\S)[^\\r\\n]*$',
       ...(field.validations.choices ? { enum: field.validations.choices } : {}),
     }
     const value = { ...(field.value_type === 'list.single_line_text'

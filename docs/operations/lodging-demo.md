@@ -62,7 +62,7 @@ hold on those nights clears it. Staging runs no cron, so nothing else does.
 
 ## Payments setup (once per organization)
 
-Financial approvals are same-origin browser actions, so the script stops before
+Financial setup requires an owner's explicit approval. The script stops before
 publishing until an owner of the organization has done both of these in the
 staging dashboard:
 

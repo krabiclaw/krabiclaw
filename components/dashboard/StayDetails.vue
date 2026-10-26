@@ -18,6 +18,7 @@
       <template v-if="personalScope && home">
         <h2 class="text-2xl font-semibold text-highlighted">{{ home.name }}</h2>
         <p class="mt-1 text-base text-muted">{{ home.organization_name }}</p>
+        <UButton v-if="stay.request_id" :to="`/dashboard/account/messages/${encodeURIComponent(stay.request_id)}`" color="neutral" variant="soft" class="mt-4" :label="t('stay.message_host')" />
       </template>
       <h2 v-else-if="guest.state === 'named'" class="text-2xl font-semibold text-highlighted">{{ guest.name }}</h2>
       <h2 v-else-if="guest.state === 'not-provided'" class="text-2xl font-semibold text-muted">Name not provided by {{ channelName }}</h2>
@@ -36,6 +37,11 @@
         <h2 class="text-xl font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
         <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
         <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('site.experience_detail.open_in_maps')" />
+      </section>
+
+      <section v-if="personalScope && home?.arrival_guide" class="mt-8 border-t border-default pt-8">
+        <h2 class="mb-6 text-xl font-semibold text-highlighted">{{ t('stay.arrival_guide') }}</h2>
+        <StayArrivalGuideView :guide="home.arrival_guide" :rules="home.house_rules" :safety="home.safety" />
       </section>
 
       <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
@@ -68,7 +74,7 @@
       </template>
       <template v-else-if="stay.owner === 'app'">
         <h2 class="mt-8 text-xl font-semibold text-highlighted">Payments</h2>
-        <p class="mt-1 text-sm text-muted">Money you received outside KrabiClaw. Recording it moves no money.</p>
+        <p class="mt-1 text-sm text-muted">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
         <ul v-if="stay.payments.length" class="mt-4 divide-y divide-default border-y border-default">
           <li v-for="payment in stay.payments" :key="payment.id" class="flex items-center gap-4 py-3">
             <span class="min-w-0 flex-1">
@@ -80,7 +86,7 @@
         </ul>
         <p v-else class="mt-4 text-base text-muted">No payments recorded.</p>
 
-        <UForm v-if="manage && stay.status !== 'cancelled'" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
+        <UForm v-if="manage" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
           <div class="grid gap-4 sm:grid-cols-2">
             <UFormField :label="`Amount (${stay.currency})`" name="amount" description="Negative for a refund." required>
               <UInput v-model="draft.amount" inputmode="decimal" class="w-full" />
@@ -106,9 +112,12 @@
 
 <script setup lang="ts">
 import { formatPhone } from '~/utils/phone'
+import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
+import { isGuestStay } from '~/shared/stay-arrival'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
-import type { GuestStay, StayDetail, StayPaymentMethod } from '~/server/domain/stays'
+import type { GuestStay, StayDetail } from '~/server/domain/stays'
+import { STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
@@ -131,8 +140,6 @@ const realtime = useDashboardInvalidations()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
-const isGuestStay = (value: unknown): value is GuestStay => isStay(value) && isRecord((value as Record<string, unknown>).home) && 'cancellation' in value
-  && ((value as GuestStay).home.location === null || isRecord((value as GuestStay).home.location))
 const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : 'dashboard'}-stay:${props.stayId}`, (): Promise<{ stay: StayDetail; manage?: boolean } | GuestStay> => props.personalScope
   ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
   : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isStay }))
@@ -148,10 +155,8 @@ watch(realtime.event, event => {
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 
-const CHANNELS = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'You' } as const
-const METHODS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }
-const methods = Object.entries(METHODS).map(([value, label]) => ({ value, label }))
-const channelName = computed(() => stay.value ? CHANNELS[stay.value.channel] : '')
+const methods = Object.entries(STAY_PAYMENT_METHOD_LABELS).map(([value, label]) => ({ value, label }))
+const channelName = computed(() => stay.value ? stay.value.channel === 'direct' ? 'You' : STAY_CHANNEL_LABELS[stay.value.channel] : '')
 /**
  * Who the stay is for. A stay made here always names its guest, so one without
  * is missing data; a channel may send a stay without a name, which is said as
@@ -185,7 +190,7 @@ function money(minor: number): string {
   if (!isCurrencyCode(currency)) throw new Error(`Unsupported stay currency ${String(currency)}`)
   return `${minor < 0 ? '−' : ''}${formatMinorAmount(Math.abs(minor), currency)}`
 }
-function methodLabel(method: StayPaymentMethod) { return METHODS[method] }
+function methodLabel(method: StayPaymentMethod) { return STAY_PAYMENT_METHOD_LABELS[method] }
 
 const rows = computed(() => {
   const value = stay.value

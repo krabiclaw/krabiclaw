@@ -28,7 +28,8 @@ test('public discovery resolves translations through current publication owners'
     await db.batch(statements.map(statement => db.prepare(statement)))
     for (const id of ['platform', 'tenant', 'other']) {
       // KrabiClaw's own organization is the one running the platform template.
-      await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone) VALUES (?,?,?,?,?,?, 'USD', 'UTC')`)
+      // Public sites: discovery serves only a tenant that finished onboarding.
+      await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone, onboarding_status) VALUES (?,?,?,?,?,?, 'USD', 'UTC', 'active')`)
         .bind(id, id, id, id, id === 'platform' ? 'krabiclaw-theme-v1' : 'tenant-theme-v1', id === 'platform' ? 'service' : 'restaurant').run()
       for (const locale of ['en', 'th']) await db.prepare('INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,?,?,?)')
         .bind(id + locale, id, locale, Number(locale === 'en'), 'published').run()
@@ -94,6 +95,14 @@ test('public discovery resolves translations through current publication owners'
     // Complete built-in routes derive their localized paths; authored pages still
     // require a published representation. The collector stores the actual visit.
     const identityInput = { organizationId: 'tenant', requestedLocale: null, themeId: 'tenant-theme-v1', vertical: 'restaurant' }
+    const officeInput = { ...identityInput, vertical: 'service' }
+    assert.deepEqual(await resolvePublicPageIdentity(env, createDb(db), { ...officeInput, pagePath: '/locations/branch' }), {
+      publicPath: '/locations/branch', sourcePath: '/locations/branch', locale: 'en', locationId: 'branch',
+      pageId: null, documentId: null, pageType: null, recipe: null, productId: null,
+    })
+    for (const path of ['/locations/hidden', '/locations/foreign', '/locations/missing']) {
+      assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...officeInput, pagePath: path }), null, path)
+    }
     for (const path of ['/th/menu', '/th/experiences', '/th/contact', '/th/reservations']) {
       const identity = await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: path })
       assert(identity, path)

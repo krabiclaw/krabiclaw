@@ -66,12 +66,13 @@ const { data, error } = await useAsyncData(
   () => `earnings-paid:${route.params.orgSlug}:${after.value ?? ''}`,
   async () => {
     const page = await api<PayoutsView>('/api/dashboard/payments', { query: { view: 'payouts', ...(after.value ? { after: after.value } : {}) }, validate: isPayoutsView })
-    // Pages accumulate, as Airbnb's "Show more" does.
-    loaded.value = after.value ? [...loaded.value, ...page.payouts] : page.payouts
     return page
   },
   { watch: [after] },
 )
+// Pages accumulate, as Airbnb's "Show more" does. Watched rather than written in
+// the handler, which does not run again when the server-rendered page hydrates.
+watch(data, (page) => { if (page) loaded.value = after.value ? [...loaded.value, ...page.payouts] : page.payouts }, { immediate: true })
 const upcoming = computed(() => loaded.value.filter(row => row.status === 'pending' || row.status === 'in_transit'))
 const paid = computed(() => loaded.value.filter(row => row.status === 'paid'))
 const total = computed(() => {

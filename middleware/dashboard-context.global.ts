@@ -14,6 +14,6 @@ export default defineNuxtRouteMiddleware(async (to, from) => {
   // Entering an organization fetches its context afresh rather than showing
   // what an earlier visit loaded; moving within it keeps what is held.
   const entering = useDashboardRouteScope(from).value?.orgSlug !== scope.orgSlug
-  if (entering && context.status.value === 'success') await context.refresh()
+  if (entering && context.status.value !== 'pending') await context.refresh()
   else await context
 })

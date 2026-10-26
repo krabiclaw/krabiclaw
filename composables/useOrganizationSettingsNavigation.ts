@@ -1,7 +1,7 @@
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
+import type { DashboardScopeHeaderModel } from '~/lib/components/workspace/dashboard/DashboardScopeHeader.vue'
 import { authClient } from '~/lib/auth-client'
 import { canOpenPlatformAccounts, canOpenPlatformReports } from '~/utils/platform-admin-access'
-import type { organizationRoles } from '~/utils/organization-access'
 
 // The rows on Menu. Menu is a launcher: every row is a destination of its own
 // — Website, Posts, Locations, Team, Plan and billing — or an action, with no headings. The Menu
@@ -11,13 +11,45 @@ import type { organizationRoles } from '~/utils/organization-access'
 // The organization is the shell's (useDashboardMenu): the route's, otherwise
 // Better Auth's active one, so Account settings opened from inside an
 // organization keeps that organization's Menu.
-export function useOrganizationSettingsNavigation(organization: Ref<{ id: string; slug: string } | null>) {
+export function useOrganizationSettingsNavigation(
+  organization: Ref<{ id: string; slug: string } | null>,
+  scopeModel: Readonly<Ref<DashboardScopeHeaderModel | null>>,
+) {
   const route = useRoute()
   const router = useRouter()
   const dashboard = useDashboardOrganization()
   const session = authClient.useSession()
 
   const base = computed(() => organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : null)
+
+  // Menu and Search share these exact organization checks. Personal has no
+  // organization permissions to read; no active-member role query is needed.
+  // The loaded context's role is part of the key, so a role change (a
+  // self-demotion on Team refreshes it) asks Better Auth again.
+  const contextRole = computed(() => dashboard.organization.value?.id === organization.value?.id ? dashboard.organization.value?.role ?? '' : '')
+  const permissionLoad = useAsyncData(
+    () => `menu-organization:${session.value.data?.user.id ?? ''}:${organization.value?.id ?? ''}:${contextRole.value}`,
+    async (_app, { signal }) => {
+      const target = organization.value
+      const userId = session.value.data?.user.id
+      if (!target || !userId) return null
+      const [payments, billing, team] = await Promise.all([
+        authClient.organization.hasPermission({ organizationId: target.id, permissions: { payments: ['read'] }, fetchOptions: { signal } }),
+        authClient.organization.hasPermission({ organizationId: target.id, permissions: { billing: ['read'] }, fetchOptions: { signal } }),
+        authClient.organization.hasPermission({ organizationId: target.id, permissions: { members: ['read'] }, fetchOptions: { signal } }),
+      ])
+      signal.throwIfAborted()
+      for (const permission of [payments, billing, team]) {
+        if (permission.error) throw new Error(permission.error.message || 'Your permissions could not be checked.')
+      }
+      return { organizationId: target.id, userId, payments: payments.data!.success, billing: billing.data!.success, team: team.data!.success }
+    },
+    { enabled: () => Boolean(organization.value && session.value.data?.user.id), dedupe: 'defer' },
+  )
+  const permissions = computed(() => {
+    const loaded = permissionLoad.data.value
+    return loaded && loaded.organizationId === organization.value?.id && loaded.userId === session.value.data?.user.id ? loaded : null
+  })
 
   /**
    * Every account on the platform, and impersonation: KrabiClaw runs on
@@ -35,28 +67,28 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
     return Boolean(loaded && canOpenPlatformReports(loaded, (session.value.data?.user as { role?: string | null } | undefined)?.role))
   })
 
-  /**
-   * Plan and billing is read by owners and admins, by Better Auth's billing
-   * permission: the routed organization's role, otherwise the active member's,
-   * since the shell outside an organization's routes is the active one.
-   */
-  const activeMemberRole = authClient.useActiveMemberRole()
-  const memberRole = computed(() => {
-    const routed = dashboard.organization.value
-    return routed && routed.id === organization.value?.id ? routed.role : activeMemberRole.value.data?.role
+  // Airbnb's "Switch to hosting": one organization switches straight to it;
+  // several open the list under Account settings; none offers to start one.
+  const switchRow = computed(() => {
+    const organizations = (scopeModel.value?.peers ?? []).filter(peer => peer.id)
+    if (organizations.length === 1) return organizations[0]!.to ? { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, to: organizations[0]!.to } : { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, action: {} }
+    if (organizations.length > 1) return { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: 'Switch to an organization', to: '/dashboard/account/profile/organizations' }
+    return { id: 'switch-organization', icon: 'i-lucide-plus', label: 'New organization', to: '/dashboard/onboarding' }
   })
-  const showBilling = computed(() => Boolean(memberRole.value) && authClient.organization.checkRolePermission({ role: memberRole.value as keyof typeof organizationRoles, permissions: { billing: ['read'] } }))
-  const showTeam = computed(() => Boolean(memberRole.value) && authClient.organization.checkRolePermission({ role: memberRole.value as keyof typeof organizationRoles, permissions: { members: ['read'] } }))
 
   const items = computed(() => {
-    if (!base.value) return []
+    if (!base.value) return [
+      { id: 'account', icon: 'i-lucide-user-round-cog', label: 'Account settings', to: '/dashboard/account/profile' },
+      switchRow.value,
+      { id: 'log-out', icon: 'i-lucide-log-out', label: 'Log out', action: {} },
+    ]
     return [
       { id: 'website', icon: 'i-lucide-panels-top-left', label: 'Website', to: `${base.value}/website` },
       { id: 'locations', icon: 'i-lucide-map-pin', label: dashboard.organization.value?.vertical === 'service' ? 'Offices' : 'Locations', to: `${base.value}/locations` },
-      ...(showTeam.value ? [{ id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` }] : []),
+      ...(permissions.value?.team ? [{ id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` }] : []),
       { id: 'integrations', icon: 'i-lucide-plug', label: 'Integrations', to: `${base.value}/integrations` },
       // What the organization pays KrabiClaw. Owners change it and admins read it; members have no row.
-      ...(showBilling.value ? [{ id: 'billing', icon: 'i-lucide-receipt', label: 'Plan and billing', to: `${base.value}/billing` }] : []),
+      ...(permissions.value?.billing ? [{ id: 'billing', icon: 'i-lucide-receipt', label: 'Plan and billing', to: `${base.value}/billing` }] : []),
       // "Team" is this organization's members; this is every account there is.
       ...(showPlatformAccounts.value
         ? [{ id: 'platform-accounts', icon: 'i-lucide-shield-user', label: 'Platform accounts', to: `${base.value}/platform-accounts` }]
@@ -75,7 +107,7 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
     ]
   })
 
-  const groups = computed<EditorNavigationGroup[]>(() => [{ id: 'organization', items: items.value }])
+  const groups = computed<EditorNavigationGroup[]>(() => [{ id: organization.value ? 'organization' : 'account', items: items.value }])
 
   /** The row whose destination is open, for the slideover's current row. */
   const activeItem = computed(() => {
@@ -83,5 +115,5 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
     return items.value.find(item => item.to && open.has(item.to))?.id ?? null
   })
 
-  return { groups, activeItem }
+  return { groups, activeItem, permissions, error: permissionLoad.error, pending: permissionLoad.pending, ready: permissionLoad }
 }

@@ -11,6 +11,7 @@
   >
     <template #right>
       <div class="flex items-center gap-1">
+        <UButton v-if="!personalScope && !sessionProduct && canCreateStay" label="Add stay" icon="i-lucide-plus" :to="`/dashboard/${route.params.orgSlug}/bookings/stay/new`" :disabled="Boolean(level.child.value)" />
         <UButton v-if="sessionProduct && !providerHours && canCreate" label="Add availability" icon="i-lucide-plus" :to="addAvailabilityTo" :disabled="Boolean(level.child.value)" />
         <UButton v-else-if="providerHours && sessionProduct?.booking" label="Bookable times" icon="i-lucide-clock" :to="sessionProduct.booking.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${sessionProduct.booking.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team`" />
         <UButton
@@ -291,6 +292,7 @@ const props = defineProps<{
   sessionLocations?: DashboardLocation[]
   offeringItems?: { label: string; value: string }[]
   offeringsError?: string
+  canCreateStay?: boolean
 }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.
@@ -520,7 +522,17 @@ async function resetMonths(): Promise<void> {
 const itemsByDay = computed(() => {
   const groups = new Map<string, CalendarItem[]>()
   for (const block of monthData.value.values()) {
-    for (const item of block.items) groups.set(item.dayKey, [...(groups.get(item.dayKey) ?? []), item])
+    for (const item of block.items) {
+      const days = [item.dayKey]
+      if (item.kind === 'stay' && item.endsAt) {
+        const last = localNow(item.timeZone, new Date(item.endsAt)).date
+        for (let day = parseDate(item.dayKey).add({ days: 1 }); day.toString() <= last; day = day.add({ days: 1 })) days.push(day.toString())
+      }
+      for (const day of days) {
+        const rows = groups.get(day) ?? []
+        if (!rows.some(row => row.id === item.id)) groups.set(day, [...rows, item])
+      }
+    }
   }
   return groups
 })

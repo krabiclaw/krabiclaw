@@ -44,5 +44,5 @@ export function teamThreadName(thread: TeamThread, userId: string | undefined) {
 export async function useTeamThreads() {
   const dashboard = useDashboardOrganization()
   const api = useDashboardApi()
-  return useAsyncData(`team-threads:${dashboard.organizationId.value}`, () => api('/api/dashboard/team/threads', { validate: isTeamThreadsResponse }))
+  return useAsyncData(() => `team-threads:${dashboard.organizationId.value}`, () => api('/api/dashboard/team/threads', { validate: isTeamThreadsResponse }))
 }

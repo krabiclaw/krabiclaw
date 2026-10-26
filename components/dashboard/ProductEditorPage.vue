@@ -177,43 +177,7 @@
               <div><dt class="text-sm text-muted">Checkout by</dt><dd class="mt-1 text-base text-highlighted">{{ product?.stay?.check_out_time }}</dd></div>
             </dl>
           </section>
-          <section v-if="arrivalHome.directions">
-            <h2 class="text-xl font-medium text-highlighted">Directions</h2>
-            <p class="mt-3 whitespace-pre-wrap break-words text-base text-muted">{{ arrivalHome.directions }}</p>
-          </section>
-          <section v-if="arrivalHome.check_in_method || arrivalHome.check_in_instructions">
-            <h2 class="text-xl font-medium text-highlighted">Check-in method</h2>
-            <p v-if="arrivalHome.check_in_method" class="mt-3 text-base text-muted">{{ STAY_CHECK_IN_METHODS[arrivalHome.check_in_method].label }}</p>
-            <p v-if="arrivalHome.check_in_instructions" class="mt-3 whitespace-pre-wrap break-words text-base text-muted">{{ arrivalHome.check_in_instructions }}</p>
-          </section>
-          <section v-if="arrivalHome.wifi_network || arrivalHome.wifi_password">
-            <h2 class="text-xl font-medium text-highlighted">Wifi details</h2>
-            <dl class="mt-4 space-y-4">
-              <div v-if="arrivalHome.wifi_network"><dt class="text-sm text-muted">Wifi network</dt><dd class="mt-1 whitespace-pre-wrap break-words text-base text-highlighted">{{ arrivalHome.wifi_network }}</dd></div>
-              <div v-if="arrivalHome.wifi_password"><dt class="text-sm text-muted">Wifi password</dt><dd class="mt-1 whitespace-pre-wrap break-words text-base text-highlighted">{{ arrivalHome.wifi_password }}</dd></div>
-            </dl>
-          </section>
-          <section v-if="arrivalHome.house_manual">
-            <h2 class="text-xl font-medium text-highlighted">House manual</h2>
-            <p class="mt-3 whitespace-pre-wrap break-words text-base text-muted">{{ arrivalHome.house_manual }}</p>
-          </section>
-          <section v-if="savedHouseRules.length">
-            <h2 class="text-xl font-medium text-highlighted">House rules</h2>
-            <ul class="mt-3 space-y-3 text-base text-muted"><li v-for="(line, index) in savedHouseRules" :key="index" class="whitespace-pre-wrap break-words">{{ line }}</li></ul>
-          </section>
-          <section v-if="arrivalSafety.length">
-            <h2 class="text-xl font-medium text-highlighted">Safety &amp; property</h2>
-            <ul class="mt-3 space-y-3 text-base text-muted"><li v-for="(line, index) in arrivalSafety" :key="index" class="whitespace-pre-wrap break-words">{{ line }}</li></ul>
-          </section>
-          <section v-if="arrivalHome.checkout_instructions.length">
-            <h2 class="text-xl font-medium text-highlighted">Checkout instructions</h2>
-            <ul class="mt-4 space-y-6">
-              <li v-for="instruction in arrivalHome.checkout_instructions" :key="instruction.task" class="flex gap-4">
-                <UIcon :name="STAY_CHECKOUT_TASKS[instruction.task].icon" class="mt-0.5 size-6 shrink-0 text-highlighted" aria-hidden="true" />
-                <div><h3 class="text-base font-medium text-highlighted">{{ STAY_CHECKOUT_TASKS[instruction.task].label }}</h3><p v-if="instruction.details" class="mt-1 whitespace-pre-wrap break-words text-base text-muted">{{ instruction.details }}</p></div>
-              </li>
-            </ul>
-          </section>
+          <StayArrivalGuideView :guide="arrivalHome" :rules="savedHouseRules" :safety="arrivalSafety" />
         </div>
       </div>
     </template>
@@ -447,6 +411,7 @@ import { useHomesQuote } from '~/composables/usePaymentsSettings'
 import { formatPostalAddress } from '~/utils/postal-address'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { ApiClientError } from '~/utils/api-clients'
+import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
 import { isStayArrivalGuide, stayCheckInWindow } from '~/shared/stay-arrival'
 import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct } from '~/utils/product-presentation'
@@ -470,7 +435,6 @@ import {
   STAY_CANCELLATION_POLICIES,
   STAY_LONG_TERM_CANCELLATION_POLICIES,
   STAY_CHECK_IN_METHODS,
-  STAY_CHECKOUT_TASKS,
   isStayPropertyType,
 } from '~/shared/stay-listing'
 

@@ -17,19 +17,20 @@
 
       <!-- Full-bleed location hero -->
       <section class="relative min-h-160 overflow-hidden">
-        <video
-          v-if="heroMedia.isVideo"
-          :src="heroMedia.url ?? undefined"
-          autoplay
-          muted
-          loop
-          playsinline
-          class="absolute inset-0 h-full w-full object-cover opacity-50"
-        />
-        <div
+        <div v-if="heroMedia.isVideo && heroMedia.url" class="absolute inset-0 opacity-50">
+          <MediaPreview
+            :item="{ url: heroMedia.url, kind: 'video', poster: heroMedia.thumb || undefined }"
+            :show-play-indicator="false"
+            aria-hidden="true"
+          />
+        </div>
+        <img
           v-else-if="heroMedia.url"
-          class="absolute inset-0 bg-cover bg-center opacity-50"
-          :style="heroBackgroundStyle"
+          :src="heroMedia.url"
+          alt=""
+          aria-hidden="true"
+          fetchpriority="high"
+          class="absolute inset-0 size-full object-cover object-center opacity-50"
         />
         <!-- No real photo yet: same action-color + icon treatment as the homepage
              hero (TenantHeroBlock.vue) — not a stock photo that isn't actually theirs. -->
@@ -223,11 +224,10 @@
               class="block overflow-hidden border border-inverted/10 bg-inverted/5 no-underline transition hover:border-inverted/20"
             >
               <div class="aspect-video overflow-hidden bg-inverted/10">
-                <video
+                <MediaPreview
                   v-if="locationMedia(loc)?.public_url && locationMedia(loc)?.kind === 'video'"
-                  :src="locationMedia(loc)?.public_url"
-                  class="h-full w-full object-contain"
-                  autoplay muted loop playsinline
+                  :item="{ url: String(locationMedia(loc)!.public_url), kind: 'video', poster: String(locationMedia(loc)!.thumbnail_url || ''), alt: String(loc.title) }"
+                  fit="contain"
                 />
                 <img
                   v-else-if="locationMedia(loc)?.public_url"
@@ -289,11 +289,13 @@ import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { loadDomPurify } from '~/utils/dom-purify-loader'
 import { sanitizeHtmlForSsr } from '~/utils/markdown'
+import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
 
 const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 
 const { resolveMedia } = useMedia()
 definePageMeta({ layout: 'tenant' })
+provideMediaPreviews(ref(false))
 
 const route = useRoute()
 const { organization } = useTenantOrganization()
@@ -369,31 +371,6 @@ const reviewsPreview = computed(() => locationReviews.value.slice(0, 3))
 
 // Neutral default until the owner picks a brand color in onboarding.
 const locationHeroIcon = computed(() => (organization as ApiValue)?.vertical === 'experience' ? 'sparkles' : 'map-pin')
-
-// Sanitize hero background URL to prevent CSS injection
-const heroBackgroundStyle = computed(() => {
-  const raw = String(heroMedia.value?.url || '').trim()
-  if (!raw) return {}
-
-  let safeHref = ''
-  try {
-    if (raw.startsWith('/')) {
-      safeHref = encodeURI(raw)
-    } else {
-      const parsed = new URL(raw)
-      if (!['http:', 'https:'].includes(parsed.protocol)) return {}
-      safeHref = encodeURI(parsed.href)
-    }
-  } catch {
-    return {}
-  }
-
-  if (/["'\\);]/.test(safeHref) || safeHref.includes('/*') || safeHref.includes('*/')) {
-    return {}
-  }
-
-  return { backgroundImage: `url("${safeHref}")` }
-})
 
 // Every other product surface refuses to render rather than quote a price in a
 // currency nobody set. This page used to degrade to null instead, which showed
@@ -476,8 +453,7 @@ const heroMedia = computed(() => {
   if (contentHero.value.image) return resolveMedia({ public_url: contentHero.value.image, kind: contentHero.value.imageKind || 'image' })
   return resolveMedia(location.value ? locationMedia(location.value as ApiRecord) : null)
 })
-// The full-bleed hero is this route's LCP element when it is an image.
-useHeroLcpPreload(computed(() => heroMedia.value.isVideo ? null : (heroMedia.value.url ?? null)))
+useHeroLcpPreload(computed(() => heroMedia.value.thumb))
 
 const locationSocialCard = computed(() => location.value?.social_image ?? null)
 const heroTitle = computed(() => contentHero.value.title || null)

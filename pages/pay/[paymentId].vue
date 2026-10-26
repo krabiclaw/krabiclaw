@@ -20,7 +20,7 @@
         <h1 class="text-2xl sm:text-[32px] font-semibold tracking-tight text-highlighted">{{ t('payment.title') }}</h1>
       </div>
 
-      <USkeleton v-if="status === 'idle' || status === 'pending'" class="h-64 w-full rounded-2xl" />
+      <USkeleton v-if="status === 'pending' || (status === 'idle' && !(mounted && !claim))" class="h-64 w-full rounded-2xl" />
       <UAlert v-else-if="loadError" color="error" :title="t('payment.unavailable')" :description="loadError" />
       <!-- Airbnb's Confirm and pay: the method and the one button on the left, what is being bought on the right. -->
       <div v-else-if="handoff" class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16 items-start">
@@ -29,10 +29,17 @@
             <img v-if="handoff.image_url" :src="handoff.image_url" alt="" class="size-24 shrink-0 rounded-xl object-cover">
             <h2 class="min-w-0 text-lg font-semibold leading-snug text-highlighted">{{ handoff.title }}</h2>
           </div>
-          <p v-if="policySummary" class="text-sm text-default">
-            <span class="line-clamp-3">{{ policySummary }}</span>
-            <NuxtLink v-if="termsPath" :to="termsPath" class="font-semibold underline">{{ t('payment.full_policy') }}</NuxtLink>
-          </p>
+          <section v-if="policySummary" id="booking-policy" class="scroll-mt-8 text-sm text-default">
+            <p>
+              <span :class="handoff.stay ? undefined : 'line-clamp-3'">{{ policySummary }}</span>
+              <NuxtLink v-if="termsPath && !handoff.stay" :to="termsPath" class="font-semibold underline">{{ t('payment.full_policy') }}</NuxtLink>
+            </p>
+            <details v-if="stayPolicy" class="mt-2">
+              <summary class="cursor-pointer font-semibold underline">{{ t('payment.full_policy') }}</summary>
+              <ul class="mt-2 list-disc space-y-1 pl-5"><li v-for="term in stayPolicy.terms" :key="term">{{ term }}</li></ul>
+              <p v-if="'detail' in stayPolicy" class="mt-2">{{ stayPolicy.detail }}</p>
+            </details>
+          </section>
 
           <!-- Airbnb's Change goes back to what was picked; here that is the offering's own page. -->
           <div v-if="handoff.stay" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-stay>
@@ -138,6 +145,7 @@
 </template>
 
 <script setup lang="ts">
+import { useMounted } from '@vueuse/core'
 import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement, type StripePaymentMethodMessagingElementOptions } from '@stripe/stripe-js'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { ProductKind } from '~/shared/product-details'
@@ -171,6 +179,8 @@ const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && 
   || ((value.kind === 'booking' || value.kind === 'reservation') && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
 
 const { data: handoff, status, error } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) })
+// The fragment never reaches the server, so a missing claim is known only once mounted.
+const mounted = useMounted()
 const loadError = computed(() => !claim.value ? t('payment.unavailable') : error.value ? getErrorMessage(error.value, t('payment.unavailable')) : '')
 useSocialMetadata(() => ({ path: route.path, title: t('payment.title'), description: t('payment.title'), socialImage: null, discoverability: 'private' }))
 
@@ -209,10 +219,11 @@ const guests = computed(() => {
   if (value.stay) return guestsLabel(value.stay.adults + value.stay.children)
   return value.kind === 'experience' || value.kind === 'reservation' ? guestsLabel(value.quantity) : ''
 })
-const policySummary = computed(() => {
+const stayPolicy = computed(() => {
   const policy = handoff.value?.stay?.cancellation_policy
-  return policy ? bookedPolicyTerms(policy).summary : handoff.value?.cancellation_policy ?? ''
+  return policy ? bookedPolicyTerms(policy) : null
 })
+const policySummary = computed(() => stayPolicy.value?.summary ?? handoff.value?.cancellation_policy ?? '')
 // The offering's own page: where its full terms are stated and what was picked can be changed.
 const offeringPath = computed(() => {
   const value = handoff.value
@@ -221,8 +232,8 @@ const offeringPath = computed(() => {
   if (value.kind !== 'experience' && value.kind !== 'stay' && !value.location_slug) return ''
   return localePath(presentationForProduct({ kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
 })
-// A stay's booked policy is always among its things to know; any other offering states its terms on its page.
-const termsPath = computed(() => !offeringPath.value ? '' : handoff.value?.stay ? `${offeringPath.value}#things-to-know` : offeringPath.value)
+// A stay's accepted policy is shown here; other offerings state their terms on their page.
+const termsPath = computed(() => handoff.value?.stay ? '#booking-policy' : offeringPath.value)
 
 // Airbnb's "Choose when to pay": now with any method, or later with the method that pays in installments.
 const LATER_TYPES = ['klarna', 'affirm', 'afterpay_clearpay']

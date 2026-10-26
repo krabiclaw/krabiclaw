@@ -7,12 +7,15 @@
   -->
   <PlatformPricingComparison v-if="isComparison" :block="block" />
   <PlatformPlansSection v-else-if="isPlans" :block="block" :page="page" />
-  <section v-else-if="page.recipe === 'products'" class="kc-product-more" :class="{ 'kc-product-more--lodging': page.path === '/lodging' || page.path.startsWith('/lodging/') }" data-parity-section="product-more">
+  <section v-else-if="page.recipe === 'products'" class="kc-product-more" :class="{ 'kc-product-more--columns': block.data.layout === 'columns', 'kc-product-more--strip': block.data.layout === 'strip' }" data-parity-section="product-more">
     <div class="kc-product-more__inner">
-      <h2 v-if="title">{{ title }}</h2>
+      <div v-if="title || (ctaLabel && ctaUrl)" class="kc-product-more__heading">
+        <h2 v-if="title">{{ title }}</h2>
+        <NuxtLink v-if="ctaLabel && ctaUrl" :to="route(ctaUrl)" class="kc-product-link">{{ ctaLabel }} <span aria-hidden="true">↗</span></NuxtLink>
+      </div>
       <div class="kc-product-more__columns" :style="{ '--kc-columns': String(Math.min(items.length, 3)) }">
         <div v-for="item in items" :key="item.title">
-          <Icon v-if="item.icon.startsWith('simple-icons:')" :name="item.icon" class="kc-product-more__mark" aria-hidden="true" />
+          <Icon v-if="item.icon.includes(':')" :name="item.icon" class="kc-product-more__mark" aria-hidden="true" />
           <h3>{{ item.title }}</h3>
           <p>{{ item.description }}</p>
           <NuxtLink v-if="item.url && item.linkLabel" :to="route(item.url)" class="kc-product-link">{{ item.linkLabel }} <span aria-hidden="true">↗</span></NuxtLink>
@@ -108,7 +111,7 @@
       </div>
       <div v-if="item.url && item.linkLabel" class="pt-4 border-t border-default/50">
         <NuxtLink
-          :to="item.url"
+          :to="route(item.url)"
           class="inline-flex items-center gap-1 text-[13px] font-semibold text-primary hover:text-primary/80 transition-colors no-underline group/link"
         >
           {{ item.linkLabel }}
@@ -286,21 +289,37 @@ const variant = computed<'home' | 'detailed' | 'vertical' | 'pictures'>(() => {
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-.kc-product-more--lodging { background: #f6f4ef; color: #171920; padding: clamp(5rem, 10vw, 9rem) 0; }
-.kc-product-more--lodging .kc-product-more__inner { width: min(86%, 75rem); }
-.kc-product-more--lodging h2 { font-size: clamp(2.6rem, 4.6vw, 4.5rem); font-weight: 600; letter-spacing: -.045em; line-height: 1.02; white-space: pre-line; color: inherit; max-width: 45rem; margin-bottom: 3.5rem; }
-.kc-product-more--lodging .kc-product-more__columns > div { border: 0; padding: 0; }
-.kc-product-more--lodging h3 { font-size: clamp(1.3rem, 2vw, 1.8rem); }
-.kc-product-more--lodging p { color: #606168; font-size: 1.05rem; }
-.kc-product-more--lodging .kc-product-link { color: #b64436; }
-
+.kc-product-more--columns, .kc-product-more--strip { background: #f6f4ef; color: #171920; padding: clamp(3rem, 5.5vw, 5.5rem) 0; }
+.kc-product-more--columns .kc-product-more__inner, .kc-product-more--strip .kc-product-more__inner { width: min(calc(100% - 3rem), 75rem); }
+.kc-product-more--columns .kc-product-more__inner { display: grid; grid-template-columns: .9fr 1.6fr; gap: 3rem; align-items: center; }
+.kc-product-more--columns h2 { font-size: clamp(2rem, 3vw, 3rem); font-weight: 600; letter-spacing: -.045em; line-height: 1.1; white-space: pre-line; color: inherit; margin: 0; }
+.kc-product-more--columns .kc-product-more__columns { gap: 1.5rem; }
+.kc-product-more--columns .kc-product-more__columns > div { border-top: 0; border-left: 1px solid #d8d7d3; padding: 0 0 0 1.5rem; }
+.kc-product-more--columns h3 { font-size: 1.1rem; letter-spacing: -.02em; }
+.kc-product-more--columns p { color: #606168; font-size: .95rem; line-height: 1.5; margin: .75rem 0 0; }
+.kc-product-more--columns .kc-product-link { color: #b64436; font-size: 1rem; margin-top: 1.5rem; }
+.kc-product-more--columns .kc-product-more__mark { width: 2rem; height: 2rem; color: #252c47; margin-bottom: 1.25rem; }
+.kc-product-more--strip { padding: 2rem 0; }
+.kc-product-more--strip .kc-product-more__columns { gap: 2rem; }
+.kc-product-more--strip .kc-product-more__columns > div { border: 0; padding: 0; display: grid; grid-template-columns: auto 1fr; column-gap: 1rem; align-items: center; }
+.kc-product-more--strip .kc-product-more__columns > div + div { border-left: 1px solid #d8d7d3; padding-left: 2rem; }
+.kc-product-more--strip .kc-product-more__mark { grid-row: 1 / 3; margin: 0; color: #db4f40; }
+.kc-product-more--strip h3, .kc-product-more--strip p { grid-column: 2; }
+.kc-product-more--strip h3 { font-size: 1.15rem; letter-spacing: -.02em; }
+.kc-product-more--strip p { font-size: .8rem; color: #606168; margin: .25rem 0 0; line-height: 1.5; }
+@media (max-width: 1100px) {
+  .kc-product-more--columns .kc-product-more__inner { grid-template-columns: 1fr; }
+}
 .kc-picture-cards__cta:hover {
   background: var(--ui-text-highlighted);
   color: var(--ui-bg);
 }
 
 @media (max-width: 767px) {
-  .kc-product-more--lodging .kc-product-more__inner { width: calc(100% - 3rem); }
+  .kc-product-more--columns .kc-product-more__columns { grid-template-columns: 1fr; gap: 2rem; }
+  .kc-product-more--columns .kc-product-more__columns > div { border-left: 0; border-top: 1px solid #d8d7d3; padding: 1.5rem 0 0; }
+  .kc-product-more--strip .kc-product-more__columns { grid-template-columns: 1fr; gap: 1.25rem; }
+  .kc-product-more--strip .kc-product-more__columns > div + div { border-left: 0; padding-left: 0; }
   .kc-picture-cards__grid {
     grid-template-columns: 1fr;
   }

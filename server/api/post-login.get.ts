@@ -46,7 +46,7 @@ export default defineHandler(async (event) => {
     }
 
     if (plan && !redirectTarget) {
-      if (route.kind === 'onboard') {
+      if (route.kind === 'onboard' || route.destination === '/dashboard/account') {
         throw new HTTPError({ statusCode: 409, message: 'An organization is required before choosing a billing plan' })
       }
       // The chooser carries the plan and returns through here, so the billing

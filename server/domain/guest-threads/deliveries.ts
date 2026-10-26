@@ -1,5 +1,6 @@
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { WebhookEventPayload } from 'resend'
+import { notifyBuyerThread } from '~/server/utils/notification-center'
 import { sendReplyEmail, type ReplyEmailEnv, type SubmissionType } from '~/server/utils/submission-messages'
 import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import type {
@@ -219,6 +220,11 @@ export async function deliverGuestThreadEmail(
   },
 ): Promise<GuestThreadDeliveryRow> {
   if (input.delivery.channel !== 'email') throw new Error('Delivery channel is not email')
+  await notifyBuyerThread(db, {
+    threadId: input.submissionId, entryId: input.delivery.entry_id,
+    title: input.subject, message: input.fromName,
+    conversation: input.delivery.purpose === 'member_reply' || input.delivery.purpose === 'scheduled_message',
+  })
   if (isDeliverySent(input.delivery)) return input.delivery
   const result = await sendReplyEmail(input.env, {
     to: input.to,

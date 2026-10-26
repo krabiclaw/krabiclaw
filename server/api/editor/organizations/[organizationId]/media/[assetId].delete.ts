@@ -28,10 +28,9 @@ export default defineHandler(async (event) => {
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
   if (!organization) return jsonResponse({ error: 'Organization not found or access denied' }, { status: 404 })
 
-  const asset = await queryFirst<MediaAssetOrganizationRow>(db, `SELECT id, organization_id FROM media_assets WHERE id = ? LIMIT 1`, [assetId]
-  )
+  // Another organization's asset is not found here, rather than refused, so its existence stays private.
+  const asset = await queryFirst<MediaAssetOrganizationRow>(db, `SELECT id, organization_id FROM media_assets WHERE id = ? AND organization_id = ? LIMIT 1`, [assetId, organizationId])
   if (!asset) return jsonResponse({ error: 'Asset not found' }, { status: 404 })
-  if (asset.organization_id !== organizationId) return jsonResponse({ error: 'Forbidden' }, { status: 403 })
 
   try {
     await assertResourceAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), resourceLocationId: null })

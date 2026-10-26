@@ -13,6 +13,7 @@ import type {
 import { formatOperationalStatusLabel, formatThreadWhenLabel } from './status-labels'
 import { resolveGuestThreadMailbox, type GuestThreadMailbox } from './mailbox'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { HTTPError } from 'nitro'
 
 const SOURCE_GUEST_NAME_SQL = "json_extract(gt.payload_json, '$.guest.name')"
 const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WHERE ct.request_id = gt.id AND ct.organization_id = gt.organization_id) OR EXISTS (SELECT 1 FROM stays st WHERE st.request_id = gt.id AND st.organization_id = gt.organization_id AND st.owner = 'channel') THEN 'airbnb' ELSE 'email' END"
@@ -32,14 +33,14 @@ async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
  * booking rather than printing a fabricated slot.
  */
 const OPERATIONAL_RECORDS_SQL = `(
-    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date, b.assigned_member_id
+    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date, b.assigned_member_id, b.product_id, NULL AS stay_channel
       FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id
      WHERE b.request_id IS NOT NULL
     UNION ALL
-    SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone, NULL, NULL, NULL
+    SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone, NULL, NULL, NULL, NULL, NULL
       FROM reservations r WHERE r.request_id IS NOT NULL
     UNION ALL
-    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date, c.assigned_member_id
+    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date, c.assigned_member_id, st.product_id, st.channel
       FROM stays st
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
@@ -83,6 +84,7 @@ function mailboxFields(row: { archived_at: string | null; blocked_at: string | n
 const SOURCE_PREVIEW_SQL = `SUBSTR(CASE WHEN gt.kind = 'contact' THEN json_extract(gt.payload_json, '$.message') ELSE NULLIF(TRIM(json_extract(gt.payload_json, '$.notes')), '') END, 1, 160)`
 
 const SOURCE_PREVIEW_COLUMNS = `op.starts_at AS record_starts_at, op.ends_at AS record_ends_at, op.timezone AS record_timezone, op.party_size AS record_party_size, op.assigned_member_id,
+      op.product_id AS record_product_id, op.stay_channel, (SELECT ct.product_id FROM channel_threads ct WHERE ct.organization_id = gt.organization_id AND ct.request_id = gt.id) AS channel_product_id,
       op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
       json_extract(gt.payload_json, '$.party_size_is_minimum') AS party_size_is_minimum`
 
@@ -217,6 +219,9 @@ async function countUnreadThreadIds(
 
 type GuestThreadListRow = GuestThreadRow & {
   assigned_member_id: string | null
+  record_product_id: string | null
+  channel_product_id: string | null
+  stay_channel: GuestThreadListItemViewModel['stayChannel']
   guest_name: string | null
   reply_channel: 'email' | 'airbnb'
   location_title: string | null
@@ -238,6 +243,13 @@ type GuestThreadListRow = GuestThreadRow & {
   place_image_kind: string | null
   place_image_thumbnail_url: string | null
   place_image_public_url: string | null
+}
+
+function threadProductId(row: GuestThreadListRow): string | null {
+  if (row.record_product_id !== null && row.channel_product_id !== null && row.record_product_id !== row.channel_product_id) {
+    throw new HTTPError({ statusCode: 409, message: 'The booking and provider conversation name different offerings', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'productId' } })
+  }
+  return row.record_product_id ?? row.channel_product_id
 }
 
 /** Returns list view models with member-specific unread and one canonical `preview` field. */
@@ -351,6 +363,8 @@ export async function listGuestThreads(
       locationLabel: row.location_title,
       locationId: row.location_id,
       assignedMemberId: row.assigned_member_id,
+      productId: threadProductId(row),
+      stayChannel: row.stay_channel,
       occurrenceAt: row.record_starts_at,
       timeZone: row.record_timezone,
       latestMessageFromGuest: row.latest_message_actor_kind === 'guest',
@@ -479,6 +493,8 @@ export async function listOrganizationGuestThreads(
       locationLabel: row.location_title,
       locationId: row.location_id,
       assignedMemberId: row.assigned_member_id,
+      productId: threadProductId(row),
+      stayChannel: row.stay_channel,
       occurrenceAt: row.record_starts_at,
       timeZone: row.record_timezone,
       latestMessageFromGuest: row.latest_message_actor_kind === 'guest',

@@ -1,5 +1,7 @@
 import type { RouteLocationNormalized } from 'vue-router'
 import { normalizeReferrerHost, readAttributionParams } from '~/utils/analytics-attribution'
+import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
+import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { isTrackablePath } from '~/utils/pageview-path'
 import { NATIVE_PAGEVIEW_ZARAZ_EVENT } from '~/utils/zaraz-consent'
 
@@ -23,7 +25,6 @@ interface TrackedPage {
   pageviewReady: Promise<boolean>
 }
 
-const isTracked = (path: string) => isTrackablePath(path) && !path.startsWith('/dev')
 
 // The pages observed so far, by path, so an action names the visit it happened on even when it was
 // captured before the collector registered or after the visitor moved on.
@@ -77,6 +78,8 @@ export function registerPageviewTracking() {
   win.__kc_pageview_tracking_registered = true
 
   const router = useRouter()
+  const locales = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
+  const isTracked = (path: string) => isTrackablePath(resolveTenantLocalePath(path, locales.value.map(item => item.locale)).sourcePath) && path !== '/dev' && !path.startsWith('/dev/')
 
   // The collector answers `ignored` for a request it deliberately does not record (a known bot), and
   // an error for one it could not. Neither is a persisted event. A failure is reported through the
