@@ -344,13 +344,23 @@ active at its active location and published or syncing through an enabled
 Channex mapping; other homes are free drafts. See
 [billing](payments/payments.md) and the [live-home contract](shared-auth-contract.md#34-live-homes).
 
+Increasing the number of live homes through product publication, product edits,
+reconciliation or location activation requires the dashboard. MCP returns an
+incomplete action and the selected organization’s dashboard URL; the rejected
+write remains rolled back. Ordinary draft edits, withholding and deactivation
+remain available.
+
+Google Ads campaign creation always saves a paused campaign for review. It
+accepts no activation status. Campaign status and budget updates remain available
+through the existing update tool.
+
 ## Financial reads and dashboard actions
 
 `list_payments` lists customer transactions, `get_payment` reads one purchase and
 its refunds/disputes, and `get_payment_summary` reports period totals per currency.
-`get_payment_payouts` reads the connected account's balance and payout history;
-`get_payments_usage` reads Payments operating usage and invoices. These calls do
-not mutate finance records or move money. Existing records remain readable after
+`get_payment_payouts` reads the connected account's balance and payout history.
+These calls do not mutate finance records or move money. Subscription fees and
+usage are managed in the billing dashboard. Existing records remain readable after
 a plan downgrade, subject to the same payment/billing permissions.
 
 `get_payments_dashboard_link` is an owner-only read that returns the authenticated

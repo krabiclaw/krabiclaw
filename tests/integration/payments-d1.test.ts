@@ -2,6 +2,7 @@ import {createCanonicalNotification} from '../../server/utils/notification-cente
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import Stripe from 'stripe'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { HTTPError } from 'nitro'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
@@ -18,7 +19,7 @@ import { listGuestThreads } from '../../server/domain/guest-threads/repository.t
 import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
 import { acknowledgeBuyerThreadEntries } from '../../server/utils/notification-acknowledgement.ts'
 import { retainPaymentsForTenantDeletion } from '../../server/domain/payments/retention.ts'
-import { deliverPaymentsUsage } from '../../server/domain/payments/usage.ts'
+import { deliverPaymentsUsage, paymentsUsage } from '../../server/domain/payments/usage.ts'
 import { agreeToService, endService, listServices, SERVICE_TERMS_VERSION } from '../../server/utils/organization-services.ts'
 import { storeIntegration, readIntegration } from '../../server/utils/organization-integrations.ts'
 import { releaseIntegration } from '../../server/utils/integration-release.ts'
@@ -27,6 +28,7 @@ import { H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
 import servicesPostRoute from '../../server/api/dashboard/services.post.ts'
 import servicesGetRoute from '../../server/api/dashboard/services.get.ts'
+import mcpRoute from '../../server/api/mcp.ts'
 import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
 import bookingReceiptRoute from '../../server/api/public/booking-requests/[requestId].get.ts'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '../../server/utils/reservation-cancel-token.ts'
@@ -41,12 +43,13 @@ import { reconcilePaymentIntent, processPaymentEvent } from '../../server/domain
 import { canRetryGuestReservationRefund } from '../../server/domain/payments/visit-refund.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
+import { NOT_HANDLED } from '../../server/utils/mcp-tools/execution.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
 import type { McpOrganizationContext } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 const ORG = 'payments-org', NOW = '2026-10-01T00:00:00.000Z'
 async function boot(){
- const runtime=new Miniflare({workers:[{config:{name:'payments-proof',compatibilityDate:'2024-11-01',manifest:{mainModule:'index.mjs',modules:{'index.mjs':{type:'esm',contents:'export class Hub { fetch(){return new Response(null,{status:204})} } export default {fetch(){return new Response("ok")}}'}}},exports:{Hub:{type:'durable-object',storage:'sqlite'}},env:{DB:{type:'d1'},GUEST_INBOX_HUBS:{type:'durable-object',worker:'payments-proof',exportName:'Hub'}}}}]})
+ const runtime=new Miniflare({workers:[{config:{name:'payments-proof',compatibilityDate:'2024-11-01',manifest:{mainModule:'index.mjs',modules:{'index.mjs':{type:'esm',contents:'export class Hub { fetch(){return new Response(null,{status:204})} } export default {fetch(){return new Response("ok")}}'}}},exports:{Hub:{type:'durable-object',storage:'sqlite'}},env:{DB:{type:'d1'},ORGANIZATION_CACHE:{type:'kv'},GUEST_INBOX_HUBS:{type:'durable-object',worker:'payments-proof',exportName:'Hub'}}}}]})
  const db=await runtime.getD1Database('DB')
  try {
  const migration=await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))
@@ -340,10 +343,10 @@ test('MCP financial reads return bounded reports and authenticated detail links 
   assert.deepEqual(detail.purchase,{title:'Original consultation',quantity:1,product_id:null,variant_id:null,session_id:null,price:{unit_amount:10000,currency:'USD',type:'one_time',tax_behavior:'exclusive'}})
   assert.deepEqual(detail.refunds,[{id:'report-refund',amount:1000,status:'succeeded'}])
   assert.equal(detail.dashboard_url,'https://proof.example/dashboard/payments/bookings/payment/report')
-  const usage = await call('get_payments_usage')
-  assert.deepEqual(usage.pending,[{currency:'USD',kind:'stripe_cost',event_count:1,amount:100,billing_currency:'USD',billing_amount:100,action_required:true}])
-  // The fees are read in Plan and billing, beside the subscription that bills them.
-  assert.equal(usage.dashboard_url,'https://proof.example/dashboard/payments/billing')
+  assert.equal(await handlePaymentsTools({organization,toolName:'get_payments_usage',args:{}}), NOT_HANDLED)
+  // Plan and billing keeps its canonical fee read, while MCP no longer exposes it.
+  const usage = await paymentsUsage(db,env,ORG)
+  assert.deepEqual(usage.pending,[{currency:'USD',kind:'stripe_cost',event_count:1,amount:100,billing_amount:100,action_required:true}])
   assert.deepEqual({configured:usage.configured,pricing:usage.pricing,source:usage.source},{configured:false,pricing:null,source:'Stripe'})
   const originalFetch = globalThis.fetch
   const payoutReads:string[]=[]
@@ -964,7 +967,7 @@ test('processing webhooks extend only active checkout holds and preserve capacit
   }
 })
 
-test('managed ads consent requires live billable USD accounts, preserves its billing dependencies, and ends on its recorded day', { timeout: 120_000 }, async t => {
+test('managed ads keeps MCP creation paused, preserves updates and billing consent, and ends on its recorded day', { timeout: 120_000 }, async t => {
  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-01T12:00:00.000Z') })
  const { db, runtime } = await boot()
  try {
@@ -977,9 +980,13 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   const app = new H3()
   app.post('/api/dashboard/services', servicesPostRoute)
   app.get('/api/dashboard/services', servicesGetRoute)
+  app.post('/api/mcp', mcpRoute)
+  const background: Promise<unknown>[] = []
+  // Nitro initializes the Request context before H3; the bare in-process app shares it here too.
+  const workerRuntime = { name: 'cloudflare', cloudflare: { env, context: { waitUntil: (promise: Promise<unknown>) => background.push(promise) } } }
   const call = (path: string, method = 'GET', body?: Record<string, unknown>) => app.request(Object.assign(new Request(`https://proof.example${path}`, {
-   method, headers: { cookie, origin: 'https://proof.example', 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
-  }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+   method, headers: { cookie, host: 'proof.example', origin: 'https://proof.example', 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' }, ...(body ? { body: JSON.stringify(body) } : {}),
+  }), { context: {}, runtime: workerRuntime }))
   const agree = () => agreeToService(db, env, ORG, 'managed_ads', 'verified')
   const noConsent = async () => assert.equal(await db.prepare('SELECT COUNT(*) AS count FROM organization_services WHERE organization_id=?').bind(ORG).first('count'), 0)
   // A business without the Business subscription gets a concrete setup step before any consent is written.
@@ -991,6 +998,7 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   let timeZone: string | undefined = 'America/New_York'
   let deliveryUnavailable = false
   let googleReads = 0
+  const campaignMutations: Array<{ status: string; budget: string | null }> = []
   const ingests: Array<{ identifier: string | null; value: string | null }> = []
   const item = (id: string, metadata: Record<string, string>, price: Record<string, unknown>) => ({ id, object: 'subscription_item', price: { id: `price_${id}`, object: 'price', currency: 'usd', product: { id: `prod_${id}`, object: 'product', metadata }, ...price } })
   const metered = (family: string, decimal: string) => item(family, { product_family: family }, { billing_scheme: 'per_unit', unit_amount: null, unit_amount_decimal: decimal, recurring: { interval: 'month', interval_count: 1, usage_type: 'metered' } })
@@ -1017,10 +1025,29 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
     return Response.json({ id: 'cus_operating', object: 'customer', invoice_settings: { default_payment_method: defaultCard } })
    }
    if (url.origin === 'https://googleads.googleapis.com') {
+    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer managed-ads-token')
+    if (url.pathname === '/v25/customers/1234567890/googleAds:mutate') {
+     const body = JSON.parse(String(init?.body)) as { mutateOperations: Array<{ campaignOperation?: { create?: { status: string }; update?: { status: string } }; campaignBudgetOperation?: { create: { amountMicros: string } } }> }
+     const campaign = body.mutateOperations.find(operation => operation.campaignOperation)?.campaignOperation
+     if (campaign?.create) {
+      assert.equal(campaign.create.status, 'PAUSED')
+      campaignMutations.push({ status: campaign.create.status, budget: body.mutateOperations[0]!.campaignBudgetOperation!.create.amountMicros })
+      return Response.json({ mutateOperationResponses: [
+       { campaignBudgetResult: { resourceName: 'customers/1234567890/campaignBudgets/888' } },
+       { campaignResult: { resourceName: 'customers/1234567890/campaigns/222' } },
+       { adGroupResult: { resourceName: 'customers/1234567890/adGroups/333' } },
+       { adGroupCriterionResult: { resourceName: 'customers/1234567890/adGroupCriteria/444' } },
+       { adGroupAdResult: { resourceName: 'customers/1234567890/adGroupAds/555' } },
+      ] })
+     }
+     assert(campaign?.update)
+     assert.equal(campaign.update.status, 'ENABLED')
+     campaignMutations.push({ status: campaign.update.status, budget: null })
+     return Response.json({ mutateOperationResponses: [{ campaignResult: { resourceName: 'customers/1234567890/campaigns/222' } }] })
+    }
     googleReads++
     // The managed account, and the accounts a later free connection chooses from: 3333333333 is a manager account.
     assert.ok(['1234567890', '2222222222', '3333333333'].some(id => url.pathname === `/v25/customers/${id}/googleAds:search`), url.pathname)
-    assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer managed-ads-token')
     if (providerUnavailable) return Response.json({ error: 'Reporting unavailable at external boundary' }, { status: 503 })
     const query = JSON.parse(String(init?.body)).query as string
     if (query.includes('metrics.cost_micros')) {
@@ -1043,6 +1070,39 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   const token = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: 'managed-ads-token' })
   await db.prepare("INSERT INTO account(id,accountId,providerId,userId,accessToken) VALUES('ads-linked','google-fixture','google','verified',?)").bind(token).run()
   await storeIntegration(db, ORG, 'google_ads', { account_id: 'ads-linked', target_id: '1234567890', target_name: 'Managed ads fixture' }, { revision: null })
+  const client = new Client({ name: 'payments-managed-ads-proof', version: '1.0.0' }, { versionNegotiation: { mode: { pin: '2026-07-28' } } })
+  const transport = new StreamableHTTPClientTransport(new URL('https://proof.example/api/mcp'), {
+   requestInit: { headers: { cookie, host: 'proof.example', origin: 'https://proof.example' } },
+   fetch: async (input, init) => {
+    const response = await app.request(Object.assign(new Request(input, init), { context: {}, runtime: workerRuntime }))
+    assert.equal(response.status, 200, await response.clone().text())
+    return response
+   },
+  })
+  try {
+   await client.connect(transport)
+   const { tools } = await client.listTools()
+   assert.equal(tools.some(tool => tool.name === 'get_payments_usage'), false)
+   assert.equal(tools.some(tool => tool.name === 'create_google_ads_search_campaign'), true)
+   assert.equal(tools.some(tool => tool.name === 'update_google_ads_campaign'), true)
+   const campaignInput = { organization_id: ORG, name: 'Paused Search setup', daily_budget_micros: 1000000, target_url: 'https://proof.example', keywords: [{ text: 'local classes' }], headlines: ['Local Classes', 'Find Your Class', 'Choose A Workshop'], descriptions: ['Find a workshop that fits your plans.', 'Explore classes near you.'], contains_eu_political_advertising: false }
+   const refusal = await client.callTool({ name: 'create_google_ads_search_campaign', arguments: { ...campaignInput, status: 'ENABLED' } })
+   assert.equal(refusal.isError, true)
+   assert.equal(refusal.structuredContent, undefined)
+   assert.match(String(refusal.content[0]!.text), /Invalid arguments for tool create_google_ads_search_campaign/u)
+   assert.deepEqual(campaignMutations, [])
+   const creation = await client.callTool({ name: 'create_google_ads_search_campaign', arguments: campaignInput })
+   assert.notEqual(creation.isError, true, JSON.stringify(creation))
+   assert.deepEqual(creation.structuredContent, { campaign_id: '222', status: 'PAUSED' })
+   assert.deepEqual(campaignMutations, [{ status: 'PAUSED', budget: '1000000' }])
+   const enabled = await client.callTool({ name: 'update_google_ads_campaign', arguments: { organization_id: ORG, campaign_id: '222', status: 'ENABLED' } })
+   assert.notEqual(enabled.isError, true, JSON.stringify(enabled))
+   assert.equal(enabled.structuredContent?.status, 'ENABLED')
+   assert.deepEqual(campaignMutations, [{ status: 'PAUSED', budget: '1000000' }, { status: 'ENABLED', budget: null }])
+  } finally {
+   await client.close()
+   await Promise.all(background)
+  }
   currency = 'THB'
   await assert.rejects(agree, /requires a Google Ads account billed in USD/u)
   currency = 'USD'

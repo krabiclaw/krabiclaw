@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:542beaaa82442dbd44f74c11f909f487063db57a5e8d4050652f1b64aaf9f074",
-  "documentationFingerprint": "sha256:fff298038ce024537f44bf35943981ca23df01434419de5767619fb0c386e339",
+  "fingerprint": "sha256:c4a3c76c5f4016a0b0496a436a27b1474ba980d15f7ade7642e6ce47ea96154a",
+  "documentationFingerprint": "sha256:b358028ec0b98ad989efd7fa4e69a40d281620a51f0ce7c31c80accd5356d8e4",
   "tools": [
     {
       "name": "add_organization_language",
@@ -8151,7 +8151,7 @@
               "additionalProperties": false,
               "properties": {
                 "active": {
-                  "description": "Enable or disable sale of this product. Independent of site and location publication.",
+                  "description": "Enable or disable this product. Increasing the number of live homes requires the dashboard.",
                   "type": "boolean"
                 },
                 "description": {
@@ -18935,7 +18935,7 @@
     {
       "name": "create_google_ads_search_campaign",
       "title": "Create Google Ads search campaign",
-      "description": "Create a Google Ads Search campaign from supplied keywords, ad copy, destination URL and daily budget in the account currency returned by list_google_ads_campaigns. Creates one ad group and responsive search ad. Starts PAUSED unless ENABLED is explicitly requested; enabled campaigns can spend the connected account’s advertising budget. Each create call makes a new campaign; inspect the account before retrying an uncertain result.",
+      "description": "Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign; inspect the account before retrying an uncertain result.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -19008,14 +19008,6 @@
             "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
             "type": "string"
           },
-          "status": {
-            "description": "Initial campaign status (defaults to PAUSED).",
-            "enum": [
-              "ENABLED",
-              "PAUSED"
-            ],
-            "type": "string"
-          },
           "target_url": {
             "description": "Destination landing page or blog post URL (must start with http:// or https://).",
             "type": "string"
@@ -19040,7 +19032,7 @@
             "type": "string"
           },
           "status": {
-            "type": "string"
+            "const": "PAUSED"
           }
         },
         "required": [
@@ -21966,7 +21958,7 @@
         "additionalProperties": false,
         "properties": {
           "active": {
-            "description": "Enable or disable sale of this product. Independent of site and location publication.",
+            "description": "Enable or disable this product. Increasing the number of live homes requires the dashboard.",
             "type": "boolean"
           },
           "booking": {
@@ -49778,160 +49770,6 @@
       ],
       "domain": "payments",
       "minimumRole": "owner",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
-      "name": "get_payments_usage",
-      "title": "Get payments usage",
-      "description": "Read the selected business’s KrabiClaw Payments fees: the rates its plan subscription’s metered prices charge for payment volume, Stripe fees and managed ad spend, and usage not yet reported to Stripe. Stripe bills these fees on the subscription invoice at the end of each period, separate from customer payments. Requires payment and billing read access. Does not change billing or move money.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "organization_id": {
-            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
-            "minLength": 1,
-            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
-            "type": "string"
-          }
-        },
-        "required": [],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "additionalProperties": false,
-        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
-        "properties": {
-          "configured": {
-            "type": "boolean"
-          },
-          "dashboard_url": {
-            "type": "string"
-          },
-          "organization_id": {
-            "type": "string"
-          },
-          "pending": {
-            "items": {
-              "properties": {
-                "action_required": {
-                  "type": "boolean"
-                },
-                "amount": {
-                  "type": "integer"
-                },
-                "billing_amount": {
-                  "type": "integer"
-                },
-                "billing_currency": {
-                  "const": "USD"
-                },
-                "currency": {
-                  "type": "string"
-                },
-                "event_count": {
-                  "type": "integer"
-                },
-                "kind": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "currency",
-                "kind",
-                "event_count",
-                "amount",
-                "billing_currency",
-                "billing_amount",
-                "action_required"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "pricing": {
-            "properties": {
-              "ad_spend_rate": {
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
-              "ad_spend_rate_percent": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "captured_volume_rate": {
-                "type": "number"
-              },
-              "captured_volume_rate_percent": {
-                "type": "string"
-              },
-              "currency": {
-                "const": "USD"
-              },
-              "stripe_cost_rate": {
-                "type": "number"
-              },
-              "units": {
-                "const": "cents"
-              }
-            },
-            "required": [
-              "currency",
-              "units",
-              "captured_volume_rate",
-              "captured_volume_rate_percent",
-              "stripe_cost_rate",
-              "ad_spend_rate",
-              "ad_spend_rate_percent"
-            ],
-            "type": [
-              "object",
-              "null"
-            ]
-          },
-          "refreshed_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "source": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "organization_id",
-          "configured",
-          "source",
-          "pricing",
-          "pending",
-          "dashboard_url"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": false,
-        "idempotentHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": true,
-        "title": "Get payments usage"
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "payments",
-      "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -80766,7 +80604,7 @@
     {
       "name": "reconcile_products",
       "title": "Reconcile products",
-      "description": "Synchronize complete catalog entries in one atomic local write. Existing product IDs preserve identity; supplied variants, prices and options replace their lists. Omitted products stay unchanged unless deactivate_missing disables them. A new home requires stay settings. Changed connected-home settings and nightly prices are pushed to Airbnb through Channex after saving. Unsupported connected-listing settings are refused before any local writes; a failed channel completion reports committed changes with CHANNEL_PUSH_FAILED. Repeat the same idempotency key for an identical retry. Use update_menu for a restaurant menu and update_product for a partial edit.",
+      "description": "Synchronize complete catalog entries in one atomic local write. Existing product IDs preserve identity; supplied variants, prices and options replace their lists. Omitted products stay unchanged unless deactivate_missing disables them. A new home requires stay settings. Changed connected-home settings and nightly prices are pushed to Airbnb through Channex after saving. Unsupported connected-listing settings are refused before any local writes; a failed channel completion reports committed changes with CHANNEL_PUSH_FAILED. Repeat the same idempotency key for an identical retry. Use update_menu for a restaurant menu and update_product for a partial edit. Increasing the number of live homes requires the dashboard.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -80789,7 +80627,7 @@
               "additionalProperties": false,
               "properties": {
                 "active": {
-                  "description": "Enable or disable sale of this product. Independent of site and location publication.",
+                  "description": "Enable or disable this product. Increasing the number of live homes requires the dashboard.",
                   "type": "boolean"
                 },
                 "description": {
@@ -97533,7 +97371,7 @@
     {
       "name": "set_product_publication",
       "title": "Set product publication",
-      "description": "Publish or withhold a product on the selected site and return its saved publication flag. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations.",
+      "description": "Publish or withhold a product on the selected site and return its saved publication flag. Read get_product first. A home or offering booked on this site needs an assigned host with an approved public profile and nonblank public_name: find membership IDs in list_organization_members, read get_member_public_profile, and author or approve the profile through update_member_public_profile. Assignment alone does not publish a profile. Other publication prerequisites, including pricing and availability, still apply. This setting is independent of whether the product is available for sale and of visibility at individual locations. Increasing the number of live homes requires the dashboard.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -105557,7 +105395,7 @@
             "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected."
           },
           "status": {
-            "description": "Set active to enable the location, or inactive to hide it. Locations are not billed; for a home's location this can change the live homes billed on the existing subscription.",
+            "description": "Set active to enable the location, or inactive to hide it. Increasing the number of live homes requires the dashboard.",
             "enum": [
               "active",
               "inactive"
@@ -106442,7 +106280,7 @@
                     "additionalProperties": false,
                     "properties": {
                       "active": {
-                        "description": "Enable or disable sale of this product. Independent of site and location publication.",
+                        "description": "Enable or disable this product. Increasing the number of live homes requires the dashboard.",
                         "type": "boolean"
                       },
                       "description": {
@@ -109056,12 +108894,12 @@
     {
       "name": "update_product",
       "title": "Update product",
-      "description": "Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying.",
+      "description": "Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering. For a connected Airbnb home, changed arrival/departure windows, cancellation, pet/smoking/event rules and minimum stays update supported listing settings through Channex. Unsupported connected-listing settings are refused before saving. A failed channel completion reports the committed edit with CHANNEL_PUSH_FAILED; reload before retrying. Increasing the number of live homes requires the dashboard.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "active": {
-            "description": "Enable or disable sale of this product. Independent of site and location publication.",
+            "description": "Enable or disable this product. Increasing the number of live homes requires the dashboard.",
             "type": "boolean"
           },
           "booking": {
@@ -122190,18 +122028,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:6a42e7db3b5bc9c39eb21a5a173d3f73071180fe589b39c08f04fd044ce42355",
+        "create_product": "sha256:205b4a7e79165f7e9721f7b0b54310d343a3e5c37c0b05beb1b5d5603c39211e",
         "get_product": "sha256:85af069d6c1877e9d89374b36417ab02b4fd18541b7ab3eaba6d0ce447c6569d",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
         "list_location_products": "sha256:3d072da910400920fd6ff0679ad8d99e1fdf2494d6f0d7feb3bee5082ce13d9e",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
-        "reconcile_products": "sha256:e47c5884c5879f725996e6d92ee7f66cf8e43bbf274b4514ae1b0c180e9c6598",
+        "reconcile_products": "sha256:c9d396c7582ac5f8bb3b3a8d97dbbdd9985ccae030d00df528f4976fd7408a8c",
         "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
         "set_collection_products": "sha256:16e3e08ee87d86dcb6735b1d2fc9a43600aca70ea8715af3aadfdce5690b8463",
-        "update_menu": "sha256:3c5ffa9c26ccd30f026fc2acf7896cc0d2021f54575e79182d9c2505e3a8bf93",
-        "update_product": "sha256:7ae90e59106d0720fe6d1fcc62831c886be7ceffdac2c006a309ed87684a14c2"
+        "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
+        "update_product": "sha256:a7243fff517faac5d5319962eddd3c168842153ed3cfbaaa92e40c8fb57b21a8"
       }
     },
     {
@@ -122246,7 +122084,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
-        "create_product": "sha256:6a42e7db3b5bc9c39eb21a5a173d3f73071180fe589b39c08f04fd044ce42355",
+        "create_product": "sha256:205b4a7e79165f7e9721f7b0b54310d343a3e5c37c0b05beb1b5d5603c39211e",
         "get_product": "sha256:85af069d6c1877e9d89374b36417ab02b4fd18541b7ab3eaba6d0ce447c6569d",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
@@ -122333,7 +122171,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:6a42e7db3b5bc9c39eb21a5a173d3f73071180fe589b39c08f04fd044ce42355",
+        "create_product": "sha256:205b4a7e79165f7e9721f7b0b54310d343a3e5c37c0b05beb1b5d5603c39211e",
         "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
         "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
         "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
@@ -122344,7 +122182,7 @@
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "publish_website": "sha256:939b1ce7c3fd387584cc132ae36ef88ea13eb064617de0ba0764e5a81f572f3f",
         "save_website_draft": "sha256:e65a7a223712c5d820ccd7d2ec84abb8da6602e898a89516f1a1caf4d17d171b",
-        "update_menu": "sha256:3c5ffa9c26ccd30f026fc2acf7896cc0d2021f54575e79182d9c2505e3a8bf93",
+        "update_menu": "sha256:ed70b2c30b8fa7ff3e2ff83d103e650b762b7214797f62934c45e51dbfd39735",
         "update_organization_settings": "sha256:1a600f7c7a066cfe36d906e8b9a90070be26be9e7b678da716c64bb783e22faa",
         "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
       }
@@ -122367,7 +122205,7 @@
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
         "set_product_booking_config": "sha256:349460de334343f13114d406912f7eb1ee8902d9004fa899fa2564e7fc1242b6",
-        "update_product": "sha256:7ae90e59106d0720fe6d1fcc62831c886be7ceffdac2c006a309ed87684a14c2",
+        "update_product": "sha256:a7243fff517faac5d5319962eddd3c168842153ed3cfbaaa92e40c8fb57b21a8",
         "update_reservation_policy": "sha256:7dd8f0cb74352e584d3ed4f97fcef2a2265bd75e490c57fdcf076c7398d8b774"
       }
     },
@@ -122387,7 +122225,7 @@
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
         "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
-        "update_product": "sha256:7ae90e59106d0720fe6d1fcc62831c886be7ceffdac2c006a309ed87684a14c2",
+        "update_product": "sha256:a7243fff517faac5d5319962eddd3c168842153ed3cfbaaa92e40c8fb57b21a8",
         "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
       }
     },
@@ -122410,7 +122248,7 @@
         "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
         "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
-        "update_product": "sha256:7ae90e59106d0720fe6d1fcc62831c886be7ceffdac2c006a309ed87684a14c2"
+        "update_product": "sha256:a7243fff517faac5d5319962eddd3c168842153ed3cfbaaa92e40c8fb57b21a8"
       }
     }
   ]

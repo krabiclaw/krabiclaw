@@ -32,10 +32,14 @@ import { renderStructuredResponse } from '~/server/utils/mcp-render'
 import { fromJsonSchema, type JsonSchemaType } from '@modelcontextprotocol/server'
 import { paginateMcpCollection } from '~/server/utils/mcp-pagination'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import {
   NOT_HANDLED,
   humanizeEntitlement,
   normalizeWorkspaceArguments,
+  omit,
+  optionalString,
+  requiredString,
   resolveOrganizationPublicOrigin,
   workspaceContextPayload,
   workspaceLocationsPayload,
@@ -333,8 +337,18 @@ export async function executeMcpToolCall(
 
   const domainHandler = tool.domain ? DOMAIN_HANDLERS[tool.domain] : undefined;
   if (domainHandler) {
-    const result = await domainHandler({ event, toolName, rawArguments, normalizedArguments, tool, organizationId, organization, args });
-    if (result !== NOT_HANDLED) return result;
+    try {
+      const result = await domainHandler({ event, toolName, rawArguments, normalizedArguments, tool, organizationId, organization, args });
+      if (result !== NOT_HANDLED) return result;
+    } catch (error) {
+      if (error instanceof HTTPError && error.statusCode === 409 && error.data?.code === 'HOME_ACTIVATION_REQUIRES_DASHBOARD') {
+        if (!organization.organizationSlug) throw new HTTPError({ statusCode: 503, statusMessage: 'Home activation requires the organization dashboard address', cause: error });
+        throw new HTTPError({ statusCode: 409, message: error.message, cause: error, data: {
+          ...error.data, dashboard_url: `${dashboardOrigin(organization.env, { orgSlug: organization.organizationSlug, locationSlug: null })}/products`,
+        } });
+      }
+      throw error;
+    }
   }
   throw mcpProtocolError(
         MCP_ERROR.methodNotFound,

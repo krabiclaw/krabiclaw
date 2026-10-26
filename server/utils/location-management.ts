@@ -442,6 +442,7 @@ export async function updateLocation(
   userId: string | null,
   env: CloudflareEnv,
   writeGuard?: BatchQuery,
+  options: { allowHomeActivation?: boolean } = {},
 ) {
   const existing = await loadLocation(db, organizationId, locationIdOrSlug);
   if (!existing) {
@@ -647,10 +648,9 @@ export async function updateLocation(
     // The site changed: recorded with the change, so its caches and search index follow it.
     statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'));
 
-    // An inactive location is off the site and is not counted; making it
-    // active again is refused past the locations, or for a home's location
-    // the homes, Basic includes.
-    const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active' });
+    // An inactive location takes its homes off the live count. Making it
+    // active again is guarded by the same home-activation boundary.
+    const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
     const changed = (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
     // The saved privacy mode must be visible even if readback or card work fails.
     if (changed) await purgePublicResourceCacheNow(env, organizationId);

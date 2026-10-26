@@ -65,7 +65,6 @@ unpaid substitutes, or publish to an unrequested social audience.
 | `get_payment_payouts` | Show our connected account's balance and payout history. | What has Stripe paid out to us, and what's still in the balance? | Create a payout or transfer money. |
 | `get_payment_summary` | Show customer payment totals and refunds for last month by currency. | How much did customers pay us last month, and how much was refunded? | Show the website traffic overview instead. |
 | `get_payments_dashboard_link` | Give me the link to our Payments setup page. | Where do I manage our business's Stripe integration myself? | Start onboarding or create a Stripe account for me in chat. |
-| `get_payments_usage` | Show our Payments usage and operating invoices. | What are our business's payment-processing operating costs so far? | Show what a particular customer paid for their booking. |
 | `get_post` | Show this short website post and its saved publication receipts. | Let me review the announcement draft and see where we already sent it. | Read the current Facebook caption directly. |
 | `get_product` | Show this product's variants, prices and booking settings. | What are all the choices and prices for this item right now? | Change one price without me approving any edit. |
 | `get_product_booking` | Show this class booking's guest, status and session. | What exactly is Maya booked into right now? | Change Maya's session without proposing it to her. |

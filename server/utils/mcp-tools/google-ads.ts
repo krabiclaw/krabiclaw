@@ -133,7 +133,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'create_google_ads_search_campaign',
-    description: 'Create a Google Ads Search campaign from supplied keywords, ad copy, destination URL and daily budget in the account currency returned by list_google_ads_campaigns. Creates one ad group and responsive search ad. Starts PAUSED unless ENABLED is explicitly requested; enabled campaigns can spend the connected account’s advertising budget. Each create call makes a new campaign; inspect the account before retrying an uncertain result.',
+    description: 'Create a paused Google Ads Search campaign with one ad group and responsive search ad from the supplied keywords, copy, destination and daily budget. The campaign cannot serve ads until separately enabled. Each call creates a new campaign; inspect the account before retrying an uncertain result.',
     domain: 'google_ads',
     minimumRole: 'admin',
     requiredEntitlement: 'marketing',
@@ -182,11 +182,6 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
         uniqueItems: true,
         description: 'Descriptions for Responsive Search Ad (2 to 4, max 90 chars each).',
       },
-      status: {
-        type: 'string',
-        enum: ['ENABLED', 'PAUSED'],
-        description: 'Initial campaign status (defaults to PAUSED).',
-      },
       contains_eu_political_advertising: {
         type: 'boolean',
         description: 'Whether the campaign contains EU political advertising. Google requires this self-declaration on every new campaign; ask the user rather than assuming.',
@@ -196,7 +191,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
       type: 'object',
       properties: {
         campaign_id: { type: 'string' },
-        status: { type: 'string' },
+        status: { const: 'PAUSED' },
       },
       required: ['campaign_id', 'status'],
     },
@@ -280,7 +275,6 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
     }))
     const headlines = (args.headlines as string[]) ?? []
     const descriptions = (args.descriptions as string[]) ?? []
-    const status = (optionalString(args, 'status') as 'ENABLED' | 'PAUSED') ?? 'PAUSED'
 
     const result = await createGoogleAdsSearchCampaign(accessToken, developerToken, customerId, {
       name,
@@ -289,7 +283,7 @@ export async function handleGoogleAdsTools(ctx: McpExecutorContext): Promise<unk
       keywords,
       headlines,
       descriptions,
-      status,
+      status: 'PAUSED',
       containsEuPoliticalAdvertising: requiredBoolean(args, 'contains_eu_political_advertising'),
     })
 

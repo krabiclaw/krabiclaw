@@ -1327,7 +1327,7 @@ export async function publishStayProducts(env: CloudflareEnv, products: readonly
  * as a home, and the counts are reported to Stripe after. Other products are
  * not billed by count, so their writes run as they are.
  */
-async function executeProductWrites(db: DbClient, env: CloudflareEnv, organizationId: string, writes: BatchQuery[], options: { operation: string; action: string; stay: boolean }): Promise<void> {
+async function executeProductWrites(db: DbClient, env: CloudflareEnv, organizationId: string, writes: BatchQuery[], options: { operation: string; action: string; stay: boolean; allowHomeActivation?: boolean }): Promise<void> {
   if (options.stay) await executeWithinCapacity(env, db, organizationId, writes, options)
   else await executeBatch(db, writes, { operation: options.operation })
 }
@@ -1852,6 +1852,7 @@ export async function updateProduct(db: DbClient, input: {
   patch: UpdateProductInput
   actor: Actor
   env: CloudflareEnv
+  allowHomeActivation?: boolean
   booking?: { data: ProductBookingSetupInput; env: CloudflareEnv }
   idempotencyKey?: string
   /** updateStayHome completes once after its optional location timezone write. */
@@ -2018,7 +2019,7 @@ export async function updateProduct(db: DbClient, input: {
   // A booking taken between the check above and this batch makes the variant
   // delete raise, and D1 rolls the whole batch back: the product is exactly as
   // it was, and the merchant is told why rather than reading a constraint name.
-  await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Update product', action: 'turn it on', stay: current.kind === 'stay' }).catch(async (error: unknown) => {
+  await executeProductWrites(db, env, input.organizationId, writes, { operation: 'Update product', action: 'turn it on', stay: current.kind === 'stay', allowHomeActivation: input.allowHomeActivation }).catch(async (error: unknown) => {
     if (isUniqueDedupeConflict(error) && await replay()) return
     const evidenceError = stayAccessibilityEvidenceWriteError(error)
     if (evidenceError !== error) throw evidenceError
@@ -2176,7 +2177,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
 }
 
 export async function setProductPublication(db: DbClient, input: {
-  organizationId: string; productId: string; published: boolean; actor: Actor; env: CloudflareEnv
+  organizationId: string; productId: string; published: boolean; actor: Actor; env: CloudflareEnv; allowHomeActivation?: boolean
 }): Promise<void> {
   const product = await requireOrganizationProduct(db, input)
   if (input.published) await assertStayBookable(db, input.organizationId, product)
@@ -2197,7 +2198,7 @@ export async function setProductPublication(db: DbClient, input: {
   }, publicResourceCacheInvalidationQuery(input.organizationId, 'product_publication_changed')]
   const operation = 'Set product publication'
   await (product.kind === 'stay'
-    ? executeWithinCapacity(input.env, db, input.organizationId, writes, { operation, action: 'publish it' })
+    ? executeWithinCapacity(input.env, db, input.organizationId, writes, { operation, action: 'publish it', allowHomeActivation: input.allowHomeActivation })
     : executeBatch(db, writes, { operation })).catch(error => {
     if (/NOT NULL constraint failed: product_publications\.published/.test(error instanceof Error ? error.message : String(error))) throw new HTTPError({statusCode:409,statusMessage:'The offering or its availability changed before publication. Review it and retry.',cause:error})
     throw error
@@ -2601,7 +2602,7 @@ async function planProductReconciliation(db: DbClient, input: {
 }
 
 export async function reconcileProducts(db: DbClient, input: {
-  organizationId: string; products: ReconcileProductInput[]; actor: Actor; env: CloudflareEnv; deactivateMissing?: boolean; idempotencyKey?: string
+  organizationId: string; products: ReconcileProductInput[]; actor: Actor; env: CloudflareEnv; deactivateMissing?: boolean; idempotencyKey?: string; allowHomeActivation?: boolean
 }): Promise<ProductMutation[]> {
   if (!Array.isArray(input.products)) throw new HTTPError({ statusCode: 400, message: 'products must be an array', data: { code: 'INVALID_PRODUCT_FIELD', field: 'products' } })
   input.products.forEach((product, index) => {
@@ -2662,7 +2663,7 @@ export async function reconcileProducts(db: DbClient, input: {
     updated_by=? WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))`, params: [now, now, input.actor.actorId, input.organizationId, d1JsonArray(missing.map(product => product.id))] })
   writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered, channel_completion: channelCompletion } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
-  try { await executeProductWrites(db, input.env, input.organizationId, writes, { operation: 'Reconcile products', action: 'turn them on', stay: [...planned, ...missing].some(product => product.kind === 'stay') }) } catch (error) {
+  try { await executeProductWrites(db, input.env, input.organizationId, writes, { operation: 'Reconcile products', action: 'turn them on', stay: [...planned, ...missing].some(product => product.kind === 'stay'), allowHomeActivation: input.allowHomeActivation }) } catch (error) {
     if (isStayBedAllocationConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Every listing bed total must cover its assigned room beds. Reduce room quantities before reducing or clearing a total.', data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: 'stay.beds' }, cause: error })
     const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
     if (stale || isUniqueDedupeConflict(error)) {

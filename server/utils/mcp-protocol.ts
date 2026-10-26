@@ -61,6 +61,8 @@ export function mcpErrorRecoveryDetails(value: unknown): Record<string, unknown>
   const details = value as Record<string, unknown>
   const recovery: Record<string, unknown> = mcpErrorRecoveryIds(details)
   if (typeof details.code === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(details.code)) recovery.code = details.code
+  if (details.action_required === true) recovery.action_required = true
+  if (details.operation_completed === false) recovery.operation_completed = false
   if (details.committed === true) {
     recovery.committed = true
     if (typeof details.field === 'string' && /^[A-Za-z_][A-Za-z0-9_.\[\]]*$/.test(details.field)) recovery.field = details.field
