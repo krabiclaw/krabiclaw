@@ -20,7 +20,7 @@
       />
       <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
       <div class="flex flex-col items-center text-center">
-        <img v-if="homeImageUrl" :src="homeImageUrl" :alt="recordHome?.name ?? ''" class="mb-5 size-24 shrink-0 rounded-xl object-cover">
+        <img v-if="homeImageUrl" :src="homeImageUrl" :alt="recordHome?.name ?? ''" class="mb-6 aspect-square w-full max-w-80 shrink-0 rounded-2xl object-cover">
         <UAvatar v-if="guest.state === 'named'" :alt="guest.name" size="xl" class="mb-4 shrink-0" />
         <h2 v-if="personalScope && home" class="text-2xl font-semibold text-highlighted">{{ home.name }}</h2>
         <h2 v-else-if="guest.state === 'named'" class="text-2xl font-semibold text-highlighted">{{ guest.name }}</h2>

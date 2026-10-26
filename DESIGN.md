@@ -1092,7 +1092,7 @@ nowhere to put.
 
 **The picture leads.** Rows lead with a thumbnail; a leaf leads with the image
 large when editing the photo itself. A booking or stay summary places its real
-resource photo in a compact square above the guest avatar and party identity,
+resource photo in a substantial square cover above the guest avatar and party identity,
 then dates and arrival facts. Private team notes precede guest details and the
 cancellation policy; payment, management and booking metadata follow. Message
 and Call remain at the foot of the pane while its facts scroll. Embedded thread

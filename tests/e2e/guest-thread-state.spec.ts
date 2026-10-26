@@ -671,7 +671,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(summary.threadId).not.toBeNull()
   const priorViewport = page.viewportSize()!
   for (const width of [1728, 390]) {
-    await page.setViewportSize({ width, height: width === 1728 ? 630 : 940 })
+    await page.setViewportSize({ width, height: 940 })
     const identity = detailPanel.getByRole('heading', { level: 2, name: `${summary.guestName}'s group of ${summary.partySize}`, exact: true })
     const message = detailPanel.getByRole('link', { name: 'Message guest', exact: true })
     const call = detailPanel.getByRole('link', { name: 'Call', exact: true })
@@ -691,8 +691,8 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     const pictureBounds = (await picture.boundingBox())!
     const guestBounds = (await guestGroup.boundingBox())!
     const identityBounds = (await identity.boundingBox())!
-    expect(pictureBounds.width, 'The property picture remains compact beside Today').toBeLessThanOrEqual(128)
-    expect(pictureBounds.width).toBeGreaterThan(0)
+    expect(pictureBounds.width, 'The property photo leads as a substantial cover, not an avatar thumbnail').toBeGreaterThanOrEqual(280)
+    expect(pictureBounds.width).toBeLessThanOrEqual((await detailPanel.boundingBox())!.width)
     expect(pictureBounds.height).toBe(pictureBounds.width)
     expect(pictureBounds.y + pictureBounds.height).toBeLessThanOrEqual(guestBounds.y)
     expect(guestBounds.y + guestBounds.height).toBeLessThanOrEqual(identityBounds.y)
@@ -749,9 +749,10 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     await page.mouse.wheel(0, -maximum - bodyBounds.height)
     await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
     const capture = testInfo.outputPath(`reservation-details-${width}.png`)
-    // Keep copied conversations below the two fictional reservations out of
-    // the desktop evidence; mobile contains only this fictional record.
-    await page.screenshot({ path: capture, fullPage: false })
+    // Show the actual desktop detail pane without publishing copied
+    // conversations elsewhere in Today's local fixture. Mobile is this record.
+    const detailBounds = (await detailPanel.boundingBox())!
+    await page.screenshot({ path: capture, ...(width === 1728 ? { clip: { x: detailBounds.x, y: 0, width: detailBounds.width, height: 940 } } : { fullPage: false }) })
     await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
   }
   await page.setViewportSize(priorViewport)

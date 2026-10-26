@@ -27,7 +27,7 @@
       <template v-if="booking">
         <!-- The business reads who is coming; the account reads what it booked and where. A purchase is what was bought, for both. -->
         <div class="text-center">
-          <img v-if="booking.resourceImageUrl" :src="booking.resourceImageUrl" alt="" class="mx-auto mb-5 size-24 rounded-xl bg-elevated object-cover">
+          <img v-if="booking.resourceImageUrl" :src="booking.resourceImageUrl" alt="" class="mx-auto mb-6 aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover">
           <div v-if="!personalScope && !purchase && booking.guestName" class="mb-3 flex items-center justify-center -space-x-2">
             <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" size="xl" class="ring-2 ring-default" />
             <span v-if="booking.partySize && booking.partySize > 1" class="flex size-10 items-center justify-center rounded-full bg-elevated text-sm font-medium text-highlighted ring-2 ring-default" :aria-label="`${booking.partySize - 1} other guests`">+{{ booking.partySize - 1 }}</span>
