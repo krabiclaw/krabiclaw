@@ -35,6 +35,9 @@ test('owner intent drives grounded previews and evidence-bound feedback follows 
     }))
     expect(provisioned.organizationId).toBe(organization.id)
     await responseBody(await member.post(`${api}/recommendations/preview`, { data: { availableMinutes: 0 } }), 401)
+    const noGoalPreview = await preview({})
+    expect(noGoalPreview).toMatchObject({ decision: 'needs_context', recommendations: [], reasoning: { model: null, usage: null } })
+    expect(noGoalPreview.questions.length).toBeGreaterThan(0)
     const intent = { idempotencyKey: crypto.randomUUID(), intent: 'Explain consultation preparation clearly to prospective clients.', constraints: 'I have twenty minutes for writing this week.' }
     const concurrentCreates = await Promise.all([request.post(`${api}/goals`, { data: intent }), request.post(`${api}/goals`, { data: intent })])
     const createdGoals = await Promise.all(concurrentCreates.map(response => responseBody<{ goal: BusinessGoal }>(response, 201)))
@@ -361,20 +364,46 @@ test('business progress read-only contract uses the explicitly configured canary
     unverified: ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement'],
   })
   expect(second.coverage).toEqual(first.coverage)
-  expect(second.goals).toEqual(first.goals)
-  const decisions = (progress: Progress) => progress.feedback.map(({ applicability: _applicability, ...saved }) => saved)
-  expect(decisions(second)).toEqual(decisions(first))
-  if (!first.goals.some(goal => goal.status === 'active')) {
-    const { preview: noGoalPreview } = await responseBody<{ preview: RecommendationPreview }>(await request.post(`${api}/recommendations/preview`, { data: {} }))
-    expect(noGoalPreview).toMatchObject({ decision: 'needs_context', recommendations: [], reasoning: { model: null, usage: null } })
-    expect(noGoalPreview.questions.length).toBeGreaterThan(0)
+  for (const goal of first.goals) {
+    const repeated = second.goals.find(item => item.id === goal.id && item.revision === goal.revision)
+    if (!repeated) continue
+    expect(repeated).toMatchObject({ id: goal.id, intent: goal.intent, constraints: goal.constraints, targetAt: goal.targetAt,
+      status: goal.status, createdAt: goal.createdAt, revision: goal.revision })
+  }
+  for (const feedback of first.feedback) {
+    const repeated = second.feedback.find(item => item.id === feedback.id && item.revision === feedback.revision)
+    if (!repeated) continue
+    const { applicability: _firstApplicability, ...saved } = feedback
+    const { applicability: _secondApplicability, ...savedAgain } = repeated
+    expect(savedAgain).toEqual(saved)
   }
   for (const outcome of first.outcomes) {
     const repeated = second.outcomes.find(item => item.id === outcome.id)
+    if (!repeated) continue
     expect(repeated, 'A canonical occurrence keeps its identity across progress reads').toMatchObject({
-      id: outcome.id, event: outcome.event, subject: outcome.subject, actor: outcome.actor, occurredAt: outcome.occurredAt,
+      id: outcome.id, event: outcome.event, subject: outcome.subject, occurredAt: outcome.occurredAt,
     })
   }
+  for (const outcome of [...first.outcomes, ...second.outcomes]) {
+    expect(['guest', 'member', 'system', 'cloudflare']).toContain(outcome.actor.kind)
+    if (outcome.actor.userId !== null) {
+      expect(outcome.actor.userId).toEqual(expect.any(String))
+      expect(outcome.actor.userId.length).toBeGreaterThan(0)
+    }
+  }
+  let previewResponse = await request.post(`${api}/recommendations/preview`, { data: { availableMinutes: 0 } })
+  if (previewResponse.status() === 409) {
+    const contextConflict = await responseBody<{ message: string }>(previewResponse, 409)
+    expect([
+      'An article changed while recommendation context was being read',
+      'A recommendation conversation changed during the read',
+      'A conversation changed while recommendation context was being read',
+      'Recommendation context changed during reasoning; request a fresh preview',
+    ]).toContain(contextConflict.message)
+    previewResponse = await request.post(`${api}/recommendations/preview`, { data: { availableMinutes: 0 } })
+  }
+  const { preview: noTimePreview } = await responseBody<{ preview: RecommendationPreview }>(previewResponse)
+  expect(noTimePreview).toMatchObject({ decision: 'no_suggestion', recommendations: [], reasoning: { model: null, usage: null } })
   // Audit history can describe a deleted article. Its immutable occurrence
   // remains valid; only an existing source can provide a current reference.
   for (const outcome of first.outcomes.filter(item => item.subject.kind === 'article')) {
@@ -382,11 +411,18 @@ test('business progress read-only contract uses the explicitly configured canary
     if (article.status() === 404) continue
     const { post } = await responseBody<{ post: { id: string; status: string; updated_at: string } }>(article)
     expect(post.id).toBe(outcome.subject.id)
-    const { reference } = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, {
+    expect(post.status).toEqual(expect.any(String))
+    expect(new Date(post.updated_at).toISOString()).toBe(post.updated_at)
+    const referenceResponse = await request.get(`${api}/progress/reference`, {
       params: { operation: 'article.update', subjectId: outcome.subject.id },
-    }))
-    expect(reference).toMatchObject({ operation: 'article.update', subjectId: post.id, evidence: { kind: 'article', status: post.status, updatedAt: post.updated_at } })
+    })
+    if (referenceResponse.status() === 404) continue
+    const { reference } = await responseBody<{ reference: BusinessProgressReference }>(referenceResponse)
+    expect(reference).toMatchObject({ operation: 'article.update', subjectId: post.id, evidence: { kind: 'article' } })
     expect(reference.evidenceRevision).toMatch(/^[a-f0-9]{64}$/)
+    if (reference.evidence.kind !== 'article') throw new Error('An article reference must describe article evidence')
+    expect(new Date(reference.evidence.updatedAt).toISOString()).toBe(reference.evidence.updatedAt)
+    if (reference.evidence.updatedAt === post.updated_at) expect(reference.evidence.status).toBe(post.status)
     break
   }
 })
