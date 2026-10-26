@@ -112,6 +112,7 @@ const guestVisit = {
   contactPhone: '+1 555 000 0000',
   contactEmail: 'hello@emberslice.example',
   receiptUrl: 'https://demo.krabiclaw.com/reservations/confirmed?id=preview',
+  heroImageUrl: sampleCover,
 }
 
 const payment = {
@@ -281,7 +282,7 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — reservation confirmed', message: guestReservationReceivedMessage(guestVisit) },
   { id: 'guest-reservation-cancelled', audience: 'guest', title: 'Guest — reservation cancelled', message: guestReservationCancelledMessage({ ...guestVisit, wasConfirmed: true }) },
   { id: 'guest-booking-received', audience: 'guest', title: 'Guest — booking request sent', message: guestBookingReceivedMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM' }) },
-  { id: 'guest-stay-confirmed', audience: 'guest', title: 'Guest — stay confirmed', message: guestStayConfirmedMessage({ guestName: 'Mina Park', organizationName: 'Pinecone Stays', organizationLogoUrl: sampleLogo, homeName: 'Cedar Loft', checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults', total: '$645.00', receiptUrl: 'https://demo.krabiclaw.com/bookings/stay?id=preview', checkInInstructions: 'The lockbox is to the left of the front door. Your code arrives the morning of check-in.', contactPhone: '+1 415 555 0100', contactEmail: 'hello@example.com' }) },
+  { id: 'guest-stay-confirmed', audience: 'guest', title: 'Guest — stay confirmed', message: guestStayConfirmedMessage({ guestName: 'Mina Park', organizationName: 'Pinecone Stays', organizationLogoUrl: sampleLogo, homeName: 'Cedar Loft', heroImageUrl: sampleCover, checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults', total: '$645.00', receiptUrl: 'https://demo.krabiclaw.com/bookings/stay?id=preview', checkInInstructions: 'The lockbox is to the left of the front door. Your code arrives the morning of check-in.', contactPhone: '+1 415 555 0100', contactEmail: 'hello@example.com' }) },
   { id: 'guest-booking-cancelled', audience: 'guest', title: 'Guest — booking cancelled', message: guestBookingCancelledMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM', wasConfirmed: false }) },
   { id: 'guest-contact-received', audience: 'guest', title: 'Guest — message sent', message: guestContactReceivedMessage({ guestName: 'Jordan Lee', organizationName: restaurant, organizationLogoUrl: sampleLogo, subject: 'General', productTitle: 'Pottery Wheel Class', message: 'Hi, do you have vegan options and parking nearby?', consentAcknowledged: true }) },
   { id: 'guest-thread-reply', audience: 'guest', title: 'Guest — a reply from the business', message: guestThreadReplyMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, body: 'Hi Jordan,\n\nYes — we have a full vegan menu, and there is street parking on Soi 3 right outside. See you Tuesday!' }) },

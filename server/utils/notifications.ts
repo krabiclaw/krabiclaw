@@ -947,7 +947,7 @@ export async function notifyReservationCreated(
     guestName: opts.guestName, organizationLogoUrl: logoUrl,
     date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale), partySize: opts.guests, notes: opts.requests,
     contactPhone: opts.contactPhone, contactEmail: opts.contactEmail,
-    receiptUrl: opts.receiptUrl,
+    receiptUrl: opts.receiptUrl, heroImageUrl: hero?.imageUrl ?? null,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1280,7 +1280,7 @@ export async function notifyBookingCreated(
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
     time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: String(opts.partySize),
     notes: opts.notes, contactPhone: opts.contactPhone ?? null, contactEmail: opts.contactEmail ?? null,
-    receiptUrl: opts.receiptUrl ?? null,
+    receiptUrl: opts.receiptUrl ?? null, heroImageUrl: hero?.imageUrl ?? null,
     paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
@@ -1360,6 +1360,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     checkIn: when(stay.check_in_date, home.check_in_time, guest.locale), checkOut: when(stay.check_out_date, home.check_out_time, guest.locale),
     nights: String(nights), guests: String(stay.adults + stay.children), total: formatMinorAmount(paid.amount, paid.currency, guest.locale),
     checkInInstructions: home.check_in_instructions, contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null,
+    heroImageUrl: hero?.imageUrl ?? null,
     receiptUrl: organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/stay', guest.locale, sourceLocale.locale)}?id=${encodeURIComponent(stay.request_id)}#${(await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.request_id)).token}` : null,
   })
   const payload = {
