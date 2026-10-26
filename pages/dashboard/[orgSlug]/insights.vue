@@ -5,14 +5,14 @@
         v-if="loadError"
         color="error"
         variant="soft"
-        title="Analytics could not be loaded"
+        title="Insights could not be loaded"
         :description="loadError"
         :actions="[{ label: 'Try again', onClick: () => refresh() }]"
       />
       <DashboardFilterPills
         id="insights-channel"
         v-model="tab"
-        label="Analytics view"
+        label="Insights view"
         :items="tabItems"
         role="tablist"
         class="mb-8"
@@ -26,7 +26,7 @@
           <UButton
             v-for="days in [7, 30]"
             :key="days"
-            :label="`${days}d`"
+            :label="`Last ${days} days`"
             color="neutral"
             :variant="activeDays === days ? 'solid' : 'outline'"
             class="h-10 rounded-full px-4 text-sm font-normal"
@@ -39,136 +39,224 @@
       </div>
 
       <div v-if="tab === 'views' && analytics && !loadError" class="space-y-8">
-
-        <section class="border-b border-default pb-8 last:border-b-0" data-testid="insights-funnel">
-          <header class="mb-4"><h2 class="font-semibold text-highlighted">Funnel</h2></header>
-          <div class="space-y-4">
-            <DashboardAnalyticsRow
-              v-for="step in funnelSteps"
-              :key="step.key"
-              :label="step.label"
-              :value="step.value"
-              :percent="step.percent"
-              :data-testid="`insights-funnel-${step.key}`"
-            />
-            <p class="text-xs text-muted">Each percentage is of the step before it. Visits are sessions; confirmed is a request whose {{ funnelWords.confirmedNoun }} stands confirmed now.</p>
+        <!-- The report mixes visits, repeatable actions, requests and payments.
+             It cannot supply Airbnb's matched booking-conversion journey. -->
+        <section aria-labelledby="insights-overview-heading" data-testid="insights-overview">
+          <h2 id="insights-overview-heading" class="mb-4 text-lg font-semibold text-highlighted">At a glance</h2>
+          <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
+            <UCard v-for="metric in overviewCards" :key="metric.key" variant="subtle" :data-testid="`insights-overview-${metric.key}`">
+              <p class="text-sm font-medium text-highlighted">{{ metric.label }}</p>
+              <p class="mt-3 text-3xl font-semibold tabular-nums tracking-tight text-highlighted" :data-testid="`insights-overview-${metric.key}-count`">{{ metric.value }}</p>
+              <p class="mt-3 text-sm leading-5 text-muted">{{ metric.detail }}</p>
+              <template v-if="metric.key === 'paid' && analytics.funnel.paidCollected.length">
+                <p class="mt-3 text-sm text-muted">Collected before refunds, including tax</p>
+                <p v-for="amount in analytics.funnel.paidCollected" :key="amount.currency" class="mt-1 text-base font-medium tabular-nums text-highlighted">{{ formatMoney(amount.collectedMinor, amount.currency) }}</p>
+              </template>
+            </UCard>
           </div>
-          <div v-for="breakdown in funnelBreakdowns" :key="breakdown.title" class="mt-6 overflow-x-auto">
-            <table class="w-full text-left text-sm" :data-testid="breakdown.testId">
-              <thead class="text-xs text-muted"><tr>
-                <th scope="col" class="pb-3 font-medium">{{ breakdown.title }}</th>
-                <th v-for="column in funnelWords.short" :key="column" scope="col" class="pb-3 pl-4 text-right font-medium">{{ column }}</th>
+        </section>
+
+        <div class="grid gap-8" :class="funnelBreakdowns.length > 1 ? 'xl:grid-cols-2' : undefined">
+          <section v-for="breakdown in funnelBreakdowns" :key="breakdown.key" :aria-labelledby="`insights-requests-${breakdown.key}-heading`">
+            <h2 :id="`insights-requests-${breakdown.key}-heading`" class="text-lg font-semibold text-highlighted">{{ breakdown.heading }}</h2>
+            <p class="mt-2 text-sm text-muted">{{ breakdown.description }}</p>
+            <table v-if="breakdown.requests.length" :id="`insights-requests-${breakdown.key}`" class="mt-4 w-full text-left text-sm" :data-testid="`insights-requests-by-${breakdown.key}`">
+              <thead class="text-muted"><tr>
+                <th scope="col" class="pb-3 pr-4 font-medium">{{ breakdown.title }}</th>
+                <th scope="col" class="pb-3 text-right font-medium">Requests</th>
+                <th scope="col" class="pb-3 pl-4 text-right font-medium">Confirmed</th>
               </tr></thead>
               <tbody class="divide-y divide-default">
-                <tr v-for="row in breakdown.rows" :key="row.label">
-                  <td class="py-3 pr-4 font-medium text-highlighted">{{ row.label }}</td>
-                  <td v-for="(cell, index) in row.cells" :key="index" class="py-3 pl-4 text-right tabular-nums">{{ cell }}</td>
+                <tr v-for="row in (expandedBreakdowns[breakdown.key] ? breakdown.requests : breakdown.requests.slice(0, 5))" :key="row.key">
+                  <th scope="row" class="py-4 pr-4 text-left font-medium text-highlighted">{{ row.label }}</th>
+                  <td class="py-4 text-right tabular-nums">{{ formatCount(row.counts.submitted) }}</td>
+                  <td class="py-4 pl-4 text-right tabular-nums">{{ formatCount(row.counts.confirmed) }}</td>
                 </tr>
               </tbody>
             </table>
-          </div>
-        </section>
+            <UEmpty v-else title="No requests received in this period" class="mt-4" />
+            <UButton v-if="breakdown.requests.length > 5" color="neutral" variant="outline" class="mt-4 rounded-full"
+              :label="expandedBreakdowns[breakdown.key] ? 'Show fewer' : `Show all ${breakdown.requests.length} ${breakdown.plural}`"
+              :aria-expanded="expandedBreakdowns[breakdown.key]" :aria-controls="`insights-requests-${breakdown.key}`"
+              @click="expandedBreakdowns[breakdown.key] = !expandedBreakdowns[breakdown.key]" />
+          </section>
+        </div>
 
-        <section class="border-b border-default pb-8 last:border-b-0">
-          <div class="grid grid-cols-2 gap-x-6 gap-y-6">
-            <div v-for="metric in metricCards" :key="metric.label">
-              <p class="text-sm text-muted">{{ metric.label }}</p>
-              <p class="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-highlighted">{{ metric.value }}</p>
-              <p class="mt-2 text-xs leading-5 text-muted">{{ metric.detail }}</p>
+        <details class="border-t border-default pt-6" data-testid="insights-activity-details">
+          <summary class="cursor-pointer text-base font-semibold text-highlighted">All recorded activity</summary>
+          <div class="mt-6 space-y-6" data-testid="insights-funnel">
+            <p class="text-sm leading-6 text-muted">These are separate counts. One person can visit or click more than once. Requests and payments can also be recorded without a website visit.</p>
+            <dl class="grid gap-x-8 sm:grid-cols-2">
+              <div v-for="step in funnelSteps" :key="step.key" class="flex items-start justify-between gap-4 border-b border-default py-4" :data-testid="`insights-funnel-${step.key}`">
+                <dt>
+                  <span class="text-base font-medium text-highlighted">{{ step.label }}</span>
+                  <p class="mt-1 text-sm leading-5 text-muted">{{ step.detail }}</p>
+                </dt>
+                <dd class="text-right text-base font-semibold tabular-nums text-highlighted" :data-testid="`insights-funnel-${step.key}-count`">{{ funnelCell(analytics.funnel, step.key) }}</dd>
+              </div>
+            </dl>
+            <div v-for="breakdown in funnelBreakdowns" :key="breakdown.key" class="space-y-3">
+              <h3 class="text-base font-semibold text-highlighted">All activity by {{ breakdown.title.toLowerCase() }}</h3>
+              <div class="overflow-x-auto" tabindex="0" :aria-label="`All activity by ${breakdown.title.toLowerCase()}`">
+                <table class="w-full text-left text-sm" :data-testid="breakdown.testId">
+                  <thead class="text-muted"><tr>
+                    <th scope="col" class="pb-3 font-medium">{{ breakdown.title }}</th>
+                    <th v-for="step in funnelSteps" :key="step.key" scope="col" class="pb-3 pl-4 text-right font-medium">{{ step.label }}</th>
+                  </tr></thead>
+                  <tbody class="divide-y divide-default">
+                    <tr v-for="row in breakdown.rows" :key="row.key">
+                      <td class="py-3 pr-4 font-medium text-highlighted">{{ row.label }}</td>
+                      <td v-for="key in FUNNEL_KEYS" :key="key" class="py-3 pl-4 text-right tabular-nums">{{ funnelCell(row.counts, key) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p v-if="breakdown.key === 'location'" class="text-sm text-muted">A visit can include more than one location, so location visits can add up to more than the total.</p>
             </div>
           </div>
-        </section>
+        </details>
 
-        <section class="border-b border-default pb-8 last:border-b-0">
-          <header class="mb-4">
-            <div class="flex items-center justify-between gap-3">
-              <h2 class="font-semibold text-highlighted">Traffic trend</h2>
-              <UBadge color="neutral" variant="soft" class="rounded-2xl">{{ dailyData.length }} days</UBadge>
-            </div>
-          </header>
-          <AnalyticsTrendChart label="Daily pageviews and sessions" :dates="dailyData.map(day => day.date)" :series="trafficSeries" />
-        </section>
+        <details class="border-t border-default pt-6" data-testid="insights-website-details">
+          <summary class="cursor-pointer text-base font-semibold text-highlighted">Website details</summary>
+          <div class="mt-6 space-y-8">
+            <section>
+              <h2 class="mb-4 text-lg font-semibold text-highlighted">Visits to your website</h2>
+              <div class="grid gap-8 xl:grid-cols-2">
+                <div class="grid grid-cols-2 content-start gap-6">
+                  <div v-for="metric in metricCards" :key="metric.label">
+                    <p class="text-sm text-muted">{{ metric.label }}</p>
+                    <p class="mt-2 text-2xl font-semibold tabular-nums tracking-tight text-highlighted">{{ metric.value }}</p>
+                    <p class="mt-2 text-sm leading-5 text-muted">{{ metric.detail }}</p>
+                  </div>
+                </div>
+                <div>
+                  <h3 class="mb-3 text-base font-semibold text-highlighted">Website activity by day</h3>
+                  <DashboardFilterPills id="insights-chart" v-model="trafficMetric" label="Daily website activity" :items="trafficMetricItems" class="mb-4" />
+                  <AnalyticsTrendChart :label="trafficMetric === 'visits' ? 'Website visits by day' : 'Page views by day'" :dates="dailyData.map(day => day.date)" :series="trafficSeries" />
+                </div>
+              </div>
+            </section>
 
-        <section class="border-b border-default pb-8 last:border-b-0">
-          <header class="mb-4"><h2 class="font-semibold text-highlighted">Top pages</h2></header>
-          <table v-if="analytics.topPages.length" class="w-full table-fixed text-left text-sm">
-            <thead class="text-xs text-muted"><tr><th class="w-3/5 pb-3 font-medium">Page</th><th class="pb-3 text-right font-medium">Views</th><th class="pb-3 text-right font-medium">Share</th></tr></thead>
-            <tbody class="divide-y divide-default">
-              <tr v-for="page in analytics.topPages" :key="page.path">
-                <td class="break-words py-3 pr-4 font-medium text-highlighted">{{ page.path }}</td>
-                <td class="py-3 text-right tabular-nums">{{ formatCount(page.views) }}</td>
-                <td class="py-3 text-right tabular-nums text-muted">{{ page.percentOfTotal }}%</td>
-              </tr>
-            </tbody>
-          </table>
-          <p v-else class="text-sm text-muted">No page data yet.</p>
-        </section>
-
-        <div class="space-y-6">
-          <section class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4"><h2 class="font-semibold text-highlighted">Traffic sources</h2></header>
-            <div v-if="analytics.attribution.length" class="overflow-x-auto">
-              <table class="w-full text-left text-sm">
-                <thead class="text-xs text-muted"><tr><th class="pb-3 font-medium">Source / campaign</th><th class="pb-3 text-right font-medium">Sessions</th><th class="pb-3 pl-4 text-right font-medium">Converting</th></tr></thead>
+            <section>
+              <h2 class="mb-4 text-lg font-semibold text-highlighted">Most viewed pages</h2>
+              <table v-if="analytics.topPages.length" id="insights-top-pages" class="w-full table-fixed text-left text-sm">
+                <thead class="text-muted"><tr><th scope="col" class="w-3/5 pb-3 font-medium">Page</th><th scope="col" class="pb-3 text-right font-medium">Views</th><th scope="col" class="pb-3 text-right font-medium">Share</th></tr></thead>
                 <tbody class="divide-y divide-default">
-                  <tr v-for="row in analytics.attribution" :key="JSON.stringify([row.source, row.medium, row.campaign, row.content])">
-                    <td class="py-3 pr-4"><p class="font-medium text-highlighted">{{ row.source }} <span class="font-normal text-muted">/ {{ row.medium }}</span></p><p v-if="row.campaign || row.content" class="mt-1 text-xs text-muted">{{ [row.campaign, row.content].filter(Boolean).join(' · ') }}</p></td>
-                    <td class="py-3 text-right tabular-nums">{{ formatCount(row.sessions) }}</td>
-                    <td class="py-3 pl-4 text-right tabular-nums">{{ formatCount(row.convertingSessions) }}<span v-if="row.sessionConversionRate !== null" class="ml-2 text-xs text-muted">{{ formatNumber(row.sessionConversionRate) }}%</span></td>
+                  <tr v-for="page in (showAllPages ? analytics.topPages : analytics.topPages.slice(0, 5))" :key="page.path">
+                    <td class="break-words py-3 pr-4 font-medium text-highlighted">{{ page.path }}</td>
+                    <td class="py-3 text-right tabular-nums">{{ formatCount(page.views) }}</td>
+                    <td class="py-3 text-right tabular-nums text-muted">{{ page.percentOfTotal }}%</td>
                   </tr>
                 </tbody>
               </table>
-            </div>
-            <p v-else class="text-sm text-muted">No attribution data yet.</p>
-          </section>
-          <section class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4"><h2 class="font-semibold text-highlighted">Pageviews by language</h2></header>
-            <div class="space-y-4">
-              <DashboardAnalyticsRow
-                v-for="row in languageRows"
-                :key="row.language ?? 'unknown'"
-                :label="row.language ?? 'Language not recorded'"
-                :value="`${formatCount(row.pageViews)} pageviews · ${formatCount(row.sessions)} sessions`"
-                :percent="languages?.totalPageViews ? Math.round(row.pageViews / languages.totalPageViews * 100) : 0"
-              />
-              <p v-if="languagesError" class="text-sm text-error">{{ getErrorMessage(languagesError, 'Could not load pageviews by language') }}</p>
-              <p v-else-if="!languageRows.length" class="text-sm text-muted">No pageviews recorded in this range.</p>
-              <p v-if="languageRows.length && languages" class="text-xs text-muted">{{ formatCount(languages.totalSessions) }} distinct sessions across all languages (not the sum of the rows).</p>
-              <UButton v-if="languages?.cursor" size="sm" variant="soft" :loading="languagesPending" @click="languagesAfter = { period: languagePeriod, cursor: languages.cursor }">Show more</UButton>
-            </div>
-          </section>
-          <section v-if="analytics.signupCohort.signups" class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4"><h2 class="font-semibold text-highlighted">Signup funnel</h2></header>
-            <div class="space-y-6">
-              <div class="grid grid-cols-3 gap-4" aria-label="Signup conversion funnel">
+              <p v-else class="text-sm text-muted">No page views recorded in this period.</p>
+              <UButton v-if="analytics.topPages.length > 5" color="neutral" variant="outline" class="mt-4 rounded-full"
+                :label="showAllPages ? 'Show fewer pages' : `Show all ${analytics.topPages.length} pages`"
+                :aria-expanded="showAllPages" aria-controls="insights-top-pages" @click="showAllPages = !showAllPages" />
+            </section>
+
+            <details class="border-t border-default pt-6">
+              <summary class="cursor-pointer text-base font-semibold text-highlighted">Visitor locations, languages and devices</summary>
+              <div class="mt-6 grid gap-8 xl:grid-cols-2">
+                <section>
+                  <h3 class="mb-4 text-base font-semibold text-highlighted">Languages used on your website</h3>
+                  <div class="space-y-4">
+                    <DashboardAnalyticsRow v-for="row in languageRows" :key="row.language ?? 'unknown'"
+                      :label="languageName(row.language)" :value="`${formatCount(row.pageViews)} views · ${formatCount(row.sessions)} visits`"
+                      :percent="languages?.totalPageViews ? Math.round(row.pageViews / languages.totalPageViews * 100) : 0" />
+                    <p v-if="languagesError" class="text-sm text-error">{{ getErrorMessage(languagesError, 'Could not load website languages') }}</p>
+                    <p v-else-if="!languageRows.length" class="text-sm text-muted">No page views recorded in this period.</p>
+                    <p v-if="languageRows.length && languages" class="text-sm text-muted">{{ formatCount(languages.totalSessions) }} visits in total. A visit can use more than one language.</p>
+                    <UButton v-if="languages?.cursor" color="neutral" variant="outline" :loading="languagesPending" @click="languagesAfter = { period: languagePeriod, cursor: languages.cursor }">Show more languages</UButton>
+                  </div>
+                </section>
+                <section>
+                  <h3 class="mb-4 text-base font-semibold text-highlighted">Page views by country</h3>
+                  <div class="space-y-4">
+                    <DashboardAnalyticsRow v-for="country in analytics.countries" :key="country.countryCode"
+                      :label="countryName(country.countryCode)" :prefix="countryFlag(country.countryCode)" :value="formatCount(country.views)" :percent="country.percentOfTotal" />
+                    <p v-if="!analytics.countries.length" class="text-sm text-muted">No country data recorded in this period.</p>
+                  </div>
+                </section>
+                <section>
+                  <h3 class="mb-4 text-base font-semibold text-highlighted">Page views by device</h3>
+                  <div class="space-y-4">
+                    <DashboardAnalyticsRow v-for="device in analytics.devices" :key="device.type" :label="device.type"
+                      :prefix="deviceIcon(device.type)" :value="formatCount(device.views)" :percent="device.percentOfTotal" />
+                    <p v-if="!analytics.devices.length" class="text-sm text-muted">No device data recorded in this period.</p>
+                  </div>
+                </section>
+                <section>
+                  <h3 class="mb-4 text-base font-semibold text-highlighted">Page views by city</h3>
+                  <div class="space-y-4">
+                    <DashboardAnalyticsRow v-for="city in analytics.cities" :key="`${city.city}-${city.region}-${city.countryCode}`"
+                      :label="city.region ? `${city.city}, ${city.region}` : city.city" :prefix="countryFlag(city.countryCode)"
+                      :value="formatCount(city.views)" :percent="percentOfViews(city.views)" />
+                    <p v-if="!analytics.cities.length" class="text-sm text-muted">No city data recorded in this period.</p>
+                  </div>
+                </section>
+              </div>
+            </details>
+
+            <details class="border-t border-default pt-6">
+              <summary class="cursor-pointer text-base font-semibold text-highlighted">Campaign and referral details</summary>
+              <div class="mt-6 space-y-8">
+                <section>
+                  <h3 class="mb-2 text-base font-semibold text-highlighted">Visits by source and campaign</h3>
+                  <p class="mb-4 text-sm text-muted">Visits with a result include a recorded message, request, payment or signup. Each visit is counted once in that column.</p>
+                  <div v-if="analytics.attribution.length" class="overflow-x-auto" tabindex="0" aria-label="Visits by source and campaign">
+                    <table class="w-full text-left text-sm">
+                      <thead class="text-muted"><tr><th scope="col" class="pb-3 font-medium">Source / campaign</th><th scope="col" class="pb-3 text-right font-medium">Visits</th><th scope="col" class="pb-3 pl-4 text-right font-medium">Visits with a result</th></tr></thead>
+                      <tbody class="divide-y divide-default">
+                        <tr v-for="row in analytics.attribution" :key="JSON.stringify([row.source, row.medium, row.campaign, row.content])">
+                          <td class="break-all py-3 pr-4"><p class="font-medium text-highlighted">{{ row.source }} <span class="font-normal text-muted">/ {{ row.medium }}</span></p><p v-if="row.campaign || row.content" class="mt-1 text-muted">{{ [row.campaign, row.content].filter(Boolean).join(' · ') }}</p></td>
+                          <td class="py-3 text-right tabular-nums">{{ formatCount(row.sessions) }}</td>
+                          <td class="py-3 pl-4 text-right tabular-nums">{{ formatCount(row.convertingSessions) }}<span v-if="row.sessionConversionRate !== null" class="ml-2 text-muted">{{ formatNumber(row.sessionConversionRate) }}%</span></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p v-else class="text-sm text-muted">No source data recorded in this period.</p>
+                </section>
+                <section>
+                  <h3 class="mb-4 text-base font-semibold text-highlighted">Referring websites and direct visits</h3>
+                  <div class="space-y-4">
+                    <DashboardAnalyticsRow v-for="referrer in analytics.referrers" :key="referrer.source" :label="referrer.source"
+                      :value="`${formatCount(referrer.views)} page views`" :percent="referrer.percentOfTotal" />
+                    <p v-if="!analytics.referrers.length" class="text-sm text-muted">No referring websites recorded in this period.</p>
+                  </div>
+                </section>
+              </div>
+            </details>
+
+            <section v-if="analytics.signupCohort.signups" class="border-t border-default pt-6">
+              <h2 class="mb-4 text-lg font-semibold text-highlighted">New account signups</h2>
+              <div class="grid grid-cols-3 gap-4" aria-label="Signup progress">
                 <div v-for="stage in [
-                  { label: 'Signups', count: analytics.signupCohort.signups },
-                  { label: 'Onboarded', count: analytics.signupCohort.onboardedSignups },
+                  { label: 'Signed up', count: analytics.signupCohort.signups },
+                  { label: 'Finished setup', count: analytics.signupCohort.onboardedSignups },
                   { label: 'Paid', count: analytics.signupCohort.firstPaidSignups },
                 ]" :key="stage.label" class="space-y-3">
                   <p class="text-sm text-muted">{{ stage.label }}</p>
-                  <p class="text-3xl font-semibold tabular-nums text-highlighted">{{ formatCount(stage.count) }}</p>
-                  <div class="h-2 overflow-hidden rounded-full bg-accented" aria-hidden="true">
-                    <div class="h-full rounded-full bg-primary" :style="{ width: `${stage.count / analytics.signupCohort.signups * 100}%` }" />
-                  </div>
-                  <p class="text-xs tabular-nums text-muted">{{ Math.round(stage.count / analytics.signupCohort.signups * 100) }}%</p>
+                  <p class="text-2xl font-semibold tabular-nums text-highlighted">{{ formatCount(stage.count) }}</p>
+                  <p class="text-sm tabular-nums text-muted">{{ Math.round(stage.count / analytics.signupCohort.signups * 100) }}%</p>
                 </div>
               </div>
-              <p class="text-xs text-muted">Progress of people who signed up in this period, through the organizations they own.</p>
-              <details class="border-t border-default pt-4">
-                <summary class="cursor-pointer text-sm font-medium text-highlighted">By campaign</summary>
-                <div class="mt-4 overflow-x-auto">
+              <p class="mt-4 text-sm text-muted">People who signed up in this period and the businesses they went on to set up or pay for.</p>
+              <details class="mt-4">
+                <summary class="cursor-pointer text-sm font-medium text-highlighted">Signups by campaign</summary>
+                <div class="mt-4 overflow-x-auto" tabindex="0" aria-label="Signups by campaign">
                   <table class="w-full text-sm">
-                    <thead class="text-xs text-muted"><tr>
+                    <thead class="text-sm text-muted"><tr>
                       <th scope="col" class="pb-3 text-left font-medium">Source / campaign</th>
-                      <th v-for="label in ['Signups', 'Onboarded', 'Paid']" :key="label" scope="col" class="pb-3 pl-4 text-right font-medium">{{ label }}</th>
+                      <th v-for="label in ['Signed up', 'Finished setup', 'Paid']" :key="label" scope="col" class="pb-3 pl-4 text-right font-medium">{{ label }}</th>
                     </tr></thead>
                     <tbody class="divide-y divide-default">
                       <tr v-for="row in analytics.signupCohort.bySignupAttribution" :key="`${row.source}-${row.medium}-${row.campaign || ''}-${row.content || ''}`">
-                        <td class="py-3">
-                          <p class="text-highlighted">{{ row.source || 'Unattributed' }} / {{ row.medium || 'Unattributed' }}</p>
-                          <p v-if="row.campaign" class="mt-1 break-all text-xs text-muted">{{ row.campaign }}</p>
-                          <p v-if="row.content" class="mt-1 break-all text-xs text-muted">{{ row.content }}</p>
+                        <td class="break-all py-3">
+                          <p class="text-highlighted">{{ row.source || 'Source not recorded' }} / {{ row.medium || 'Not recorded' }}</p>
+                          <p v-if="row.campaign" class="mt-1 text-muted">{{ row.campaign }}</p>
+                          <p v-if="row.content" class="mt-1 text-muted">{{ row.content }}</p>
                         </td>
                         <td v-for="(count, index) in [row.signups, row.onboardedSignups, row.firstPaidSignups]" :key="index" class="py-3 pl-4 text-right tabular-nums">{{ formatCount(count) }}</td>
                       </tr>
@@ -176,80 +264,9 @@
                   </table>
                 </div>
               </details>
-            </div>
-          </section>
-        </div>
-
-        <div class="space-y-6">
-          <section class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4">
-              <h2 class="font-semibold text-highlighted">Countries</h2>
-            </header>
-            <div class="space-y-4">
-              <DashboardAnalyticsRow
-                v-for="country in analytics.countries"
-                :key="country.countryCode"
-                :label="countryName(country.countryCode)"
-                :prefix="countryFlag(country.countryCode)"
-                :value="formatCount(country.views)"
-                :percent="country.percentOfTotal"
-              />
-              <p v-if="!analytics.countries.length" class="text-sm text-muted">No country data yet.</p>
-            </div>
-          </section>
-
-          <section class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4">
-              <h2 class="font-semibold text-highlighted">Referrers</h2>
-            </header>
-            <div class="space-y-4">
-              <DashboardAnalyticsRow
-                v-for="referrer in analytics.referrers"
-                :key="referrer.source"
-                :label="referrer.source"
-                :value="formatCount(referrer.views)"
-                :percent="referrer.percentOfTotal"
-              />
-              <p v-if="!analytics.referrers.length" class="text-sm text-muted">No referrer data yet.</p>
-            </div>
-          </section>
-
-          <section class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4">
-              <h2 class="font-semibold text-highlighted">Devices</h2>
-            </header>
-            <div class="space-y-4">
-              <DashboardAnalyticsRow
-                v-for="device in analytics.devices"
-                :key="device.type"
-                :label="device.type"
-                :prefix="deviceIcon(device.type)"
-                :value="formatCount(device.views)"
-                :percent="device.percentOfTotal"
-              />
-              <p v-if="!analytics.devices.length" class="text-sm text-muted">No device data yet.</p>
-            </div>
-          </section>
-
-          <section class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4">
-              <h2 class="font-semibold text-highlighted">Cities</h2>
-            </header>
-            <div class="space-y-4">
-              <DashboardAnalyticsRow
-                v-for="city in analytics.cities"
-                :key="`${city.city}-${city.region}-${city.countryCode}`"
-                :label="city.region ? `${city.city}, ${city.region}` : city.city"
-                :prefix="countryFlag(city.countryCode)"
-                :value="formatCount(city.views)"
-                :percent="percentOfViews(city.views)"
-              />
-              <p v-if="!analytics.cities.length" class="text-sm text-muted">No city data yet.</p>
-            </div>
-          </section>
-        </div>
-
-
+            </section>
+          </div>
+        </details>
       </div>
 
       <div v-else-if="tab === 'reviews' && reviews && !loadError" class="space-y-6">
@@ -440,7 +457,7 @@ watch(tab, (next) => {
   void navigateTo({ query: next === 'views' ? { ...route.query, tab: undefined } : { ...route.query, tab: next } }, { replace: true })
 })
 const tabItems = [
-  { label: 'Views', value: 'views' as const },
+  { label: 'Overview', value: 'views' as const },
   { label: 'Instagram', value: 'instagram' as const },
   { label: 'Google Ads', value: 'ads' as const },
   { label: 'Reviews', value: 'reviews' as const },
@@ -577,59 +594,85 @@ const { data: languages, pending: languagesPending, error: languagesError } = aw
 )
 
 const dailyData = computed(() => analytics.value?.dailyData || [])
-const trafficSeries = computed(() => [
-  { label: 'Pageviews', values: dailyData.value.map(day => day.pageViews), color: 'var(--ui-primary)' },
-  { label: 'Sessions', values: dailyData.value.map(day => day.sessions), color: 'var(--ui-info)' },
-])
+const trafficMetric = ref<'visits' | 'pageViews'>('visits')
+const trafficMetricItems = [{ label: 'Visits', value: 'visits' }, { label: 'Page views', value: 'pageViews' }]
+const trafficSeries = computed(() => [{
+  label: trafficMetric.value === 'visits' ? 'Visits' : 'Page views',
+  values: dailyData.value.map(day => trafficMetric.value === 'visits' ? day.sessions : day.pageViews),
+  color: 'var(--ui-primary)',
+}])
 
-// The funnel in the business's own words. Steps are counted by the report; only their names vary.
+// The API's funnel fields are independent activity counts, not one cohort.
+// Keep their units visible and never divide one field by the previous field.
 type FunnelCounts = Omit<AnalyticsReport['funnel'], 'bySource' | 'byLocation'>
 const FUNNEL_KEYS = ['visits', 'viewed', 'intent', 'submitted', 'confirmed', 'paid'] as const
-const FUNNEL_WORDS = {
-  service: { long: ['Visits', 'Viewed a practice area', 'Clicked Book a consultation', 'Requested a consultation', 'Scheduled', 'Paid'], short: ['Visits', 'Viewed', 'Clicked', 'Requested', 'Scheduled', 'Paid'], confirmedNoun: 'consultation' },
-  restaurant: { long: ['Visits', 'Viewed a dish', 'Started a reservation', 'Reserved', 'Seated', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Reserved', 'Seated', 'Paid'], confirmedNoun: 'reservation' },
-  experience: { long: ['Visits', 'Viewed', 'Started checkout', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
-  lodging: { long: ['Visits', 'Viewed', 'Started checkout', 'Booked', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Started', 'Booked', 'Confirmed', 'Paid'], confirmedNoun: 'stay' },
-  platform: { long: ['Visits', 'Viewed an offering', 'Showed intent', 'Submitted', 'Confirmed', 'Paid'], short: ['Visits', 'Viewed', 'Intent', 'Submitted', 'Confirmed', 'Paid'], confirmedNoun: 'booking' },
+const ACTIVITY_LABELS = {
+  visits: 'Website visits', viewed: 'Content views', intent: 'Booking and link actions',
+  submitted: 'Requests received', confirmed: 'Requests now confirmed', paid: 'Payments received',
 } as const
+const REQUEST_NAMES = {
+  service: 'consultation requests', restaurant: 'reservation requests', experience: 'booking requests',
+  lodging: 'stay requests', platform: 'booking requests',
+} as const
+const SOURCE_LABELS: Partial<Record<AnalyticsReport['funnel']['bySource'][number]['channel'], string>> = {
+  'Organic search': 'Search engines', Direct: 'Direct visits', Referral: 'Other websites',
+  Other: 'Other sources', 'Not recorded': 'Source not recorded',
+}
 const dashboard = useDashboardOrganization()
-const funnelWords = computed(() => FUNNEL_WORDS[dashboard.organization.value?.vertical ?? 'platform'])
-// A step with nothing recorded reads "—", never 0 or 0%.
+const requestDescription = computed(() => `Messages and requests recorded in this period, including ${REQUEST_NAMES[dashboard.organization.value?.vertical ?? 'platform']}.`)
+const activityDetails = computed(() => ({
+  visits: 'Visits to your website. One person can visit more than once.',
+  viewed: 'Views of offerings and announcements, including repeat views.',
+  intent: 'Booking, checkout, ordering and announcement actions, including repeat clicks.',
+  submitted: `${requestDescription.value} Includes requests made through checkout.`,
+  confirmed: 'Requests received in this period that are currently confirmed.',
+  paid: 'Payments received in this period, including payments for earlier requests. Amounts include tax and are before refunds.',
+}))
+const expandedBreakdowns = ref({ source: false, location: false })
+const showAllPages = ref(false)
 const funnelCell = (counts: FunnelCounts, key: typeof FUNNEL_KEYS[number]) => {
-  if (!counts[key]) return '—'
   if (key !== 'paid' || !counts.paidCollected.length) return formatCount(counts[key])
   return `${formatCount(counts.paid)} · ${counts.paidCollected.map(paid => formatMoney(paid.collectedMinor, paid.currency)).join(' · ')}`
 }
-const funnelSteps = computed(() => {
-  const funnel = analytics.value?.funnel
-  if (!funnel) return []
-  return FUNNEL_KEYS.map((key, index) => {
-    const previous = index ? funnel[FUNNEL_KEYS[index - 1]!] : 0
-    const rate = index && previous && funnel[key] ? ` · ${formatNumber(Math.round(funnel[key] / previous * 1000) / 10)}%` : ''
-    return { key, label: funnelWords.value.long[index]!, value: `${funnelCell(funnel, key)}${rate}`, percent: funnel.visits ? funnel[key] / funnel.visits * 100 : 0 }
-  })
+const funnelSteps = computed(() => FUNNEL_KEYS.map(key => ({ key, label: ACTIVITY_LABELS[key], detail: activityDetails.value[key] })))
+const overviewCards = computed(() => {
+  const counts = analytics.value?.funnel
+  if (!counts) return []
+  return (['submitted', 'confirmed', 'paid', 'visits'] as const).map(key => ({
+    key, label: ACTIVITY_LABELS[key], value: formatCount(counts[key]),
+    detail: key === 'submitted' ? requestDescription.value : key === 'paid' ? 'Payments recorded in this period.' : activityDetails.value[key],
+  }))
 })
 const funnelBreakdowns = computed(() => {
   const funnel = analytics.value?.funnel
   if (!funnel) return []
-  const rows = (entries: Array<{ label: string; counts: FunnelCounts }>) => entries.map(({ label, counts }) => ({ label, cells: FUNNEL_KEYS.map(key => funnelCell(counts, key)) }))
-  const locationTitle = (id: string | null) => id ? dashboard.locations.value.find(location => location.id === id)?.title ?? 'Removed location' : 'No location'
+  const locationTitle = (id: string | null) => id ? dashboard.locations.value.find(location => location.id === id)?.title ?? 'Removed location' : 'Location not recorded'
+  const locationLabel = dashboard.organization.value?.vertical === 'service' ? 'Office' : 'Location'
   return [
-    { title: 'Source', testId: 'insights-funnel-by-source', rows: rows(funnel.bySource.map(row => ({ label: row.channel, counts: row }))) },
-    ...(dashboard.locations.value.length > 1
-      ? [{ title: 'Location', testId: 'insights-funnel-by-location', rows: rows(funnel.byLocation.map(row => ({ label: locationTitle(row.locationId), counts: row }))) }]
-      : []),
-  ].filter(breakdown => breakdown.rows.length)
+    {
+      key: 'source' as const, title: 'Source', heading: 'Where requests came from', plural: 'sources',
+      description: 'Sources recorded with your requests, ordered by requests received.', testId: 'insights-funnel-by-source',
+      rows: funnel.bySource.map(row => ({ key: row.channel, label: SOURCE_LABELS[row.channel] ?? row.channel, counts: row })),
+    },
+    ...(dashboard.locations.value.length > 1 || funnel.byLocation.filter(row => row.locationId !== null).length > 1 ? [{
+      key: 'location' as const, title: locationLabel, heading: `Requests by ${locationLabel.toLowerCase()}`, plural: `${locationLabel.toLowerCase()}s`,
+      description: 'Requests received in this period, with their current confirmation status.', testId: 'insights-funnel-by-location',
+      rows: funnel.byLocation.map(row => ({ key: row.locationId ?? 'unassigned', label: locationTitle(row.locationId), counts: row })),
+    }] : []),
+  ].map(breakdown => {
+    const rows = breakdown.rows.toSorted((a, b) => b.counts.submitted - a.counts.submitted || b.counts.confirmed - a.counts.confirmed || b.counts.visits - a.counts.visits || a.label.localeCompare(b.label))
+    return { ...breakdown, rows, requests: rows.filter(row => row.counts.submitted > 0) }
+  })
 })
 
 const metricCards = computed(() => {
   const metrics = analytics.value?.metrics
   if (!metrics) return []
   return [
-    { label: 'Pageviews', value: formatCount(metrics.pageViews), detail: metrics.changePercent === null ? 'Not enough prior data' : `${formatSigned(metrics.changePercent)} vs previous period`, icon: 'i-lucide-chart-bar' },
-    { label: 'Unique visitors', value: formatCount(metrics.uniqueVisitors), detail: `${formatCount(metrics.returningVisitors)} returning`, icon: 'i-lucide-users' },
-    { label: 'Sessions', value: formatCount(metrics.uniqueSessions), detail: `${formatNumber(metrics.pagesPerSession)} pages per session`, icon: 'i-lucide-mouse-pointer-click' },
-    { label: 'Avg. duration', value: formatDuration(metrics.avgSessionDuration), detail: 'Average session time', icon: 'i-lucide-clock' }
+    { label: 'Page views', value: formatCount(metrics.pageViews), detail: metrics.changePercent === null ? 'Pages opened, including repeat views.' : `${formatSigned(metrics.changePercent)} compared with the previous period.` },
+    { label: 'Visitors', value: formatCount(metrics.uniqueVisitors), detail: `${formatCount(metrics.returningVisitors)} also visited before this period.` },
+    { label: 'Visits', value: formatCount(metrics.uniqueSessions), detail: `${formatNumber(metrics.pagesPerSession)} pages opened per visit.` },
+    { label: 'Average visit length', value: formatDuration(metrics.avgSessionDuration), detail: 'Average recorded time on your website.' },
   ]
 })
 
@@ -685,6 +728,15 @@ function countryName(countryCode: string): string {
   }
 }
 
+function languageName(language: string | null): string {
+  if (!language) return 'Language not recorded'
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'language' }).of(language) || language
+  } catch {
+    return language
+  }
+}
+
 function deviceIcon(type: string): string {
   if (type === 'Mobile') return '📱'
   if (type === 'Tablet') return '▭'
@@ -700,3 +752,4 @@ function percentOfViews(views: number): number {
 
 useSeoMeta({ title: 'Insights | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>
+
