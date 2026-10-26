@@ -1091,8 +1091,14 @@ price per variant and never offers a product-level amount the server has
 nowhere to put.
 
 **The picture leads.** Rows lead with a thumbnail; a leaf leads with the image
-large when editing the photo itself. A booking, stay or payment summary leads
-with its identity, status, dates and actions, with compact contextual media.
+large when editing the photo itself. A booking or stay summary places its real
+resource photo in a compact square above the guest avatar and party identity,
+then dates and arrival facts. Private team notes precede guest details and the
+cancellation policy; payment, management and booking metadata follow. Message
+and Call remain at the foot of the pane while its facts scroll. Embedded thread
+details retain those actions at the end of their existing leaf. Guest requests
+are not private team notes, and unavailable facts never become invented rows.
+Payment summaries retain their purchase identity and canonical payment facts.
 Member portraits use avatars, and photo grids respond to their pane's width.
 When there is no image, show a muted icon in the *same footprint* so a
 list does not reflow between rows that have one and rows that do not.

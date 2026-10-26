@@ -10,6 +10,7 @@ import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { E2E_DEMO_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHeaders, potteryHouseTestExtraHeaders, tenantTestExtraHeaders, testBaseUrl } from './test-env'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 interface NotificationView {
   id: string
@@ -662,25 +663,60 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
   const detailPanel = page.locator('#dashboard-panel-booking-details')
+  const summaryResponse = await page.request.get(`/api/dashboard/bookings/reservation/${bookingIds[0]}`, { params: { org: 'ember-slice-demo' } })
+  await expectStatus(summaryResponse, 200)
+  const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
+  expect(summary).toMatchObject({ guestName, guestPhone: '+12025550123', partySize: 2 })
+  expect(summary.resourceImageUrl, 'This reservation has its location’s actual authored picture').not.toBeNull()
+  expect(summary.threadId).not.toBeNull()
   const priorViewport = page.viewportSize()!
   for (const width of [1728, 390]) {
-    await page.setViewportSize({ width, height: 940 })
-    const identity = detailPanel.getByRole('heading', { level: 2 }).first()
+    await page.setViewportSize({ width, height: width === 1728 ? 630 : 940 })
+    const identity = detailPanel.getByRole('heading', { level: 2, name: `${summary.guestName}'s group of ${summary.partySize}`, exact: true })
     const message = detailPanel.getByRole('link', { name: 'Message guest', exact: true })
+    const call = detailPanel.getByRole('link', { name: 'Call', exact: true })
+    await expect(message).toHaveAttribute('href', `/dashboard/ember-slice-demo/messages/${encodeURIComponent(summary.threadId!)}`)
+    await expect(call).toHaveAttribute('href', `tel:${summary.guestPhone}`)
     await expect(identity).toBeInViewport()
     await expect(message).toBeInViewport()
-    const pictures = detailPanel.locator('img')
-    await expect(pictures, 'the record retains its existing thumbnail').toHaveCount(1)
-    await expect(pictures).toHaveJSProperty('complete', true)
-    expect(await pictures.evaluate(image => (image as HTMLImageElement).naturalWidth), 'the thumbnail loads its existing media').toBeGreaterThan(0)
-    expect(await pictures.evaluateAll(images => images.every(image => {
-      const bounds = image.getBoundingClientRect()
-      return bounds.width <= 80 && bounds.height <= 80
-    })), 'record imagery stays a thumbnail rather than pushing the identity and actions down').toBe(true)
+    await expect(call).toBeInViewport()
+    const picture = detailPanel.locator('img[alt=""]')
+    await expect(picture).toHaveCount(1)
+    await expect(picture).toHaveAttribute('src', summary.resourceImageUrl!)
+    await expect(picture).toHaveJSProperty('complete', true)
+    expect(await picture.evaluate(image => (image as HTMLImageElement).naturalWidth), 'The actual location picture loads').toBeGreaterThan(0)
+    const guestGroup = detailPanel.getByLabel(`${summary.partySize! - 1} other guests`, { exact: true }).locator('..')
+    await expect(guestGroup).toBeInViewport()
+    if (summary.guestImageUrl) await expect(guestGroup.getByAltText(summary.guestName!, { exact: true })).toHaveAttribute('src', summary.guestImageUrl)
+    const pictureBounds = (await picture.boundingBox())!
+    const guestBounds = (await guestGroup.boundingBox())!
+    const identityBounds = (await identity.boundingBox())!
+    expect(pictureBounds.width, 'The property picture remains compact beside Today').toBeLessThanOrEqual(128)
+    expect(pictureBounds.width).toBeGreaterThan(0)
+    expect(pictureBounds.height).toBe(pictureBounds.width)
+    expect(pictureBounds.y + pictureBounds.height).toBeLessThanOrEqual(guestBounds.y)
+    expect(guestBounds.y + guestBounds.height).toBeLessThanOrEqual(identityBounds.y)
+    expect(Math.abs(pictureBounds.x + pictureBounds.width / 2 - identityBounds.x - identityBounds.width / 2)).toBeLessThanOrEqual(1)
+    expect(await identity.evaluate(element => getComputedStyle(element).textAlign)).toBe('center')
+    const paymentInfo = detailPanel.getByRole('heading', { name: 'Payment info', exact: true })
+    await expect(paymentInfo).toHaveCount(summary.payments?.length ?? 0)
+    const sections = [
+      detailPanel.getByText('Date', { exact: true }),
+      detailPanel.getByRole('link', { name: /^Your notes/ }),
+      detailPanel.getByRole('link', { name: `Guests ${summary.guestName} · ${summary.partySize} guests`, exact: true }),
+      detailPanel.getByRole('button', { name: /^Cancellation policy/ }),
+      ...await paymentInfo.all(),
+      detailPanel.getByRole('link', { name: 'Change reservation', exact: true }),
+      detailPanel.getByText('Reservation made', { exact: true }),
+    ]
+    for (let at = 1; at < sections.length; at++) {
+      const previous = (await sections[at - 1]!.boundingBox())!
+      const current = (await sections[at]!.boundingBox())!
+      expect(current.y, 'The reservation’s sections follow their reading order vertically').toBeGreaterThan(previous.y)
+    }
     const date = (await detailPanel.getByText('Date', { exact: true }).boundingBox())!
-    const policy = (await detailPanel.getByRole('button', { name: /^Cancellation policy/ }).boundingBox())!
-    expect(Math.abs(policy.x - date.x), 'facts stay in one vertical detail flow').toBeLessThan(1)
-    expect(policy.y).toBeGreaterThan(date.y)
+    const time = (await detailPanel.getByText('Time', { exact: true }).boundingBox())!
+    expect(time.y).toBe(date.y)
     const todayPanel = page.locator('#dashboard-panel-org-today')
     if (width === 1728) {
       await expect(todayPanel).toBeVisible()
@@ -689,14 +725,36 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
       expect(detailBounds.x).toBeGreaterThanOrEqual(agendaBounds.x + agendaBounds.width - 1)
     } else await expect(todayPanel).toBeHidden()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    const body = detailPanel.locator(':scope > [data-slot="body"]')
+    const bodyBounds = (await body.boundingBox())!
+    const footer = detailPanel.locator(':scope > div').filter({ has: page.getByRole('link', { name: 'Message guest', exact: true }) })
+    await expect(footer).toHaveCount(1)
+    const footerBounds = (await footer.boundingBox())!
+    const messageBefore = await message.boundingBox()
+    const callBefore = await call.boundingBox()
+    const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
+    expect(maximum, 'The actual reservation summary has a scroll end at this viewport').toBeGreaterThan(0)
+    await page.mouse.move(bodyBounds.x + 4, bodyBounds.y + bodyBounds.height / 2)
+    await page.mouse.wheel(0, maximum + bodyBounds.height)
+    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    await expect(message).toBeInViewport({ ratio: 1 })
+    await expect(call).toBeInViewport({ ratio: 1 })
+    expect(await message.boundingBox()).toEqual(messageBefore)
+    expect(await call.boundingBox()).toEqual(callBefore)
+    const recordMade = detailPanel.getByText('Reservation made', { exact: true }).locator('..')
+    await expect(recordMade).toBeInViewport({ ratio: 1 })
+    const madeBounds = (await recordMade.boundingBox())!
+    expect(madeBounds.y + madeBounds.height, 'The final metadata clears the pinned actions').toBeLessThanOrEqual(footerBounds.y + 1)
+    await page.mouse.wheel(0, -maximum - bodyBounds.height)
+    await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
     const capture = testInfo.outputPath(`reservation-details-${width}.png`)
     // Keep copied conversations below the two fictional reservations out of
     // the desktop evidence; mobile contains only this fictional record.
-    await page.screenshot({ path: capture, ...(width === 1728 ? { clip: { x: 0, y: 0, width, height: 630 } } : { fullPage: false }) })
+    await page.screenshot({ path: capture, fullPage: false })
     await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
   }
   await page.setViewportSize(priorViewport)
-  await page.getByRole('link', { name: guestName }).last().click()
+  await detailPanel.getByRole('link', { name: `Guests ${summary.guestName} · ${summary.partySize} guests`, exact: true }).click()
   await expect(page.getByText(guestEmail, { exact: true })).toBeVisible()
   await page.goBack()
 
