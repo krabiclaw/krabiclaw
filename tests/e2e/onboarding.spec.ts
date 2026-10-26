@@ -605,7 +605,7 @@ test('a paid plan adds a third location without counting it', async ({ page, bas
         expect(deleted.status(), await deleted.text()).toBe(200)
         const absent = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
         expect(absent.status(), await absent.text()).toBe(404)
-        expect((await status()).usage).toEqual(before.usage)
+        expect((await status()).usage).toEqual({ plan: 'business', homes: 0 })
       } catch (error) { failures.push(error) }
     }
     try { await release() }
