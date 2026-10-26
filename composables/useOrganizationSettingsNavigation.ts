@@ -24,8 +24,11 @@ export function useOrganizationSettingsNavigation(
 
   // Menu and Search share these exact organization checks. Personal has no
   // organization permissions to read; no active-member role query is needed.
+  // The loaded context's role is part of the key, so a role change (a
+  // self-demotion on Team refreshes it) asks Better Auth again.
+  const contextRole = computed(() => dashboard.organization.value?.id === organization.value?.id ? dashboard.organization.value?.role ?? '' : '')
   const permissionLoad = useAsyncData(
-    () => `menu-organization:${session.value.data?.user.id ?? ''}:${organization.value?.id ?? ''}`,
+    () => `menu-organization:${session.value.data?.user.id ?? ''}:${organization.value?.id ?? ''}:${contextRole.value}`,
     async (_app, { signal }) => {
       const target = organization.value
       const userId = session.value.data?.user.id
