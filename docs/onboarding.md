@@ -8,6 +8,117 @@ Global first, local second, persistent after that.
 - **Location level** (once per location, repeats on every new location): hours, contact, notification destination, location hero/media, location-specific copy.
 - Onboarding is not a single linear flow that ends at "Create site." It collects the first handful of critical steps; everything else is done from the dashboard after the site exists. The flow itself loads no checklist.
 
+## Foundation and first visual slice
+
+Owner direction, 2026-10-26: keep a stable, measurable product foundation so
+the presentation can evolve. Organization creation and account personalization
+are the first experience to review for a warmer, more enjoyable CMS. Build on
+the existing setup, brand controls and real-site preview.
+
+Booky Boo currently serves lodging on iOS; eventual web/app parity means shared
+domain behavior, authorization and outcome meanings. The owner reports that
+Kikuzuki, NCLS and Pottery House use Android, with active usage currently
+reported for Kikuzuki's messenger inbox and NCLS's MCP blog updates. These are
+owner-reported observations, not measured adoption or validation of a redesign.
+Evaluate the CMS on Android as well as desktop.
+
+### Stable ownership
+
+- Better Auth owns the person, organization, membership and session. Account
+  personalization edits the existing user; it does not create onboarding-only
+  identity or a second profile.
+- Personal name/photo, an organization's brand and a member's public
+  professional profile have different owners. Connect their entrances where
+  useful while preserving their explicit scope and canonical operations.
+- `ONBOARDING_STEPS` owns sequence, applicability and completion conditions;
+  `useOnboardingDraft` owns draft save, restore and activation calls. Brand
+  media uploads use the existing draft-media operation and update its revision.
+  The shell and step controls render those decisions. A reskin adds no
+  provisioning or persistence path.
+- The existing pending organization is the eventual active organization, and
+  its preview is the real website renderer. Saved answers and imported or
+  owner-supplied content remain the source for the preview.
+- Owner goals are distinct from account identity and business facts. Their
+  capture and the recommendation strategy remain decisions in
+  [#1606](https://github.com/krabiclaw/krabiclaw/issues/1606) and
+  [#1607](https://github.com/krabiclaw/krabiclaw/issues/1607); a new profile field
+  or mandatory setup question is not implied by this first slice.
+
+### Existing journey and verification boundaries
+
+| Moment | Existing surface / owner | Outcome and independent readback |
+| --- | --- | --- |
+| Arrive or resume | `/dashboard/onboarding` welcome; onboarding shell and active-draft reader | **Get started** opens type; **Pick up where you left off** opens the persisted draft's applicable incomplete step. Welcome arrival and the start/resume action are distinct observations. |
+| Describe the organization | `/dashboard/onboarding/:step`; `ONBOARDING_STEPS` and `OnboardingStepScreen` | Collect type, language, name, optional address, required timezone and currency. Before the first save, answers are client state. |
+| First save | Currency advance or Save & exit when required details are complete; `useOnboardingDraft.save()` and shared provisioning | Create one real pending Better Auth organization. Read its draft and tenant through the existing readers; missing required state is an error. |
+| Make it theirs | Contact, applicable products and look steps; existing location/catalog/brand writers | Save answers to that same organization. Read the saved content and its real-site preview. Legal Services and lodging skip initial products. |
+| Inspect the site | Existing desktop preview pane and narrow-screen Site preview action | Render the pending tenant with its preview access. A preview is distinct from publication. |
+| Activate | Review; `useOnboardingDraft.activate()` and `activateOrganization` | Activate the organization, set session scope and close the draft. Independently load the public site and organization state. |
+| Personalize the account | `/dashboard/account/profile/personal`; `AccountProfilePage` | Save name through Better Auth, photo through the account-avatar operation, and phone through verification. Read the session afresh and inspect the rendered profile. |
+
+### Bounded first presentation work
+
+The first visual pass changes the existing welcome and personal-profile
+surfaces: show the saved organization's name when resuming, strengthen the
+account photo/name presentation, and improve hierarchy and spacing through the
+shared controls described in [DESIGN.md](../DESIGN.md). Continue into the
+existing look/review controls and real-site preview. Keep optional
+personalization skippable and revisitable through its existing editor.
+
+Save, exit and resume use the existing draft operation and its required-state
+rules, described below. Saving and uploads finish before navigation, and a
+failed save leaves the edited answers and error visible.
+
+### Measurement and evidence
+
+Reuse the [event measurement contract](operations/event-measurement.md), its
+catalog, D1 writer and authorized query/report path. Preserve server outcomes
+across layouts and surfaces:
+
+- `sign_up` is once per registered user, recorded by Better Auth's server hook.
+- `onboarding_complete` is once per activated organization, recorded by the
+  server. It measures activation, not pending-organization creation.
+
+Current `organization_created` instrumentation is a browser interaction emitted
+after activation, not the canonical activation count or a native-app coverage
+claim. Retain it only if it answers a distinct measurement question; otherwise
+use the canonical activation outcome.
+
+Existing dashboard routes are excluded from pageview collection. Step dropoff,
+save failures and successful profile edits cannot be inferred from those
+pageviews or from an assumed "profile complete" state. This visual pass retains
+the existing signup and activation measurements.
+Step-entry, action-result and changed-profile-save observations remain proposed
+extensions through that same catalog and pipeline in #1607. Define their
+bounded step/action/result codes and surface provenance before instrumenting.
+Keep entered names, contact details, goal text and error messages out of
+analytics. Preserve operational diagnostics in the existing error pipeline.
+
+Use the existing signup/activation outcomes alongside direct walkthroughs and
+feedback about clarity and enjoyment. Timing, save-failure and resumption
+counts remain unknown where instrumentation is absent. Define an observation
+window before calling a stalled journey abandonment. Organization setup
+measures site activation; account registration
+and successful profile changes remain separate outcomes. Useful inbox/content
+work and returning use need their own outcome measures. Small-sample counts
+alone do not establish delight or retention improvement.
+
+Review evidence on 2026-10-26: source at `0755ab851`, plus read-only production
+inspection of account settings, personal information, onboarding welcome and
+the type question at a 390 × 844 viewport. The production build revision was
+not established. No account/organization write, preview session, activation or
+new event was exercised during that inspection. Existing verification lives
+in `tests/e2e/onboarding.spec.ts`, the profile journeys in
+`tests/e2e/dashboard-layout.spec.ts` and the D1 analytics suites; source
+inspection of those tests is not a fresh passing run. The Save & exit hotfix
+was subsequently exercised through the local production Worker:
+saved-answer readback, cold resume, revision conflicts, upload recovery
+and publication passed; the full local suite passed with 194 tests and 4
+skipped. That verifies the hotfix, not owner validation of the visual design.
+The visual pass retains the existing account/draft operations and outcome
+semantics; its own browser and profile-save verification is recorded with its
+pull request.
+
 ## Current flow
 
 The flow is draft-first, and this is the one and only new-site creation path:
