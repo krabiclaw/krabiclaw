@@ -1720,7 +1720,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
   if (owned.request_id) await ownedBuyerRequest(db, buyerUserId, owned.request_id)
   const [stay, pictures] = await Promise.all([
     getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id),
-    loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id]),
+    loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id], { organizationFallback: false }),
   ])
   if (stay.user_id !== buyerUserId || stay.owner !== 'app') fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
   const cancellation = stay.status !== 'cancelled' && owned.paid_online === 1

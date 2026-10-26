@@ -670,13 +670,24 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     await expect(identity).toBeInViewport()
     await expect(message).toBeInViewport()
     const pictures = detailPanel.locator('img')
+    await expect(pictures, 'the record retains its existing thumbnail').toHaveCount(1)
+    await expect(pictures).toHaveJSProperty('complete', true)
+    expect(await pictures.evaluate(image => (image as HTMLImageElement).naturalWidth), 'the thumbnail loads its existing media').toBeGreaterThan(0)
     expect(await pictures.evaluateAll(images => images.every(image => {
       const bounds = image.getBoundingClientRect()
       return bounds.width <= 80 && bounds.height <= 80
     })), 'record imagery stays a thumbnail rather than pushing the identity and actions down').toBe(true)
     const date = (await detailPanel.getByText('Date', { exact: true }).boundingBox())!
     const policy = (await detailPanel.getByRole('button', { name: /^Cancellation policy/ }).boundingBox())!
-    expect(policy.x > date.x + 100, 'supporting details use the second column only when the actual pane has room').toBe(width === 1728)
+    expect(Math.abs(policy.x - date.x), 'facts stay in one vertical detail flow').toBeLessThan(1)
+    expect(policy.y).toBeGreaterThan(date.y)
+    const todayPanel = page.locator('#dashboard-panel-org-today')
+    if (width === 1728) {
+      await expect(todayPanel).toBeVisible()
+      const agendaBounds = (await todayPanel.boundingBox())!
+      const detailBounds = (await detailPanel.boundingBox())!
+      expect(detailBounds.x).toBeGreaterThanOrEqual(agendaBounds.x + agendaBounds.width - 1)
+    } else await expect(todayPanel).toBeHidden()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     const capture = testInfo.outputPath(`reservation-details-${width}.png`)
     await page.screenshot({ path: capture, fullPage: false })

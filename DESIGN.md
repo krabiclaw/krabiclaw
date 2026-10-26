@@ -171,6 +171,12 @@ Booking occurrences retain their own location's timezone. Future bookings
 needing a decision belong in Today now and retain their actual booking date.
 
 Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
+Booked activity opens beneath Today: desktop keeps the agenda beside the
+bounded, vertical record summary; below the pane breakpoint the record is one
+screen and Back returns to the same range and filters. Calendar and Messages
+use the same detail components inside their existing context. Real resource
+photography belongs to that record; organization social artwork is not a
+substitute booking cover.
 The existing stay domain owns homes, assignments, nights and payments; Today
 projects its arrivals and departures rather than creating a lodging service or
 second lifecycle. Cleaner cards show the guest's first name, party size, home,
@@ -283,9 +289,10 @@ Three separate questions, three separate answers. None is derived from another.
   Earnings. Catalog, Today, Calendar, Messages and Menu are primary
   destinations and have no exit. A nested level never declares one.
 
-The booking mounts keep their own affiliation: a booking opened from Today is a
-root that exits to Today and lights it; the same booking under a calendar day
-is a child of the calendar, which lights Calendar.
+The booking mounts keep their own affiliation: a booking opened from Today is
+its child and lights Today; the same booking under a calendar day is a child of
+the calendar, which lights Calendar. The route parent supplies both the context
+pane and Back, including on reload and deep links.
 
 ### Who owns what
 
@@ -1085,12 +1092,9 @@ nowhere to put.
 
 **The picture leads.** Rows lead with a thumbnail; a leaf leads with the image
 large when editing the photo itself. A booking, stay or payment summary leads
-with its identity, status, dates and actions; any contextual image is a compact
-thumbnail that contains brand artwork without cropping it. Record summaries
-use the frame rather than a single-field width, and their facts and supporting
-details split only when their actual pane has room. Messages keeps its embedded
-summary in one column. Member portraits use avatars, and photo grids respond to
-their pane's width. When there is no image, show a muted icon in the *same footprint* so a
+with its identity, status, dates and actions, with compact contextual media.
+Member portraits use avatars, and photo grids respond to their pane's width.
+When there is no image, show a muted icon in the *same footprint* so a
 list does not reflow between rows that have one and rows that do not.
 
 **Unsupported routes 404, and so does a record that is not there.** The level

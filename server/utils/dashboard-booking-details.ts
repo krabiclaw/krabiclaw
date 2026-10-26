@@ -199,7 +199,7 @@ async function loadResourceImage(db: DbClient, row: BookingRow, type: DashboardB
     ? ['product' as const, row.experience_id]
     : ['business_location' as const, row.location_id]
   if (!ownerId) return null
-  return (await loadOwnerPictures(db, row.organization_id, ownerType, [ownerId])).get(ownerId)?.imageUrl ?? null
+  return (await loadOwnerPictures(db, row.organization_id, ownerType, [ownerId], { organizationFallback: false })).get(ownerId)?.imageUrl ?? null
 }
 
 /** The latest proposal on the thread with no acceptance or decline answering it. */
@@ -444,10 +444,9 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
   const snapshot: unknown = JSON.parse(detail.payment.price_snapshot_json)
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
   const line = detail.order ? await queryFirst<{ product_id: string | null }>(db, 'SELECT product_id FROM payment_order_lines WHERE order_id = ? ORDER BY rowid LIMIT 1', [detail.order.id]) : null
-  // The picture is the item's; failing that, the place it was sold; failing that, the business's own mark — as the booking screen leads with its place.
-  const resourceImageUrl = (line?.product_id ? (await loadOwnerPictures(db, payment.organization_id, 'product', [line.product_id])).get(line.product_id)?.imageUrl : null)
-    ?? (payment.location_id ? (await loadOwnerPictures(db, payment.organization_id, 'business_location', [payment.location_id])).get(payment.location_id)?.imageUrl : null)
-    ?? (await loadOwnerPictures(db, payment.organization_id, 'organization', [payment.organization_id])).get(payment.organization_id)?.imageUrl
+  // A purchase keeps the item's own photo or the place it was sold.
+  const resourceImageUrl = (line?.product_id ? (await loadOwnerPictures(db, payment.organization_id, 'product', [line.product_id], { organizationFallback: false })).get(line.product_id)?.imageUrl : null)
+    ?? (payment.location_id ? (await loadOwnerPictures(db, payment.organization_id, 'business_location', [payment.location_id], { organizationFallback: false })).get(payment.location_id)?.imageUrl : null)
     ?? null
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {

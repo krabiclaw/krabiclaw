@@ -1919,6 +1919,28 @@ test.describe('dashboard pane hierarchy', () => {
     await open(page, reservation!.to)
     await expect(page.locator('#dashboard-panel-booking-details [data-testid="dashboard-navbar-back"]')).toHaveAttribute('href', ORG)
     await expect(page.locator('[aria-current="page"]', { hasText: 'Today' }).first()).toBeVisible()
+
+    // A direct link and reload retain Today as the actual parent, so the same
+    // range and filters remain beside the record and survive mobile Back.
+    const context = '?range=upcoming&kinds=reservation'
+    await page.setViewportSize(WIDE)
+    await open(page, `${reservation!.to}${context}`)
+    await expectPanes(page, ['org-today', 'booking-details'])
+    const today = page.locator('#dashboard-panel-org-today')
+    await expect(today.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
+    expect((await page.locator('#dashboard-panel-booking-details').boundingBox())!.x)
+      .toBeGreaterThanOrEqual((await today.boundingBox())!.width)
+    await page.reload()
+    await waitForNuxtHydration(page)
+    await expectPanes(page, ['org-today', 'booking-details'])
+    await page.setViewportSize(PHONE)
+    await expectPanes(page, ['booking-details'])
+    const todayBack = page.locator('#dashboard-panel-booking-details [data-testid="dashboard-navbar-back"]')
+    await expect(todayBack).toHaveAttribute('href', `${ORG}${context}`)
+    await todayBack.click()
+    await expect(page).toHaveURL(`${ORG}${context}`)
+    await expectPanes(page, ['org-today'])
+    await expect(today.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
   })
 
   test('Calendar can filter by a host and return to everyone', async ({ page }) => {
