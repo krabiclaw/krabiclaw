@@ -37,8 +37,8 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
-        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
-        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'One key per new location, kept by this business and never expired. Retrying with the same key and details returns the location it created. The same key with different details fails with IDEMPOTENCY_CONFLICT; if that location has been deleted it fails with LOCATION_DELETED and nothing is created.' },
+        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' },
+        idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'One key per new location, kept by this business and never expired. Retrying with the same key and details returns the location it created. The same key with different details fails with IDEMPOTENCY_CONFLICT; if that location has been deleted it fails with LOCATION_DELETED and nothing is created.' },
         address: postalAddressSchema,
         phone: { type: 'string', description: PHONE_FORMAT },
         email: { type: 'string', format: 'email' },
@@ -101,7 +101,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       minimumRole: 'admin',
       inputSchema: {
         location_id: { type: 'string', description: 'Internal location ID returned by list_locations or get_workspace_context.' },
-        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
+        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
         status: { type: 'string', enum: ['active', 'inactive'], description: 'Set active to enable the location, or inactive to hide it. This can change location or home usage billed on the existing subscription.' },

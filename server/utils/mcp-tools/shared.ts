@@ -89,7 +89,7 @@ export const postalAddressSchema = {
   type: ['object', 'null'],
   properties: {
     regionCode: { type: 'string', pattern: POSTAL_REGION_CODE_PATTERN, description: 'Two-letter uppercase country code, e.g. TH.' },
-    addressLines: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1, pattern: '\\S' }, description: 'Address lines in order, unbounded.' },
+    addressLines: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$' }, description: 'Address lines in order, unbounded.' },
     languageCode: { type: 'string', description: 'BCP-47 tag when the address is written in a specific language.' },
     locality: { type: 'string', description: 'Town or city.' },
     sublocality: { type: 'string', description: 'Neighbourhood or sub-district.' },
@@ -746,7 +746,7 @@ export const organizationListItemObject = {
 // ---
 
 export const organizationIdSchema = {
-  organization_id: { type: 'string', minLength: 1, pattern: '\\S', description: 'Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.' },
+  organization_id: { type: 'string', minLength: 1, pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: 'Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.' },
 }
 
 export const MCP_TOOL_RESULT_DESCRIPTION = 'Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.'

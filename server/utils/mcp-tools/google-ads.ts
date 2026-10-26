@@ -142,7 +142,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
       name: {
         type: 'string',
         minLength: 1,
-        pattern: '\\S',
+        pattern: '^[\\s\\S]*\\S[\\s\\S]*$',
         description: 'Campaign name.',
       },
       daily_budget_micros: {

@@ -103,7 +103,7 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
       argsSchema: fromJsonSchema<Record<string, string>>({
         type: 'object',
         properties: Object.fromEntries(prompt.arguments.map(argument => [argument.name, {
-          type: 'string', pattern: '\\S', description: argument.description,
+          type: 'string', pattern: '^[\\s\\S]*\\S[\\s\\S]*$', description: argument.description,
         }])),
         required: prompt.arguments.filter(argument => argument.required).map(argument => argument.name),
         additionalProperties: false,

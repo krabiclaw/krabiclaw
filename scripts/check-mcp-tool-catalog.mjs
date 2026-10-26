@@ -73,6 +73,12 @@ async function main() {
   for (const tool of MCP_PUBLIC_TOOLS) {
     if (typeof tool.description !== 'string' || !tool.description.trim()) failures.push(`tenant: ${tool.name} needs a nonempty description`)
     if (!dispatchNames.has(tool.name)) failures.push(`tenant: public tool ${tool.name} is absent from dispatch`)
+    // ChatGPT's connector matches a pattern against the whole value; JSON Schema finds it anywhere. Only a
+    // pattern anchored at both ends means the same to both: '\S' refused every ID longer than one character.
+    JSON.stringify([tool.inputSchema, tool.outputSchema], (key, value) => {
+      if (key === 'pattern' && typeof value === 'string' && !(value.startsWith('^') && value.endsWith('$'))) failures.push(`tenant: ${tool.name} has unanchored pattern ${JSON.stringify(value)}`)
+      return value
+    })
   }
 
   const generated = catalogSnapshot(MCP_PUBLIC_TOOLS, previous)
