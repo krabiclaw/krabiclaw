@@ -32,8 +32,9 @@
         <figure v-if="blockMedia(block, 'media')" class="my-12">
           <MediaPreview
             v-if="blockMedia(block, 'media')?.kind === 'video'"
-            :item="{ url: blockMedia(block, 'media')!.public_url!, kind: 'video', poster: blockMedia(block, 'media')!.thumbnail_url ?? undefined }"
+            :item="{ url: blockMedia(block, 'media')!.public_url!, kind: 'video', poster: blockMedia(block, 'media')!.thumbnail_url ?? undefined, alt: blockMedia(block, 'media')!.alt_text ?? undefined }"
             :fill="false"
+            :controls="reducedMotion === 'reduce'"
             class="rounded-2xl shadow-lg"
           />
           <img v-else :src="blockMedia(block, 'media')!.public_url!" :alt="blockMedia(block, 'media')!.alt_text ?? ''" class="w-full rounded-2xl object-cover shadow-lg">
@@ -51,7 +52,7 @@
         <div v-if="galleryImages(block).length" class="my-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <figure v-for="image in galleryImages(block)" :key="image.id || image.url">
             <div v-if="image.kind === 'video'" class="aspect-4/3 w-full overflow-hidden rounded-2xl">
-              <MediaPreview :item="{ url: image.url, kind: 'video', poster: image.thumbnailUrl ?? undefined, alt: image.alt }" />
+              <MediaPreview :item="{ url: image.url, kind: 'video', poster: image.thumbnailUrl ?? undefined, alt: image.alt }" :controls="reducedMotion === 'reduce'" />
             </div>
             <img v-else :src="image.url" :alt="image.alt ?? ''" class="aspect-[4/3] w-full rounded-2xl object-cover">
             <figcaption v-if="image.caption" class="mt-2 text-sm text-muted">{{ image.caption }}</figcaption>
@@ -168,9 +169,11 @@ import { isInternalRoute, overviewProseBlockId } from '~/utils/tenant-page-block
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import ContentVideoEmbed from '~/components/content/ContentVideoEmbed.vue'
 import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
+import { usePreferredReducedMotion } from '@vueuse/core'
 
 const props = defineProps<{ page: PublicTenantPage }>()
 provideMediaPreviews(ref(false))
+const reducedMotion = usePreferredReducedMotion()
 
 const { template: resolvedTemplate } = useTenantOrganization().organization
 const template = computed<PublicTemplateSlug>(() => resolvedTemplate.slug)

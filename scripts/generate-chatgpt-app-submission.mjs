@@ -19,7 +19,7 @@ const effects = {
   get_website_draft: 'Reads the authenticated user’s saved website draft, revision and missing publication fields.',
   save_website_draft: 'Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish.',
   publish_website: 'Activates a complete saved website draft, selects the new business as the user’s workspace and sends the native operator notification.',
-  create_location: 'Creates a location in the selected business using a durable retry key; its details can appear on the live website.',
+  create_location: 'Creates an active business location that can publish details and increase usage charges on the business’s existing subscription.',
   list_organization_members: 'Reads Better Auth memberships, pending invitations and their actual email delivery receipts for the selected business.',
   invite_organization_member: 'Creates or explicitly resends a Better Auth invitation, emails its recipient and returns the saved invitation and delivery receipt.',
   update_organization_member_role: 'Changes a Better Auth membership role, subject to native owner permissions and last-owner protection.',

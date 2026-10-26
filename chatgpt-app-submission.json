@@ -216,12 +216,12 @@
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Creates a location in the selected business using a durable retry key; its details can appear on the live website.",
+        "read_only_justification": "Creates an active business location that can publish details and increase usage charges on the business’s existing subscription.",
         "open_world_justification": "Adds location details that can appear on the selected business’s public website.",
-        "destructive_justification": "Creates a location in the selected business using a durable retry key; its details can appear on the live website."
+        "destructive_justification": "Creates an active business location that can publish details and increase usage charges on the business’s existing subscription."
       }
     },
     "create_message_template": {

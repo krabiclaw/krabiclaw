@@ -242,6 +242,7 @@ export async function createLocation(
     if (record.requestHash !== requestHash) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency_key was already used for a different location', data: { code: 'IDEMPOTENCY_CONFLICT', field: 'idempotency_key' } });
     const location = await loadLocation(db, organizationId, record.entityId, true);
     if (!location) throw new HTTPError({ statusCode: 410, statusMessage: 'The location this idempotency_key created has been deleted; it is not created again', data: { code: 'LOCATION_DELETED', field: 'idempotency_key' } });
+    await reportBillingUsage(env, db, organizationId, { committed: true });
     return location;
   };
   const complete = async (location: LocationRecord) => {

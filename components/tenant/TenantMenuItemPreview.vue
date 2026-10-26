@@ -4,17 +4,7 @@
     class="relative shrink-0 overflow-hidden rounded-xl bg-muted"
     :class="disabled ? 'opacity-50 grayscale' : ''"
   >
-    <video
-      v-if="isVideo && media?.public_url"
-      :src="media.public_url"
-      :poster="media.thumbnail_url || undefined"
-      class="size-24 object-cover"
-      muted
-      playsinline
-      preload="metadata"
-    />
     <img
-      v-else
       :src="previewUrl"
       :alt="item.name"
       class="size-24 object-cover"

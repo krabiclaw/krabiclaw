@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:68e569e2ddd4b15c64141fce3babe1ff33df1a72db83aef9a880af2276d4bf06",
-  "documentationFingerprint": "sha256:e09fb42afb1d7db5bccf93049b51ef4f57f3bd632b0d4ed44bd29bf8d4ead64d",
+  "fingerprint": "sha256:5dee6384bd78e86f70fa7caf913b14e072839a9ac0f678ec42cf268485f3f02b",
+  "documentationFingerprint": "sha256:7aa7183e704875bd3d49c7f681873612582a8d5917b6a01e4e182193cf142f1e",
   "tools": [
     {
       "name": "add_organization_language",
@@ -350,6 +350,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -413,6 +424,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -636,6 +658,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -686,6 +719,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -904,6 +948,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -979,6 +1025,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -992,6 +1044,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -1254,10 +1331,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -1275,7 +1383,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -3648,6 +3778,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -3711,6 +3852,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -3934,6 +4086,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -3984,6 +4147,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -4202,6 +4376,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -4277,6 +4453,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -4290,6 +4472,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -4552,10 +4759,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -4573,7 +4811,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -11682,6 +11942,7 @@
             "description": "Persisted values of the fields named in changed_fields.",
             "properties": {
               "address": {
+                "additionalProperties": false,
                 "properties": {
                   "addressLines": {
                     "description": "Address lines in order, unbounded.",
@@ -11709,9 +11970,8 @@
                     "type": "string"
                   },
                   "regionCode": {
-                    "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                    "minLength": 1,
-                    "pattern": "\\S",
+                    "description": "Two-letter uppercase country code, e.g. TH.",
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
                   "sublocality": {
@@ -12092,7 +12352,7 @@
                 ]
               },
               "status": {
-                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "description": "Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.",
                 "enum": [
                   "active",
                   "inactive"
@@ -13552,6 +13812,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -14750,6 +15021,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -14813,6 +15095,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -15036,6 +15329,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -15086,6 +15390,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -15304,6 +15619,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -15379,6 +15696,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -15392,6 +15715,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -15654,10 +16002,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -15675,7 +16054,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -18812,11 +19213,12 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status inactive takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business's one subscription, billed at the end of the period for the active locations at that time. Inactive locations and the locations of places to stay are not counted. Basic refuses a third active location. Returns its identity, status, timezone and saved timestamp; use get_location for its full details.",
+      "description": "Add an active business branch or office. It counts toward existing subscription usage and may increase the bill. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "address": {
+            "additionalProperties": false,
             "properties": {
               "addressLines": {
                 "description": "Address lines in order, unbounded.",
@@ -18844,9 +19246,8 @@
                 "type": "string"
               },
               "regionCode": {
-                "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                "minLength": 1,
-                "pattern": "\\S",
+                "description": "Two-letter uppercase country code, e.g. TH.",
+                "pattern": "^[A-Z]{2}$",
                 "type": "string"
               },
               "sublocality": {
@@ -18877,121 +19278,6 @@
             "pattern": "\\S",
             "type": "string"
           },
-          "opening_hours": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "periods": {
-                    "items": {
-                      "anyOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "close": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "day": {
-                                  "maximum": 6,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "hour": {
-                                  "maximum": 23,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "minute": {
-                                  "maximum": 59,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                }
-                              },
-                              "required": [
-                                "day",
-                                "hour",
-                                "minute"
-                              ],
-                              "type": "object"
-                            },
-                            "open": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "day": {
-                                  "maximum": 6,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "hour": {
-                                  "maximum": 23,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "minute": {
-                                  "maximum": 59,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                }
-                              },
-                              "required": [
-                                "day",
-                                "hour",
-                                "minute"
-                              ],
-                              "type": "object"
-                            }
-                          },
-                          "required": [
-                            "open",
-                            "close"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "open": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "day": {
-                                  "const": 0
-                                },
-                                "hour": {
-                                  "const": 0
-                                },
-                                "minute": {
-                                  "const": 0
-                                }
-                              },
-                              "required": [
-                                "day",
-                                "hour",
-                                "minute"
-                              ],
-                              "type": "object"
-                            }
-                          },
-                          "required": [
-                            "open"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "periods"
-                ],
-                "type": "object"
-              }
-            ],
-            "description": "Canonical weekly endpoint periods. Days use Sunday=0. Null means unknown; periods [] means closed. Sunday 00:00 without a close means always open. Omitted is the same as null."
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -19001,120 +19287,6 @@
           "phone": {
             "description": "International number with its country calling code, e.g. +66812345678.",
             "type": "string"
-          },
-          "special_hours": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "items": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "ends_on": {
-                          "anyOf": [
-                            {
-                              "description": "Gregorian calendar date, YYYY-MM-DD. No timezone conversion.",
-                              "format": "date",
-                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "kind": {
-                          "const": "closure"
-                        },
-                        "note": {
-                          "maxLength": 1000,
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "starts_on": {
-                          "description": "Gregorian calendar date, YYYY-MM-DD. No timezone conversion.",
-                          "format": "date",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "starts_on",
-                        "ends_on",
-                        "note"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "date": {
-                          "description": "Gregorian calendar date, YYYY-MM-DD. No timezone conversion.",
-                          "format": "date",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "type": "string"
-                        },
-                        "kind": {
-                          "const": "hours"
-                        },
-                        "note": {
-                          "maxLength": 1000,
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "periods": {
-                          "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "close_day_offset": {
-                                "enum": [
-                                  0,
-                                  1
-                                ]
-                              },
-                              "close_time": {
-                                "description": "Local wall-clock time, HH:mm (24-hour), in the explicitly selected location timezone.",
-                                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
-                                "type": "string"
-                              },
-                              "open_time": {
-                                "description": "Local wall-clock time, HH:mm (24-hour), in the explicitly selected location timezone.",
-                                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "open_time",
-                              "close_time",
-                              "close_day_offset"
-                            ],
-                            "type": "object"
-                          },
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "date",
-                        "periods",
-                        "note"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                "type": "array"
-              }
-            ],
-            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected. Omitted, null and [] all mean no special hours."
           },
           "timezone": {
             "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
@@ -19144,79 +19316,10 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "context": {
-            "additionalProperties": false,
-            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
-            "properties": {
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "location_slug": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "location_title": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_public_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_slug": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_subdomain": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "organization_id",
-              "organization_name",
-              "organization_slug",
-              "organization_subdomain",
-              "organization_public_url",
-              "location_id",
-              "location_slug",
-              "location_title"
-            ],
-            "type": "object"
-          },
           "location": {
             "additionalProperties": false,
             "properties": {
               "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "slug": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -19228,37 +19331,29 @@
                 ],
                 "type": "string"
               },
-              "timezone": {
-                "description": "Saved IANA timezone for this location.",
-                "type": "string"
-              },
               "title": {
-                "type": "string"
-              },
-              "updated_at": {
-                "description": "Saved location update timestamp.",
                 "type": "string"
               }
             },
             "required": [
               "id",
-              "slug",
               "title",
-              "status",
-              "timezone",
-              "updated_at"
+              "status"
             ],
             "type": "object"
+          },
+          "organization_id": {
+            "type": "string"
           }
         },
         "required": [
-          "location",
-          "context"
+          "organization_id",
+          "location"
         ],
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -20287,6 +20382,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -20350,6 +20456,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -20573,6 +20690,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -20623,6 +20751,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -20841,6 +20980,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -20916,6 +21057,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -20929,6 +21076,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -21191,10 +21363,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -21212,7 +21415,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -27982,6 +28207,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -28045,6 +28281,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -28268,6 +28515,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -28318,6 +28576,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -28536,6 +28805,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -28611,6 +28882,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -28624,6 +28901,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -28886,10 +29188,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -28907,7 +29240,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -31645,6 +32000,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -31708,6 +32074,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -31931,6 +32308,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -31981,6 +32369,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -32199,6 +32598,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -32274,6 +32675,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -32287,6 +32694,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -32549,10 +32981,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -32570,7 +33033,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -36077,6 +36562,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -36140,6 +36636,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -36363,6 +36870,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -36413,6 +36931,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -36631,6 +37160,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -36706,6 +37237,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -36719,6 +37256,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -36981,10 +37543,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -37002,7 +37595,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -40726,6 +41341,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -40789,6 +41415,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -41012,6 +41649,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -41062,6 +41710,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -41280,6 +41939,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -41355,6 +42016,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -41368,6 +42035,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -41630,10 +42322,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -41651,7 +42374,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -45530,6 +46275,7 @@
           "location": {
             "properties": {
               "address": {
+                "additionalProperties": false,
                 "properties": {
                   "addressLines": {
                     "description": "Address lines in order, unbounded.",
@@ -45557,9 +46303,8 @@
                     "type": "string"
                   },
                   "regionCode": {
-                    "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                    "minLength": 1,
-                    "pattern": "\\S",
+                    "description": "Two-letter uppercase country code, e.g. TH.",
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
                   "sublocality": {
@@ -45940,7 +46685,7 @@
                 ]
               },
               "status": {
-                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "description": "Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.",
                 "enum": [
                   "active",
                   "inactive"
@@ -53312,6 +54057,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -53375,6 +54131,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -53598,6 +54365,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -53648,6 +54426,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -53866,6 +54655,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -53941,6 +54732,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -53954,6 +54751,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -54216,10 +55038,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -54237,7 +55090,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -57592,6 +58467,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -57655,6 +58541,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -57878,6 +58775,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -57928,6 +58836,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -58146,6 +59065,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -58221,6 +59142,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -58234,6 +59161,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -58496,10 +59448,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -58517,7 +59500,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -68608,6 +69613,7 @@
             "description": "Persisted values of the fields named in changed_fields.",
             "properties": {
               "address": {
+                "additionalProperties": false,
                 "properties": {
                   "addressLines": {
                     "description": "Address lines in order, unbounded.",
@@ -68635,9 +69641,8 @@
                     "type": "string"
                   },
                   "regionCode": {
-                    "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                    "minLength": 1,
-                    "pattern": "\\S",
+                    "description": "Two-letter uppercase country code, e.g. TH.",
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
                   "sublocality": {
@@ -69018,7 +70023,7 @@
                 ]
               },
               "status": {
-                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "description": "Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.",
                 "enum": [
                   "active",
                   "inactive"
@@ -69876,6 +70881,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -69939,6 +70955,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -70162,6 +71189,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -70212,6 +71250,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -70430,6 +71479,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -70505,6 +71556,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -70518,6 +71575,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -70780,10 +71862,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -70801,7 +71914,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -74610,6 +75745,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -74673,6 +75819,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -74896,6 +76053,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -74946,6 +76114,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -75164,6 +76343,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -75239,6 +76420,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -75252,6 +76439,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -75514,10 +76726,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -75535,7 +76778,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -85685,6 +86950,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -85748,6 +87024,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -85971,6 +87258,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -86021,6 +87319,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -86239,6 +87548,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -86314,6 +87625,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -86327,6 +87644,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -86589,10 +87931,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -86610,7 +87983,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -87489,6 +88884,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -87552,6 +88958,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -87775,6 +89192,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -87825,6 +89253,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -88043,6 +89482,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -88118,6 +89559,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -88131,6 +89578,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -88393,10 +89865,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -88414,7 +89917,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -97277,6 +98802,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -98520,6 +100056,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -98583,6 +100130,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -98806,6 +100364,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -98856,6 +100425,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -99074,6 +100654,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -99149,6 +100731,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -99162,6 +100750,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -99424,10 +101037,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -99445,7 +101089,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -103330,6 +104996,7 @@
         "additionalProperties": false,
         "properties": {
           "address": {
+            "additionalProperties": false,
             "properties": {
               "addressLines": {
                 "description": "Address lines in order, unbounded.",
@@ -103357,9 +105024,8 @@
                 "type": "string"
               },
               "regionCode": {
-                "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                "minLength": 1,
-                "pattern": "\\S",
+                "description": "Two-letter uppercase country code, e.g. TH.",
+                "pattern": "^[A-Z]{2}$",
                 "type": "string"
               },
               "sublocality": {
@@ -103666,7 +105332,7 @@
             "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected."
           },
           "status": {
-            "description": "active keeps the location on the website; inactive takes it off the website and frees its plan slot.",
+            "description": "Set active to enable the location, or inactive to hide it. This can change location or home usage billed on the existing subscription.",
             "enum": [
               "active",
               "inactive"
@@ -103789,6 +105455,7 @@
             "description": "Persisted values of the fields named in changed_fields.",
             "properties": {
               "address": {
+                "additionalProperties": false,
                 "properties": {
                   "addressLines": {
                     "description": "Address lines in order, unbounded.",
@@ -103816,9 +105483,8 @@
                     "type": "string"
                   },
                   "regionCode": {
-                    "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                    "minLength": 1,
-                    "pattern": "\\S",
+                    "description": "Two-letter uppercase country code, e.g. TH.",
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
                   "sublocality": {
@@ -104199,7 +105865,7 @@
                 ]
               },
               "status": {
-                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "description": "Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.",
                 "enum": [
                   "active",
                   "inactive"
@@ -112141,6 +113807,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -112204,6 +113881,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -112427,6 +114115,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -112477,6 +114176,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -112695,6 +114405,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -112770,6 +114482,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -112783,6 +114501,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -113045,10 +114788,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -113066,7 +114840,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -115808,6 +117604,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "notice": {
                 "type": [
                   "string",
@@ -115871,6 +117678,17 @@
                   "type": "object"
                 },
                 "type": "array"
+              },
+              "layout": {
+                "enum": [
+                  "buttons",
+                  "links",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [],
@@ -116094,6 +117912,17 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "secondary_label": {
                 "type": [
                   "string",
@@ -116144,6 +117973,17 @@
                 ]
               },
               "label": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "layout": {
+                "enum": [
+                  "centered",
+                  "compact",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -116362,6 +118202,8 @@
                 "enum": [
                   "cards",
                   "pictures",
+                  "columns",
+                  "strip",
                   null
                 ],
                 "type": [
@@ -116437,6 +118279,12 @@
                   "null"
                 ]
               },
+              "caption": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cta_label": {
                 "type": [
                   "string",
@@ -116450,6 +118298,31 @@
                 ]
               },
               "eyebrow": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -116712,10 +118585,41 @@
                   "null"
                 ]
               },
+              "image_position": {
+                "enum": [
+                  "top",
+                  "center",
+                  "bottom",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "image_ratio": {
+                "enum": [
+                  "original",
+                  "portrait",
+                  "square",
+                  "landscape",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "items": {
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "description": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "title": {
                       "type": "string"
                     }
@@ -116733,7 +118637,29 @@
                   "null"
                 ]
               },
+              "layout": {
+                "enum": [
+                  "standard",
+                  "editorial",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "tone": {
+                "enum": [
+                  "light",
+                  "dark",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -120022,7 +121948,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:a7bda678adaf8914d9d4dbe0f5c186c317ac8905f62e74f9baf63c3cbf061ac6",
+        "create_product": "sha256:f5294f6b5077691d2bc902977ded2e186960ad02b5644879136811b4aa206d5d",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_collections": "sha256:e3e115808ba9a44475cd08c5cdf4290fb3e4e036aa89075910f2753576ba2309",
@@ -120078,7 +122004,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "create_product": "sha256:a7bda678adaf8914d9d4dbe0f5c186c317ac8905f62e74f9baf63c3cbf061ac6",
+        "create_product": "sha256:f5294f6b5077691d2bc902977ded2e186960ad02b5644879136811b4aa206d5d",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
@@ -120127,14 +122053,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "get_site_page": "sha256:9bd34037fc97f2c20d794dc6393dc8df6110ef2e218dbc7c22f06d477a637819",
+        "get_site_page": "sha256:1e05ef7ca1c7b90eaabda92936432a76e82077025af242e698cfe5ba7c3952fd",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_media_assets": "sha256:baf61a4e5e669943d219b28e0309d131ae3b38e6168c8092b7bac50ac9e218be",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
         "remove_media": "sha256:9f10e4fc49ea8ac1844f66eceb15024ab358f113bd2235dd24e1be243d0f07d5",
         "reorder_media": "sha256:2d576fb2f0b9fe1ccbfa813fda4631e861dc059a47afa4af74b1e1fa2879b573",
         "set_media": "sha256:1d6bd29b35cac32edcb36fb6ffc3fcbe1f618cfb4c54cf39a3c93f7b29eb2416",
-        "update_site_page": "sha256:d8bdcec0c105305cc5e09af430b0610e59fe7d700bd505a4f43d2ed50d0b36c5"
+        "update_site_page": "sha256:761af60d8c3fd979e8f9154e87f03cce08a607a05652ee1e807352e8e161ec49"
       }
     },
     {
@@ -120147,10 +122073,10 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "get_location": "sha256:997354e40501e6182c1fa9514f7aa19f307dcc840c706503ded44b208db7c36a",
+        "get_location": "sha256:9be9af469b6443cefbaf891b2175198fc0a31d884c672ba0d08bf5ea5ee9ada4",
         "get_post": "sha256:90a66e74e4c1bd71f9898112b21121f2ae6e2ebc9bfdca6fbd1edf74f4014bec",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
-        "get_site_page": "sha256:9bd34037fc97f2c20d794dc6393dc8df6110ef2e218dbc7c22f06d477a637819",
+        "get_site_page": "sha256:1e05ef7ca1c7b90eaabda92936432a76e82077025af242e698cfe5ba7c3952fd",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "save_media_attachment": "sha256:420c7df571df0cd02f519a706d231efe51544183d79b66def3b90fc08d9b1bef",
         "set_media": "sha256:1d6bd29b35cac32edcb36fb6ffc3fcbe1f618cfb4c54cf39a3c93f7b29eb2416"
@@ -120165,9 +122091,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:a7bda678adaf8914d9d4dbe0f5c186c317ac8905f62e74f9baf63c3cbf061ac6",
+        "create_product": "sha256:f5294f6b5077691d2bc902977ded2e186960ad02b5644879136811b4aa206d5d",
         "get_organization": "sha256:7ebc3f74bcada2b704d555b6f1b3380a16b39ee6f9694f1a74ab1d5579879063",
-        "get_site_page": "sha256:9bd34037fc97f2c20d794dc6393dc8df6110ef2e218dbc7c22f06d477a637819",
+        "get_site_page": "sha256:1e05ef7ca1c7b90eaabda92936432a76e82077025af242e698cfe5ba7c3952fd",
         "get_website_draft": "sha256:ba4ac466ac8155b67b570e373c132ed877f24a5769b5d33c48dde59fd83e69e3",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_locations": "sha256:9b4d56f26b72fe7c0470cb92e282dd57a09ef35e0b4712455b6441b0aa027454",
@@ -120178,7 +122104,7 @@
         "save_website_draft": "sha256:b492a71234d030ddcf7a065ec5af65900f6c879ba98b28c6a73c95c358dd8fc4",
         "update_menu": "sha256:5b13e967b7941a67b218375785afe57fa614ca2b42fe0d33d4aaca3ac9fe4afd",
         "update_organization_settings": "sha256:f3814e677c462c0f6cdc50cbe2849929481129997e3157a7e030727e87ae5652",
-        "update_site_page": "sha256:d8bdcec0c105305cc5e09af430b0610e59fe7d700bd505a4f43d2ed50d0b36c5"
+        "update_site_page": "sha256:761af60d8c3fd979e8f9154e87f03cce08a607a05652ee1e807352e8e161ec49"
       }
     },
     {
@@ -120190,7 +122116,7 @@
         "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:997354e40501e6182c1fa9514f7aa19f307dcc840c706503ded44b208db7c36a",
+        "get_location": "sha256:9be9af469b6443cefbaf891b2175198fc0a31d884c672ba0d08bf5ea5ee9ada4",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_reservation_policy": "sha256:4045310c41d2fc80d5a07e206d3b6f9d4726bb5b6697f4941332034e1474980b",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
@@ -120213,14 +122139,14 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "get_site_page": "sha256:9bd34037fc97f2c20d794dc6393dc8df6110ef2e218dbc7c22f06d477a637819",
+        "get_site_page": "sha256:1e05ef7ca1c7b90eaabda92936432a76e82077025af242e698cfe5ba7c3952fd",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
         "list_media_assets": "sha256:baf61a4e5e669943d219b28e0309d131ae3b38e6168c8092b7bac50ac9e218be",
         "list_products": "sha256:7292607ec85d9bf945e6921cc52ffc0abf2be912c9e8ecde4fcff0806c99ecda",
         "list_site_pages": "sha256:2bfdd553c55f195f0d18165540c975ed426bc47c1955f494472437de8df7704c",
         "set_media": "sha256:1d6bd29b35cac32edcb36fb6ffc3fcbe1f618cfb4c54cf39a3c93f7b29eb2416",
         "update_product": "sha256:5e8d017fbc6db350da458809a9de36fc99b65c4b2d004677da02b859f264e314",
-        "update_site_page": "sha256:d8bdcec0c105305cc5e09af430b0610e59fe7d700bd505a4f43d2ed50d0b36c5"
+        "update_site_page": "sha256:761af60d8c3fd979e8f9154e87f03cce08a607a05652ee1e807352e8e161ec49"
       }
     },
     {

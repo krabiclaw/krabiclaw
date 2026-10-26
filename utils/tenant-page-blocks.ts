@@ -175,8 +175,22 @@ const text = (label: string, extra: Partial<TenantPageField> = {}): TenantPageFi
 const prose = (label: string, extra: Partial<TenantPageField> = {}): TenantPageField => ({ kind: 'text', label, multiline: true, section: 'copy', ...extra })
 const link = (label: string, extra: Partial<TenantPageField> = {}): TenantPageField => ({ kind: 'url', label, translatable: false, section: 'button', ...extra })
 
+// Product captures retain their original file; the page owns the visible crop.
+const PRODUCT_IMAGE_FIELDS = {
+  image_ratio: { kind: 'enum', label: 'Image proportions', translatable: false, section: 'image_display', options: [
+    { value: 'original', label: 'Original' }, { value: 'portrait', label: 'Portrait (4:5)' },
+    { value: 'square', label: 'Square' }, { value: 'landscape', label: 'Landscape (6:5)' },
+  ] },
+  image_position: { kind: 'enum', label: 'Image focus', translatable: false, section: 'image_display', options: [
+    { value: 'top', label: 'Top' }, { value: 'center', label: 'Centre' }, { value: 'bottom', label: 'Bottom' },
+  ] },
+} as const
+
 /** A call to action is one prompt and one button, and the button needs both halves. */
 const CTA_FIELDS = {
+  layout: { kind: 'enum', label: 'Layout', translatable: false, section: 'settings', options: [
+    { value: 'centered', label: 'Centred' }, { value: 'compact', label: 'Compact', platformOnly: true },
+  ] },
   title: text('Title'),
   accent: text('Emphasised phrase'),
   description: prose('Description'),
@@ -314,6 +328,9 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     eyebrow: text('Eyebrow'),
     subtitle: prose('Subheading'),
     media: { kind: 'media', label: 'Image or video', translatable: false, section: 'image', slot: 'media', accept: 'any' },
+    featured: { kind: 'media', label: 'Product image', translatable: false, section: 'featured', slot: 'featured' },
+    caption: text('Product image caption', { section: 'featured' }),
+    ...PRODUCT_IMAGE_FIELDS,
     cta_label: text('Button label', { section: 'button', pairedWith: 'cta_url' }),
     cta_url: link('Button URL', { pairedWith: 'cta_label' }),
     // A second button, which eight platform heroes already carry and no list
@@ -323,6 +340,9 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   }, { accessibility: 'required', seo: 'structured' }),
 
   button_group: blockDefinitionWithMetadata('button_group', 'Buttons', 'i-lucide-mouse-pointer-click', 'A row of links.', ALL_RECIPES, {
+    layout: { kind: 'enum', label: 'Layout', translatable: false, section: 'settings', options: [
+      { value: 'buttons', label: 'Buttons' }, { value: 'links', label: 'Open links', platformOnly: true },
+    ] },
     buttons: { kind: 'list', label: 'Buttons', section: 'buttons', of: { label: text('Label', { required: true }), url: link('URL') } },
   }),
 
@@ -351,6 +371,8 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
       options: [
         { value: 'cards', label: 'Cards' },
         { value: 'pictures', label: 'Pictures', platformOnly: true },
+        { value: 'columns', label: 'Open columns', platformOnly: true },
+        { value: 'strip', label: 'Compact strip', platformOnly: true },
       ],
     },
     calculator: { kind: 'calculator', label: 'Calculator', translatable: false, section: 'calculator', availableWhen: { field: 'source', equals: ['calculator'] } },
@@ -483,6 +505,13 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   // `story.image`, `story.body`) that the renderer re-assembled at display
   // time, in the alphabetical order the migration wrote them.
   media_text: blockDefinitionWithMetadata('media_text', 'Image with text', 'i-lucide-panels-top-left', 'A picture and the words beside it.', ALL_RECIPES, {
+    layout: { kind: 'enum', label: 'Layout', translatable: false, section: 'settings', options: [
+      { value: 'standard', label: 'Standard' }, { value: 'editorial', label: 'Editorial', platformOnly: true },
+    ] },
+    tone: { kind: 'enum', label: 'Background', translatable: false, section: 'settings', options: [
+      { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' },
+    ] },
+    ...PRODUCT_IMAGE_FIELDS,
     title: text('Title'),
     body: prose('Text'),
     media: { kind: 'media', label: 'Image or video', translatable: false, section: 'image', slot: 'media', accept: 'any' },
@@ -495,8 +524,9 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
       { value: 'posts', label: 'Photos and posts' },
       { value: 'app_screens', label: 'App screenshots' },
     ] },
-    items: { kind: 'list', label: 'Examples', section: 'examples', of: {
-      title: text('Example name', { required: true }),
+    items: { kind: 'list', label: 'Details & examples', section: 'items', of: {
+      title: text('Title', { required: true }),
+      description: prose('Description'),
       image: { kind: 'media', label: 'Picture', translatable: false, slot: 'image' },
     } },
   }),
@@ -945,8 +975,10 @@ export function normalizeTenantPageBlocks(value: unknown): TenantPageBlock[] {
       return { asset_id: assetId, slot, sort_order: mediaIndex }
     })
     const canonicalSlot = type === 'gallery' ? 'gallery' : type === 'hero' || type === 'image' ? 'media' : null
-    if (canonicalSlot && normalizedMedia.some(item => item.slot !== canonicalSlot && !(type === 'hero' && item.slot.startsWith('parallax_') && isSupportedMediaPlacement({ owner_type: 'content_block', slot: item.slot })))) {
-      throw new Error(`blocks[${index}].media must use the ${canonicalSlot} slot for ${type} blocks.`)
+    const declaredSlots = Object.values(TENANT_PAGE_BLOCK_REGISTRY[type].fields)
+      .filter(field => field.kind === 'media').map(field => field.slot)
+    if (canonicalSlot && normalizedMedia.some(item => !declaredSlots.includes(item.slot) && !(type === 'hero' && item.slot.startsWith('parallax_') && isSupportedMediaPlacement({ owner_type: 'content_block', slot: item.slot })))) {
+      throw new Error(`blocks[${index}].media must use a declared media slot for ${type} blocks: ${declaredSlots.join(', ')}.`)
     }
     if (canonicalSlot) {
       // Media references belong in the placement array, not block data.

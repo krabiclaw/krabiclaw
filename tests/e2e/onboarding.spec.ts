@@ -578,17 +578,17 @@ test('a paid plan adds a location past the included ones and counts it', async (
     const args = { organization_id: 'org-demo', title: 'Third branch', timezone: 'America/New_York', idempotency_key: crypto.randomUUID() }
     const created = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'create_location', args })
     expect(created.status(), await created.text()).toBe(200)
-    const receipt = mcpData<{ location: { id: string; slug: string; title: string; status: string; timezone: string; updated_at: string }; context: { organization_id: string; location_id: string; location_slug: string; location_title: string } }>(await created.json())
+    const receipt = mcpData<{ organization_id: string; location: { id: string; title: string; status: string } }>(await created.json())
     createdLocationId = receipt.location.id
-    expect(Object.keys(receipt).sort()).toEqual(['context', 'location'])
-    expect(Object.keys(receipt.location).sort()).toEqual(['id', 'slug', 'status', 'timezone', 'title', 'updated_at'])
-    expect(receipt.location).toMatchObject({ title: args.title, status: 'active', timezone: args.timezone })
-    expect(receipt.location.updated_at).toEqual(expect.any(String))
-    expect(receipt.context).toMatchObject({ organization_id: args.organization_id, location_id: createdLocationId, location_slug: receipt.location.slug, location_title: args.title })
+    expect(Object.keys(receipt).sort()).toEqual(['location', 'organization_id'])
+    expect(Object.keys(receipt.location).sort()).toEqual(['id', 'status', 'title'])
+    expect(receipt.location).toEqual({ id: createdLocationId, title: args.title, status: 'active' })
+    expect(receipt.organization_id).toBe(args.organization_id)
     const nativeRead = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
     expect(nativeRead.status(), await nativeRead.text()).toBe(200)
     const saved = await nativeRead.json()
     expect(saved.location).toMatchObject(receipt.location)
+    expect(saved.location.timezone).toBe(args.timezone)
     expect((await status()).usage.locations).toBe(3)
 
     const replay = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'create_location', args })

@@ -95,6 +95,14 @@ test('public discovery resolves translations through current publication owners'
     // Complete built-in routes derive their localized paths; authored pages still
     // require a published representation. The collector stores the actual visit.
     const identityInput = { organizationId: 'tenant', requestedLocale: null, themeId: 'tenant-theme-v1', vertical: 'restaurant' }
+    const officeInput = { ...identityInput, vertical: 'service' }
+    assert.deepEqual(await resolvePublicPageIdentity(env, createDb(db), { ...officeInput, pagePath: '/locations/branch' }), {
+      publicPath: '/locations/branch', sourcePath: '/locations/branch', locale: 'en', locationId: 'branch',
+      pageId: null, documentId: null, pageType: null, recipe: null, productId: null,
+    })
+    for (const path of ['/locations/hidden', '/locations/foreign', '/locations/missing']) {
+      assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...officeInput, pagePath: path }), null, path)
+    }
     for (const path of ['/th/menu', '/th/experiences', '/th/contact', '/th/reservations']) {
       const identity = await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: path })
       assert(identity, path)

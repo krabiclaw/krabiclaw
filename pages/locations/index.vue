@@ -38,14 +38,9 @@
         >
           <!-- Photo -->
           <div class="aspect-16/10 overflow-hidden bg-muted">
-            <video
+            <MediaPreview
               v-if="locationMedia(loc)?.public_url && locationMedia(loc)?.kind === 'video'"
-              :src="locationMedia(loc)?.public_url"
-              autoplay
-              muted
-              loop
-              playsinline
-              class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+              :item="{ url: String(locationMedia(loc)!.public_url), kind: 'video', poster: String(locationMedia(loc)!.thumbnail_url || ''), alt: String(loc.title) }"
             />
             <img
               v-else-if="locationMedia(loc)?.public_url"
@@ -105,8 +100,10 @@ import { authClient } from '~/lib/auth-client'
 import { getTodayHoursLabel } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { publicLocationPath } from '~/utils/product-presentation'
+import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
 
 definePageMeta({ layout: 'tenant' })
+provideMediaPreviews(ref(false))
 
 const { organization } = useTenantOrganization()
 const session = authClient.useSession()
@@ -123,12 +120,10 @@ const locationMedia = (location: ApiRecord) => Array.isArray(location.media)
   ? (location.media as ApiRecord[]).find(item => item.slot === 'hero') ?? null
   : null
 
-// The first card's hero is this route's LCP element. A video hero has no poster
-// here, so there is no image to hint and it is left to normal discovery.
+// The first card's photograph or video poster is this route's LCP element.
 useHeroLcpPreload(computed(() => {
   const media = locations.value[0] ? locationMedia(locations.value[0] as ApiRecord) : null
-  if (!media || media.kind === 'video') return null
-  return String(media.public_url ?? '') || null
+  return media ? String(media.kind === 'video' ? media.thumbnail_url ?? '' : media.public_url ?? '') || null : null
 }))
 function locationAddress(location: ApiRecord): string {
   return formatPostalAddress(location.address as PostalAddress | null)

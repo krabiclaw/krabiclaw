@@ -69,7 +69,8 @@ export function getCloudflareGeo(event: H3Event): CloudflareGeo {
 export async function resolveLocationIdFromPath(db: AppDb, organizationId: string, pagePath: string): Promise<string | null> {
   const slug = pagePath.match(/^\/locations\/([^/]+)/)?.[1]
   if (!slug) return null
-  return (await queryFirst<{ id: string }>(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND slug = ? LIMIT 1', [organizationId, slug]))?.id ?? null
+  const { publicLocationSql } = await import('~/server/utils/public-locations')
+  return (await queryFirst<{ id: string }>(db, `SELECT l.id FROM business_locations l WHERE l.organization_id = ? AND l.slug = ? AND ${publicLocationSql('l')} LIMIT 1`, [organizationId, slug]))?.id ?? null
 }
 
 /** The facts a valid public route identifies. Each describes a different thing: the path the visitor requested, the locale-bare path its document is stored under, the language, and the entities behind it. */
@@ -163,6 +164,12 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
   const productRoute = parseProductRouteSegments(routing.sourcePath, input.vertical ?? await getOrganizationVertical(db, organizationId))
   const product = productRoute ? await findPublishedProductAtRoute(db, organizationId, productRoute) : null
   if (product) return { ...base, locale: sourceLocale, locationId: product.location_id, pageId: null, pageType: 'product', recipe: null, documentId: null, productId: product.id }
+
+  // Office overviews, like venue overviews, are public location resources even
+  // when the practice template has no location document or sitemap prefix.
+  if (/^\/locations\/[^/]+$/.test(routing.sourcePath)) {
+    return base.locationId ? { ...base, locale: sourceLocale, pageId: null, pageType: null, recipe: null, documentId: null, productId: null } : null
+  }
 
   if (!isKnownTenantPublicPath(routing.sourcePath, { themeId: input.themeId, vertical: input.vertical })) return null
   return { ...base, locale: sourceLocale, pageId: null, pageType: null, recipe: null, documentId: null, productId: null }
