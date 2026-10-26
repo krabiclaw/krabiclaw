@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:2e4e3de49afc2a0f542635c64854410c654e68393ba835c16a47409ce99f262e",
-  "documentationFingerprint": "sha256:5e446fb1250350ef8f1ae777974b83315b9e3712ca9768c697b641f1bc7a505e",
+  "fingerprint": "sha256:552655e41137cce45de01763cf4c8debc038898d220e000d4a82d6d8e2f97d2e",
+  "documentationFingerprint": "sha256:d0663220fc3cdffbb4fcaad118d7ea522e5f5a167529a77c13e0994a0564acb0",
   "tools": [
     {
       "name": "add_organization_language",
@@ -11942,6 +11942,7 @@
             "description": "Persisted values of the fields named in changed_fields.",
             "properties": {
               "address": {
+                "additionalProperties": false,
                 "properties": {
                   "addressLines": {
                     "description": "Address lines in order, unbounded.",
@@ -11969,9 +11970,8 @@
                     "type": "string"
                   },
                   "regionCode": {
-                    "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                    "minLength": 1,
-                    "pattern": "\\S",
+                    "description": "Two-letter uppercase country code, e.g. TH.",
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
                   "sublocality": {
@@ -19213,11 +19213,12 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status inactive takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business's one subscription, billed at the end of the period for the active locations at that time. Inactive locations and the locations of places to stay are not counted. Basic refuses a third active location. Returns its identity, status, timezone and saved timestamp; use get_location for its full details.",
+      "description": "Add an active business branch or office. It counts toward existing subscription usage and may increase the bill. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "address": {
+            "additionalProperties": false,
             "properties": {
               "addressLines": {
                 "description": "Address lines in order, unbounded.",
@@ -19245,9 +19246,8 @@
                 "type": "string"
               },
               "regionCode": {
-                "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                "minLength": 1,
-                "pattern": "\\S",
+                "description": "Two-letter uppercase country code, e.g. TH.",
+                "pattern": "^[A-Z]{2}$",
                 "type": "string"
               },
               "sublocality": {
@@ -19278,121 +19278,6 @@
             "pattern": "\\S",
             "type": "string"
           },
-          "opening_hours": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "additionalProperties": false,
-                "properties": {
-                  "periods": {
-                    "items": {
-                      "anyOf": [
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "close": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "day": {
-                                  "maximum": 6,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "hour": {
-                                  "maximum": 23,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "minute": {
-                                  "maximum": 59,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                }
-                              },
-                              "required": [
-                                "day",
-                                "hour",
-                                "minute"
-                              ],
-                              "type": "object"
-                            },
-                            "open": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "day": {
-                                  "maximum": 6,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "hour": {
-                                  "maximum": 23,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                },
-                                "minute": {
-                                  "maximum": 59,
-                                  "minimum": 0,
-                                  "type": "integer"
-                                }
-                              },
-                              "required": [
-                                "day",
-                                "hour",
-                                "minute"
-                              ],
-                              "type": "object"
-                            }
-                          },
-                          "required": [
-                            "open",
-                            "close"
-                          ],
-                          "type": "object"
-                        },
-                        {
-                          "additionalProperties": false,
-                          "properties": {
-                            "open": {
-                              "additionalProperties": false,
-                              "properties": {
-                                "day": {
-                                  "const": 0
-                                },
-                                "hour": {
-                                  "const": 0
-                                },
-                                "minute": {
-                                  "const": 0
-                                }
-                              },
-                              "required": [
-                                "day",
-                                "hour",
-                                "minute"
-                              ],
-                              "type": "object"
-                            }
-                          },
-                          "required": [
-                            "open"
-                          ],
-                          "type": "object"
-                        }
-                      ]
-                    },
-                    "type": "array"
-                  }
-                },
-                "required": [
-                  "periods"
-                ],
-                "type": "object"
-              }
-            ],
-            "description": "Canonical weekly endpoint periods. Days use Sunday=0. Null means unknown; periods [] means closed. Sunday 00:00 without a close means always open. Omitted is the same as null."
-          },
           "organization_id": {
             "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
             "minLength": 1,
@@ -19402,120 +19287,6 @@
           "phone": {
             "description": "International number with its country calling code, e.g. +66812345678.",
             "type": "string"
-          },
-          "special_hours": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "items": {
-                  "anyOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "ends_on": {
-                          "anyOf": [
-                            {
-                              "description": "Gregorian calendar date, YYYY-MM-DD. No timezone conversion.",
-                              "format": "date",
-                              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ]
-                        },
-                        "kind": {
-                          "const": "closure"
-                        },
-                        "note": {
-                          "maxLength": 1000,
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "starts_on": {
-                          "description": "Gregorian calendar date, YYYY-MM-DD. No timezone conversion.",
-                          "format": "date",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "starts_on",
-                        "ends_on",
-                        "note"
-                      ],
-                      "type": "object"
-                    },
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "date": {
-                          "description": "Gregorian calendar date, YYYY-MM-DD. No timezone conversion.",
-                          "format": "date",
-                          "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
-                          "type": "string"
-                        },
-                        "kind": {
-                          "const": "hours"
-                        },
-                        "note": {
-                          "maxLength": 1000,
-                          "type": [
-                            "string",
-                            "null"
-                          ]
-                        },
-                        "periods": {
-                          "items": {
-                            "additionalProperties": false,
-                            "properties": {
-                              "close_day_offset": {
-                                "enum": [
-                                  0,
-                                  1
-                                ]
-                              },
-                              "close_time": {
-                                "description": "Local wall-clock time, HH:mm (24-hour), in the explicitly selected location timezone.",
-                                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
-                                "type": "string"
-                              },
-                              "open_time": {
-                                "description": "Local wall-clock time, HH:mm (24-hour), in the explicitly selected location timezone.",
-                                "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "open_time",
-                              "close_time",
-                              "close_day_offset"
-                            ],
-                            "type": "object"
-                          },
-                          "type": "array"
-                        }
-                      },
-                      "required": [
-                        "kind",
-                        "date",
-                        "periods",
-                        "note"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                "type": "array"
-              }
-            ],
-            "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected. Omitted, null and [] all mean no special hours."
           },
           "timezone": {
             "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
@@ -19545,79 +19316,10 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
-          "context": {
-            "additionalProperties": false,
-            "description": "The business this call acted on, its public website origin, and the location the call named, or null location fields when it named none.",
-            "properties": {
-              "location_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "location_slug": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "location_title": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_id": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_name": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_public_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_slug": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "organization_subdomain": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              }
-            },
-            "required": [
-              "organization_id",
-              "organization_name",
-              "organization_slug",
-              "organization_subdomain",
-              "organization_public_url",
-              "location_id",
-              "location_slug",
-              "location_title"
-            ],
-            "type": "object"
-          },
           "location": {
             "additionalProperties": false,
             "properties": {
               "id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "slug": {
                 "minLength": 1,
                 "type": "string"
               },
@@ -19629,37 +19331,29 @@
                 ],
                 "type": "string"
               },
-              "timezone": {
-                "description": "Saved IANA timezone for this location.",
-                "type": "string"
-              },
               "title": {
-                "type": "string"
-              },
-              "updated_at": {
-                "description": "Saved location update timestamp.",
                 "type": "string"
               }
             },
             "required": [
               "id",
-              "slug",
               "title",
-              "status",
-              "timezone",
-              "updated_at"
+              "status"
             ],
             "type": "object"
+          },
+          "organization_id": {
+            "type": "string"
           }
         },
         "required": [
-          "location",
-          "context"
+          "organization_id",
+          "location"
         ],
         "type": "object"
       },
       "annotations": {
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
         "readOnlyHint": false
@@ -46581,6 +46275,7 @@
           "location": {
             "properties": {
               "address": {
+                "additionalProperties": false,
                 "properties": {
                   "addressLines": {
                     "description": "Address lines in order, unbounded.",
@@ -46608,9 +46303,8 @@
                     "type": "string"
                   },
                   "regionCode": {
-                    "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                    "minLength": 1,
-                    "pattern": "\\S",
+                    "description": "Two-letter uppercase country code, e.g. TH.",
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
                   "sublocality": {
@@ -69919,6 +69613,7 @@
             "description": "Persisted values of the fields named in changed_fields.",
             "properties": {
               "address": {
+                "additionalProperties": false,
                 "properties": {
                   "addressLines": {
                     "description": "Address lines in order, unbounded.",
@@ -69946,9 +69641,8 @@
                     "type": "string"
                   },
                   "regionCode": {
-                    "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                    "minLength": 1,
-                    "pattern": "\\S",
+                    "description": "Two-letter uppercase country code, e.g. TH.",
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
                   "sublocality": {
@@ -105302,6 +104996,7 @@
         "additionalProperties": false,
         "properties": {
           "address": {
+            "additionalProperties": false,
             "properties": {
               "addressLines": {
                 "description": "Address lines in order, unbounded.",
@@ -105329,9 +105024,8 @@
                 "type": "string"
               },
               "regionCode": {
-                "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                "minLength": 1,
-                "pattern": "\\S",
+                "description": "Two-letter uppercase country code, e.g. TH.",
+                "pattern": "^[A-Z]{2}$",
                 "type": "string"
               },
               "sublocality": {
@@ -105761,6 +105455,7 @@
             "description": "Persisted values of the fields named in changed_fields.",
             "properties": {
               "address": {
+                "additionalProperties": false,
                 "properties": {
                   "addressLines": {
                     "description": "Address lines in order, unbounded.",
@@ -105788,9 +105483,8 @@
                     "type": "string"
                   },
                   "regionCode": {
-                    "description": "ISO 3166-1 alpha-2 country code, e.g. TH.",
-                    "minLength": 1,
-                    "pattern": "\\S",
+                    "description": "Two-letter uppercase country code, e.g. TH.",
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
                   "sublocality": {
@@ -122379,7 +122073,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "get_location": "sha256:997354e40501e6182c1fa9514f7aa19f307dcc840c706503ded44b208db7c36a",
+        "get_location": "sha256:6a8e35ed2d402f344ff6322e9cd5427a7140ce16d30ee16e1f298a1e55d41e70",
         "get_post": "sha256:90a66e74e4c1bd71f9898112b21121f2ae6e2ebc9bfdca6fbd1edf74f4014bec",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_site_page": "sha256:1e05ef7ca1c7b90eaabda92936432a76e82077025af242e698cfe5ba7c3952fd",
@@ -122422,7 +122116,7 @@
         "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:997354e40501e6182c1fa9514f7aa19f307dcc840c706503ded44b208db7c36a",
+        "get_location": "sha256:6a8e35ed2d402f344ff6322e9cd5427a7140ce16d30ee16e1f298a1e55d41e70",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_reservation_policy": "sha256:4045310c41d2fc80d5a07e206d3b6f9d4726bb5b6697f4941332034e1474980b",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",

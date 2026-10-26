@@ -41,6 +41,7 @@ test('active locations and live homes are reported to their Stripe meters, draft
   const innTrialEnd = Math.floor(Date.UTC(2026, 10, 22, 14, 6, 27) / 1000)
   // Stripe receives the meter events; each one is kept as Stripe was sent it.
   const reported: Array<{ event: string; customer: string; value: number }> = []
+  let refusedMeterCustomer: string | null = null
   const originalFetch = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : String(input))
@@ -61,6 +62,9 @@ test('active locations and live homes are reported to their Stripe meters, draft
     if (catalog) return catalog
     assert.equal(url.pathname, '/v1/billing/meter_events')
     const body = new URLSearchParams(String(init?.body))
+    if (body.get('payload[stripe_customer_id]') === refusedMeterCustomer) {
+      return Response.json({ error: { type: 'invalid_request_error', message: 'Meter reporting is refused for this test' } }, { status: 400 })
+    }
     reported.push({ event: body.get('event_name')!, customer: body.get('payload[stripe_customer_id]')!, value: Number(body.get('payload[value]')) })
     return Response.json({ object: 'billing.meter_event', event_name: body.get('event_name'), identifier: crypto.randomUUID(), payload: {}, timestamp: Math.floor(Date.now() / 1000), created: Math.floor(Date.now() / 1000), livemode: false })
   }) as typeof fetch
@@ -111,9 +115,26 @@ test('active locations and live homes are reported to their Stripe meters, draft
 
     // ── Business: every active location and every live home is billed; a home is a home, not a location. Nothing is refused.
     await organization('inn', 'business')
-    const bistro = await place('inn', 'Bistro')
+    const bistroInput = { title: 'Bistro', timezone: 'America/Denver' }
+    const bistroOptions = { idempotencyKey: 'bistro-creation' }
+    const billingIncomplete = (error: unknown) => error instanceof HTTPError && error.status === 503
+      && error.data?.code === 'POST_WRITE_COMPLETION_FAILED' && error.data?.field === 'billing_usage' && error.data?.committed === true
+    refusedMeterCustomer = 'cus_inn'
+    await assert.rejects(createLocation(env, db, 'inn', bistroInput, OWNER, bistroOptions), billingIncomplete)
+    const savedBistro = (await db.prepare("SELECT id, title, status, timezone, created_at FROM business_locations WHERE organization_id = 'inn'").all<{ id: string; title: string; status: string; timezone: string; created_at: string }>()).results
+    assert.equal(savedBistro.length, 1)
+    assert.deepEqual({ title: savedBistro[0]!.title, status: savedBistro[0]!.status, timezone: savedBistro[0]!.timezone }, { title: 'Bistro', status: 'active', timezone: 'America/Denver' })
+    assert.deepEqual(await counts('inn'), { locations: 1, homes: 0 })
+    assert.deepEqual(last('cus_inn'), { locations: null, homes: null })
+    // A saved row is not success while the required billing report still fails.
+    await assert.rejects(createLocation(env, db, 'inn', bistroInput, OWNER, bistroOptions), billingIncomplete)
+    assert.deepEqual((await db.prepare("SELECT id, title, status, timezone, created_at FROM business_locations WHERE organization_id = 'inn'").all()).results, savedBistro)
+    refusedMeterCustomer = null
+    const bistro = await createLocation(env, db, 'inn', bistroInput, OWNER, bistroOptions)
     assert.equal(bistro.status, 201)
     const bistroId = (bistro.data as { location: { id: string } }).location.id
+    assert.equal(bistroId, savedBistro[0]!.id)
+    assert.deepEqual(await counts('inn'), { locations: 1, homes: 0 })
     assert.deepEqual(last('cus_inn'), { locations: 1, homes: 0 })
     const villas = []
     for (const key of ['villa-1', 'villa-2', 'villa-3']) villas.push(await home('inn', key))
