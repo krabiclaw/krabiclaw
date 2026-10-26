@@ -283,8 +283,8 @@ const routeLocationSlug = computed(() => typeof route.params.locationSlug === 's
 // dashboard context of the route's organization. There is no second source: a
 // route with no organization context renders no avatar rather than another
 // organization's image or a generic icon standing in for one.
-const scopeOrganizationAvatar = computed(() =>
-  mediaStillUrl(organization.value?.media.find(item => item.slot === 'logo')) ?? undefined)
+const scopeOrganizationLogo = computed(() => organization.value?.media.find(item => item.slot === 'logo'))
+const scopeOrganizationAvatar = computed(() => mediaStillUrl(scopeOrganizationLogo.value) ?? undefined)
 
 // Progressive drill-in: exactly one scope is active per route, and the sidebar's
 // single ContextSwitcher (this dropdown) and NavigationGroups both key off it —
@@ -302,6 +302,8 @@ const scopeHeaderModel = computed<DashboardScopeHeaderModel>(() => {
     current: {
       label: personal.value ? 'Personal' : scopeOrganization.value?.name ?? 'Organization',
       avatar: personal.value ? sessionData.value?.user?.image ?? undefined : scopeOrganizationAvatar.value,
+      // A logo shown whole is fitted inside the avatar rather than cropped to fill it.
+      avatarFit: !personal.value && (scopeOrganizationLogo.value?.presentation?.shape ?? 'original') === 'original' ? 'contain' : 'cover',
     },
     parent: null,
     // Peers carry no mark. `organization.logo` is Better Auth's column and

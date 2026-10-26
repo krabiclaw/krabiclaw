@@ -36,7 +36,7 @@ export interface DashboardScopeHeaderPeer {
 // pattern of a back-row sized like every other nav item, not custom chrome
 // inside the switcher header. Do not add parent-rendering back here.
 export interface DashboardScopeHeaderModel {
-  current: { label: string; avatar?: string }
+  current: { label: string; avatar?: string; avatarFit: 'cover' | 'contain' }
   parent: { label: string; to: string } | null
   peers: DashboardScopeHeaderPeer[]
   createAction?: { label: string; to: string }
@@ -47,7 +47,9 @@ const props = defineProps<{ model: DashboardScopeHeaderModel; collapsed?: boolea
 // No glyph stands in for a missing mark. A business without a `logo`
 // placement shows its name and nothing else, so it is distinguishable from one
 // that has a mark.
-const currentAvatar = computed(() => props.model.current.avatar ? { src: props.model.current.avatar } : undefined)
+const currentAvatar = computed(() => props.model.current.avatar
+  ? { src: props.model.current.avatar, ui: props.model.current.avatarFit === 'contain' ? { image: 'object-contain bg-elevated p-0.5' } : undefined }
+  : undefined)
 
 interface ScopeMenuItem {
   label: string

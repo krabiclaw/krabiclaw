@@ -12,7 +12,7 @@ import { getOrganizationPlan } from '~/server/utils/billing-access'
 import { parsePostalAddress } from '~/utils/postal-address'
 import { readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { loadPublicSocialMedia, type PublicSocialMedia } from '~/server/utils/public-social-image'
-import { mediaStillUrl, resolveOwnerPicture } from '~/shared/media-placement-contract'
+import { mediaStillUrl, resolveOwnerPicture, type LogoPresentation } from '~/shared/media-placement-contract'
 import type { StayMapSharing } from '~/shared/stay-listing'
 
 /**
@@ -52,8 +52,8 @@ const ORGANIZATION_CONFIG_BY_ID_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE id = 
 const ORGANIZATION_CONFIG_BY_SLUG_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE slug = ? LIMIT 1`
 
 // The dashboard shows the business's mark and nothing else of its media: the
-// sidebar avatar is its `logo`, or no avatar at all.
-export type DashboardOrganizationMedia = Array<{ asset_id: string, slot: string, public_url: string | null, thumbnail_url: string | null, kind: string | null }>
+// sidebar avatar is its `logo` as its owner presents it, or no avatar at all.
+export type DashboardOrganizationMedia = Array<{ asset_id: string, slot: string, public_url: string | null, thumbnail_url: string | null, kind: string | null, presentation: LogoPresentation | null }>
 
 /** The presentation the tenant card needs: the plan and the logo, one read each. */
 export interface DashboardOrganizationCard {
@@ -71,7 +71,7 @@ export async function loadDashboardOrganizationCard(
     readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId], slot: 'logo' }),
   ])
   const media = (placements.get(organizationId) ?? []).map(item => ({
-    asset_id: item.asset_id, slot: item.slot, public_url: item.public_url, thumbnail_url: item.thumbnail_url, kind: item.kind,
+    asset_id: item.asset_id, slot: item.slot, public_url: item.public_url, thumbnail_url: item.thumbnail_url, kind: item.kind, presentation: item.presentation,
   }))
   return { effective_plan: effectivePlan, media }
 }

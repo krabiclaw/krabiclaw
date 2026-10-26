@@ -3,6 +3,7 @@ import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 import { organizationRoles } from '~/utils/organization-access'
 import { STAY_MAP_SHARING_MODES, type StayMapSharing } from '~/shared/stay-listing'
 import { coordinatesFailure } from '~/utils/location-map'
+import { LOGO_SHAPES, type LogoPresentation } from '~/shared/media-placement-contract'
 
 /**
  * The tenant, as the dashboard reads it.
@@ -26,7 +27,7 @@ export interface DashboardOrganization {
   onboarding_status: string
   effective_plan: string
   default_currency: string
-  media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>
+  media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null; presentation: LogoPresentation | null }>
 }
 
 export interface DashboardLocation {
@@ -80,6 +81,7 @@ const isDashboardOrganization = (value: unknown): value is DashboardOrganization
   && typeof value.onboarding_status === 'string'
   && typeof value.default_currency === 'string'
   && isMediaList(value.media)
+  && (value.media as Array<Record<string, unknown>>).every(item => item.presentation === null || (isRecord(item.presentation) && LOGO_SHAPES.includes(item.presentation.shape as LogoPresentation['shape'])))
 
 const isDashboardLocation = (value: unknown): value is DashboardLocation =>
   isRecord(value)
