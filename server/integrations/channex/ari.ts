@@ -259,11 +259,14 @@ async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: st
   const from = today(home.timezone)
   const queued = [...new Set(dates.filter(date => date >= from))].sort()
   if (!queued.length) return null
-  // A night already pending keeps its attempt count and retry time: the property's pause holds, and the change goes with the retry.
+  // A night already pending keeps its attempt count and retry time: the property's pause holds, and the change goes
+  // with the retry. Its updated_at still moves, so a delivery that read the night before this change leaves it pending.
   await execute(db, `INSERT INTO channel_night_pushes (organization_id, product_id, provider, date, state, detail, attempts, retry_at, updated_at)
     SELECT ?, ?, 'channex', value, 'pending', NULL, 0, NULL, ? FROM json_each(?) WHERE true
-    ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending', detail = NULL, attempts = 0, retry_at = NULL, updated_at = excluded.updated_at
-    WHERE channel_night_pushes.state <> 'pending'`,
+    ON CONFLICT (product_id, provider, date) DO UPDATE SET state = 'pending', updated_at = excluded.updated_at,
+      detail = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.detail ELSE NULL END,
+      attempts = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.attempts ELSE 0 END,
+      retry_at = CASE WHEN channel_night_pushes.state = 'pending' THEN channel_night_pushes.retry_at ELSE NULL END`,
   [organizationId, home.product_id, new Date().toISOString(), JSON.stringify(queued)])
   await deliver(db, env, organizationId, home, mapping, read)
   const rows = await queryAll<{ state: OutboxRow['state']; detail: string | null }>(db, `SELECT state, detail FROM channel_night_pushes
