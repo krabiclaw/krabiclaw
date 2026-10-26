@@ -874,10 +874,19 @@ test.describe('stateless MCP server', () => {
       await preview.scrollIntoViewIfNeeded()
       const initialTime = await preview.evaluate(element => (element as HTMLVideoElement).currentTime)
       await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(initialTime)
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
+      await expect(preview).toHaveJSProperty('controls', true)
+      await preview.press('Home')
+      const manualTime = await preview.evaluate(element => (element as HTMLVideoElement).currentTime)
+      await preview.press('Space')
+      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(manualTime)
       await page.setViewportSize({ width: 1280, height: 480 })
       await page.evaluate(() => scrollTo(0, 0))
       await expect.poll(() => preview.evaluate(element => element.getBoundingClientRect().top >= innerHeight)).toBe(true)
       await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
+      await expect(preview).toHaveJSProperty('ended', false)
+      await page.emulateMedia({ reducedMotion: 'no-preference' })
     } finally {
       if (postId) {
         const cleanup = await mcpRequest(request, baseURL!, {
