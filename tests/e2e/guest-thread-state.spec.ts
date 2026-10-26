@@ -732,6 +732,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     const footerBounds = (await footer.boundingBox())!
     const messageBefore = await message.boundingBox()
     const callBefore = await call.boundingBox()
+    expect(Math.abs((messageBefore!.x + callBefore!.x + callBefore!.width) / 2 - identityBounds.x - identityBounds.width / 2), 'Contact actions align with the bounded record, including beside Today').toBeLessThanOrEqual(1)
     const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
     expect(maximum, 'The actual reservation summary has a scroll end at this viewport').toBeGreaterThan(0)
     await page.mouse.move(bodyBounds.x + 4, bodyBounds.y + bodyBounds.height / 2)

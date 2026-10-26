@@ -43,7 +43,9 @@
     <!-- A list whose order is itself a draft — sections, links — commits from here. -->
     <template v-if="$slots.footer" #footer>
       <div class="shrink-0" :class="[dashboardGutterClass, footerClass ?? 'border-t border-default py-3']">
-        <slot name="footer" />
+        <div class="w-full" :class="width">
+          <slot name="footer" />
+        </div>
       </div>
     </template>
   </UDashboardPanel>
