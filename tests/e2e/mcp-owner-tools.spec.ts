@@ -1398,7 +1398,8 @@ test.describe('stateless MCP server', () => {
         expect(await call('get_member_public_profile', { member_id: hostMemberId })).toEqual({ profile: null })
         const unsavedNative = await request.get(memberEndpoint)
         expect(unsavedNative.status(), await unsavedNative.text()).toBe(200)
-        expect(await unsavedNative.json()).toEqual({ scheduling: null })
+        // The native read also answers whether the plan includes Google Calendar sync; this organization is on Business.
+        expect(await unsavedNative.json()).toEqual({ scheduling: null, calendar_sync: true })
         const wrongIdentity = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
         expect(wrongIdentity.status(), await wrongIdentity.text()).toBe(200)
         const wrongIdentityResult = (await wrongIdentity.json()).result
