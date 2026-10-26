@@ -6,7 +6,7 @@ import { STAY_CHANNELS } from '~/shared/bookings'
 
 export const todayCardSchema = z.object({
   id: z.string(), to: z.string(), eyebrow: z.string(), headline: z.string(), description: z.string().nullable(),
-  imageUrl: z.string().nullable(), imageIcon: z.string(), badgeImageUrl: z.string().nullable(), badgeIcon: z.string().nullable(),
+  imageUrl: z.string().nullable(), imageFit: z.enum(['cover', 'contain']), imageIcon: z.string(), badgeImageUrl: z.string().nullable(), badgeIcon: z.string().nullable(),
   locationId: z.string().nullable(), assignedMemberId: z.string().nullable(),
   bookingKind: z.enum(['reservation', 'booking', 'stay']).nullable(),
   stayId: z.string().nullable(),
@@ -51,7 +51,7 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string;
     id: item.id, to: item.to, eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }), headline,
     description: input.personal ? [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ')
       : [...new Set([item.resourceTitle, item.kind === 'booking' && item.locationId === null ? 'Online' : item.locationTitle, item.stayMoment === 'turnover' ? 'Next guests arrive the same day' : null].filter((part): part is string => !!part))].join(' · '),
-    imageUrl: input.personal ? item.resourceImageUrl : item.guestImageUrl, imageIcon: input.personal ? resourceIcon : 'i-lucide-user',
+    imageUrl: input.personal ? item.resourceImageUrl : item.guestImageUrl, imageFit: 'cover', imageIcon: input.personal ? resourceIcon : 'i-lucide-user',
     badgeImageUrl: input.personal ? null : item.resourceImageUrl, badgeIcon: input.personal ? null : resourceIcon,
     locationId: item.locationId, assignedMemberId: item.assignedMemberId, bookingKind: item.kind, stayId: item.stayId, productId: item.productId, stayChannel: item.stayChannel,
     occurrenceAt: item.stayMoment === 'current' ? null : item.startsAt, timeZone: item.timeZone, priority: 'schedule',

@@ -126,7 +126,8 @@
               v-if="thread.imageUrl"
               :src="thread.imageUrl"
               alt=""
-              class="size-14 shrink-0 rounded-xl object-cover"
+              class="size-14 shrink-0 rounded-xl"
+              :class="thread.imageFit === 'contain' ? 'bg-elevated object-contain p-1.5' : 'object-cover'"
               loading="lazy"
             >
             <div v-else class="flex size-14 shrink-0 items-center justify-center rounded-xl bg-elevated">

@@ -1,5 +1,6 @@
 import type { NotificationFact, NotificationMessage } from './messages'
 import { formatPhone } from '~/utils/phone'
+import type { BookingPresentation } from '~/utils/booking-presentation'
 
 /**
  * The owner-facing events that send on both channels, each described once.
@@ -150,15 +151,16 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
 
 export interface BookingEventInput extends ReservationEventInput {
   productTitle: string
+  presentation: BookingPresentation
 }
 
 export function bookingCreatedMessage(input: BookingEventInput): NotificationMessage {
   return {
-    title: `New booking request from ${input.guestName}`,
+    title: `New ${input.presentation.noun} request from ${input.guestName}`,
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     facts: facts(
-      fact('context', 'Experience', input.productTitle, true),
+      fact('context', input.presentation.label, input.productTitle, true),
       fact('guestName', 'Guest', input.guestName, true),
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
@@ -174,7 +176,7 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
 }
 
 export function bookingCancelledMessage(input: BookingEventInput & { wasConfirmed: boolean }): NotificationMessage {
-  const standing = input.wasConfirmed ? 'Confirmed booking' : 'Booking request'
+  const standing = input.wasConfirmed ? `Confirmed ${input.presentation.noun}` : `${input.presentation.label} request`
   return {
     title: `${standing} cancelled by ${input.guestName}`,
     preheader: `${input.productTitle} · ${input.date} at ${input.time}`,

@@ -1,3 +1,4 @@
+import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { queryAll, queryFirst } from '~/server/db'
@@ -16,7 +17,7 @@ export default defineHandler(async event => {
   const scheduled = await queryAll<{ member_id: string }>(env.DB, 'SELECT member_id FROM member_scheduling WHERE organization_id=? AND timezone IS NOT NULL', [organization.id])
   for (const row of scheduled) await refreshMemberBusy(env.DB, env, row.member_id)
   const members = await queryAll<{ id: string; name: string; image: string | null; current: number; available: number }>(env.DB, `
-    SELECT m.id, COALESCE(NULLIF(ms.public_name,''), u.name, u.email) name, COALESCE(ms.public_photo_url, u.image) image,
+    SELECT m.id, ${MEMBER_NAME_SQL} name, COALESCE(ms.public_photo_url, u.image) image,
       m.id IS b.assigned_member_id current, NOT ${providerUnavailableSql('s', 'NULL', 'NULL', 'm.id')} available
     FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
       JOIN member m ON m.organizationId=b.organization_id JOIN user u ON u.id=m.userId

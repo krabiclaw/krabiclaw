@@ -1,5 +1,6 @@
 import type { WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import type { NotificationMessage } from './messages'
 import { guestPaymentMessage, ownerPaymentMessage } from './payment-events'
 import type { GuestPaymentNotificationEvent, PaymentNotificationEvent } from './payment-events'
@@ -92,6 +93,7 @@ const booking = {
   guestPhone: '+66 76 000 0002',
   organizationName: studio,
   productTitle: 'Pottery Wheel Class',
+  presentation: resolveBookingPresentation('booking', 'experience'),
   date: 'Mon, Jul 20, 2026',
   time: '10:00 AM',
   locationName: 'Main Studio',

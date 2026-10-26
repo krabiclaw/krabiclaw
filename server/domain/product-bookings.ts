@@ -43,7 +43,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   const [request, record, organization] = await Promise.all([
     getGuestRequest(db, requestId, organizationId, 'booking'),
     getThreadOperationalRecord(db, requestId),
-    queryFirst<{ name: string | null; public_url: string | null }>(db, `SELECT name, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
+    queryFirst<{ name: string | null; vertical: string | null; public_url: string | null }>(db, `SELECT name, vertical, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
   ])
   if (!request || request.kind !== 'booking' || !record || record.kind !== 'booking' || record.organization_id !== organizationId || !record.product_id || !record.product_name || !organization) throw new Error('Booking creation delivery requires its canonical tenant, request and offering')
   const creation = await queryFirst<{ status: string }>(db, `SELECT json_extract(payload_json, '$.afterStatus') AS status FROM activity_entries WHERE request_id = ? AND event_name = 'booking.created' AND dedupe_key = ?`, [requestId, `booking:${record.id}:created`])
@@ -64,7 +64,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   const results = await Promise.allSettled([
     publishGuestInboxThreadEvent(env, db, { threadId: requestId, type: 'thread.created' }),
     notifyBookingCreated(env, db, {
-      organizationId, organizationName: organization.name, locationId: record.location_id,
+      organizationId, organizationName: organization.name, vertical: organization.vertical, locationId: record.location_id,
       guestAcknowledgement: request.payload.provenance?.guest_acknowledgement ?? true,
       bookingId: requestId, status: creation.status, guestName: request.payload.guest.name,
       email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
