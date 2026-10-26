@@ -1940,7 +1940,7 @@ test.describe('dashboard pane hierarchy', () => {
     await open(page, `${reservation!.to}${context}`)
     await page.locator('#dashboard-panel-booking-details').getByRole('link', { name: /^Your notes/ }).click()
     await expect(page).toHaveURL(`${reservation!.to}/notes${context}`)
-    await page.locator('#dashboard-panel-booking-notes [data-testid="dashboard-navbar-back"]').click()
+    await page.locator('#dashboard-panel-booking-notes').getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${reservation!.to}${context}`)
     await page.setViewportSize(PHONE)
     await expectPanes(page, ['booking-details'])

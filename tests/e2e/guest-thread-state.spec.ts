@@ -690,7 +690,9 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     } else await expect(todayPanel).toBeHidden()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
     const capture = testInfo.outputPath(`reservation-details-${width}.png`)
-    await page.screenshot({ path: capture, fullPage: false })
+    // Keep copied conversations below the two fictional reservations out of
+    // the desktop evidence; mobile contains only this fictional record.
+    await page.screenshot({ path: capture, ...(width === 1728 ? { clip: { x: 0, y: 0, width, height: 630 } } : { fullPage: false }) })
     await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
   }
   await page.setViewportSize(priorViewport)
