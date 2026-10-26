@@ -238,6 +238,8 @@ async function boot() {
       VALUES (?, 'Org', 'org', 'org', '{}', 'tenant-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@example.test', 1, 0, 0)").bind(OWNER).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
+    // Airbnb sync is Business; a test about the plan lapsing cancels this subscription first.
+    await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, periodEnd) VALUES ('sub-boot', 'business', ?, 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
     await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES ('a-owner', ?, 'credential', ?, ?, 0, 0)").bind(OWNER, OWNER, await hashPassword(PASSWORD)).run()
     return { runtime, db, env }
   } catch (error) {
@@ -629,10 +631,12 @@ test('a sync request is checked against the plan once, then KrabiClaw imports, a
     const job = () => db.prepare('SELECT action, state, product_id, last_error_code, attempts FROM airbnb_sync_jobs WHERE listing_id = ?').bind(LISTING).first<Record<string, unknown>>()
 
     // Airbnb sync is Business: on Basic the request is refused before anything is queued, and nothing reaches Channex.
+    await db.prepare("UPDATE subscription SET status = 'canceled' WHERE id = 'sub-boot'").run()
     const writesBefore = channex.seen.filter(request => request.method !== 'GET').length
     const refused = await call('POST', { sync: [{ listing_id: LISTING }] })
     assert.equal(refused.status, 403)
-    assert.deepEqual(refused.body, { error: 'Airbnb sync comes with the Business plan', code: 'ENTITLEMENT_REQUIRED', entitlement: 'channel_sync' })
+    assert.deepEqual((refused.body as { data: Record<string, unknown> }).data, { code: 'ENTITLEMENT_REQUIRED', entitlement: 'channel_sync' })
+    assert.match(JSON.stringify(refused.body), /Airbnb sync comes with the Business plan/)
     assert.equal(await job(), null)
     assert.equal(channex.seen.filter(request => request.method !== 'GET').length, writesBefore)
 
@@ -871,6 +875,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     const prepared = await connection.prepare(LISTING, form)
     await advanceTo(connection, db, channex, prepared.product_id, 'draft')
     await db.prepare('UPDATE organization SET stripeCustomerId = ? WHERE id = ?').bind('cus_paid_host', ORG).run()
+    await db.prepare("DELETE FROM subscription WHERE id = 'sub-boot'").run()
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, stripeCustomerId, stripeSubscriptionId, status, seats, periodEnd) VALUES ('sub-paid', 'business', ?, 'cus_paid_host', 'sub-paid', 'active', 1, ?)").bind(ORG, Math.floor(Date.now() / 1000) + 86_400).run()
     let stalled = true
     let refused = false

@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { executeWithinCapacity, requireHomeCapacity } from '~/server/utils/billing'
+import { executeWithinCapacity, hasOrganizationEntitlement, requireHomeCapacity } from '~/server/utils/billing'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createStayHome, importStayNights, placeStayHomePhotosFirst, readStayHome, stayHomeInput, syncStayCalendar, updateStayHome, type StayAccess } from '~/server/domain/stays'
@@ -677,6 +677,11 @@ export class AirbnbConnection {
     })
   }
 
+  /** Airbnb sync is Business: every step that reads from or writes to Airbnb needs it; stopping and disconnecting never do. */
+  async requireChannelSync() {
+    if (!await hasOrganizationEntitlement(this.env, this.organizationId, 'channel_sync')) fail(403, 'ENTITLEMENT_REQUIRED', 'Airbnb sync comes with the Business plan', { entitlement: 'channel_sync' })
+  }
+
   /**
    * Activate a draft: the plan is checked for one more live home before
    * anything is written to Channex, then the import moves to `mapping` and
@@ -691,6 +696,7 @@ export class AirbnbConnection {
       const stage = IMPORT_STAGES.indexOf(mapping.import_stage)
       if (stage > IMPORT_STAGES.indexOf('draft')) return { product_id: productId, stage: mapping.import_stage, waiting: false }
       if (stage < IMPORT_STAGES.indexOf('draft')) fail(409, 'IMPORT_IN_PROGRESS', 'Finish importing this listing before activating it.')
+      await this.requireChannelSync()
       await requireHomeCapacity(this.env, this.db, this.organizationId, productId)
       const result = await execute(this.db, "UPDATE product_channel_mappings SET import_stage = 'mapping', updated_at = ? WHERE product_id = ? AND provider = 'channex' AND import_stage = 'draft'", [now(), productId])
       if (!result.meta.changes) fail(409, 'IMPORT_CHANGED', 'The import changed. Refresh and try again.')
@@ -747,6 +753,7 @@ export class AirbnbConnection {
   async refreshContent(productId: string): Promise<{ product_id: string; stage: ImportStage; content: ImportContentReport }> {
     return await this.locked(async (row) => {
       if (row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before importing listing content.')
+      await this.requireChannelSync()
       const mapping = await queryFirst<MappingRow>(this.db, "SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [this.organizationId, productId])
       if (!mapping || mapping.channel_id !== row.channel_id) fail(404, 'IMPORT_NOT_FOUND', 'Listing import not found')
       if (mapping.import_stage !== 'complete') fail(409, 'IMPORT_IN_PROGRESS', 'Finish importing this listing first; its content lands at the content stage.')
@@ -1011,6 +1018,7 @@ export class AirbnbConnection {
   async syncMessages(productId: string): Promise<{ threads: number }> {
     return this.locked(async (row) => {
       if (row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before importing conversations')
+      await this.requireChannelSync()
       const mapping = await queryFirst<MappingRow>(this.db, "SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [this.organizationId, productId])
       if (!mapping || mapping.enabled !== 1 || mapping.channel_id !== row.channel_id || !mapping.property_id) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'Connect this home before importing conversations')
       await this.save(row, { pending_step: 'install_messages' })
