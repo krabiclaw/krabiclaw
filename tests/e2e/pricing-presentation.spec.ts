@@ -16,14 +16,9 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(JSON.stringify(document), 'complete canonical pricing document').toContain('billing_features')
   const comparison = page.locator('[data-parity-section="comparison"]')
   await expect(comparison).toBeVisible()
-  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(37)
-  const locations = comparison.locator('tr[data-feature-id="locations.included"]')
-  await expect(locations.locator('td')).toHaveText([
-    '2 included',
-    '2 included, then $49 per additional location per month',
-    '2 included, then $49 per additional location per month',
-  ])
-  // Homes are billed apart from locations: 2 included, then $9 each on a paid plan.
+  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(36)
+  await expect(comparison.locator('tr[data-feature-id="locations.included"]')).toHaveCount(0)
+  // Homes are billed by count: 2 included, then $9 each on a paid plan.
   const homes = comparison.locator('tr[data-feature-id="homes.included"]')
   await expect(homes).toContainText('Homes')
   await expect(homes.locator('td')).toHaveText([
@@ -81,8 +76,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(business.features).toContain('Direct stay booking with online payment')
   expect(business.prices).toEqual([expect.objectContaining({ amount: 14900, currency: 'usd', interval: 'month' })])
   await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
-  await expect(cards.nth(0).locator('[data-plan-locations]')).toHaveText('2 locations included')
-  for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-locations]')).toHaveText('2 locations included, then $49 per additional location per month')
+  await expect(page.locator('[data-plan-locations]')).toHaveCount(0)
   await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('2 homes included')
   for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText('2 homes included, then $9 per additional home per month')
   await expect(page.getByText(/rental unit/i)).toHaveCount(0)
@@ -98,7 +92,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   const markdownText = await markdown.text()
   expect(markdownText).toContain('- **SEO and marketing strategy**: $2,000 per month.')
   expect(markdownText).toContain('- **Price**: $149/month')
-  expect(markdownText).toContain('- **Locations**: 2 included, then $49 per additional location per month')
+  expect(markdownText).not.toContain('additional location')
   expect(markdownText).toContain('- **Homes**: 2 included, then $9 per additional home per month')
   expect(markdownText).toContain('Home listings, nightly rates & stay calendars')
   expect(markdownText).toContain('Business websites for restaurants, experiences, law firms and lodging')
@@ -189,8 +183,7 @@ test('pricing remains readable with JavaScript disabled', async ({ browser }) =>
     await expect(cards.first().getByRole('link')).toBeVisible()
     await expect(cards.nth(2).getByRole('heading', { name: 'Business', exact: true })).toBeVisible()
     await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$149')
-    await expect(cards.nth(0).locator('[data-plan-locations]')).toHaveText('2 locations included')
-    for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-locations]')).toHaveText('2 locations included, then $49 per additional location per month')
+    await expect(page.locator('[data-plan-locations]')).toHaveCount(0)
     await expect(cards.nth(0).locator('[data-plan-homes]')).toHaveText('2 homes included')
     for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-homes]')).toHaveText('2 homes included, then $9 per additional home per month')
     await expect(cards.nth(2).getByRole('link', { name: 'Get Business', exact: true })).toHaveAttribute('href', '/signup?plan=business&redirect=%2Fapi%2Fpost-login%3Fplan%3Dbusiness')

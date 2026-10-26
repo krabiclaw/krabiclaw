@@ -1,5 +1,5 @@
 diff --git a/dist/api/index.d.mts b/dist/api/index.d.mts
-index 3f5412c0a86a2cc8858dd5e80ceadb4c856dbc82..58920e060d657e0f49ca2c98067ea3dfbceba63b 100644
+index 3f5412c0a86a2cc8858dd5e80ceadb4c856dbc82..40710837eef1ae00c8aae3abea2c6522903a1326 100644
 --- a/dist/api/index.d.mts
 +++ b/dist/api/index.d.mts
 @@ -32,7 +32,7 @@ import * as _$zod_v4_core0 from "zod/v4/core";

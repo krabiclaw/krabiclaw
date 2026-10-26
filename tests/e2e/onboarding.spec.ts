@@ -551,29 +551,28 @@ test('the business search API refuses what the picker would never send', async (
   expect(detailsMalformed.status(), await detailsMalformed.text()).toBe(400)
 })
 
-// Ember & Slice is on Business with the 2 included locations in use. A paid
-// plan refuses no location: a third is made by the createLocation every surface
-// shares, counted in the plan's usage, and billed at the end of the period.
-test('a paid plan adds a location past the included ones and counts it', async ({ page, baseURL }, testInfo) => {
-  test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'This local fixture journey creates and deletes a billable location.')
+// Ember & Slice is on Business with two locations. Locations are not billed:
+// a third is made by the createLocation every surface shares, and the plan's
+// usage reports homes only.
+test('a paid plan adds a third location without counting it', async ({ page, baseURL }, testInfo) => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'This local fixture journey creates and deletes a location.')
   const release = await acquireTenantMutationLock(testInfo, 'org-demo')
   const failures: unknown[] = []
   let createdLocationId: string | undefined
   const status = async () => {
     const response = await page.request.get('/api/billing/status?organizationId=org-demo')
     expect(response.status(), await response.text()).toBe(200)
-    return (await response.json() as { billing: { plan: string; usage: { locations: number } } }).billing
+    return (await response.json() as { billing: { plan: string; usage: Record<string, number> } }).billing
   }
   try {
     await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
     const before = await status()
     expect(before.plan).toBe('business')
-    expect(before.usage.locations).toBe(2)
+    expect(before.usage).toEqual({ plan: 'business', homes: 0 })
 
-    // The new location's own level walks its sections; nothing asks to extend the plan first.
+    // The new location's own level walks its sections.
     await page.goto('/dashboard/ember-slice-demo/locations/new')
     await expect(page).toHaveURL(/\/dashboard\/ember-slice-demo\/locations\/new\/name$/)
-    await expect(page.locator('[data-location-limit]')).toHaveCount(0)
 
     const args = { organization_id: 'org-demo', title: 'Third branch', timezone: 'America/New_York', idempotency_key: crypto.randomUUID() }
     const created = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'create_location', args })
@@ -589,7 +588,7 @@ test('a paid plan adds a location past the included ones and counts it', async (
     const saved = await nativeRead.json()
     expect(saved.location).toMatchObject(receipt.location)
     expect(saved.location.timezone).toBe(args.timezone)
-    expect((await status()).usage.locations).toBe(3)
+    expect((await status()).usage).toEqual(before.usage)
 
     const replay = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'create_location', args })
     expect(replay.status(), await replay.text()).toBe(200)
@@ -597,7 +596,7 @@ test('a paid plan adds a location past the included ones and counts it', async (
     const nativeReplayRead = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
     expect(nativeReplayRead.status(), await nativeReplayRead.text()).toBe(200)
     expect(await nativeReplayRead.json()).toEqual(saved)
-    expect((await status()).usage.locations).toBe(3)
+    expect((await status()).usage).toEqual(before.usage)
   } catch (error) { failures.push(error) }
   finally {
     if (createdLocationId) {
@@ -606,7 +605,7 @@ test('a paid plan adds a location past the included ones and counts it', async (
         expect(deleted.status(), await deleted.text()).toBe(200)
         const absent = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
         expect(absent.status(), await absent.text()).toBe(404)
-        expect((await status()).usage.locations).toBe(2)
+        expect((await status()).usage).toEqual({ plan: 'business', homes: 0 })
       } catch (error) { failures.push(error) }
     }
     try { await release() }
@@ -615,7 +614,7 @@ test('a paid plan adds a location past the included ones and counts it', async (
   if (failures.length) throw new AggregateError(failures, 'Location creation or cleanup failed')
 })
 
-// NCLS has one of the two locations its plan includes. Adding one walks the
+// NCLS has one location. Adding one walks the
 // location record's own create level: Name, then Hours, then Create location,
 // which opens the new location's first Photos section on a desktop.
 test('a location is created by walking its own record', async ({ page, baseURL, playwright }) => {

@@ -36,7 +36,7 @@ export async function handleReviewsTools(ctx: McpExecutorContext): Promise<unkno
   switch (toolName) {
     case "list_organization_reviews":
       {
-        const reviews = await listOrganizationReviews(organization.db, organization.organizationId);
+        const reviews = await listOrganizationReviews(organization.db, organization.organizationId, { locationId: null });
         const page = paginateMcpCollection(reviews, args, { resource: `organization-reviews:${organization.organizationId}` });
         return { reviews: page.items.map(reviewSummary), page_info: page.page_info };
       }

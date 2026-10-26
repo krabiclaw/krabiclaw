@@ -63,10 +63,7 @@
             {{ billingPeriodLabel }}
           </span>
         </div>
-        <p data-plan-locations class="text-xs font-semibold mt-2" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
-          {{ locationsNote }}
-        </p>
-        <p data-plan-homes class="text-xs font-semibold mt-1" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
+        <p data-plan-homes class="text-xs font-semibold mt-2" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
           {{ homesNote }}
         </p>
       </template>
@@ -117,7 +114,7 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import type { Plan } from '~/composables/usePlans'
-import { additionalHomePrice, additionalLocationPrice, INCLUDED_HOMES, INCLUDED_LOCATIONS } from '~/shared/billing-model'
+import { additionalHomePrice, INCLUDED_HOMES } from '~/shared/billing-model'
 
 const props = defineProps<{
   plan: Plan
@@ -157,12 +154,7 @@ const currentPrice = computed(() => displayPrice(props.plan))
 
 const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free' ? 'No subscription' : '/mo')
 
-// Stripe's own phrasing: the included allowance, then the charge per additional unit.
-const locationsNote = computed(() => {
-  if (!props.plan.prices.length) return `${INCLUDED_LOCATIONS} locations included`
-  return `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`
-})
-// Homes are counted apart from locations: a home is a place to stay, not a location.
+// Stripe's own phrasing: the included allowance, then the charge per additional home (a place to stay).
 const homesNote = computed(() => {
   if (!props.plan.prices.length) return `${INCLUDED_HOMES} homes included`
   return `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`

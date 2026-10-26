@@ -24,7 +24,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { completeChannelPush, deliverStayNights, pushAirbnbListingSettings, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import { completeChannelPush, deliverStayNights, pushAirbnbListingSettings, pushStayCalendar, pushStayNights, requireChannelPush, type AirbnbListingSettings, type ChannelPushCompletion, type ChannexMapping } from '~/server/integrations/channex/ari'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { ownedBuyerRequest } from '~/server/domain/payments/buyer'
@@ -854,7 +854,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),
-  }, access.actorId, { idempotencyKey, home: true })
+  }, access.actorId, { idempotencyKey })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
   if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')
@@ -1284,6 +1284,16 @@ async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, pro
   } catch (cause) {
     return cause instanceof Error ? cause : new Error(String(cause))
   }
+}
+
+/**
+ * The full sync of a home's calendar to the Channex property it is mapped to,
+ * enabled or not: an import's inventory, or a home syncing again. Fails the
+ * way a save's push fails; the caller decides what its import does with it.
+ */
+export async function syncStayCalendar(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, mapping: ChannexMapping): Promise<ChannelPush> {
+  const home = await readStayHome(db, access, productId)
+  return pushStayCalendar(db, env, access.organizationId, home, mapping, (from, to) => homeNights(db, access.organizationId, home, from, to))
 }
 
 /**
@@ -1923,12 +1933,13 @@ export async function setStayNights(db: DbClient, env: StayMutationEnv, access: 
   })
 }
 
-/** One night of a channel's calendar as an import reads it. */
+/** One night of a channel's calendar as an import reads it. Airbnb has one minimum stay a night; it is both of KrabiClaw's. */
 export interface ImportedNight {
   date: string
   available: boolean
   price_minor: number
   min_stay_arrival: number
+  min_stay_through: number
   max_stay: number | null
   closed_to_arrival: boolean
   closed_to_departure: boolean
@@ -1947,17 +1958,18 @@ export async function importStayNights(db: DbClient, env: GuestInboxPublicationE
   const now = new Date().toISOString()
   await executeBatch(db, [
     {
-      query: `INSERT INTO product_nights (organization_id, product_id, date, closed, price_minor, min_stay_arrival, max_stay, closed_to_arrival, closed_to_departure, source, updated_at, updated_by)
-              SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.closed'), json_extract(value, '$.price_minor'), json_extract(value, '$.min_stay_arrival'),
+      query: `INSERT INTO product_nights (organization_id, product_id, date, closed, price_minor, min_stay_arrival, min_stay_through, max_stay, closed_to_arrival, closed_to_departure, source, updated_at, updated_by)
+              SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.closed'), json_extract(value, '$.price_minor'), json_extract(value, '$.min_stay_arrival'), json_extract(value, '$.min_stay_through'),
                      json_extract(value, '$.max_stay'), json_extract(value, '$.closed_to_arrival'), json_extract(value, '$.closed_to_departure'), 'import', ?, ?
                 FROM json_each(?) WHERE true
-              ON CONFLICT (product_id, date) DO UPDATE SET closed = excluded.closed, price_minor = excluded.price_minor, min_stay_arrival = excluded.min_stay_arrival,
+              ON CONFLICT (product_id, date) DO UPDATE SET closed = excluded.closed, price_minor = excluded.price_minor, min_stay_arrival = excluded.min_stay_arrival, min_stay_through = excluded.min_stay_through,
                 max_stay = excluded.max_stay, closed_to_arrival = excluded.closed_to_arrival, closed_to_departure = excluded.closed_to_departure,
                 updated_at = excluded.updated_at, updated_by = excluded.updated_by
               WHERE product_nights.source = 'import'`,
       params: [access.organizationId, home.product_id, now, access.actorId, JSON.stringify(nights.map(night => ({
-        date: night.date, closed: night.available ? 0 : 1, price_minor: night.price_minor, min_stay_arrival: night.min_stay_arrival,
+        date: night.date, closed: night.available ? 0 : 1, price_minor: night.price_minor, min_stay_arrival: night.min_stay_arrival, min_stay_through: night.min_stay_through,
         max_stay: night.max_stay, closed_to_arrival: night.closed_to_arrival ? 1 : 0, closed_to_departure: night.closed_to_departure ? 1 : 0,
+
       })))],
     },
     organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_imported', entityType: 'product', entityId: home.product_id, metadata: { from: nights[0]!.date, to: nights.at(-1)!.date, nights: nights.length } }),

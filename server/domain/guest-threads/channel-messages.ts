@@ -1,8 +1,8 @@
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryFirst, type DbClient } from '~/server/db'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
-import { channexGet, ChannexError, type ChannexEnv } from '~/server/integrations/channex/client'
-import { nullableString } from '~/server/integrations/channex/data'
+import { ChannexError, type ChannexEnv } from '~/server/integrations/channex/client'
+import { landBookingRevision, pendingBookingRevisions } from '~/server/integrations/channex/booking-revisions'
 import { getChannexThread, listChannexMessages, listChannexThreads, sendChannexMessage, type ChannexMessage, type ChannexMessageThread } from '~/server/integrations/channex/messages'
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload, GuestThreadEntryDedupeConflictError } from './entries'
 import { getDeliveryById, getDeliveryByProviderMessageId, isDeliverySent, recordDeliveryOutcome } from './deliveries'
@@ -34,17 +34,22 @@ async function homeMapping(db: DbClient, propertyId: string): Promise<HomeMappin
     WHERE m.provider = 'channex' AND m.property_id = ?`, [propertyId])
 }
 
+type ThreadStay = { id: string; request_id: string | null; organization_id: string; product_id: string }
+
 /**
- * The stay of an Airbnb reservation that already has a stay under another
- * provider booking id: the same reservation re-imported through a new Channex
- * account, before its booking revision moved the stay onto the new id.
+ * The stay of the booking a conversation names. A booking whose revision
+ * Channex still holds unacknowledged (the conversation arrived first, or the
+ * same reservation re-imported through a new Channex account) is landed from
+ * the revision feed here, so the conversation joins the stay it belongs to;
+ * the booking itself is never read by id. A booking Channex never sent (one
+ * before the import's reservations) has no stay.
  */
-async function reimportedStay(db: DbClient, env: ChannexEnv, home: HomeMapping, bookingId: string): Promise<{ id: string; request_id: string | null; organization_id: string; product_id: string } | null> {
-  const booking = await channexGet(env, `/bookings/${encodeURIComponent(bookingId)}`, 'booking')
-  if (booking.attributes.property_id !== home.property_id) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider booking belongs to another property', 'relationships.booking')
-  const code = nullableString(booking.attributes.ota_reservation_code ?? null, 'ota_reservation_code')
-  return code === null ? null : await queryFirst(db, `SELECT id, request_id, organization_id, product_id FROM stays
-    WHERE organization_id = ? AND channel = 'airbnb' AND channel_booking_id = ? AND provider = 'channex' AND external_booking_id <> ?`, [home.organization_id, code, bookingId])
+async function threadStay(db: DbClient, env: ChannelEnv, home: HomeMapping, bookingId: string): Promise<ThreadStay | null> {
+  const stay = () => queryFirst<ThreadStay>(db, "SELECT id, request_id, organization_id, product_id FROM stays WHERE provider = 'channex' AND external_booking_id = ?", [bookingId])
+  const landed = await stay()
+  if (landed) return landed
+  for (const revision of await pendingBookingRevisions(env, home.property_id, bookingId)) await landBookingRevision(db, env, revision)
+  return stay()
 }
 
 /**
@@ -52,14 +57,13 @@ async function reimportedStay(db: DbClient, env: ChannexEnv, home: HomeMapping, 
  * A stay's conversation whose provider address belongs to its reservation's
  * earlier booking id (a retired Channex account) moves to the new thread.
  */
-async function adoptThread(db: DbClient, env: ChannexEnv, home: HomeMapping, thread: ChannexMessageThread): Promise<ChannelThreadMapping> {
+async function adoptThread(db: DbClient, env: ChannelEnv, home: HomeMapping, thread: ChannexMessageThread): Promise<ChannelThreadMapping> {
+
   const mapped = await queryFirst<ChannelThreadMapping>(db, "SELECT * FROM channel_threads WHERE provider = 'channex' AND external_thread_id = ?", [thread.id])
   if (mapped && (mapped.organization_id !== home.organization_id || mapped.product_id !== home.product_id)) fail(502, 'INVALID_PROVIDER_RESPONSE', 'The provider conversation belongs to another home', 'relationships.property')
   if (mapped?.external_booking_id && mapped.external_booking_id !== thread.bookingId) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The provider changed an existing conversation booking association; review its timeline', 'relationships.booking')
   if (thread.bookingId && await queryFirst(db, "SELECT request_id FROM channel_threads WHERE provider = 'channex' AND external_booking_id = ? AND external_thread_id <> ?", [thread.bookingId, thread.id])) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The booking is already associated with another provider conversation', 'relationships.booking')
-  const stay = !thread.bookingId ? null : await queryFirst<{ id: string; request_id: string | null; organization_id: string; product_id: string }>(db,
-    "SELECT id, request_id, organization_id, product_id FROM stays WHERE provider = 'channex' AND external_booking_id = ?", [thread.bookingId])
-    ?? (mapped ? null : await reimportedStay(db, env, home, thread.bookingId))
+  const stay = thread.bookingId === null ? null : await threadStay(db, env, home, thread.bookingId)
   if (stay && (stay.organization_id !== home.organization_id || stay.product_id !== home.product_id)) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The provider booking belongs to another home', 'relationships.booking')
   if (mapped && stay?.request_id && mapped.request_id !== stay.request_id) fail(409, 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', 'The inquiry and stay already have separate conversations; reconcile them without discarding either timeline', 'request_id')
   const requestId = mapped?.request_id ?? stay?.request_id ?? crypto.randomUUID()

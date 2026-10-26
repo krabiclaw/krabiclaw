@@ -41,8 +41,6 @@ Validation follows product risk:
 
 1. Test the affected tenant journey first.
 2. Check all three customer sites for shared public changes.
-3. Expand the retained tenant matrix only for shared renderer, routing,
-   theme, content-model, or destructive content-migration changes.
 
 A reproducible first-party failure blocks promotion. An operator-closed tab or
 an isolated third-party timeout is not an application failure; retry the
@@ -123,12 +121,6 @@ The representative client order is:
    home detail, nightly availability and the guest booking form. Use the
    [fictional lodging demo](lodging-demo.md); inspect existing calendar, Airbnb
    and guest-message state without resetting the demo or sending a message.
-
-For a shared renderer, routing, theme, content-model, or destructive
-content-migration change, expand that representative set to every published
-route using the sitemap and fixture inventory. Check desktop and narrow/mobile
-layouts and full-page media composition. A route that was not opened remains
-unverified, but unrelated route families do not block a narrowly scoped change.
 
 ## Migration and content safety
 

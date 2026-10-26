@@ -10,10 +10,10 @@ import type { HomesQuote } from '~/server/utils/billing'
  * serves both and a leaf's refresh updates the row it came from.
  */
 
-export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; withoutPaymentMethod: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { locations: number; homes: number }; scheduledPlan?: { plan: string; at: string } | null }
+export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month'; meters: string[]; trial: { end: string; withoutPaymentMethod: 'cancel' | 'create_invoice' | 'pause' } | null }; usage: { homes: number }; scheduledPlan?: { plan: string; at: string } | null }
 const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
-  && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.locations) && Number.isSafeInteger(value.billing.usage.homes)
+  && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.homes)
   && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && value.billing.subscriptionPrice.interval === 'month'
     && Array.isArray(value.billing.subscriptionPrice.meters) && value.billing.subscriptionPrice.meters.every(meter => typeof meter === 'string')
     && (value.billing.subscriptionPrice.trial === null || (isRecord(value.billing.subscriptionPrice.trial) && typeof value.billing.subscriptionPrice.trial.end === 'string'

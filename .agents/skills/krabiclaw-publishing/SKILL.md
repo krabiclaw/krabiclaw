@@ -222,10 +222,9 @@ and Growth ($49/month) retain supported bookings without online payments; a manu
 recorded stay is not a guest payment. Legacy Commerce ($89/month) remains an active
 grandfathered contract.
 
-Growth and Business include 2 business locations, then $49 per additional location
-per month, and separately 2 live homes, then $9 per additional home per month,
-billed at period end. A home's location does not count again as a business
-location. Basic includes 2 of each and refuses a third. Live means active at an
+Growth and Business include 2 live homes, then $9 per additional home per month,
+billed at period end. Locations are not billed on any plan. Basic includes 2 live
+homes and refuses a third. Live means active at an
 active location and published on the site or syncing through an enabled Channex
 mapping. Draft homes are free and unlimited; existing subscriptions without the
 homes price keep their contracted prices. Read the target environment's catalog

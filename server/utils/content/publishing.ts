@@ -600,8 +600,11 @@ export async function getPublishedBlogPost(
   if (locale === await getSourceLocale(db, organizationId)) {
     const post = await getPublicOrganizationBlogPost(db, organizationId, collection, slug, env, previewAuthorized)
     if (!post || typeof post.id !== 'string') return post
+    // The page renders content_blocks. The Markdown body is for the Markdown
+    // and LLM mirrors; in the page payload it doubled the MCP reference (824 KB).
+    const { body: _body, ...article } = post
     return {
-      ...post,
+      ...article,
       localeRepresentations: await listPublicLocaleRepresentations(env, db, {
         organizationId,
         sourcePath: pathOf(slug),
@@ -631,10 +634,11 @@ export async function getPublishedBlogPost(
   if (!outlineBlocks) throw new HTTPError({ statusCode: 500, statusMessage: 'Documentation content document is missing' })
   const contentBlocks = (await attachPageQa(db, organizationId, pathOf(row.source_slug), outlineBlocks, locale))
     .map(block => ({ ...block, media: projectLocalizedMediaAlt(block.media.map(item => ({ ...item, alt_text: item.alt_text ?? null })), localizations) }))
-  return { ...canonical, id: row.id, title: row.title, excerpt: row.summary, slug,
+  const { body: _canonicalBody, ...canonicalArticle } = canonical
+  return { ...canonicalArticle, id: row.id, title: row.title, excerpt: row.summary, slug,
     seo_keywords: row.seo_keywords,
     category: (await localizeArticleCategories(env, db, organizationId, locale, [canonical]))[0]!.category,
-    updated_at: row.updated_at, body: renderContentBlocksForLlm(contentBlocks),
+    updated_at: row.updated_at,
     content_blocks: contentBlocks,
     media: projectLocalizedMediaAlt(social.get(row.id)?.media ?? [], localizations),
     social_image: social.get(row.id)?.social_image ?? null,

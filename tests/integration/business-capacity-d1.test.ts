@@ -5,7 +5,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
-import { countActiveHomes, countActiveLocations, getOrganizationBillingStatus, getOrganizationSubscriptionPrice, homesQuote, parseHomesAdding } from '../../server/utils/billing.ts'
+import { countActiveHomes, getOrganizationBillingStatus, getOrganizationSubscriptionPrice, homesQuote, parseHomesAdding } from '../../server/utils/billing.ts'
 import { createLocation, deleteLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, readStayHome, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
@@ -13,20 +13,19 @@ import { publishedCatalogResponse } from './support/stripe-published-catalog.ts'
 import { returnExtrasToDraftsForPlanEnd } from '../../server/utils/billing-plan-end.ts'
 import { HTTPError } from 'nitro'
 
-// Billing by count: Growth and Business bill every active location and every
-// live home. A home is a stay product at a location; that location is the
-// home's, not a location, so it is never billed as one. A home is live when it
-// is published on the site or syncs with Airbnb; until then it is a draft,
-// free and unlimited on every plan. A paid plan refuses nothing: every write
-// that makes a location active or a home live, or takes one away, reports both
-// counts to their Stripe meters, and the subscription's metered prices bill
-// the last count of the period at its end. Basic includes its locations and
-// its live homes and refuses past either.
+// Billing by count: Growth and Business bill every live home. A home is a stay
+// product at a location; locations themselves are never counted or billed. A
+// home is live when it is published on the site or syncs with Airbnb; until
+// then it is a draft, free and unlimited on every plan. A paid plan refuses
+// nothing: every write that makes a home live, or takes one away, reports the
+// count to its Stripe meter, and the subscription's metered price bills the
+// last count of the period at its end. Basic includes its live homes and
+// refuses past them; it adds locations freely.
 
 const OWNER = 'owner'
 const actor = { actorId: OWNER }
 
-test('active locations and live homes are reported to their Stripe meters, drafts are free, and only Basic limits them', async () => {
+test('live homes are reported to their Stripe meter, drafts and locations are free, and only Basic limits homes', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'business-capacity-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -35,9 +34,9 @@ test('active locations and live homes are reported to their Stripe meters, draft
   } }] })
   // Each Stripe subscription as Stripe returns it. Growth's carries a homes price of its own, 3 included and
   // $7 each after, not the published one: the quote reads the subscription. Business's is from before homes
-  // were priced, carries only the locations price, and is in a free trial.
+  // were priced, carries no metered price, and is in a free trial.
   const homesTiers = [{ up_to: 3, unit_amount: 0, flat_amount: null }, { up_to: null, unit_amount: 700, flat_amount: null }]
-  const subscriptions: Record<string, { status: string; meters: string[] }> = { sub_grower: { status: 'active', meters: ['locations', 'homes'] }, sub_inn: { status: 'trialing', meters: ['locations'] } }
+  const subscriptions: Record<string, { status: string; meters: string[] }> = { sub_grower: { status: 'active', meters: ['homes'] }, sub_inn: { status: 'trialing', meters: [] } }
   const innTrialEnd = Math.floor(Date.UTC(2026, 10, 22, 14, 6, 27) / 1000)
   // Stripe receives the meter events; each one is kept as Stripe was sent it.
   const reported: Array<{ event: string; customer: string; value: number }> = []
@@ -68,15 +67,14 @@ test('active locations and live homes are reported to their Stripe meters, draft
     reported.push({ event: body.get('event_name')!, customer: body.get('payload[stripe_customer_id]')!, value: Number(body.get('payload[value]')) })
     return Response.json({ object: 'billing.meter_event', event_name: body.get('event_name'), identifier: crypto.randomUUID(), payload: {}, timestamp: Math.floor(Date.now() / 1000), created: Math.floor(Date.now() / 1000), livemode: false })
   }) as typeof fetch
-  // The last counts a customer's locations and homes meters were sent; they are the only meters counts reach.
+  // The last count a customer's homes meter was sent; it is the only meter a count reaches.
   const last = (customer: string) => {
-    assert.deepEqual(reported.filter(row => row.event !== 'krabiclaw_locations' && row.event !== 'krabiclaw_homes'), [])
-    const of = (event: string) => reported.filter(row => row.customer === customer && row.event === event).at(-1)?.value ?? null
-    return { locations: of('krabiclaw_locations'), homes: of('krabiclaw_homes') }
+    assert.deepEqual(reported.filter(row => row.event !== 'krabiclaw_homes'), [])
+    return reported.filter(row => row.customer === customer && row.event === 'krabiclaw_homes').at(-1)?.value ?? null
   }
   try {
     const db = await runtime.getD1Database('DB')
-    const counts = async (organizationId: string) => ({ locations: await countActiveLocations(db, organizationId), homes: await countActiveHomes(db, organizationId) })
+    const counts = (organizationId: string) => countActiveHomes(db, organizationId)
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     const env = {
       ...await runtime.getBindings<CloudflareEnv>(), DB: db, BETTER_AUTH_SECRET: 'business-capacity-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
@@ -113,7 +111,7 @@ test('active locations and live homes are reported to their Stripe meters, draft
     } })
     const reportsFor = (customer: string) => reported.filter(row => row.customer === customer).length
 
-    // ── Business: every active location and every live home is billed; a home is a home, not a location. Nothing is refused.
+    // ── Business: every live home is billed; a location is never billed. Nothing is refused.
     await organization('inn', 'business')
     const bistroInput = { title: 'Bistro', timezone: 'America/Denver' }
     const bistroOptions = { idempotencyKey: 'bistro-creation' }
@@ -124,8 +122,8 @@ test('active locations and live homes are reported to their Stripe meters, draft
     const savedBistro = (await db.prepare("SELECT id, title, status, timezone, created_at FROM business_locations WHERE organization_id = 'inn'").all<{ id: string; title: string; status: string; timezone: string; created_at: string }>()).results
     assert.equal(savedBistro.length, 1)
     assert.deepEqual({ title: savedBistro[0]!.title, status: savedBistro[0]!.status, timezone: savedBistro[0]!.timezone }, { title: 'Bistro', status: 'active', timezone: 'America/Denver' })
-    assert.deepEqual(await counts('inn'), { locations: 1, homes: 0 })
-    assert.deepEqual(last('cus_inn'), { locations: null, homes: null })
+    assert.deepEqual(await counts('inn'), 0)
+    assert.deepEqual(last('cus_inn'), null)
     // A saved row is not success while the required billing report still fails.
     await assert.rejects(createLocation(env, db, 'inn', bistroInput, OWNER, bistroOptions), billingIncomplete)
     assert.deepEqual((await db.prepare("SELECT id, title, status, timezone, created_at FROM business_locations WHERE organization_id = 'inn'").all()).results, savedBistro)
@@ -134,19 +132,19 @@ test('active locations and live homes are reported to their Stripe meters, draft
     assert.equal(bistro.status, 201)
     const bistroId = (bistro.data as { location: { id: string } }).location.id
     assert.equal(bistroId, savedBistro[0]!.id)
-    assert.deepEqual(await counts('inn'), { locations: 1, homes: 0 })
-    assert.deepEqual(last('cus_inn'), { locations: 1, homes: 0 })
+    assert.deepEqual(await counts('inn'), 0)
+    assert.deepEqual(last('cus_inn'), 0)
     const villas = []
     for (const key of ['villa-1', 'villa-2', 'villa-3']) villas.push(await home('inn', key))
     // New homes are drafts: free, and not live.
     assert.deepEqual(villas.map(villa => villa.live), [false, false, false])
-    assert.deepEqual(await counts('inn'), { locations: 1, homes: 0 })
-    assert.deepEqual(last('cus_inn'), { locations: 1, homes: 0 })
+    assert.deepEqual(await counts('inn'), 0)
+    assert.deepEqual(last('cus_inn'), 0)
     assert.deepEqual((await homesQuote(env, db, 'inn', 3)).homes, { used: 0, drafts: 3, included: 2, additional_price_minor: 0, amount_minor: 0 })
     // Publishing makes each live, billed and reported.
     for (const villa of villas) assert.equal((await publish('inn', villa.product_id)).live, true)
-    assert.deepEqual(await counts('inn'), { locations: 1, homes: 3 })
-    assert.deepEqual(last('cus_inn'), { locations: 1, homes: 3 })
+    assert.deepEqual(await counts('inn'), 3)
+    assert.deepEqual(last('cus_inn'), 3)
     assert.equal((await getProduct(db, 'inn', villas[0]!.product_id)).stay!.live, true)
     // A subscription without the homes price is charged nothing for homes: its quote prices each one at 0.
     // In its free trial the quote says when the trial ends, from Stripe: no usage is billed before then.
@@ -158,13 +156,13 @@ test('active locations and live homes are reported to their Stripe meters, draft
     ])
     // The billing status the plan screen reads says the same trial, and what Stripe does at its end without a card.
     assert.deepEqual((await getOrganizationSubscriptionPrice(env, await getOrganizationBillingStatus(env, db, 'inn')))?.trial, { end: '2026-11-22T14:06:27.000Z', withoutPaymentMethod: 'cancel' })
-    // A stay product made at a location makes that location a home's: one fewer location, and one more home once it is live.
+    // A stay product made at a location is one more home once it is live.
     const cabin = await homeAt('inn', bistroId, 'Garden Cabin')
     assert.equal(cabin.stay!.live, false)
-    assert.deepEqual(await counts('inn'), { locations: 0, homes: 3 })
-    assert.deepEqual(last('cus_inn'), { locations: 0, homes: 3 })
+    assert.deepEqual(await counts('inn'), 3)
+    assert.deepEqual(last('cus_inn'), 3)
     await publish('inn', cabin.id)
-    assert.deepEqual(last('cus_inn'), { locations: 0, homes: 4 })
+    assert.deepEqual(last('cus_inn'), 4)
     // Other offerings are products at a location: adding one or moving it changes no count and reports nothing.
     const before = reportsFor('cus_inn')
     const soup = await createProduct(db, { env, organizationId: 'inn', actor, product: { kind: 'dish', name: 'Soup', variants: [{ name: 'Soup', prices: [{ unit_amount: 9_00, currency: 'USD' }] }] } })
@@ -173,33 +171,33 @@ test('active locations and live homes are reported to their Stripe meters, draft
     assert.equal(reportsFor('cus_inn'), before)
     // A home withdrawn from the site is a draft again: off the bill, and reported.
     assert.equal((await withdraw('inn', villas[2]!.product_id)).live, false)
-    assert.deepEqual(last('cus_inn'), { locations: 0, homes: 3 })
+    assert.deepEqual(last('cus_inn'), 3)
     await publish('inn', villas[2]!.product_id)
-    assert.deepEqual(last('cus_inn'), { locations: 0, homes: 4 })
-    // A home turned off is not billed, and its location stays a home's; turned back on it is billed again.
+    assert.deepEqual(last('cus_inn'), 4)
+    // A home turned off is not billed; turned back on it is billed again.
     await updateProduct(db, { env, organizationId: 'inn', productId: villas[2]!.product_id, actor, patch: { active: false } })
-    assert.deepEqual(await counts('inn'), { locations: 0, homes: 3 })
-    assert.deepEqual(last('cus_inn'), { locations: 0, homes: 3 })
+    assert.deepEqual(await counts('inn'), 3)
+    assert.deepEqual(last('cus_inn'), 3)
     await updateProduct(db, { env, organizationId: 'inn', productId: villas[2]!.product_id, actor, patch: { active: true } })
-    assert.deepEqual(last('cus_inn'), { locations: 0, homes: 4 })
-    // A home deleted leaves its location a location again.
+    assert.deepEqual(last('cus_inn'), 4)
+    // A home deleted is off the bill.
     await deleteProduct(db, { organizationId: 'inn', productId: cabin.id, env })
-    assert.deepEqual(await counts('inn'), { locations: 1, homes: 3 })
-    assert.deepEqual(last('cus_inn'), { locations: 1, homes: 3 })
+    assert.deepEqual(await counts('inn'), 3)
+    assert.deepEqual(last('cus_inn'), 3)
     // A home's location turned off takes the home off the bill; turning it back on bills the home again.
     const villa = villas[1]!.location_id
     assert.equal((await updateLocation(db, 'inn', villa, { status: 'inactive' }, OWNER, env)).status, 200)
-    assert.deepEqual(last('cus_inn'), { locations: 1, homes: 2 })
+    assert.deepEqual(last('cus_inn'), 2)
     assert.equal((await updateLocation(db, 'inn', villa, { status: 'active' }, OWNER, env)).status, 200)
-    assert.deepEqual(last('cus_inn'), { locations: 1, homes: 3 })
-    // A location turned off or deleted is no longer billed.
+    assert.deepEqual(last('cus_inn'), 3)
+    // A location added or deleted changes no count.
     assert.equal((await place('inn', 'Cafe')).status, 201)
-    assert.deepEqual(last('cus_inn'), { locations: 2, homes: 3 })
+    assert.deepEqual(last('cus_inn'), 3)
     const cafe = (await db.prepare("SELECT id FROM business_locations WHERE organization_id = 'inn' AND title = 'Cafe'").first('id')) as string
     assert.equal((await deleteLocation(env, db, 'inn', cafe)).status, 200)
-    assert.deepEqual(last('cus_inn'), { locations: 1, homes: 3 })
+    assert.deepEqual(last('cus_inn'), 3)
 
-    // ── Growth bills the same way: both meters, nothing refused.
+    // ── Growth bills the same way: the homes meter, nothing refused.
     await organization('grower', 'growth')
     for (const title of ['One', 'Two', 'Three']) assert.equal((await place('grower', title)).status, 201)
     await publish('grower', (await home('grower', 'g-1')).product_id)
@@ -216,30 +214,30 @@ test('active locations and live homes are reported to their Stripe meters, draft
     // With four live, one is billed now and the next would be too.
     assert.deepEqual((await homesQuote(env, db, 'grower', 1)).homes, { used: 4, drafts: 0, included: 3, additional_price_minor: 700, amount_minor: 700 })
     assert.deepEqual((await homesQuote(env, db, 'grower', 1)).adding, { count: 1, additional_homes: 1, amount_minor: 700, allowed: true })
-    assert.deepEqual(await counts('grower'), { locations: 3, homes: 4 })
-    assert.deepEqual(last('cus_grower'), { locations: 3, homes: 4 })
+    assert.deepEqual(await counts('grower'), 4)
+    assert.deepEqual(last('cus_grower'), 4)
 
     // ── Growth ends: Stripe deletes the subscription and Better Auth marks it canceled. The organization is on Basic, so its
-    // newest location and two newest homes past what Basic includes go back to drafts; the oldest stay as they are.
+    // two newest homes past what Basic includes go back to drafts; the oldest stay as they are, and every location stays active.
     const newestFirst = async (sql: string) => (await db.prepare(sql).bind('grower').all<{ id: string }>()).results.map(row => row.id)
     const growerHomes = await newestFirst("SELECT id FROM products WHERE organization_id = ? AND kind = 'stay' ORDER BY created_at DESC, id DESC")
     const growerLocations = await newestFirst("SELECT id FROM business_locations WHERE organization_id = ? AND id NOT IN (SELECT location_id FROM product_stay_configs) ORDER BY created_at DESC, id DESC")
     const ended = { type: 'customer.subscription.deleted', data: { object: { id: 'sub_grower', customer: 'cus_grower', status: 'canceled' } } } as unknown as Stripe.Event
     // While the subscription still entitles Growth, nothing changes.
     await returnExtrasToDraftsForPlanEnd(env, db, ended)
-    assert.deepEqual(await counts('grower'), { locations: 3, homes: 4 })
+    assert.deepEqual(await counts('grower'), 4)
     await db.prepare("UPDATE subscription SET status = 'canceled' WHERE referenceId = 'grower'").run()
     await returnExtrasToDraftsForPlanEnd(env, db, ended)
-    assert.deepEqual(await counts('grower'), { locations: 2, homes: 2 })
+    assert.deepEqual(await counts('grower'), 2)
     const liveNow = async (productId: string) => (await getProduct(db, 'grower', productId)).stay!.live
     assert.deepEqual(await Promise.all(growerHomes.map(liveNow)), [false, false, true, true])
     assert.deepEqual((await db.prepare(`SELECT id, status FROM business_locations WHERE organization_id = 'grower' AND id IN (${growerLocations.map(() => '?').join(', ')})`).bind(...growerLocations).all<{ id: string; status: string }>()).results
-      .sort((a, b) => growerLocations.indexOf(a.id) - growerLocations.indexOf(b.id)).map(row => row.status), ['inactive', 'active', 'active'])
+      .sort((a, b) => growerLocations.indexOf(a.id) - growerLocations.indexOf(b.id)).map(row => row.status), ['active', 'active', 'active'])
     // Delivered again, the event changes nothing more.
     await returnExtrasToDraftsForPlanEnd(env, db, ended)
-    assert.deepEqual(await counts('grower'), { locations: 2, homes: 2 })
+    assert.deepEqual(await counts('grower'), 2)
 
-    // ── Basic includes two locations and two live homes, counted apart, and refuses a third of either; drafts are unlimited. It has no customer and reports nothing.
+    // ── Basic includes two live homes and refuses a third; locations and drafts are unlimited. It has no customer and reports nothing.
     await organization('starter', null)
     // Basic's quote: no period, nothing billed, and a home past the included ones not allowed to go live.
     const starterQuote = (used: number, drafts: number, adding: number, allowed: boolean) => ({
@@ -249,18 +247,15 @@ test('active locations and live homes are reported to their Stripe meters, draft
       billing: { period_end: null, trial_end: null, prorated: false },
     })
     assert.deepEqual(await homesQuote(env, db, 'starter', 1), starterQuote(0, 0, 1, true))
-    for (const title of ['One', 'Two']) assert.equal((await place('starter', title)).status, 201)
-    assert.deepEqual(await place('starter', 'Three'), { status: 402, data: {
-      error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 },
-    } })
-    // Adding homes is never refused: four drafts beside two locations, none billed.
+    for (const title of ['One', 'Two', 'Three']) assert.equal((await place('starter', title)).status, 201)
+    // Adding homes is never refused: four drafts beside three locations, none billed.
     const starterHomes = []
     for (const key of ['starter-villa-1', 'starter-villa-2', 'starter-villa-3', 'starter-villa-4']) starterHomes.push(await home('starter', key))
-    assert.deepEqual(await counts('starter'), { locations: 2, homes: 0 })
+    assert.deepEqual(await counts('starter'), 0)
     assert.deepEqual(await homesQuote(env, db, 'starter', 1), starterQuote(0, 4, 1, true))
     // Two go live; the third is refused when it is published, and nothing was written.
     for (const made of starterHomes.slice(0, 2)) await publish('starter', made.product_id)
-    assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
+    assert.deepEqual(await counts('starter'), 2)
     assert.deepEqual(await homesQuote(env, db, 'starter', 0), starterQuote(2, 2, 0, true))
     assert.deepEqual(await homesQuote(env, db, 'starter', 1), starterQuote(2, 2, 1, false))
     const homeLimit = { status: 402, data: { error: 'Basic includes 2 homes. Choose Growth or Business in Billing to add more.', code: 'HOME_LIMIT', homes: { used: 2, covered: 2 } } }
@@ -273,24 +268,22 @@ test('active locations and live homes are reported to their Stripe meters, draft
     // Withdrawing one frees its place for another.
     await withdraw('starter', starterHomes[1]!.product_id)
     await publish('starter', starterHomes[2]!.product_id)
-    assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
-    // A home's location turned off takes its home off; turning it back on past the included live homes is refused as a home, not a location.
+    assert.deepEqual(await counts('starter'), 2)
+    // A home's location turned off takes its home off; turning it back on past the included live homes is refused as a home.
     const starterVilla = starterHomes[0]!.location_id
     assert.equal((await updateLocation(db, 'starter', starterVilla, { status: 'inactive' }, OWNER, env)).status, 200)
-    assert.deepEqual(await counts('starter'), { locations: 2, homes: 1 })
+    assert.deepEqual(await counts('starter'), 1)
     await publish('starter', starterHomes[1]!.product_id)
     assert.deepEqual(await updateLocation(db, 'starter', starterVilla, { status: 'active' }, OWNER, env), homeLimit)
     // A live home turned off and back on past the included homes is refused the same way.
     await updateProduct(db, { env, organizationId: 'starter', productId: starterHomes[1]!.product_id, actor, patch: { active: false } })
-    assert.deepEqual(await counts('starter'), { locations: 2, homes: 1 })
+    assert.deepEqual(await counts('starter'), 1)
     assert.equal((await updateLocation(db, 'starter', starterVilla, { status: 'active' }, OWNER, env)).status, 200)
     await assert.rejects(updateProduct(db, { env, organizationId: 'starter', productId: starterHomes[1]!.product_id, actor, patch: { active: true } }), homeLimit)
-    assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
-    // Deleting a home would make its location a third location: refused as a location while both slots are in use.
-    await assert.rejects(deleteProduct(db, { organizationId: 'starter', productId: starterHomes[3]!.product_id, env }), {
-      status: 402, data: { error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 } },
-    })
-    assert.deepEqual(await counts('starter'), { locations: 2, homes: 2 })
+    assert.deepEqual(await counts('starter'), 2)
+    // Deleting a draft home leaves its location a plain location, which Basic never refuses.
+    await deleteProduct(db, { organizationId: 'starter', productId: starterHomes[3]!.product_id, env })
+    assert.deepEqual(await counts('starter'), 2)
     assert.equal(reportsFor('cus_starter'), 0)
   } finally {
     globalThis.fetch = originalFetch

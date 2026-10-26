@@ -30,6 +30,9 @@ class Provider {
   threadId = 'thread'
   bookingId: string | null = null
   propertyId = 'property'
+  /** Booking revisions Channex has not had acknowledged: what a conversation naming an unlanded booking lands first. */
+  pendingRevisions: Array<{ id: string; attributes: Record<string, unknown> }> = []
+  acked: string[] = []
   empty = false
   uncertain = false
   refuseAttachment = false
@@ -78,9 +81,14 @@ class Provider {
     }
     if (method === 'GET' && url.pathname === '/api/v1/message_threads') return json({ data: this.empty ? [] : [this.thread()], meta: { total: this.empty ? 0 : 1 } })
     if (method === 'GET' && url.pathname === `/api/v1/message_threads/${this.threadId}`) return json({ data: this.thread() })
-    // Every booking here is the one Airbnb reservation the stay fixtures name.
-    const booked = url.pathname.match(/^\/api\/v1\/bookings\/([^/]+)$/)
-    if (method === 'GET' && booked) return json({ data: { id: booked[1], type: 'booking', attributes: { property_id: this.propertyId, ota_reservation_code: 'Airbnb-booking' } } })
+    // Bookings reach KrabiClaw as revisions only; a booking read by id is not answered.
+    if (method === 'GET' && url.pathname === '/api/v1/booking_revisions/feed') {
+      assert.equal(url.searchParams.get('filter[property_id]'), this.propertyId)
+      const pending = this.pendingRevisions.filter(revision => !this.acked.includes(revision.id))
+      return json({ data: pending.map(revision => ({ ...revision, type: 'booking_revision' })), meta: { total: pending.length } })
+    }
+    const ack = url.pathname.match(/^\/api\/v1\/booking_revisions\/([^/]+)\/ack$/)
+    if (method === 'POST' && ack) { this.acked.push(ack[1]!); return json({ meta: { message: 'Success' } }) }
     if (method === 'GET' && url.pathname === `/api/v1/message_threads/${this.threadId}/messages`) {
       assert.equal(url.searchParams.get('order[inserted_at]'), 'asc')
       return json({ data: this.messages, meta: { total: this.messages.length } })
@@ -267,8 +275,15 @@ test('a reservation moved to a new Channex account keeps its conversation in eit
       provider.messages = [provider.message('production-first', 'guest', 'Hello'), provider.message('production-second', 'system', null, ['/attachment/file']), provider.message('production-third', 'guest', 'Arriving late')]
       const moved = { ...booking('booking-production'), revision_id: 'revision-production', provider_updated_at: '2026-10-20T00:00:00Z' }
       if (first === 'booking') await applyChannelBooking(db, env, ORG, productId, moved)
+      // The conversation arriving first finds its booking's revision still unacknowledged in the feed and lands it.
+      else provider.pendingRevisions = [{ id: 'revision-production', attributes: { booking_id: 'booking-production', property_id: 'property', status: 'modified', ota_name: 'Airbnb', ota_reservation_code: 'Airbnb-booking',
+        inserted_at: '2026-10-20T00:00:00Z', arrival_date: '2027-01-01', departure_date: '2027-01-03', amount: '300.00', currency: 'USD', customer: { name: 'Actual', surname: 'Guest', mail: null, phone: null }, occupancy: { adults: 2, children: 0, infants: 0 } } }]
       await mirrorChannexThread(db, env, 'thread-production', 'property')
-      if (first === 'conversation') await applyChannelBooking(db, env, ORG, productId, moved)
+      if (first === 'conversation') {
+        assert.deepEqual(provider.acked, ['revision-production'], first)
+        assert.deepEqual(await applyChannelBooking(db, env, ORG, productId, moved).then(result => result.applied), false, 'the revision the conversation landed is the current one')
+      }
+
 
       assert.deepEqual((await db.prepare('SELECT external_thread_id, external_booking_id, moved_from_thread_id, request_id FROM channel_threads').all()).results,
         [{ external_thread_id: 'thread-production', external_booking_id: 'booking-production', moved_from_thread_id: 'thread', request_id: requestId }], first)

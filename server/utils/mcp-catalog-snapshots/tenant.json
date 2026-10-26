@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:2e287143761c7485c9f8fb560d98757c4fe44c0dc703a1eba2f625cafe433cf5",
-  "documentationFingerprint": "sha256:31e0998f23892b42daaaddf386d97372e2d9ea70826c5797fc73f3726150a206",
+  "fingerprint": "sha256:542beaaa82442dbd44f74c11f909f487063db57a5e8d4050652f1b64aaf9f074",
+  "documentationFingerprint": "sha256:fff298038ce024537f44bf35943981ca23df01434419de5767619fb0c386e339",
   "tools": [
     {
       "name": "add_organization_language",
@@ -19253,7 +19253,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add an active business branch or office. It counts toward existing subscription usage and may increase the bill. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.",
+      "description": "Add an active business branch or office. Locations are not billed. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -105557,7 +105557,7 @@
             "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected."
           },
           "status": {
-            "description": "Set active to enable the location, or inactive to hide it. This can change location or home usage billed on the existing subscription.",
+            "description": "Set active to enable the location, or inactive to hide it. Locations are not billed; for a home's location this can change the live homes billed on the existing subscription.",
             "enum": [
               "active",
               "inactive"

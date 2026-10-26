@@ -97,7 +97,7 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.equal(plan.providerSnapshotSha256, sha256Json(original))
   assert.deepEqual(plan.operations.filter(operation => operation.type.includes('subscription')), [])
   assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_product').map(operation => operation.planId),
-    ['business', 'locations', 'homes', 'captured_volume', 'stripe_cost', 'ad_spend', 'site_language', 'strategy'])
+    ['business', 'homes', 'captured_volume', 'stripe_cost', 'ad_spend', 'site_language', 'strategy'])
   // Each plan is one flat monthly price; the $39 Growth price a subscription is on is retired for new sales only.
   const growthPrice = plan.operations.find(operation => operation.type === 'create_price' && operation.planId === 'growth')
   assert.deepEqual(growthPrice?.params, { currency: 'usd', recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: 4900 })
@@ -106,32 +106,35 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.deepEqual(businessPrice?.params, { currency: 'usd', recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: 14900 })
   // A meter per billed count or fee, then the monthly metered price on it.
   assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_meter').map(operation => [operation.params.event_name, operation.params.default_aggregation.formula]), [
-    ['krabiclaw_locations', 'last'], ['krabiclaw_homes', 'last'], ['krabiclaw_captured_volume', 'sum'], ['krabiclaw_stripe_cost', 'sum'], ['krabiclaw_ad_spend', 'sum'],
+    ['krabiclaw_homes', 'last'], ['krabiclaw_captured_volume', 'sum'], ['krabiclaw_stripe_cost', 'sum'], ['krabiclaw_ad_spend', 'sum'],
   ])
-  assert.deepEqual(plan.operations.find(operation => operation.type === 'create_meter' && operation.planId === 'locations')?.params, {
-    display_name: 'Additional location', event_name: 'krabiclaw_locations', default_aggregation: { formula: 'last' },
+  assert.deepEqual(plan.operations.find(operation => operation.type === 'create_meter' && operation.planId === 'homes')?.params, {
+    display_name: 'Additional home', event_name: 'krabiclaw_homes', default_aggregation: { formula: 'last' },
     customer_mapping: { type: 'by_id', event_payload_key: 'stripe_customer_id' }, value_settings: { event_payload_key: 'value' },
   })
   const metered = (planId: string) => plan.operations.find(operation => operation.type === 'create_price' && operation.planId === planId)?.params
   const recurring = (planId: string) => ({ interval: 'month', interval_count: 1, usage_type: 'metered', meter: { ref: { kind: 'meter', planId } } })
-  assert.deepEqual(metered('locations'), { currency: 'usd', recurring: recurring('locations'), billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 4900 }] })
-  // Homes are the same graduated shape at $9, on their own meter.
+  // Homes are a graduated price at $9 past the included ones, on their own meter.
   assert.deepEqual(metered('homes'), { currency: 'usd', recurring: recurring('homes'), billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: [{ up_to: 2, unit_amount: 0 }, { up_to: 'inf', unit_amount: 900 }] })
   assert.deepEqual(metered('captured_volume'), { currency: 'usd', recurring: recurring('captured_volume'), billing_scheme: 'per_unit', unit_amount_decimal: '0.014' })
   assert.deepEqual(metered('stripe_cost'), { currency: 'usd', recurring: recurring('stripe_cost'), billing_scheme: 'per_unit', unit_amount_decimal: '1' })
   assert.deepEqual(metered('ad_spend'), { currency: 'usd', recurring: recurring('ad_spend'), billing_scheme: 'per_unit', unit_amount_decimal: '0.1' })
   // Like a service, a metered product is found by its family and never carries a plan id.
-  const locationProduct = plan.operations.find(operation => operation.type === 'create_product' && operation.planId === 'locations')
-  assert.deepEqual(locationProduct?.params.metadata, { product_family: 'locations', highlighted: 'false' })
-  const locationUpdate = plan.operations.find(operation => operation.type === 'update_product' && operation.product?.ref?.planId === 'locations')
-  assert.equal(locationUpdate?.params.unit_label, 'location')
+  const homeProduct = plan.operations.find(operation => operation.type === 'create_product' && operation.planId === 'homes')
+  assert.deepEqual(homeProduct?.params.metadata, { product_family: 'homes', highlighted: 'false' })
+  const homeUpdate = plan.operations.find(operation => operation.type === 'update_product' && operation.product?.ref?.planId === 'homes')
+  assert.equal(homeUpdate?.params.unit_label, 'home')
   // A plan is billed once, so its product carries no unit.
   assert.equal(plan.operations.find(operation => operation.type === 'update_product' && operation.product?.id === 'prod_growth')?.params.unit_label, '')
-  // Rental units are not billed: an Additional rental unit product is retired like a retired plan.
+  // Rental units and locations are not billed: an Additional rental unit or Additional location product is retired like a retired plan.
   const withUnits = buildCatalogPlan({ snapshot: { ...snapshot,
-    products: [...snapshot.products, { id: 'prod_units', active: true, metadata: { product_family: 'rental_units', monthly_price_id: 'price_units' }, default_price: 'price_units' }],
-    pricesByProduct: { ...snapshot.pricesByProduct, prod_units: [{ id: 'price_units', product: 'prod_units', active: true, currency: 'usd', unit_amount: 1900, billing_scheme: 'per_unit', recurring: { interval: 'month', interval_count: 1 } }] } } })
-  assert.deepEqual(withUnits.operations.filter(operation => operation.productId === 'prod_units').map(operation => operation.type), ['clear_product_default_price', 'deactivate_price', 'archive_product'])
+    products: [...snapshot.products,
+      { id: 'prod_units', active: true, metadata: { product_family: 'rental_units', monthly_price_id: 'price_units' }, default_price: 'price_units' },
+      { id: 'prod_locations', active: true, metadata: { product_family: 'locations', monthly_price_id: 'price_locations' }, default_price: 'price_locations' }],
+    pricesByProduct: { ...snapshot.pricesByProduct,
+      prod_units: [{ id: 'price_units', product: 'prod_units', active: true, currency: 'usd', unit_amount: 1900, billing_scheme: 'per_unit', recurring: { interval: 'month', interval_count: 1 } }],
+      prod_locations: [{ id: 'price_locations', product: 'prod_locations', active: true, currency: 'usd', billing_scheme: 'tiered', tiers_mode: 'graduated', recurring: { interval: 'month', interval_count: 1, usage_type: 'metered', meter: 'mtr_locations' } }] } } })
+  for (const productId of ['prod_units', 'prod_locations']) assert.deepEqual(withUnits.operations.filter(operation => operation.productId === productId).map(operation => operation.type), ['clear_product_default_price', 'deactivate_price', 'archive_product'])
   // The app finds the strategy product by its service metadata and never by a plan id, which would make Better Auth treat it as a plan.
   const strategyProduct = plan.operations.find(operation => operation.type === 'create_product' && operation.planId === 'strategy')
   assert.deepEqual(strategyProduct?.params.metadata, { product_family: 'services', service: 'strategy', highlighted: 'false' })
@@ -139,10 +142,10 @@ test('Business catalog consolidates new sales without repricing existing contrac
   const strategyPrice = plan.operations.find(operation => operation.type === 'create_price' && operation.planId === 'strategy')
   assert.deepEqual(strategyPrice?.params, { currency: 'usd', recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: 200000 })
   // An existing meter is reused by its id; one that aggregates differently is refused, never billed through.
-  const existingMeter = { id: 'mtr_locations', status: 'active', display_name: 'Additional location', event_name: 'krabiclaw_locations', formula: 'last', customer_payload_key: 'stripe_customer_id', value_payload_key: 'value' }
+  const existingMeter = { id: 'mtr_homes', status: 'active', display_name: 'Additional home', event_name: 'krabiclaw_homes', formula: 'last', customer_payload_key: 'stripe_customer_id', value_payload_key: 'value' }
   const reused = buildCatalogPlan({ snapshot: { ...snapshot, meters: [existingMeter] } })
-  assert.equal(reused.operations.some(operation => operation.type === 'create_meter' && operation.planId === 'locations'), false)
-  assert.equal(reused.operations.find(operation => operation.type === 'create_price' && operation.planId === 'locations')?.params.recurring.meter, 'mtr_locations')
+  assert.equal(reused.operations.some(operation => operation.type === 'create_meter' && operation.planId === 'homes'), false)
+  assert.equal(reused.operations.find(operation => operation.type === 'create_price' && operation.planId === 'homes')?.params.recurring.meter, 'mtr_homes')
   assert.throws(() => buildCatalogPlan({ snapshot: { ...snapshot, meters: [{ ...existingMeter, formula: 'sum' }] } }), /must aggregate with last/)
   for (const planId of ['commerce', 'marketing', 'managed', 'seo_accelerator']) {
     assert.deepEqual(plan.operations.filter(operation => operation.productId === `prod_${planId}`).map(operation => operation.type), [
