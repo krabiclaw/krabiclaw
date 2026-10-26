@@ -3,15 +3,9 @@ import type { APIRequestContext } from '@playwright/test'
 import { findE2eAuthFixture } from '../../../config/development-auth-fixtures'
 import { devLoginHeaders } from '../test-env'
 
-// Headers Better Auth's POST endpoints need from an API test: the trusted
-// origin (the platform origin off-localhost) plus the dev-login headers.
+// Auth requests use the platform URL explicitly supplied by their caller.
 export function authRequestHeaders(baseURL: string): Record<string, string> {
-  const target = new URL(baseURL)
-  const isLocal = target.hostname === 'localhost' || target.hostname === '127.0.0.1'
-  const origin = isLocal
-    ? target.origin
-    : new URL(process.env.NUXT_PUBLIC_PLATFORM_DOMAIN || target.origin).origin
-  return { origin, ...devLoginHeaders() }
+  return { origin: new URL(baseURL).origin, ...devLoginHeaders() }
 }
 
 export async function loginAs(request: APIRequestContext, baseURL: string, userId?: string) {

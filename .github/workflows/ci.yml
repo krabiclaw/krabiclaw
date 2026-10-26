@@ -216,6 +216,9 @@ jobs:
           https://ncls-staging.krabiclaw.com
           https://staging.krabiclaw.com
       - name: Run read-only tenant rendering
+        env:
+          CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}
+          CANARY_LOGIN_PASSWORD: ${{ secrets.CANARY_LOGIN_PASSWORD }}
         run: yarn test:e2e:tenant-rendering
       - name: Upload staging Playwright report
         if: failure()
@@ -344,6 +347,9 @@ jobs:
           SEARCH_HEAD_SHA: ${{ github.sha }}
         run: yarn ai-search:sync:prod --changed-since "$SEARCH_BASE_SHA" --changed-until "$SEARCH_HEAD_SHA"
       - name: Run read-only production tenant rendering
+        env:
+          CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}
+          CANARY_LOGIN_PASSWORD: ${{ secrets.CANARY_LOGIN_PASSWORD }}
         run: yarn test:e2e:tenant-rendering
       - name: Upload production Playwright report
         if: failure()
