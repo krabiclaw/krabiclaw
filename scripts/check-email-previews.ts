@@ -57,6 +57,14 @@ for (const entry of NOTIFICATION_CATALOG) {
     if (tenant && entry.message.organizationLogoUrl && !html.includes(entry.message.organizationLogoUrl)) {
       failures.push(`${entry.id} is ${tenant}'s mail and does not carry its logo`)
     }
+    const heroImages = [...html.matchAll(/<img\b[^>]*\bclass="[^"]*\bemail-hero-img\b[^"]*"[^>]*>/gi)]
+    if (heroImages.length !== (entry.message.hero ? 1 : 0)) {
+      failures.push(`${entry.id} does not render exactly the hero image its message supplies`)
+    }
+    if (entry.message.hero) {
+      const heroUrl = entry.message.hero.imageUrl.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
+      if (!heroImages[0]?.[0].includes(`src="${heroUrl}"`)) failures.push(`${entry.id} does not render its actual hero image URL`)
+    }
     if (!text.trim()) failures.push(`${entry.id} rendered an empty plain-text body`)
     // Against the plain-text render: the HTML escapes apostrophes and
     // ampersands, so comparing a raw title to it reports false failures.
@@ -77,9 +85,6 @@ for (const entry of NOTIFICATION_CATALOG) {
       }
       if (/\/signup(?:[/?#&"'\s]|$)/i.test(html) || /\/signup(?:[/?#&"'\s]|$)/i.test(text)) {
         failures.push(`${entry.id} promotes account signup in transactional mail`)
-      }
-      if (entry.audience === 'guest' && entry.message.hero) {
-        failures.push(`${entry.id} includes a decorative hero in a guest transaction`)
       }
     } else if (entry.message.emailPurpose === 'subscribed' || entry.message.emailPurpose === 'promotional') {
       if (!html.includes(unsubscribeUrl) || !text.includes(unsubscribeUrl)) {

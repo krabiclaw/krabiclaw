@@ -91,6 +91,8 @@ export interface GuestBookingInput {
   receiptUrl?: string | null
   /** What the guest paid on the site, formatted; absent when nothing was paid online. */
   paid?: string | null
+  /** The booked offering or location's authentic image, when available. */
+  heroImageUrl?: string | null
 }
 
 function guestLocale(input: { locale?: string }) {
@@ -125,7 +127,7 @@ export function guestReservationReceivedMessage(input: GuestBookingInput): Notif
     locale: locale.locale,
     title: locale.messages['reservations.confirmed']!,
     preheader: `${input.organizationName} · ${input.date} · ${input.time}`,
-    hero: null,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.organizationName } : null,
     facts: guestVisitFacts(input),
     primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : undefined,
     sections: contactSection(input),
@@ -160,7 +162,7 @@ export function guestBookingReceivedMessage(input: GuestBookingInput & { product
     locale: locale.locale,
     title: locale.messages[input.status === 'pending' ? 'booking.request_received' : 'booking.confirmed']!,
     preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
-    hero: null,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     intro: input.status === 'pending' ? locale.messages['booking.pending_message']! : undefined,
     facts: guestVisitFacts(input),
     primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : undefined,
@@ -187,6 +189,7 @@ export interface GuestStayInput {
   checkInInstructions: string | null
   contactPhone: string | null
   contactEmail: string | null
+  heroImageUrl: string | null
   /** The stay on the business's site. */
   receiptUrl: string | null
 }
@@ -199,7 +202,7 @@ export function guestStayConfirmedMessage(input: GuestStayInput): NotificationMe
     locale: locale.locale,
     title: labels['stay.confirmed_title']!,
     preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
-    hero: null,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
     facts: facts(
       fact('what', labels['stay.your_stay']!, input.homeName),
       fact('checkIn', labels['stay.check_in']!, input.checkIn),

@@ -17,15 +17,18 @@ booking, message or billing category and go directly to the transaction's
 contact without consulting owner notification preferences.
 
 Transactional messages omit unsubscribe links and mailing-list headers. Guest
-transactional messages also omit signup prompts and decorative cover images;
-their tenant logo, transaction details, attachments and relevant actions remain.
+transactional messages also omit signup prompts. Authentic booking, property
+and location images remain alongside tenant logos, transaction details,
+attachments and relevant actions. A message without a supplied image renders
+no hero image.
 Subscribed review alerts and promotional review requests and product news retain
 unsubscribe controls. Product News continues to use Resend's native Broadcast
 and Topic unsubscribe lifecycle.
 
 `yarn lint:email-previews` verifies all catalog messages through the canonical
-renderer, including the reason in both bodies and purpose-specific footer
-controls. The existing `resend-native-d1.test.ts` and
+renderer, including the reason in both bodies, purpose-specific footer controls,
+and the exact supplied hero image URL without inventing an absent image. The
+existing `resend-native-d1.test.ts` and
 `guest-delivery-d1.test.ts` integration tests exercise SDK request headers,
 required opt-out configuration, and persisted cancellation/replay behavior.
 These checks do not establish Gmail inbox-tab placement; that requires
