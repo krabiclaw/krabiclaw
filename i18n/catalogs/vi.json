@@ -14,6 +14,8 @@
   "booking.change_pending": "Đặt chỗ của bạn giữ nguyên cho đến khi bạn chấp nhận. Liên kết này hết hạn sau 7 ngày.",
   "booking.change_accepted": "Đã chấp nhận thay đổi",
   "booking.change_updated": "Đặt chỗ của bạn đã được cập nhật.",
+  "booking.change_moved": "Lịch đặt của bạn đã được dời",
+  "booking.change_moved_detail": "Doanh nghiệp đã dời lịch đặt của bạn sang thời gian mới. Dưới đây là thông tin đã cập nhật.",
   "booking.change_declined": "Đã từ chối thay đổi",
   "booking.change_unchanged": "Đặt chỗ ban đầu của bạn vẫn giữ nguyên.",
   "booking.change_accept": "Chấp nhận thay đổi",

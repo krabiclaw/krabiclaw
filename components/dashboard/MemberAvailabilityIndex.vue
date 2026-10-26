@@ -16,7 +16,7 @@ const to=(segment:string)=>router.resolve({path:`${level.path.value}/${segment}`
 const groups=computed<EditorNavigationGroup[]>(()=>[
  {id:'availability',items:[{ id: 'hours', icon: 'i-lucide-clock', label:'Hours',summary:editor.record.value?.timezone??'Not set',to:to('hours')},{ id: 'time-off', icon: 'i-lucide-calendar-off', label:'Time off',summary:editor.record.value?.time_off == null?'Not set':`${editor.record.value.time_off.length} dates`,to:to('time-off')}]},
  {id:'profile',items:[{ id: 'profile', icon: 'i-lucide-contact-round', label:'Public profile',summary:!editor.record.value?'Not set':editor.record.value.public_approved?'Published':'Not published',to:to('profile')}]},
- ...(props.self?[{id:'connect',items:[{id:'google-calendar',label:'Google Calendar',summary:editor.record.value?.calendar_account_id?'Connected':'Not connected',lead:{icon:'i-logos-google-calendar'},to:to('google-calendar')}]}]:[]),
+ ...(props.self?[{id:'connect',items:[{id:'google-calendar',label:'Google Calendar sync',summary:editor.record.value?.calendar_account_id?'Connected':'Not connected',lead:{icon:'i-logos-google-calendar'},to:to('google-calendar')}]}]:[]),
 ])
 await editor.load()
 </script>

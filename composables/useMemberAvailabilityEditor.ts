@@ -4,8 +4,9 @@ import type { WorkingHours } from '~/shared/member-scheduling'
 
 export type MemberSchedule = Awaited<ReturnType<typeof readMemberScheduling>>
 
-function isSchedulingResponse(value: unknown): value is { scheduling: MemberSchedule } {
+function isSchedulingResponse(value: unknown): value is { scheduling: MemberSchedule; calendar_sync?: boolean } {
   if (!isRecord(value)) return false
+  if (value.calendar_sync !== undefined && typeof value.calendar_sync !== 'boolean') return false
   const row = value.scheduling
   if (row === null) return true
   if (!isRecord(row)) return false
@@ -28,6 +29,8 @@ export const memberAvailabilityKey = Symbol('member-availability') as InjectionK
 export function createMemberAvailabilityEditor(organizationId: string, memberId: string, admin: boolean, self: boolean) {
   const base = `/api/organizations/${organizationId}/members/${memberId}`
   const record = ref<MemberSchedule>(null)
+  /** Whether the organization's plan includes Google Calendar sync; the read answers it beside the schedule. */
+  const calendarSync = ref(false)
   const loaded = ref(false), error = ref(''), saving = ref(false)
   const draft = ref({ timezone: null as string | null, weekly: null as WorkingHours[] | null, time_off: null as { start: string; end: string }[] | null, public_name: '', public_photo_url: null as string | null, public_bio: '', public_approved: false })
   const baseline = ref('')
@@ -63,6 +66,7 @@ export function createMemberAvailabilityEditor(organizationId: string, memberId:
     await run(async () => {
       const value = await applicationFetch(`${base}/scheduling`, { validate: isSchedulingResponse })
       reset(value.scheduling)
+      calendarSync.value = value.calendar_sync === true
       loaded.value = true
     })
   }
@@ -122,7 +126,7 @@ export function createMemberAvailabilityEditor(organizationId: string, memberId:
       reset((await applicationFetch(`${base}/calendar`, { method: 'POST', body: { enabled, account_id: accountId }, validate: isSchedulingResponse })).scheduling)
     })
   }
-  return { organizationId, memberId, admin, self, record, draft, loaded, error, saving, dirty, recovery, revert, load, save, calendar }
+  return { organizationId, memberId, admin, self, record, calendarSync, draft, loaded, error, saving, dirty, recovery, revert, load, save, calendar }
 }
 
 export function useMemberAvailabilityEditor() {

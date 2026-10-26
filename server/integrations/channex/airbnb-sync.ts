@@ -114,6 +114,8 @@ export async function requestAirbnbSync(env: CloudflareEnv, db: DbClient, organi
   if (!sync.length && !stop.length) fail(422, 'VALIDATION_ERROR', 'Name listings to sync or homes to stop', { field: 'sync' })
   if (sync.length + stop.length > MAX_D1_BATCH_STATEMENTS) fail(422, 'VALIDATION_ERROR', `Name at most ${MAX_D1_BATCH_STATEMENTS} listings and homes in one change`, { field: 'sync' })
   const connection = new AirbnbConnection(db, env, organizationId, userId)
+  // Starting a sync is Business; stopping one never needs a plan.
+  if (sync.length) await connection.requireChannelSync()
   const listings = await connection.listings()
   const unknownListing = sync.find(id => !listings.some(listing => listing.id === id))
   if (unknownListing) fail(404, 'LISTING_NOT_FOUND', 'This listing is not on your connected Airbnb account', { listing_id: unknownListing })

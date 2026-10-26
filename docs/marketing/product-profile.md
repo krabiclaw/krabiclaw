@@ -156,7 +156,7 @@ into repository documentation.
 | Connect Google Calendar | `241019f4-2176-4858-bfcd-92a11b0c461c` |
 | Set your working hours | `3283d505-4d01-4beb-b665-dd317d159b17` |
 | Add time off | `81fddbb6-4ecf-4361-833f-12fc6214c112` |
-| Avoid double bookings with your personal calendar | `60033f23-c250-4a52-97b1-a7a1b2a9897e` |
+| Google Calendar sync with your personal calendar | `60033f23-c250-4a52-97b1-a7a1b2a9897e` |
 | Choose who guests meet | `4dacfe5e-b8f4-41de-932b-a0d79b925b35` |
 | Update your public profile | `3bbee519-d084-43f4-b159-689be788b055` |
 | Manage your bookings | `1e9ee926-4794-4f93-aef2-f96edfb34f8f` |

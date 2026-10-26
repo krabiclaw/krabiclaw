@@ -50,6 +50,13 @@
       "when": 1793012004588,
       "tag": "0006_email_threading",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793015173995,
+      "tag": "0007_google_calendar_sync",
+      "breakpoints": true
     }
   ]
 }

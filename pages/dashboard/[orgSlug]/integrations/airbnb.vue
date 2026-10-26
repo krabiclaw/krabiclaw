@@ -7,7 +7,10 @@
     :error="panelError"
     :footer="false"
   >
+    <!-- The sync is Business. A connection made under a lapsed plan, in whatever state, can still be disconnected. -->
+    <OfferCard v-if="!entitled && (!statusData || statusData.status === 'not_connected')" :offer="offer('airbnb_sync')" />
     <IntegrationLeaf
+      v-else
       integration="airbnb"
       :connection="airbnbConnection"
       :disconnecting="disconnecting"
@@ -63,7 +66,9 @@
 
 <script setup lang="ts">
 import IntegrationLeaf, { type IntegrationLeafConnection } from '~/components/dashboard/IntegrationLeaf.vue'
+import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { integrationDefinition } from '~/shared/integrations'
+import { offer } from '~/shared/offers'
 import { getErrorMessage } from '~/utils/errors'
 import { integrationsKey } from '../integrations.vue'
 
@@ -86,6 +91,8 @@ interface AirbnbListing {
 
 const integrations = inject(integrationsKey)!
 const dashboardApi = useDashboardApi()
+const dashboard = useDashboardOrganization()
+const entitled = computed(() => dashboard.entitlements.value.channel_sync === true)
 const apiBase = `/api/organizations/${integrations.organizationId}/integrations/airbnb`
 
 const starting = ref(false)

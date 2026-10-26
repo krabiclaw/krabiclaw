@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:0fdcf25f6635c4a9bd161f0ec080e4bcd58bef7e87e42a7292f4f82ef4f2a465",
-  "documentationFingerprint": "sha256:1d83b8bf241ef7aff5acc51b0182fdbfc2c44f240dc6c0f4461fed77f741c154",
+  "fingerprint": "sha256:a50fb34e9b6644c15a9a02a16dae3d80f18b2f57986741cefda519be7a757211",
+  "documentationFingerprint": "sha256:527f600da313f25d51d046e6021b7738196a9589ff85795c2430e6d765723ca5",
   "tools": [
     {
       "name": "add_organization_language",
@@ -93885,10 +93885,14 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status.",
+      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. With apply, the booking moves now and the guest is emailed the new time; a change that needs the guest’s consent (a paid booking’s quantity or location) is refused.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "apply": {
+            "description": "Move the booking now instead of asking the guest. The guest is emailed the new time.",
+            "type": "boolean"
+          },
           "expected_updated_at": {
             "description": "Thread updated_at from get_product_booking.",
             "type": "string"
@@ -93935,7 +93939,8 @@
             "enum": [
               "awaiting_guest_acceptance",
               "accepted",
-              "declined"
+              "declined",
+              "moved"
             ],
             "type": "string"
           },
@@ -94056,10 +94061,14 @@
     {
       "name": "request_table_reservation_change",
       "title": "Request table reservation change",
-      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts.",
+      "description": "Email the guest a proposal to change a table reservation’s location, local date, time or party size. The current reservation remains unchanged until the guest accepts. With apply, the reservation moves now and the guest is emailed the new time; a change outside the change policy or that needs the guest’s consent is refused.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "apply": {
+            "description": "Move the reservation now instead of asking the guest. The guest is emailed the new time.",
+            "type": "boolean"
+          },
           "date": {
             "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
             "type": "string"
@@ -94120,7 +94129,8 @@
             "enum": [
               "awaiting_guest_acceptance",
               "accepted",
-              "declined"
+              "declined",
+              "moved"
             ],
             "type": "string"
           },
@@ -96759,7 +96769,7 @@
     {
       "name": "set_member_busy_calendars",
       "title": "Set member busy calendars",
-      "description": "After working hours are authored, select busy-input calendars using the member’s already-linked Google account and known calendar IDs. Only that member may select their linked account; an administrator can disconnect it. This tool does not connect Google or discover calendars. Returns the saved selection and check status. Stale or disconnected selected calendars block availability; no selected calendars uses internal scheduling.",
+      "description": "Google Calendar sync. Selecting calendars needs the Business plan; disconnecting never does. After working hours are authored, select busy-input calendars using the member’s already-linked Google account and known calendar IDs. Only that member may select their linked account; an administrator can disconnect it. This tool does not connect Google or discover calendars. Returns the saved selection and check status. Stale or disconnected selected calendars block availability; no selected calendars uses internal scheduling.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -122122,8 +122132,8 @@
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:d391fc30d744361aecae959a6e0530b4193bb3366cf9da36cc2a7e2011088357",
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
-        "request_product_booking_change": "sha256:e9cce3235c32d9e0f0e8a5337a7c5a84561a6ac8da9cc1768a21d6d50979b95d",
-        "request_table_reservation_change": "sha256:68fb2e0b0be4e52175dd5a83326c05b3b5f2b1fdf8032a7b995577726a170b5d",
+        "request_product_booking_change": "sha256:72aa7532cc80d1896748e6f70a6ed4dbc30239df013a42e35fe8fbd4d08fe04c",
+        "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
         "send_team_message": "sha256:a7e3d79ac0e34594d49274dc922d3d34b13e390b335cd63f2d73f1e53d973171",
         "start_team_conversation": "sha256:f69dfb163eafc2e710179a5b429fb979adfe847be9c6397cadb16d2d186d4064"
       }

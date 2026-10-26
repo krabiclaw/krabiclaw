@@ -19,13 +19,13 @@ export interface CalendarSubject {
   member_name: string | null
   revision: string
 }
-interface EventLink {
+export interface EventLink {
   id: string; organization_id: string; integration_revision: string; account_id: string
   calendar_id: string; event_id: string; booking_kind: CalendarSubject['booking_kind']; operational_id: string
   request_id: string | null; booking_revision: string; synced_revision: string | null
   state: string; attempts: number; lease_token: string | null; updated_at: string
 }
-class CalendarError extends Error {
+export class CalendarError extends Error {
   readonly status: number
   constructor(status: number) {
     super(`Google Calendar returned ${status}. Check the account grant and calendar writer access.`)
@@ -33,7 +33,7 @@ class CalendarError extends Error {
   }
 }
 const BASE = 'https://www.googleapis.com/calendar/v3'
-async function google<T>(token: string, path: string, init?: RequestInit): Promise<T> {
+export async function google<T>(token: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
     ...init,
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json', ...init?.headers },
@@ -104,6 +104,8 @@ export function calendarEvent(subject: CalendarSubject, dashboardUrl: string | n
     start: { dateTime: subject.starts_at, timeZone: subject.timezone },
     end: { dateTime: subject.ends_at, timeZone: subject.timezone },
     visibility: 'private',
+    // Stated, so that rewriting an event someone deleted in Google brings it back.
+    status: 'confirmed',
   }
 }
 export async function readCalendarIntegration(db: DbClient, organizationId: string): Promise<GoogleCalendarIntegration | null> {
@@ -203,9 +205,10 @@ async function ownsMutation(db: DbClient, link: EventLink, lease: string, revisi
 export interface CalendarProvider {
   token(accountId: string): Promise<string>
 }
-export async function syncCalendarOrganization(env: CloudflareEnv, organizationId: string, limit = 25, provider: CalendarProvider = {
-  token: async accountId => (await linkedAccountAccessToken(env, accountId)).accessToken,
-}) {
+export function defaultProvider(env: CloudflareEnv): CalendarProvider {
+  return { token: async accountId => (await linkedAccountAccessToken(env, accountId)).accessToken }
+}
+export async function syncCalendarOrganization(env: CloudflareEnv, organizationId: string, limit = 25, provider: CalendarProvider = defaultProvider(env)) {
   const db = env.DB
   const integration = await readCalendarIntegration(db, organizationId)
   if (!integration) return { checked: 0, failed: 0 }

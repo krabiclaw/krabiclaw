@@ -14,6 +14,8 @@
   "booking.change_pending": "承認するまで予約内容は変更されません。このリンクの有効期限は7日間です。",
   "booking.change_accepted": "変更を承認しました",
   "booking.change_updated": "予約内容を更新しました。",
+  "booking.change_moved": "予約の時間が変更されました",
+  "booking.change_moved_detail": "お店が予約を新しい時間に変更しました。更新後の内容をご確認ください。",
   "booking.change_declined": "変更を断りました",
   "booking.change_unchanged": "元の予約内容は変更されていません。",
   "booking.change_accept": "変更を承認",

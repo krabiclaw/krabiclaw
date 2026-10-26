@@ -4,6 +4,7 @@ import { assertRoleAllows, resolveOrganizationMembership } from '~/server/utils/
 import { linkedAccountAccessToken, requireIntegrationAccount, type CloudflareEnv } from '~/server/utils/auth'
 import { addLocalDays, localDateAt, localDateTimeToInstant, isValidTimezone, isValidInstant } from '~/utils/timezone'
 import { BUSY_FRESHNESS_MS, MEMBER_BUSY_SCOPES, type WorkingHours, type SchedulingInterval } from '~/shared/member-scheduling'
+import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getOrganizationTeamsData } from '~/server/utils/dashboard-members'
 
@@ -141,6 +142,8 @@ export async function refreshWorkingWindows(db: DbClient) {
 export async function selectBusyCalendars(actor: SchedulingActor, memberId: string, input: {account_id: string | null; calendar_ids: string[]}) {
  if(!input || (input.account_id!==null && (typeof input.account_id!=='string' || !input.account_id)))throw new HTTPError({statusCode:400,message:'Choose a linked account or explicitly disconnect it'})
  const member=await requireSchedulingAccess(actor,memberId)
+ // Turning the sync on is Business; turning it off never needs a plan.
+ if(Array.isArray(input.calendar_ids)&&input.calendar_ids.length&&!await hasOrganizationEntitlement(actor.env,actor.organizationId,'calendar_sync'))throw new HTTPError({statusCode:403,message:'Google Calendar sync comes with the Business plan',data:{code:'ENTITLEMENT_REQUIRED',entitlement:'calendar_sync'}})
  if(input.account_id && member.userId!==actor.userId) throw new HTTPError({statusCode:403,message:'Only the member may select their linked Google account'})
  if(!Array.isArray(input.calendar_ids)||input.calendar_ids.length>10||input.calendar_ids.some(id=>typeof id!=='string'||!id||id.length>1024)||(!input.account_id && input.calendar_ids.length>0)) throw new HTTPError({statusCode:400,message:'Choose an account and 1–10 calendars, or disconnect both'})
  const current=await queryFirst<MemberScheduling>(actor.env.DB,'SELECT * FROM member_scheduling WHERE member_id=? AND organization_id=?',[memberId,actor.organizationId])
@@ -157,6 +160,8 @@ export async function refreshMemberBusy(db: DbClient, env: CloudflareEnv, member
  if(!force && row.busy_checked_at && Date.now()-Date.parse(row.busy_checked_at)<BUSY_FRESHNESS_MS/2)return row.busy_error?{error:row.busy_error}:undefined
  const now=new Date().toISOString(), until=new Date(Date.parse(now)+94*86400000).toISOString()
  try {
+  // A selection kept after the plan lapsed fails closed, visibly: availability waits until the sync is back on or turned off.
+  if(!await hasOrganizationEntitlement(env,row.organization_id,'calendar_sync')) throw new Error('Google Calendar sync comes with the Business plan; turn it off or upgrade to keep checking this calendar')
   const member=await queryFirst<{userId:string}>(db,'SELECT userId FROM member WHERE id=? AND organizationId=?',[memberId,row.organization_id])
   if(!member) throw new Error('Member is no longer connected')
   await requireIntegrationAccount(env,row.calendar_account_id,{userId:member.userId,currentAccountId:null,providerId:'google',scopes:MEMBER_BUSY_SCOPES})

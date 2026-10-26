@@ -31,6 +31,9 @@
       </UCard>
     </div>
 
+    <!-- Airbnb's "Create a new listing": the first thing the plan lacks, offered once, to someone who can take it. -->
+    <OfferCard v-if="offer" :offer="offer" />
+
     <EditorNavigationList :groups="groups" :active-item="activeItem" @act="onAct" />
   </div>
 </template>
@@ -38,6 +41,8 @@
 <script setup lang="ts">
 import { NuxtLink } from '#components'
 import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
+import OfferCard from '~/components/dashboard/OfferCard.vue'
+import { planOffers } from '~/shared/offers'
 import { dashboardFetch } from '~/composables/dashboardFetch'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import { earningsFigure, isEarningsSummary, type EarningsSummary } from '~/shared/earnings-display'
@@ -47,6 +52,9 @@ import { isAccountActivityResponse, type AccountActivityResponse } from '~/share
 // Rendered by both the desktop slideover and the mobile menu page, off one
 // model, so the two surfaces cannot show different menus.
 const { scopeModel, logOut, personal, organization } = useDashboardMenu()
+const dashboard = useDashboardOrganization()
+// Only the routed organization's plan is loaded here; the active one reached from Account settings is not offered anything.
+const offer = computed(() => dashboard.organization.value && dashboard.canUpdateBilling.value ? planOffers(dashboard.entitlements.value)[0] ?? null : null)
 // The shell's organization, whichever route it is drawn on — Account settings included.
 const orgBase = computed(() => organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : null)
 const inOrganization = computed(() => Boolean(orgBase.value))
