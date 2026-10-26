@@ -263,8 +263,9 @@ if (inventoryFile) test.describe('published route inventory', () => {
                 const failed = failedRequests.shift()!
                 const error = failed.failure()?.errorText
                 const resourceType = failed.resourceType()
-                // Chromium may cancel an image duplicate or a video byte range.
-                // A picture may also replace its fallback with a selected source.
+                // Chromium may cancel an image duplicate, a video's poster
+                // duplicate or a video byte range. A picture may also replace
+                // its fallback with a selected source.
                 // Require the selected resource to succeed and decode in its
                 // rendered owner before accepting cancellation.
                 const owner = failed.method() === 'GET' && error === 'net::ERR_ABORTED'
@@ -281,7 +282,18 @@ if (inventoryFile) test.describe('published route inventory', () => {
                       && video.currentSrc === value && successful.includes(value)
                       && video.error === null && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA
                       && video.videoWidth > 0 && video.videoHeight > 0)
-                    return video ? { element: 'video', poster: video.poster, current_src: video.currentSrc, ready_state: video.readyState, video_width: video.videoWidth, video_height: video.videoHeight, error: null } : null
+                    if (video) return { element: 'video', poster: video.poster, current_src: video.currentSrc, ready_state: video.readyState, video_width: video.videoWidth, video_height: video.videoHeight, error: null }
+                    // A poster is an image its rendered video owns; Chromium can
+                    // cancel a second fetch of one this page already received.
+                    const posterOwner = [...document.querySelectorAll('video')].find(video => video.getClientRects().length
+                      && video.poster === value && successful.includes(value))
+                    if (!posterOwner) return null
+                    const poster = new Image()
+                    poster.src = value
+                    await poster.decode()
+                    return poster.naturalWidth > 0 && poster.naturalHeight > 0
+                      ? { element: 'video-poster', poster: value, current_src: posterOwner.currentSrc, natural_width: poster.naturalWidth, natural_height: poster.naturalHeight }
+                      : null
                   }, { value: failed.url(), successful: [...successfulResponses.keys()] })
                   : null
                 // Navigation cancels the departed document's outstanding byte
