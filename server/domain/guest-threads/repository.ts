@@ -18,6 +18,35 @@ import { HTTPError } from 'nitro'
 const SOURCE_GUEST_NAME_SQL = "json_extract(gt.payload_json, '$.guest.name')"
 const REPLY_CHANNEL_SQL = "CASE WHEN EXISTS (SELECT 1 FROM channel_threads ct WHERE ct.request_id = gt.id AND ct.organization_id = gt.organization_id) OR EXISTS (SELECT 1 FROM stays st WHERE st.request_id = gt.id AND st.organization_id = gt.organization_id AND st.owner = 'channel') THEN 'airbnb' ELSE 'email' END"
 
+function unansweredGuestMessagesSql(threadId: string, afterCancellation = false): string {
+  return `EXISTS (
+    SELECT 1 FROM activity_entries guest_message
+    WHERE guest_message.request_id = ${threadId}
+      AND guest_message.kind = 'message' AND guest_message.actor_kind = 'guest'
+      ${afterCancellation ? `AND NOT EXISTS (
+        SELECT 1 FROM activity_entries cancelled
+        WHERE cancelled.request_id = guest_message.request_id AND cancelled.kind = 'operation'
+          AND cancelled.event_name IN ('booking.cancel', 'booking.reject', 'reservation.cancel', 'reservation.reject')
+          AND json_extract(cancelled.payload_json, '$.afterStatus') = 'cancelled'
+          AND cancelled.sequence >= guest_message.sequence
+      )` : ''}
+      AND NOT EXISTS (
+        SELECT 1 FROM activity_entries reply
+        WHERE reply.request_id = guest_message.request_id
+          AND reply.kind = 'message' AND reply.actor_kind = 'member'
+          AND reply.event_name = 'thread.member_reply' AND reply.sequence > guest_message.sequence
+          AND (reply.channel = 'web' OR EXISTS (
+            SELECT 1 FROM guest_thread_deliveries delivery
+            WHERE delivery.entry_id = reply.id AND delivery.status IN ('accepted', 'sent', 'delivered', 'read')
+          ))
+      )
+  )`
+}
+
+// Old guest cancellations left the request open. The cancellation ends that
+// review task; only an unanswered message after its ledger fact reopens work.
+const CANCELLED_ATTENTION_SQL = `(gt.kind NOT IN ('booking', 'reservation') OR op.status IS NOT 'cancelled' OR ${unansweredGuestMessagesSql('gt.id', true)})`
+
 async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
   if (!principal || await roleAllows({ ...principal, permissions: { operations: ['read'] } })) return { sql: '', params: [] as string[] }
   await assertRoleAllows({ ...principal, permissions: { operations: ['assigned'] } })
@@ -289,6 +318,7 @@ export async function listGuestThreads(
   if (opts.conversationState) {
     where += ' AND gt.conversation_state = ?'
     params.push(opts.conversationState)
+    if (opts.conversationState === 'needs_attention') where += ` AND ${CANCELLED_ATTENTION_SQL}`
   }
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
@@ -423,6 +453,7 @@ export async function listOrganizationGuestThreads(
   if (opts.conversationState) {
     where += ' AND gt.conversation_state = ?'
     params.push(opts.conversationState)
+    if (opts.conversationState === 'needs_attention') where += ` AND ${CANCELLED_ATTENTION_SQL}`
   }
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
@@ -581,20 +612,7 @@ export async function updateThreadProjectionIfLatestEntry(
               AND later.sequence > projected.sequence
           )
       )
-      AND (? = 0 OR NOT EXISTS (
-        SELECT 1 FROM activity_entries guest_message
-        WHERE guest_message.request_id = requests.id
-          AND guest_message.kind = 'message' AND guest_message.actor_kind = 'guest'
-          AND NOT EXISTS (
-            SELECT 1 FROM activity_entries reply
-            JOIN guest_thread_deliveries delivery ON delivery.entry_id = reply.id
-            WHERE reply.request_id = guest_message.request_id
-              AND reply.kind = 'message' AND reply.actor_kind = 'member'
-              AND reply.event_name = 'thread.member_reply'
-              AND reply.sequence > guest_message.sequence
-              AND delivery.status IN ('accepted', 'sent', 'delivered', 'read')
-          )
-      ))
+      AND (? = 0 OR NOT ${unansweredGuestMessagesSql('requests.id')})
   `, [update.conversationState, update.conversationState, entryId, entryId, threadId, entryId, update.preserveUnansweredGuestMessages ? 1 : 0])
 }
 

@@ -1,9 +1,9 @@
 <template>
   <!-- One stay at a place to stay: who is coming, when, and what the host has collected. -->
   <!-- Inside the guest thread's leaf, which owns the column, it is the body alone. -->
-  <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="embedded ? {} : { id: 'stay-details', title, column: 'leaf' }">
+  <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="embedded ? {} : { id: 'stay-details', title }">
     <UAlert v-if="error" color="error" variant="soft" title="This stay could not be loaded" :description="getErrorMessage(error, 'Stay request failed')" />
-    <div v-else-if="stay">
+    <div v-else-if="stay" class="@container min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <!-- A channel stay overlapping another is the host's to resolve; it never resolves itself. -->
       <UAlert
@@ -26,86 +26,92 @@
       <p class="mt-1 text-base text-muted">{{ stayDates }} · {{ partyLabel }}</p>
       <UBadge class="mt-3" :color="stay.status === 'cancelled' ? 'neutral' : 'success'" variant="soft" :label="statusLabel" />
 
-      <dl class="mt-6 divide-y divide-default border-y border-default">
-        <div v-for="row in rows" :key="row.label" class="flex justify-between gap-4 py-4">
-          <dt class="text-base text-muted">{{ row.label }}</dt>
-          <dd class="text-right text-base text-highlighted">{{ row.value }}</dd>
+      <div class="mt-6 grid gap-x-12 gap-y-8" :class="embedded ? undefined : '@3xl:grid-cols-2'">
+        <div class="min-w-0">
+          <dl class="divide-y divide-default border-y border-default">
+            <div v-for="row in rows" :key="row.label" class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4 py-4">
+              <dt class="min-w-0 break-words text-base text-muted">{{ row.label }}</dt>
+              <dd class="min-w-0 break-words text-right text-base text-highlighted [overflow-wrap:anywhere]">{{ row.value }}</dd>
+            </div>
+          </dl>
+
+          <section v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" class="mt-8">
+            <h2 class="text-xl font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
+            <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
+            <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('site.experience_detail.open_in_maps')" />
+          </section>
+
+          <section v-if="personalScope && home?.arrival_guide" class="mt-8 border-t border-default pt-8">
+            <h2 class="mb-6 text-xl font-semibold text-highlighted">{{ t('stay.arrival_guide') }}</h2>
+            <StayArrivalGuideView :guide="home.arrival_guide" :rules="home.house_rules" :safety="home.safety" />
+          </section>
+
         </div>
-      </dl>
+        <div class="min-w-0">
+          <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
+          <template v-if="policy">
+            <h2 class="text-xl font-semibold text-highlighted">Cancellation policy</h2>
+            <p class="mt-1 text-base text-highlighted">{{ policy.label }}</p>
+            <ul class="mt-2 space-y-1 text-base text-muted">
+              <li v-for="term in policy.terms" :key="term">{{ term }}</li>
+            </ul>
+          </template>
 
-      <section v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" class="mt-8">
-        <h2 class="text-xl font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
-        <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
-        <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('site.experience_detail.open_in_maps')" />
-      </section>
+          <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
+          <template v-if="!personalScope && stay.online_payment">
+            <h2 class="mt-8 text-xl font-semibold text-highlighted">Paid on your site</h2>
+            <p class="mt-1 text-base text-muted">{{ money(stay.online_payment.captured_minor) }}{{ stay.online_payment.refunded_minor ? ` · ${money(stay.online_payment.refunded_minor)} refunded` : '' }}</p>
+            <div class="mt-4 divide-y divide-default border-y border-default">
+              <NuxtLink :to="`${paymentPath}`" class="flex items-center gap-4 py-4">
+                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">View payment</span>
+                <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </NuxtLink>
+              <NuxtLink v-if="manage && stay.online_payment.captured_minor > stay.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: stay.online_payment.payment_id } }" class="flex items-center gap-4 py-4">
+                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
+                <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+              </NuxtLink>
+            </div>
+          </template>
 
-      <section v-if="personalScope && home?.arrival_guide" class="mt-8 border-t border-default pt-8">
-        <h2 class="mb-6 text-xl font-semibold text-highlighted">{{ t('stay.arrival_guide') }}</h2>
-        <StayArrivalGuideView :guide="home.arrival_guide" :rules="home.house_rules" :safety="home.safety" />
-      </section>
+          <template v-if="personalScope">
+            <UButton v-if="cancellation" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancelAsGuest" />
+          </template>
+          <template v-else-if="stay.owner === 'app'">
+            <h2 class="mt-8 text-xl font-semibold text-highlighted">Payments</h2>
+            <p class="mt-1 text-sm text-muted">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
+            <ul v-if="stay.payments.length" class="mt-4 divide-y divide-default border-y border-default">
+              <li v-for="payment in stay.payments" :key="payment.id" class="flex items-center gap-4 py-3">
+                <span class="min-w-0 flex-1">
+                  <span class="block text-base text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
+                  <span class="block text-sm text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
+                </span>
+                <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
+              </li>
+            </ul>
+            <p v-else class="mt-4 text-base text-muted">No payments recorded.</p>
 
-      <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
-      <template v-if="policy">
-        <h2 class="mt-8 text-xl font-semibold text-highlighted">Cancellation policy</h2>
-        <p class="mt-1 text-base text-highlighted">{{ policy.label }}</p>
-        <ul class="mt-2 space-y-1 text-base text-muted">
-          <li v-for="term in policy.terms" :key="term">{{ term }}</li>
-        </ul>
-      </template>
-
-      <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
-      <template v-if="!personalScope && stay.online_payment">
-        <h2 class="mt-8 text-xl font-semibold text-highlighted">Paid on your site</h2>
-        <p class="mt-1 text-base text-muted">{{ money(stay.online_payment.captured_minor) }}{{ stay.online_payment.refunded_minor ? ` · ${money(stay.online_payment.refunded_minor)} refunded` : '' }}</p>
-        <div class="mt-4 divide-y divide-default border-y border-default">
-          <NuxtLink :to="`${paymentPath}`" class="flex items-center gap-4 py-4">
-            <span class="min-w-0 flex-1 text-base font-medium text-highlighted">View payment</span>
-            <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-          </NuxtLink>
-          <NuxtLink v-if="manage && stay.online_payment.captured_minor > stay.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: stay.online_payment.payment_id } }" class="flex items-center gap-4 py-4">
-            <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
-            <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
-          </NuxtLink>
+            <UForm v-if="manage" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
+              <div class="grid gap-4 sm:grid-cols-2">
+                <UFormField :label="`Amount (${stay.currency})`" name="amount" description="Negative for a refund." required>
+                  <UInput v-model="draft.amount" inputmode="decimal" class="w-full" />
+                </UFormField>
+                <UFormField label="Method" name="method" required>
+                  <USelect v-model="draft.method" :items="methods" class="w-full" />
+                </UFormField>
+                <UFormField label="Date" name="paid_on" required>
+                  <UInput v-model="draft.paid_on" type="date" class="w-full" />
+                </UFormField>
+                <UFormField label="Reference" name="reference">
+                  <UInput v-model="draft.reference" class="w-full" />
+                </UFormField>
+              </div>
+              <UButton type="submit" label="Record payment" :loading="busy === 'record'" :disabled="!draft.amount.trim() || !draft.paid_on" />
+            </UForm>
+            <UButton v-if="manage && stay.status !== 'cancelled'" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
+          </template>
+          <p v-else-if="!personalScope" class="mt-8 text-base text-muted">{{ channelName }} collected payment for this stay. Change or cancel it on {{ channelName }}.</p>
         </div>
-      </template>
-
-      <template v-if="personalScope">
-        <UButton v-if="cancellation" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancelAsGuest" />
-      </template>
-      <template v-else-if="stay.owner === 'app'">
-        <h2 class="mt-8 text-xl font-semibold text-highlighted">Payments</h2>
-        <p class="mt-1 text-sm text-muted">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
-        <ul v-if="stay.payments.length" class="mt-4 divide-y divide-default border-y border-default">
-          <li v-for="payment in stay.payments" :key="payment.id" class="flex items-center gap-4 py-3">
-            <span class="min-w-0 flex-1">
-              <span class="block text-base text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
-              <span class="block text-sm text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
-            </span>
-            <UButton v-if="manage" icon="i-lucide-trash-2" color="neutral" variant="ghost" :aria-label="`Delete payment of ${money(payment.amount_minor)}`" :loading="busy === payment.id" @click="deletePayment(payment.id)" />
-          </li>
-        </ul>
-        <p v-else class="mt-4 text-base text-muted">No payments recorded.</p>
-
-        <UForm v-if="manage" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
-          <div class="grid gap-4 sm:grid-cols-2">
-            <UFormField :label="`Amount (${stay.currency})`" name="amount" description="Negative for a refund." required>
-              <UInput v-model="draft.amount" inputmode="decimal" class="w-full" />
-            </UFormField>
-            <UFormField label="Method" name="method" required>
-              <USelect v-model="draft.method" :items="methods" class="w-full" />
-            </UFormField>
-            <UFormField label="Date" name="paid_on" required>
-              <UInput v-model="draft.paid_on" type="date" class="w-full" />
-            </UFormField>
-            <UFormField label="Reference" name="reference">
-              <UInput v-model="draft.reference" class="w-full" />
-            </UFormField>
-          </div>
-          <UButton type="submit" label="Record payment" :loading="busy === 'record'" :disabled="!draft.amount.trim() || !draft.paid_on" />
-        </UForm>
-        <UButton v-if="manage && stay.status !== 'cancelled'" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
-      </template>
-      <p v-else-if="!personalScope" class="mt-8 text-base text-muted">{{ channelName }} collected payment for this stay. Change or cancel it on {{ channelName }}.</p>
+      </div>
     </div>
   </component>
 </template>

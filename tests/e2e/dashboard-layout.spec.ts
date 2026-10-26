@@ -302,6 +302,8 @@ test.describe('dashboard pane hierarchy', () => {
     let actor: Member | undefined
     let teamId: string | null = null
     let roleChanged = false
+    let originalProfile: MemberSchedule = null
+    let photoAttempted = false
     const failures: unknown[] = []
     const readLocation = async () => {
       const response = await page.request.get(independentEndpoint)
@@ -405,9 +407,119 @@ test.describe('dashboard pane hierarchy', () => {
       const teamForbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: actor.id, assigned_team_id: null } })
       expect(teamForbidden.status(), await teamForbidden.text()).toBe(403)
       expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
+
+      // An administrator edits this existing member's portrait through the same
+      // media library, without initializing Hours or altering calendar facts.
+      const schedulingEndpoint = `/api/organizations/${organizationId}/members/${actor.id}/scheduling`
+      const editingSessionRead = await page.request.get('/api/auth/get-session')
+      expect(editingSessionRead.status(), await editingSessionRead.text()).toBe(200)
+      const editingUserId = (await editingSessionRead.json() as { user: { id: string } }).user.id
+      const initialProfileRead = await page.request.get(schedulingEndpoint)
+      expect(initialProfileRead.status(), await initialProfileRead.text()).toBe(200)
+      originalProfile = (await initialProfileRead.json() as { scheduling: MemberSchedule }).scheduling
+      const unchangedProfile = originalProfile ? {
+        ...originalProfile,
+      } : { member_id: actor.id, organization_id: organizationId, timezone: null, weekly: null, time_off: null,
+        public_name: null, public_photo_url: null, public_bio: null, public_approved: 0,
+        calendar_account_id: null, calendar_ids: [], calendar_status: 'internal', calendar_conflict_count: 0, calendar_conflicts: [],
+        busy_from: null, busy_until: null, busy_checked_at: null, busy_error: null }
+      const mediaRead = await page.request.get(`/api/editor/organizations/${organizationId}/media`, { params: { kind: 'image', limit: 100 } })
+      expect(mediaRead.status(), await mediaRead.text()).toBe(200)
+      const media = (await mediaRead.json() as { media: Array<{ id: string; kind: string; public_url?: string; alt_text?: string; file_name?: string }> }).media
+      const availablePhotos = media.filter(asset => asset.kind === 'image' && asset.public_url?.startsWith('https://')
+        && asset.public_url !== originalProfile?.public_photo_url
+        && media.filter(other => (other.alt_text || other.file_name || other.kind) === (asset.alt_text || asset.file_name || asset.kind)).length === 1)
+      const photo = availablePhotos[0]
+      const attemptedPhoto = availablePhotos.find(asset => asset.public_url !== photo?.public_url)
+      expect(photo, 'The existing tenant library contains a ready profile image').toBeDefined()
+      expect(attemptedPhoto, 'The existing tenant library contains a second distinct ready image').toBeDefined()
+      if (!photo || !attemptedPhoto) throw new Error('The demo photo library needs its existing distinct ready images')
+      await open(page, `${ORG}/team/${actor.id}/profile/photo`)
+      const portrait = page.locator('#dashboard-panel-member-photo')
+      await portrait.getByRole('button', { name: originalProfile?.public_photo_url ? 'Change photo' : 'Add a photo', exact: true }).click()
+      const picker = page.getByRole('dialog', { name: 'Select profile photo', exact: true })
+      await picker.getByRole('button', { name: photo.alt_text || photo.file_name || photo.kind, exact: true }).click()
+      await picker.getByRole('button', { name: 'Done', exact: true }).click()
+      await expect(portrait.locator('img')).toHaveAttribute('src', photo.public_url!)
+      const avatarBounds = await portrait.locator('img').boundingBox()
+      expect(avatarBounds?.width).toBeLessThanOrEqual(96)
+      expect(avatarBounds?.height).toBeLessThanOrEqual(96)
+      const photoWrite = page.waitForResponse(response => new URL(response.url()).pathname === schedulingEndpoint && response.request().method() === 'PUT')
+      photoAttempted = true
+      await portrait.getByRole('button', { name: 'Save', exact: true }).click()
+      const photoResponse = await photoWrite
+      expect(photoResponse.status(), await photoResponse.text()).toBe(200)
+      expect(photoResponse.request().postDataJSON()).toEqual({ public_photo_url: photo.public_url, expected_updated_at: originalProfile?.updated_at ?? null })
+      const photoProfileRead = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
+      expect(photoProfileRead.status(), await photoProfileRead.text()).toBe(200)
+      type PublicProfile = Pick<NonNullable<MemberSchedule>, 'member_id' | 'updated_at' | 'public_name' | 'public_photo_url' | 'public_bio' | 'public_approved'>
+      const savedProfile = mcpData<{ profile: PublicProfile }>(await photoProfileRead.json()).profile
+      expect(savedProfile).toEqual({ member_id: actor.id, updated_at: savedProfile.updated_at,
+        public_name: unchangedProfile.public_name, public_photo_url: photo.public_url, public_bio: unchangedProfile.public_bio, public_approved: 0 })
+      const photoNativeRead = await memberContext.request.get(schedulingEndpoint)
+      expect(photoNativeRead.status(), await photoNativeRead.text()).toBe(200)
+      const photoNative = (await photoNativeRead.json() as { scheduling: NonNullable<MemberSchedule> }).scheduling
+      expect(photoNative).toEqual({ ...unchangedProfile, public_photo_url: photo.public_url, public_approved: 0, updated_at: savedProfile.updated_at, updated_by: editingUserId })
+      await expect(portrait.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+
+      // A concurrent saved photo replaces the pending asset after recovery;
+      // reopening the picker must not label that saved URL with the old asset.
+      await portrait.getByRole('button', { name: 'Change photo', exact: true }).click()
+      await picker.getByRole('button', { name: attemptedPhoto.alt_text || attemptedPhoto.file_name || attemptedPhoto.kind, exact: true }).click()
+      await picker.getByRole('button', { name: 'Done', exact: true }).click()
+      const concurrentWrite = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: {
+        organization_id: organizationId, member_id: actor.id, public_photo_url: originalProfile?.public_photo_url ?? null, expected_updated_at: savedProfile.updated_at,
+      } })
+      expect(concurrentWrite.status(), await concurrentWrite.text()).toBe(200)
+      const concurrent = mcpData<{ profile: PublicProfile }>(await concurrentWrite.json()).profile
+      expect(concurrent).toEqual({ ...savedProfile, public_photo_url: originalProfile?.public_photo_url ?? null, updated_at: concurrent.updated_at })
+      expect(concurrent.updated_at).not.toBe(savedProfile.updated_at)
+      const conflictWrite = page.waitForResponse(response => new URL(response.url()).pathname === schedulingEndpoint && response.request().method() === 'PUT')
+      await portrait.getByRole('button', { name: 'Save', exact: true }).click()
+      const conflictResponse = await conflictWrite
+      expect(conflictResponse.status(), await conflictResponse.text()).toBe(409)
+      expect(conflictResponse.request().postDataJSON()).toEqual({ public_photo_url: attemptedPhoto.public_url, expected_updated_at: savedProfile.updated_at })
+      await expect(portrait.locator('img')).toHaveAttribute('src', attemptedPhoto.public_url!)
+      await expect(portrait.getByRole('button', { name: 'Retry', exact: true })).toBeDisabled()
+      const savedValuesRead = page.waitForResponse(response => new URL(response.url()).pathname === schedulingEndpoint && response.request().method() === 'GET')
+      await portrait.getByRole('button', { name: 'Use saved values', exact: true }).click()
+      const savedValuesResponse = await savedValuesRead
+      expect(savedValuesResponse.status(), await savedValuesResponse.text()).toBe(200)
+      expect((await savedValuesResponse.json()).scheduling).toEqual({ ...photoNative, public_photo_url: concurrent.public_photo_url, public_approved: 0, updated_at: concurrent.updated_at, updated_by: actor.userId })
+      if (concurrent.public_photo_url) await expect(portrait.locator('img')).toHaveAttribute('src', concurrent.public_photo_url)
+      else await expect(portrait.locator('img')).toHaveCount(0)
+      await expect(portrait.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await portrait.getByRole('button', { name: concurrent.public_photo_url ? 'Change photo' : 'Add a photo', exact: true }).click()
+      await expect(picker.locator('button[aria-pressed="true"]')).toHaveCount(0)
+      await expect(picker.getByRole('button', { name: 'Done', exact: true })).toBeDisabled()
+      await picker.getByRole('button', { name: 'Cancel', exact: true }).click()
+      const recoveredRead = await mcpRequest(memberContext.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
+      expect(recoveredRead.status(), await recoveredRead.text()).toBe(200)
+      expect(mcpData<{ profile: PublicProfile }>(await recoveredRead.json()).profile).toEqual(concurrent)
     } catch (error) {
       failures.push(error)
     } finally {
+      try {
+        if (photoAttempted && actor) {
+          const schedulingEndpoint = `/api/organizations/${organizationId}/members/${actor.id}/scheduling`
+          const currentRead = await page.request.get(schedulingEndpoint)
+          expect(currentRead.status(), await currentRead.text()).toBe(200)
+          const current = (await currentRead.json() as { scheduling: MemberSchedule }).scheduling
+          if (current) {
+            const restored = await page.request.put(schedulingEndpoint, { data: {
+              public_name: originalProfile?.public_name ?? null, public_photo_url: originalProfile?.public_photo_url ?? null,
+              public_bio: originalProfile?.public_bio ?? null, public_approved: Boolean(originalProfile?.public_approved), expected_updated_at: current.updated_at,
+            } })
+            expect(restored.status(), await restored.text()).toBe(200)
+            const readback = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
+            expect(readback.status(), await readback.text()).toBe(200)
+            expect(mcpData<{ profile: { public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number } }>(await readback.json()).profile).toMatchObject({
+              public_name: originalProfile?.public_name ?? null, public_photo_url: originalProfile?.public_photo_url ?? null,
+              public_bio: originalProfile?.public_bio ?? null, public_approved: originalProfile?.public_approved ?? 0,
+            })
+          } else expect(originalProfile).toBeNull()
+        }
+      } catch (error) { failures.push(error) }
       try {
         if (original) {
           const restored = await page.request.patch(endpoint, { params: { org }, data: {

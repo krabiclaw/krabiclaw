@@ -661,6 +661,28 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page.getByRole('heading', { name: 'Currently hosting', exact: true })).toBeVisible()
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
+  const detailPanel = page.locator('#dashboard-panel-booking-details')
+  const priorViewport = page.viewportSize()!
+  for (const width of [1728, 390]) {
+    await page.setViewportSize({ width, height: 940 })
+    const identity = detailPanel.getByRole('heading', { level: 2 }).first()
+    const message = detailPanel.getByRole('link', { name: 'Message guest', exact: true })
+    await expect(identity).toBeInViewport()
+    await expect(message).toBeInViewport()
+    const pictures = detailPanel.locator('img')
+    expect(await pictures.evaluateAll(images => images.every(image => {
+      const bounds = image.getBoundingClientRect()
+      return bounds.width <= 80 && bounds.height <= 80
+    })), 'record imagery stays a thumbnail rather than pushing the identity and actions down').toBe(true)
+    const date = (await detailPanel.getByText('Date', { exact: true }).boundingBox())!
+    const policy = (await detailPanel.getByRole('button', { name: /^Cancellation policy/ }).boundingBox())!
+    expect(policy.x > date.x + 100, 'supporting details use the second column only when the actual pane has room').toBe(width === 1728)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    const capture = testInfo.outputPath(`reservation-details-${width}.png`)
+    await page.screenshot({ path: capture, fullPage: false })
+    await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
+  }
+  await page.setViewportSize(priorViewport)
   await page.getByRole('link', { name: guestName }).last().click()
   await expect(page.getByText(guestEmail, { exact: true })).toBeVisible()
   await page.goBack()

@@ -13,7 +13,7 @@
         empty-icon="i-lucide-image"
         add-label="Add photos"
         selection-title="Select photos"
-        grid-class="grid grid-cols-3 gap-3 sm:grid-cols-5 xl:grid-cols-7"
+        grid-class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,9rem),1fr))] gap-3"
         :removing="galleryMutating"
         @add="openAttachModal"
         @open="openPhoto"

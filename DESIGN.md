@@ -1084,7 +1084,13 @@ price per variant and never offers a product-level amount the server has
 nowhere to put.
 
 **The picture leads.** Rows lead with a thumbnail; a leaf leads with the image
-large. When there is no image, show a muted icon in the *same footprint* so a
+large when editing the photo itself. A booking, stay or payment summary leads
+with its identity, status, dates and actions; any contextual image is a compact
+thumbnail that contains brand artwork without cropping it. Record summaries
+use the frame rather than a single-field width, and their facts and supporting
+details split only when their actual pane has room. Messages keeps its embedded
+summary in one column. Member portraits use avatars, and photo grids respond to
+their pane's width. When there is no image, show a muted icon in the *same footprint* so a
 list does not reflow between rows that have one and rows that do not.
 
 **Unsupported routes 404, and so does a record that is not there.** The level

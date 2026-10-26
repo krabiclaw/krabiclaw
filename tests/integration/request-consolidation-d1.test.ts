@@ -5,7 +5,9 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, cancelBookingRequest, getGuestRequest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
-import { getGuestThreadOperationSummary, listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
+import { getGuestThreadOperationSummary, listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
+import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
+import { createDeliveryReceipt, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { resolveGuestThreadMailbox } from '../../server/domain/guest-threads/mailbox.ts'
 import { claimReservation, requireLocationReservationConfig, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { CapacityUnavailableError, claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
@@ -135,6 +137,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     }).then(() => true, () => false)
     assert.equal(secondClaim, false)
     assert.equal(await db.prepare('SELECT count(*) FROM reservations').first('count(*)'), 1)
+    await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Could we sit outside?', occurredAt: '2097-12-31T00:00:00.000Z' })
 
     // The token is spendable exactly once, however many times it is presented.
     const cancellations = await Promise.all([1, 2].map(() => cancelBookingRequest(db, {
@@ -147,6 +150,42 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     assert.equal(await db.prepare('SELECT status FROM reservations WHERE request_id=?').bind(reservationThread).first('status'), 'cancelled')
     const cancelledThread = await getGuestRequest(db, reservationThread)
     assert.equal(cancelledThread?.payload.cancellation.used_at, '2098-01-01T00:00:00.000Z')
+    assert.equal(cancelledThread?.conversation_state, 'resolved')
+    assert.equal(cancelledThread?.resolved_at, '2098-01-01T00:00:00.000Z')
+
+    // The legacy bug left this exact request state behind after cancellation.
+    // Reading attention must consult its real cancellation fact, without
+    // rewriting the row or treating its older guest message as new work.
+    await db.prepare("UPDATE requests SET conversation_state='needs_attention',resolved_at=NULL WHERE id=?").bind(reservationThread).run()
+    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [])
+    assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'needs_attention')
+    assert.equal((await listGuestThreads(db, ORG, { userId: ACTOR })).find(thread => thread.id === reservationThread)?.operationalStatus, 'cancelled')
+
+    const guestReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'When will my refund arrive?', occurredAt: '2098-01-02T00:00:00.000Z' })
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, guestReply.id, { conversationState: 'needs_attention' })
+    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [reservationThread])
+    const retry = await cancelBookingRequest(db, { id: reservationThread, organizationId: ORG, kind: 'reservation', tokenHash: 'hash', now: '2098-01-03T00:00:00.000Z' })
+    assert.equal(retry?.changed, false)
+    assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'needs_attention')
+    assert.equal((await getGuestRequest(db, reservationThread))?.resolved_at, null)
+    assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id=? AND event_name='reservation.cancel'").bind(reservationThread).first('count(*)'), 1)
+
+    // A saved reply that failed to send does not answer the guest, even
+    // though it is now the last message in the ledger.
+    const failedReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'email', eventName: 'thread.member_reply', body: 'Your refund is on its way.', occurredAt: '2098-01-04T00:00:00.000Z' })
+    const receipt = await createDeliveryReceipt(db, { entryId: failedReply.id, channel: 'email', provider: 'log_only', purpose: 'member_reply', idempotencyKey: 'cancelled-reply-delivery' })
+    await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'failed', error: 'Delivery refused' })
+    const stillNeedsReply = await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })
+    assert.deepEqual(stillNeedsReply.map(thread => thread.id), [reservationThread])
+    assert.equal(stillNeedsReply[0]?.latestMessageFromGuest, false)
+    await recordDeliveryOutcome(db, { deliveryId: receipt.id, status: 'sent', providerMessageId: 'delivered-cancelled-reply' })
+    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [])
+    const nextQuestion = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Thank you. Can you send the receipt?', occurredAt: '2098-01-05T00:00:00.000Z' })
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, nextQuestion.id, { conversationState: 'needs_attention' })
+    const webReply = await appendEntry(db, { threadId: reservationThread, kind: 'message', actorKind: 'member', actorUserId: ACTOR, channel: 'web', eventName: 'thread.member_reply', body: 'Here is your receipt.', occurredAt: '2098-01-06T00:00:00.000Z' })
+    assert.deepEqual((await listGuestThreads(db, ORG, { userId: ACTOR, conversationState: 'needs_attention' })).map(thread => thread.id), [])
+    await updateThreadProjectionIfLatestEntry(db, reservationThread, webReply.id, { conversationState: 'resolved', preserveUnansweredGuestMessages: true })
+    assert.equal((await getGuestRequest(db, reservationThread))?.conversation_state, 'resolved', 'a committed web reply needs no external delivery receipt')
 
     // A notification is acknowledged only by someone the visibility filter
     // admits, and the acknowledgement is an entry of its own.
