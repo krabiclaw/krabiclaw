@@ -42,7 +42,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
   },
   {
     key: 'google-maps', name: 'Google Maps sync', logo: 'i-logos-google-maps', group: 'sync', entitlement: 'google_places',
-    purpose: 'Hours, photos, rating and reviews from each location’s Google Maps listing, refreshed weekly.',
+    purpose: 'Hours, photos, rating and reviews from each location’s Google Maps listing; the rating and reviews refresh weekly.',
   },
   {
     key: 'google-analytics', name: 'Google Analytics', logo: 'i-logos-google-analytics', group: 'connection',

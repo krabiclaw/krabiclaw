@@ -1,7 +1,7 @@
 import { defineHandler } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
 import { jsonResponse } from '~/server/utils/api-response'
-import { readCalendarSync, setCalendarReschedules } from '~/server/utils/google-calendar'
+import { readCalendarSync, setCalendarReschedules } from '~/server/utils/google-calendar-inbound'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 
 /** The one inbound choice: whether an event moved in Google moves its booking. Deletions are never applied. */

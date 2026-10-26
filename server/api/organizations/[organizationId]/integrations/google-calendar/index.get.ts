@@ -2,7 +2,8 @@ import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 import { jsonResponse } from '~/server/utils/api-response'
 import { queryFirst } from '~/server/db'
-import { readCalendarIntegration, readCalendarSync } from '~/server/utils/google-calendar'
+import { readCalendarIntegration } from '~/server/utils/google-calendar'
+import { readCalendarSync } from '~/server/utils/google-calendar-inbound'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 export default defineHandler(async event => {
  const id = getRouterParam(event, 'organizationId')

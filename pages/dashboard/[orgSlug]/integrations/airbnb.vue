@@ -7,8 +7,8 @@
     :error="panelError"
     :footer="false"
   >
-    <!-- The sync is Business. A connection made under a lapsed plan can still be disconnected. -->
-    <OfferCard v-if="!isConnected && !entitled" :offer="offer('airbnb_sync')" />
+    <!-- The sync is Business. A connection made under a lapsed plan, in whatever state, can still be disconnected. -->
+    <OfferCard v-if="!entitled && (!statusData || statusData.status === 'not_connected')" :offer="offer('airbnb_sync')" />
     <IntegrationLeaf
       v-else
       integration="airbnb"

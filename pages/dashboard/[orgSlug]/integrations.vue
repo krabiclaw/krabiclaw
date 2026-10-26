@@ -7,12 +7,11 @@
     says which plan includes it; its leaf makes the offer.
   -->
   <DashboardIndexPanel id="organization-integrations" title="Connections" :auto-open="items[0]?.to ?? null">
-    <UAlert v-if="error" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="error.message" />
-    <template v-else>
-      <p class="mb-6 text-base text-muted">Connect the accounts you already use. A sync keeps both sides in step for you.</p>
-      <UTabs v-model="plan" :items="planTabs" :content="false" color="neutral" variant="pill" size="sm" class="mb-6" />
-      <EditorNavigationList :groups="groups" :active-item="level.child.value" />
-    </template>
+    <!-- A summary that could not be read says so; the rows stay, each with what it knows, so a connection can still be opened and repaired. -->
+    <UAlert v-if="error" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="error.message" />
+    <p v-else class="mb-6 text-base text-muted">Connect the accounts you already use. A sync keeps both sides in step for you.</p>
+    <UTabs v-model="plan" :items="planTabs" :content="false" color="neutral" variant="pill" size="sm" class="mb-6" />
+    <EditorNavigationList :groups="groups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
 <script lang="ts">

@@ -1,5 +1,5 @@
 <template>
- <DashboardLeafPanel id="personal-google-calendar" icon="i-logos-google-calendar" title="Google Calendar sync" lead="Busy on your calendar? Booked out on your website. New bookings show up on your calendar." :footer="entitled && Boolean(editor.record.value?.calendar_account_id)" :disabled="enabled === Boolean(editor.record.value?.calendar_ids.length)" :saving="editor.saving.value" :error="editor.error.value || connection.error.value || editor.record.value?.busy_error || ''" @cancel="revert" @save="save">
+ <DashboardLeafPanel id="personal-google-calendar" icon="i-logos-google-calendar" title="Google Calendar sync" lead="Busy on your calendar? Booked out on your website. New bookings show up on your calendar." :footer="Boolean(editor.record.value?.calendar_account_id) && (entitled || Boolean(editor.record.value?.calendar_ids.length))" :disabled="enabled === Boolean(editor.record.value?.calendar_ids.length)" :saving="editor.saving.value" :error="editor.error.value || connection.error.value || editor.record.value?.busy_error || ''" @cancel="revert" @save="save">
   <!-- Nothing to edit until the schedule has been read; a failed read is the error above. -->
   <template v-if="editor.loaded.value">
     <!-- The sync is Business. A selection kept from a lapsed plan can still be turned off. -->

@@ -1,6 +1,6 @@
 import { defineHandler } from 'nitro'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
-import { pullCalendarChanges, resolveCalendarChannel } from '~/server/utils/google-calendar'
+import { pullCalendarChanges, resolveCalendarChannel } from '~/server/utils/google-calendar-inbound'
 
 /**
  * Google's push notification for a business calendar. It carries no event

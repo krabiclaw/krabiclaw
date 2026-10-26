@@ -4,7 +4,8 @@ import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
 import { claimSessionCapacity } from '../../server/utils/availability.ts'
-import { ensureCalendarWatch, pullCalendarChanges, readCalendarSync, resolveCalendarChannel, setCalendarReschedules, stopCalendarWatch, storeCalendarSelection, syncCalendarOrganization } from '../../server/utils/google-calendar.ts'
+import { storeCalendarSelection, syncCalendarOrganization } from '../../server/utils/google-calendar.ts'
+import { ensureCalendarWatch, pullCalendarChanges, readCalendarSync, resolveCalendarChannel, setCalendarReschedules, stopCalendarWatch } from '../../server/utils/google-calendar-inbound.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 /**

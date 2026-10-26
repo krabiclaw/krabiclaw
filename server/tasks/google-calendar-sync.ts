@@ -1,7 +1,8 @@
 import { refreshMemberBusy } from '~/server/domain/member-scheduling'
 import { queryAll } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { ensureCalendarWatch, pullCalendarChanges, runCalendarCleanupJobs, syncCalendarOrganization } from '~/server/utils/google-calendar'
+import { runCalendarCleanupJobs, syncCalendarOrganization } from '~/server/utils/google-calendar'
+import { ensureCalendarWatch, pullCalendarChanges } from '~/server/utils/google-calendar-inbound'
 import { filterEntitledRows } from '~/server/utils/billing-access'
 import { defineScheduledTask } from '~/server/utils/scheduled-task'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
@@ -19,18 +20,18 @@ export default defineScheduledTask({
     const results = []
     const failures = [...busyFailures]
     for (const organization of organizations) {
+      const entry: Record<string, unknown> = { organization_id: organization.organization_id }
+      results.push(entry)
       try {
-        const result=await syncCalendarOrganization(env, organization.organization_id)
-        results.push({organization_id:organization.organization_id,...result})
-        if(result.failed)failures.push(`${organization.organization_id}: ${result.failed} Google Calendar event(s) failed; inspect the integration's last_error`)
+        Object.assign(entry, await syncCalendarOrganization(env, organization.organization_id))
+        if(entry.failed)failures.push(`${organization.organization_id}: ${entry.failed} Google Calendar event(s) failed; inspect the integration's last_error`)
       } catch(error) {
         failures.push(`${organization.organization_id}: ${describeErrorForTelemetry(error)}`)
       }
       try {
         // Google's change list is the replay feed: whatever a push notification missed lands here.
-        const inbound = await pullCalendarChanges(env, organization.organization_id)
+        entry.inbound = await pullCalendarChanges(env, organization.organization_id)
         await ensureCalendarWatch(env, organization.organization_id)
-        Object.assign(results.at(-1) ?? {}, { inbound })
       } catch(error) {
         failures.push(`${organization.organization_id}: calendar changes could not be read; ${describeErrorForTelemetry(error)}`)
       }
