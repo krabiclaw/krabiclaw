@@ -47,7 +47,7 @@ export const postMutationJsonSchema = {
     body: { anyOf: [{ type: 'string', maxLength: POST_BODY_MAX }, absent], description: 'The caption, plain text; newlines are kept.' },
     slug: { anyOf: [{ type: 'string' }, absent], description: 'Optional route segment for /posts/<slug>. Allocated from the title or body when omitted, and fixed when the post is created.' },
     location_id: { anyOf: [{ type: 'string', minLength: 1 }, absent], description: 'Scope the post to one of this organization\'s locations; omit for organization-wide.' },
-    visibility: { enum: ['listed', 'unlisted'], description: 'listed shows the post in feeds; unlisted keeps it reachable by its URL only. Neither makes a draft public.' },
+    visibility: { type: 'string', enum: ['listed', 'unlisted'], description: 'listed shows the post in feeds; unlisted keeps it reachable by its URL only. Neither makes a draft public.' },
     call_to_action: { anyOf: [postCallToActionJsonSchema, absent] },
     media: postMediaJsonSchema,
   },
