@@ -41,8 +41,6 @@ Validation follows product risk:
 
 1. Test the affected tenant journey first.
 2. Check all three customer sites for shared public changes.
-3. Expand the retained tenant matrix only for shared renderer, routing,
-   theme, content-model, or destructive content-migration changes.
 
 A reproducible first-party failure blocks promotion. An operator-closed tab or
 an isolated third-party timeout is not an application failure; retry the
@@ -50,20 +48,18 @@ inspection once to determine ownership, then report the actual result.
 
 ## Normal release sequence
 
-1. Keep one coherent bugfix or feature in one ready pull request targeting
-   `staging`. Split work only when the changes are independently releasable.
-2. Run the E2E suite locally against a local D1 (`yarn e2e:local:prepare &&
-   yarn test:e2e:local`). Pull-request CI runs `Checks` and its own isolated
-   local-D1 E2E suite; there is no preview deployment.
-3. Merge to `staging` after required PR checks and local validation pass.
-4. When staging deploys, begin read-only MCP and tenant browser validation
+1. Push straight to `staging`. A push runs `Checks`, deploys the staging
+   Worker and runs the read-only staging journeys. Open a pull request
+   targeting `staging` only when the change wants review or the isolated
+   local-D1 E2E suite that pull-request CI runs; there is no preview deployment.
+2. When staging deploys, begin read-only MCP and tenant browser validation
    immediately.
-5. Open or update the ordinary `staging` to `main` pull request. It reuses the
+3. Open or update the ordinary `staging` to `main` pull request. It reuses the
    completed checks attached to that exact staging SHA without another deploy,
    provisioning pass, or CI qualification cycle.
-6. Promote only after the required checks on that exact SHA and the scoped
+4. Promote only after the required checks on that exact SHA and the scoped
    customer validation pass.
-7. After production deploys, repeat the affected read-only customer journeys
+5. After production deploys, repeat the affected read-only customer journeys
    and production smoke. Use an explicit canary identity for any production
    action that writes or sends notifications.
 
@@ -123,12 +119,6 @@ The representative client order is:
    home detail, nightly availability and the guest booking form. Use the
    [fictional lodging demo](lodging-demo.md); inspect existing calendar, Airbnb
    and guest-message state without resetting the demo or sending a message.
-
-For a shared renderer, routing, theme, content-model, or destructive
-content-migration change, expand that representative set to every published
-route using the sitemap and fixture inventory. Check desktop and narrow/mobile
-layouts and full-page media composition. A route that was not opened remains
-unverified, but unrelated route families do not block a narrowly scoped change.
 
 ## Migration and content safety
 
