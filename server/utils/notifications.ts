@@ -2001,7 +2001,7 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
     const localDate = `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
     const localTime = `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
     await notifyReservationCancelled(env, db, {
-      organizationId: request.organization_id, organizationName: organization?.name, vertical: organization?.vertical ?? null,
+      organizationId: request.organization_id, organizationName: organization?.name,
       locale: request.payload.guest.locale,
       locationId: record.location_id, locationName: summary.locationTitle, reservationId: request.id,
       guestName: request.payload.guest.name, email: request.payload.guest.email, phone: request.payload.guest.phone,
