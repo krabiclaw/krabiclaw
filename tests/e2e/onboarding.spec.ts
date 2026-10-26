@@ -269,10 +269,10 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // Releasing it reaches the local endpoint and its real Images refusal.
   const uploadPath = `/api/dashboard/onboarding/drafts/${initialDraft.draftId}/media/upload`
   const uploadRoute = `**${uploadPath}`
-  const uploadStarted = Promise.withResolvers<void>()
-  const uploadRelease = Promise.withResolvers<void>()
+  const uploadStarted = Promise.withResolvers<undefined>()
+  const uploadRelease = Promise.withResolvers<undefined>()
   await page.route(uploadRoute, async route => {
-    uploadStarted.resolve()
+    uploadStarted.resolve(undefined)
     await uploadRelease.promise
     await route.continue()
   })
@@ -288,7 +288,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
     await expect(next).toBeDisabled()
     await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeDisabled()
   } finally {
-    uploadRelease.resolve()
+    uploadRelease.resolve(undefined)
     await uploadResponse
     await page.unroute(uploadRoute)
   }
