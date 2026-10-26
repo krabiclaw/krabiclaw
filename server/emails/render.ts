@@ -61,7 +61,7 @@ export const NotificationEmail = defineComponent({
         hero ? h(EmailHero, { src: hero.imageUrl, alt: hero.alt }) : null,
 
         h(ESection, { class: 'email-gutter', style: `padding:28px ${layout.gutter} 0` }, () => [
-          // The subject is the headline. Nothing below restates it.
+          // The event keeps its headline even when SMTP retains the conversation's subject.
           h('h1', { class: 'email-title', style: `margin:0;${type.title};font-family:var(--x,inherit);color:${light.text}` }, message.title),
           message.intro
             ? h(EText, { style: `margin:12px 0 0;${type.body};color:${light.textMuted};white-space:pre-line` }, () => message.intro)

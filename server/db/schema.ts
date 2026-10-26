@@ -200,6 +200,9 @@ export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	purpose: text().notNull(),
 	status: text().default("pending").notNull(),
 	provider_message_id: text(),
+	// The request is frozen before dispatch; the RFC ID is assigned by Resend.
+	email_json: text(),
+	email_message_id: text(),
 	error: text(),
 	// Only a classified attempt can establish that retrying cannot duplicate delivery.
 	non_delivery_confirmed: integer(),

@@ -6,7 +6,7 @@ import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~
 import { getGuestRequest, requestSummary, type cancelBookingRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { getEmailDeliveryMode, hashEmail, sendEmail } from '~/server/utils/email-delivery'
+import { getEmailDeliveryMode, hashEmail, sendEmail, type EmailSendResult } from '~/server/utils/email-delivery'
 import { buildWhatsAppTemplatePayload, sendWhatsAppNotification, WhatsAppTemplateRefusal, type WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getWhatsAppDeliveryMode } from '~/server/utils/whatsapp-delivery'
@@ -50,7 +50,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
-import { createDeliveryReceipt, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
+import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
@@ -403,25 +403,23 @@ async function sendEmailNotification(
   // Resend idempotency key, so a concurrent replay cannot send it twice.
   if (delivery && isDeliverySent(delivery)) return
 
-  const result = await sendEmail(env, {
-    to: opts.to,
-    replyTo: opts.replyTo,
-    subject: opts.email.subject,
-    html: opts.email.html,
-    text: opts.email.text,
-    emailPurpose: opts.email.emailPurpose,
+  const email = {
+    to: opts.to, replyTo: opts.replyTo, subject: opts.email.subject,
+    html: opts.email.html, text: opts.email.text, emailPurpose: opts.email.emailPurpose,
     unsubscribeOneClickUrl: opts.unsubscribeOneClickUrl ?? null,
-    idempotencyKey: delivery?.id,
-  })
-  if (delivery) {
-    await recordDeliveryOutcome(db, {
-      deliveryId: delivery.id,
-      status: result.status,
-      providerMessageId: result.status === 'sent' ? result.messageId : null,
-      error: result.status === 'sent' ? null : result.error,
-    })
-    if (deliveryContext?.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: deliveryContext.threadId, type: 'delivery.changed' })
   }
+  let result: EmailSendResult
+  if (delivery) {
+    const outcome = await deliverReceiptEmail(db, { env, delivery, threadId: deliveryContext!.threadId, email })
+    if (isDeliverySent(outcome)) {
+      if (!outcome.provider_message_id) throw new Error('Sent email delivery has no provider identity')
+      result = { status: 'sent', messageId: outcome.provider_message_id }
+    } else {
+      if (!outcome.error) throw new Error('Incomplete email delivery has no recorded failure reason')
+      result = { status: 'failed', code: 'EMAIL_DELIVERY_FAILED', error: outcome.error }
+    }
+  } else result = await sendEmail(env, email)
+  if (deliveryContext?.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: deliveryContext.threadId, type: 'delivery.changed' })
   if (result.status === 'sent') {
     console.info(provider === 'log_only' ? 'email_delivery_log_only' : 'email_delivery_sent', {
       organizationId: opts.organizationId,

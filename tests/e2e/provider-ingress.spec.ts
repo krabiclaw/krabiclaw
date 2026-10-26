@@ -71,7 +71,9 @@ test('signed Resend ingress verifies the raw body and ignores mail that is not a
   expect(await irrelevant.json()).toEqual({ received: 'email.opened', outcome: 'ignored' })
 })
 
-test('compact signed email reply persists once and rejects a changed address', async ({ request, baseURL }) => {
+test('native email replies retain their RFC ancestry through repeated dashboard replies and reject changed addresses', async ({ request, baseURL }) => {
+  test.skip(!baseURL || !['localhost', '127.0.0.1'].includes(new URL(baseURL).hostname), 'native email injection requires disposable local data')
+  test.slow()
   const fetchPhase = async (phase: string, path: string, options: Parameters<typeof request.fetch>[1]) => {
     const requestId = randomUUID()
     const startedAt = Date.now()
@@ -95,12 +97,13 @@ test('compact signed email reply persists once and rejects a changed address', a
     })
   }
   const name = `E5 ${randomUUID().slice(0, 12)}`
+  const guestEmail = 'guest@e2e.example.test'
   const submitted = await fetchPhase('create contact', '/api/public/contact', {
     method: 'POST',
     // The public routes resolve their tenant from the host, and this runs against
     // the platform's, so the tenant is named rather than inferred.
     headers: { 'x-preview-tenant': 'demo' },
-    data: { name, email: 'paulchrisluke+provider-ingress@gmail.com', message: 'Please confirm the continuity check.', subject: 'general' },
+    data: { name, email: guestEmail, message: 'Please confirm the continuity check.', subject: 'general' },
   })
   expect(submitted.status(), await submitted.text()).toBe(201)
   await test.step('authenticate owner and select organization', () => loginAs(request, baseURL!, 'user-e2e-demo-owner'), { timeout: 30_000 })
@@ -120,6 +123,36 @@ test('compact signed email reply persists once and rejects a changed address', a
   const initialResponse = await fetchPhase('read initial entries', detailUrl, {})
   expect(initialResponse.status(), await initialResponse.text()).toBe(200)
   const { thread: initial } = await initialResponse.json()
+  type EmailReceipt = {
+    id: string; request_id: string; entry_id: string; purpose: string; status: string;
+    email_json: string | null; email_message_id: string | null; provider_message_id: string | null;
+  }
+  type FrozenEmail = {
+    sender: string | null;
+    message: {
+      to: string; subject: string; html: string; text: string; emailPurpose: string;
+      replyTo?: string; inReplyTo?: string; references?: string[];
+    };
+  }
+  const readDeliveries = async (phase: string) => {
+    const response = await fetchPhase(phase, '/api/dev/notifications', {
+      headers: devLoginHeaders(), params: { organization_id: 'org-demo', limit: 500 },
+    })
+    expect(response.status(), await response.text()).toBe(200)
+    const { deliveries } = await response.json() as { deliveries: EmailReceipt[] }
+    return deliveries.filter(delivery => delivery.request_id === initial.id)
+  }
+  const acknowledgements = (await readDeliveries('read initial email receipt')).filter(delivery => delivery.purpose === 'guest_acknowledgement')
+  expect(acknowledgements).toHaveLength(1)
+  const acknowledgement = acknowledgements[0]!
+  expect(acknowledgement.status).toBe('sent')
+  expect(acknowledgement.email_message_id).toBeNull()
+  expect(acknowledgement.email_json).toEqual(expect.any(String))
+  const originalEmail = JSON.parse(acknowledgement.email_json!) as FrozenEmail
+  expect(originalEmail.message.to).toBe(guestEmail)
+  expect(originalEmail.message.subject).not.toMatch(/^Re:/i)
+  expect(originalEmail.message.inReplyTo).toBeUndefined()
+  expect(originalEmail.message.references).toBeUndefined()
   // Delivered through the local runtime's email event, so the Worker's own
   // email handler parses, verifies and records the reply, and its accept or
   // reject is what Email Routing would receive.
@@ -129,15 +162,18 @@ test('compact signed email reply persists once and rejects a changed address', a
   }, 'contact', initial.submissionId)
   expect(replyTo).toMatch(/^rc[0-9a-f]{56}@/)
   const body = `Signed guest reply ${randomUUID()}`
-  const deliver = (phase: string, to: string, messageId: string) => fetchPhase(phase, '/cdn-cgi/local/email', {
+  const subject = `Re: ${originalEmail.message.subject}`
+  const emailDate = new Date().toUTCString()
+  const deliver = (phase: string, to: string, messageId: string | null, parentId?: string) => fetchPhase(phase, '/cdn-cgi/local/email', {
     method: 'POST',
-    params: { from: 'guest@e2e.example.test', to },
+    params: { from: guestEmail, to },
     data: [
-      'From: E2E Guest <guest@e2e.example.test>',
+      `From: E2E Guest <${guestEmail}>`,
       `To: ${to}`,
-      'Subject: Re: continuity check',
-      `Message-ID: <${messageId}@e2e.example.test>`,
-      `Date: ${new Date().toUTCString()}`,
+      `Subject: ${subject}`,
+      ...(messageId === null ? [] : [`Message-ID: ${messageId}`]),
+      ...(parentId ? [`In-Reply-To: ${parentId}`, `References: ${parentId}`] : []),
+      `Date: ${emailDate}`,
       'MIME-Version: 1.0',
       'Content-Type: text/plain; charset=utf-8',
       '',
@@ -145,24 +181,96 @@ test('compact signed email reply persists once and rejects a changed address', a
       '',
     ].join('\r\n'),
   })
-  const messageId = randomUUID()
+  // Log-only confirmations have no actual outbound RFC ID. The first real
+  // MIME message supplies its own; the next reply can legitimately reference it.
+  const messageId = `<${randomUUID()}@e2e.example.test>`
   for (const phase of ['receive signed reply', 'receive duplicate reply']) {
     const received = await deliver(phase, replyTo!, messageId)
     expect(received.status()).toBe(200)
     expect(await received.text()).toBe('Worker successfully processed email')
   }
+  const secondMessageId = `<${randomUUID()}@e2e.example.test>`
+  const secondReply = await deliver('receive follow-up with RFC ancestry', replyTo!, secondMessageId, messageId)
+  expect(secondReply.status(), await secondReply.text()).toBe(200)
+  expect(await secondReply.text()).toBe('Worker successfully processed email')
+  const malformed = await deliver('reject malformed RFC Message-ID', replyTo!, 'invalid-message-id')
+  expect(malformed.status(), await malformed.text()).toBe(400)
+  expect(await malformed.text()).toBe('Worker rejected email with the following reason: This email has an invalid Message-ID.')
+  // Wrangler's native MIME parser rejects a missing Message-ID before the
+  // Worker handler receives the message, so no conversation entry is recorded.
+  const missingId = await deliver('reject email without a Message-ID', replyTo!, null)
+  expect(missingId.status(), await missingId.text()).toBe(400)
+  expect(await missingId.text()).toBe('Email could not be parsed: invalid or no message id provided')
   const [localPart, domain] = replyTo!.split('@')
   for (const { phase, address, reason } of [
     { phase: 'reject altered signature', address: `${localPart!.slice(0, -1)}${localPart!.endsWith('0') ? '1' : '0'}@${domain}`, reason: 'This reply address is not valid.' },
     { phase: 'reject wrong domain', address: `${localPart}@invalid.example`, reason: 'This address does not accept email.' },
   ]) {
-    const rejected = await deliver(phase, address, randomUUID())
+    const rejected = await deliver(phase, address, `<${randomUUID()}@e2e.example.test>`)
     expect(rejected.status()).toBe(400)
     expect(await rejected.text()).toBe(`Worker rejected email with the following reason: ${reason}`)
   }
   const finalResponse = await fetchPhase('verify final entries', detailUrl, {})
   expect(finalResponse.status(), await finalResponse.text()).toBe(200)
   const { thread: final } = await finalResponse.json()
-  expect(final.entries).toHaveLength(initial.entries.length + 1)
-  expect(final.entries.at(-1)).toMatchObject({ body, channel: 'email', actorKind: 'guest' })
+  expect(final.entries).toHaveLength(initial.entries.length + 2)
+  expect(final.entries.at(-2)).toMatchObject({
+    body, channel: 'email', actorKind: 'guest',
+  })
+  expect(final.entries.at(-1)).toMatchObject({
+    body, channel: 'email', actorKind: 'guest',
+  })
+  // Normal inbox presentation hides transport metadata. The frozen staff
+  // requests below prove the received RFC IDs still drive the actual replies.
+  expect(final.entries.at(-2).payload).toEqual({})
+  expect(final.entries.at(-1).payload).toEqual({})
+
+  const replyUrl = `${detailUrl}/operations/reply`
+  const operationKey = `mime-staff-${randomUUID()}`
+  const staffBody = `Dashboard staff reply ${randomUUID()}`
+  const sendReply = (phase: string, idempotencyKey: string, replyBody: string) => fetchPhase(phase, replyUrl, {
+    method: 'POST', headers: { 'idempotency-key': idempotencyKey }, data: { body: replyBody },
+  })
+  const staffResponse = await sendReply('send first staff reply', operationKey, staffBody)
+  expect(staffResponse.status(), await staffResponse.text()).toBe(200)
+  const staffReceipts = (await readDeliveries('read first staff email receipt')).filter(delivery => delivery.purpose === 'member_reply')
+  expect(staffReceipts).toHaveLength(1)
+  const firstStaffReceipt = staffReceipts[0]!
+  expect(firstStaffReceipt.status).toBe('sent')
+  expect(firstStaffReceipt.email_message_id).toBeNull()
+  expect(firstStaffReceipt.email_json).toEqual(expect.any(String))
+  const firstStaffEmail = JSON.parse(firstStaffReceipt.email_json!) as FrozenEmail
+  expect(firstStaffEmail.message).toMatchObject({
+    to: guestEmail, subject, emailPurpose: 'transactional', replyTo,
+    inReplyTo: secondMessageId, references: [messageId, secondMessageId],
+  })
+  expect(firstStaffEmail.message.html).toContain(staffBody)
+  expect(firstStaffEmail.message.text).toContain(staffBody)
+  expect(firstStaffEmail.message.html).toContain('You received this email because')
+  expect(firstStaffEmail.message.text.replace(/\s+/g, ' ')).toContain('You received this email because')
+  expect(firstStaffEmail.message.html).not.toMatch(/unsubscribe|\/signup/i)
+
+  const replay = await sendReply('replay the first staff operation', operationKey, staffBody)
+  expect(replay.status(), await replay.text()).toBe(200)
+  expect((await readDeliveries('verify replay sends no additional email')).filter(delivery => delivery.purpose === 'member_reply')).toEqual(staffReceipts)
+
+  const nextStaffBody = `Another dashboard reply ${randomUUID()}`
+  const nextStaff = await sendReply('send another staff reply', `mime-staff-${randomUUID()}`, nextStaffBody)
+  expect(nextStaff.status(), await nextStaff.text()).toBe(200)
+  const repeatedStaffReceipts = (await readDeliveries('read repeated staff email receipts')).filter(delivery => delivery.purpose === 'member_reply')
+  expect(repeatedStaffReceipts).toHaveLength(2)
+  const nextReceipt = repeatedStaffReceipts.find(delivery => delivery.id !== firstStaffReceipt.id)!
+  expect(nextReceipt.status).toBe('sent')
+  expect(nextReceipt.email_message_id).toBeNull()
+  const nextEmail = JSON.parse(nextReceipt.email_json!) as FrozenEmail
+  expect(nextEmail.message).toMatchObject({
+    to: guestEmail, subject, emailPurpose: 'transactional', replyTo,
+    inReplyTo: secondMessageId, references: [messageId, secondMessageId],
+  })
+  expect(nextEmail.message.html).toContain(nextStaffBody)
+  const repliedResponse = await fetchPhase('verify repeated staff entries', detailUrl, {})
+  expect(repliedResponse.status(), await repliedResponse.text()).toBe(200)
+  const { thread: replied } = await repliedResponse.json()
+  expect(replied.entries.filter((entry: { body: string | null }) => entry.body === staffBody)).toHaveLength(1)
+  expect(replied.entries.filter((entry: { body: string | null }) => entry.body === nextStaffBody)).toHaveLength(1)
 })

@@ -33,7 +33,7 @@ export default defineHandler(async (event) => {
   `, [organizationId, organizationId, locationId, locationId, since, since, limit])
   const deliveries = await queryAll(db, `
     SELECT d.id, e.request_id, d.entry_id, d.channel, d.provider, d.purpose,
-           d.status, d.provider_message_id, d.error, d.created_at, d.updated_at
+           d.status, d.provider_message_id, d.email_json, d.email_message_id, d.error, d.created_at, d.updated_at
     FROM guest_thread_deliveries d
     JOIN activity_entries e ON e.id = d.entry_id
     JOIN requests gt ON gt.id = e.request_id

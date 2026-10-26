@@ -25,7 +25,16 @@ export interface InboundGuestEmail {
   body: string
   /** Every file the email carried, in order. */
   files: MessagePhoto[]
+  /** Dedupe identity; a content hash is used when no RFC Message-ID was sent. */
   messageId: string
+  /** The actual envelope sender and parsed RFC headers, without invented values. */
+  headers: {
+    from: string
+    subject: string | null
+    messageId: string | null
+    inReplyTo: string | null
+    references: string | null
+  }
 }
 
 // A single-part HTML reply has no text/plain alternative. Quoted containers are
@@ -78,7 +87,7 @@ export async function receiveGuestEmail(env: CloudflareEnv, email: InboundGuestE
   await receiveGuestReply(env, {
     threadId:thread.id, organizationId:organization.organizationId,
     submissionType:email.submissionType, body:email.body, photos, unshown,
-    channel:'email', userId:null, dedupeKey:`email:${email.messageId}`,
+    channel:'email', userId:null, dedupeKey:`email:${email.messageId}`, headers:email.headers,
   })
 }
 
@@ -103,7 +112,7 @@ export async function receiveGuestWebReply(env:CloudflareEnv,input:{threadId:str
   }
 }
 
-async function receiveGuestReply(env:CloudflareEnv,input:{threadId:string;organizationId:string;submissionType:SubmissionType;body:string;photos:MessagePhoto[];unshown:string[];channel:'email'|'web';userId:string|null;dedupeKey:string;photoManifest?:Array<{filename:string;sha256:string}>}):Promise<void> {
+async function receiveGuestReply(env:CloudflareEnv,input:{threadId:string;organizationId:string;submissionType:SubmissionType;body:string;photos:MessagePhoto[];unshown:string[];userId:string|null;dedupeKey:string;photoManifest?:Array<{filename:string;sha256:string}>}&({channel:'email';headers:InboundGuestEmail['headers']}|{channel:'web';headers?:never})):Promise<void> {
   const db=env.DB,thread=await getGuestRequest(db,input.threadId,input.organizationId,input.submissionType,input.userId??undefined)
   if(!thread)throw new Error('Conversation no longer exists')
   const {photos,unshown}=input
@@ -114,7 +123,7 @@ async function receiveGuestReply(env:CloudflareEnv,input:{threadId:string;organi
     entry = await appendEntry(db, {
       threadId:thread.id,kind:'message',actorKind:'guest',actorUserId:input.userId,...(input.userId?{buyerUserId:input.userId}:{}),
       channel:input.channel,body:input.body||null,
-      payloadJson:{...(unshown.length?{unshownFiles:unshown}:{}),...(input.photoManifest?{photos:input.photoManifest}:{})},
+      payloadJson:{...(unshown.length?{unshownFiles:unshown}:{}),...(input.photoManifest?{photos:input.photoManifest}:{}),...(input.channel==='email'?{email:input.headers}:{})},
       dedupeKey:input.dedupeKey,
     })
   } catch(error) {
