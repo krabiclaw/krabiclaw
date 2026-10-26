@@ -414,6 +414,8 @@ export function calendarSyncMessage(input: CalendarSyncEventInput): Notification
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because ${input.guestName}'s ${input.recordKind} with ${input.organizationName} changed on the business's Google Calendar and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
