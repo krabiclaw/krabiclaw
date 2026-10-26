@@ -321,11 +321,13 @@ function replySubject(submissionType: GuestThreadSubmissionType, fromName: strin
  * outbound message. A member's reply leads with their own words; a status
  * update leads with what changed.
  */
-async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationId: string, organizationName: string, entry: GuestThreadEntryRow) {
+async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationId: string, organizationName: string, entry: GuestThreadEntryRow, locale: string | undefined) {
+  const guest = await guestPresentation(db, { organizationId, organizationName, locale })
   const organizationLogoUrl = await organizationLogo(db, organizationId)
   const photos = (await listMessagePhotos(db, 'activity_entry', [entry.id])).get(entry.id) ?? []
   return renderNotificationEmail(guestThreadReplyMessage({
-    organizationName,
+    locale: guest.locale,
+    organizationName: guest.organizationName,
     organizationLogoUrl,
     body: entry.body ?? '',
     photos: photos.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${organizationName}` })),
@@ -630,7 +632,7 @@ async function executeReply(
     to: guestEmail,
     fromName,
     subject: replySubject(context.thread.kind, fromName),
-    email: await renderMemberReply(input.env, db, context.thread.organization_id, fromName, entry),
+    email: await renderMemberReply(input.env, db, context.thread.organization_id, fromName, entry, context.thread.payload.guest.locale),
     submissionType: context.thread.kind,
     submissionId: context.thread.id,
   })

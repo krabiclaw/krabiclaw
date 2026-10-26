@@ -122,7 +122,14 @@ export const BLOG_TOOLS: McpToolDefinition[] = [
         allOf: [{ if: { required: ['content_blocks'] }, then: { required: ['expected_updated_at'] } }],
       },
       required: ['post_id'],
-      outputSchema: blogPostMutationResultObject,
+      outputSchema: {
+        ...blogPostMutationResultObject,
+        properties: {
+          ...blogPostMutationResultObject.properties,
+          changed: { type: 'boolean', description: 'Whether this request changed the stored article. An equivalent save leaves its revision unchanged.' },
+        },
+        required: ['post', 'changed'],
+      },
     }),
   organizationTool({
       name: 'publish_blog_post',
@@ -426,18 +433,19 @@ export async function handleBlogTools(ctx: McpExecutorContext): Promise<unknown>
         requiredString(args, "post_id"),
         omit(args, ["post_id", "organization_id"]) as never,
         organization.organizationId,
+        organization.userId,
         organization.env,
       );
       return renderStructuredResponse(
-        { post: projectBlogPostForMcp(result.post, organization) },
-        `Saved changes to blog article "${result.post.title ?? result.post.id}".`,
+        { post: projectBlogPostForMcp(result.post, organization), changed: result.changed },
+        result.changed ? `Saved changes to blog article "${result.post.title ?? result.post.id}".` : `Blog article "${result.post.title ?? result.post.id}" is unchanged.`,
       );
     }
     case "publish_blog_post": {
       const postId = requiredString(args, "post_id")
       const lifecycle = await updateBlogLifecycle(organization.db, postId, {
         expected_updated_at: requiredString(args, 'expected_updated_at'),
-      }, organization.organizationId)
+      }, organization.organizationId, organization.userId)
       const result = await getBlogPost(organization.db, postId, organization.organizationId, organization.env)
       const summary = toBlogPostSummary(result, organization)
       return renderStructuredResponse(

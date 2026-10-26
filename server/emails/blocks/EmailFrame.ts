@@ -19,6 +19,7 @@ export default defineComponent({
   props: {
     locale: { type: String, default: undefined },
     preheader: { type: String, required: true },
+    emailReason: { type: String, required: true },
     /** The tenant this is sent for, named in the footer. Null for platform mail. */
     organizationName: { type: String as PropType<string | null>, default: null },
     /** The tenant's logo. A tenant's mail carries its mark, or its name alone. */
@@ -134,6 +135,7 @@ export default defineComponent({
             slots.default?.(),
             h(ESection, { class: 'email-gutter', style: `padding:40px ${layout.gutter} 40px` }, () => [
               h('div', { class: 'email-divider', style: `border-top:1px solid ${light.border};padding-top:24px` }, [
+                h(EText, { class: 'email-footer', style: `margin:0 0 10px;${type.footer};color:${light.textDimmed}` }, () => props.emailReason),
                 h(EText, { class: 'email-footer', style: `margin:0;${type.footer};color:${light.textDimmed}` }, () => [
                   `© ${year} KrabiClaw · `,
                   h(ELink, { href: origin, style: `color:${light.textMuted};text-decoration:underline` }, () => 'krabiclaw.com'),

@@ -56,6 +56,8 @@ export function reservationCreatedMessage(input: ReservationEventInput): Notific
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive reservation notifications for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }
@@ -82,6 +84,8 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a reservation with ${input.organizationName} was cancelled and you receive its reservation notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -122,6 +126,8 @@ export function stayBookedMessage(input: StayEventInput): NotificationMessage {
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive stay booking notifications for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }
@@ -145,6 +151,8 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a stay with ${input.organizationName} was cancelled and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -171,6 +179,8 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive ${input.presentation.noun} notifications for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }
@@ -193,6 +203,8 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a ${input.presentation.noun} with ${input.organizationName} was cancelled and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -226,6 +238,8 @@ export function contactReceivedMessage(input: ContactEventInput): NotificationMe
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
     category: 'guest_messages',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because someone contacted ${input.organizationName} and you receive its website messages.`,
     organizationName: input.organizationName,
   }
 }
@@ -255,6 +269,10 @@ export function guestReplyMessage(input: GuestReplyEventInput): NotificationMess
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open thread in dashboard' } : undefined,
     category: 'guest_messages',
+    emailPurpose: 'transactional',
+    emailReason: input.organizationName
+      ? `You received this email because a guest replied to a conversation with ${input.organizationName} and you receive its guest messages.`
+      : 'You received this email because a guest replied to a conversation you receive notifications about.',
     organizationName: input.organizationName,
   }
 }
@@ -282,6 +300,8 @@ export function reviewReceivedMessage(input: ReviewEventInput): NotificationMess
     ),
     primaryAction: input.reviewsUrl ? { url: input.reviewsUrl, label: 'View review' } : undefined,
     category: 'reviews',
+    emailPurpose: 'subscribed',
+    emailReason: `You receive this email under your review notification preferences for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }
@@ -314,6 +334,8 @@ export function bookingReassignedMessage(input: BookingReassignedEventInput): No
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a booking assignment changed at ${input.organizationName} and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -356,6 +378,8 @@ export function bookingChangeMessage(input: BookingChangeEventInput): Notificati
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'View in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because changes were proposed or answered for a ${input.recordKind} with ${input.organizationName} and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -415,6 +439,8 @@ export function domainUpdateMessage(input: DomainEventInput): NotificationMessag
     ),
     primaryAction: { url: input.dashboardUrl, label: 'Open domain settings' },
     category: 'organization_and_billing',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive status updates for ${input.domain}.`,
   }
 }
 
@@ -452,6 +478,8 @@ export function contentReportedMessage(input: ContentReportedInput): Notificatio
     ),
     primaryAction: { url: input.reviewUrl, label: 'Review report' },
     category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: 'You received this email because you handle content reports for KrabiClaw.',
   }
 }
 
@@ -468,5 +496,7 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Not
     primaryAction: { url: input.viewCustomerUrl, label: 'View customer' },
     secondaryAction: { url: input.siteUrl, label: 'Open site' },
     category: 'organization_and_billing',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because ${input.organizationName} completed setup and you receive KrabiClaw business onboarding alerts.`,
   }
 }

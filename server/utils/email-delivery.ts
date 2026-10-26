@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { getResendClient } from '~/server/utils/resend'
+import type { NotificationEmailPurpose } from '~/server/notifications/messages'
 
 export type EmailDeliveryMode = 'provider' | 'log_only'
 
@@ -104,6 +105,7 @@ export async function sendEmail(
     to: string
     subject: string
     text: string
+    emailPurpose: NotificationEmailPurpose
     /**
      * Required. Every outbound message renders through server/emails — a send
      * that can omit the HTML body is how inbox replies ended up as bare text
@@ -117,12 +119,14 @@ export async function sendEmail(
      * The RFC 8058 one-click endpoint for this message's category, so a mail
      * client can unsubscribe without opening the message. It must be a route
      * that accepts POST — the header's own POST body is fixed by the RFC, so
-     * the signed target travels in the URL. Omitted for account-security mail,
-     * which cannot be switched off.
+     * the signed target travels in the URL. Transactional mail never carries
+     * mailing-list headers, even when a caller supplies this URL.
      */
     unsubscribeOneClickUrl?: string | null
   },
 ): Promise<EmailSendResult> {
+  if (!['transactional', 'subscribed', 'promotional'].includes(input.emailPurpose)) return failed('EMAIL_PURPOSE_REQUIRED', 'a valid email purpose is required')
+  if (input.emailPurpose !== 'transactional' && !input.unsubscribeOneClickUrl) return failed('EMAIL_UNSUBSCRIBE_REQUIRED', 'subscribed and promotional email require one-click unsubscribe')
   if (!shouldSendRealEmail(env)) {
     return { status: 'sent', messageId: logOnlyEmailProviderId('email') }
   }
@@ -141,7 +145,7 @@ export async function sendEmail(
     subject: input.subject,
     html: input.html,
     text: input.text,
-    ...(input.unsubscribeOneClickUrl
+    ...(input.emailPurpose !== 'transactional' && input.unsubscribeOneClickUrl
       ? {
           headers: {
             'List-Unsubscribe': `<${input.unsubscribeOneClickUrl}>`,

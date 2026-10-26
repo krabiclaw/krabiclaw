@@ -279,7 +279,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
     env: { DB: { type: 'd1' } },
   } }] })
-  const requests: { subject: string; text: string; html: string }[] = []
+  const requests: { subject: string; text: string; html: string; headers?: Record<string, string> }[] = []
   let reject = true
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
     assert.equal(url, 'https://api.resend.com/emails')
@@ -305,7 +305,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
 
     const input = {
       threadId: 'booking-status', actorUserId: 'user-status',
-      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example' },
+      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' },
     }
     const cancel = { ...input, action: 'cancel', idempotencyKey: 'cancel-status' }
     assert.deepEqual(await executeGuestThreadOperation(db, cancel), {
@@ -328,6 +328,12 @@ test('a replayed status email sends its recorded content and refuses a supersede
     assert.equal(original.subject, 'Reservation Cancelled — Proof')
     assert.ok(original.text.includes(guestBody), original.text)
     assert.ok(original.html.includes(guestBody), original.html)
+    const emailReason = 'You received this email because there is an update to your request with Proof.'
+    assert.ok(original.html.includes(emailReason), original.html)
+    assert.ok(original.text.replace(/\s+/g, ' ').includes(emailReason), original.text)
+    assert.doesNotMatch(original.html, /unsubscribe|\/signup/i)
+    assert.doesNotMatch(original.text, /unsubscribe|\/signup/i)
+    assert.equal(original.headers, undefined, 'a cancellation is transactional and has no mailing-list headers')
     // A later display edit cannot change the copy already recorded for this
     // cancellation. Retrying sends the exact first email again.
     await db.prepare("UPDATE organization SET name='Changed after cancellation' WHERE id='org-status'").run()
@@ -575,11 +581,16 @@ test('a review request reads the visit from the record that holds it', async () 
     // headline fragment leaking into a value, which is what this guards — the
     // message carries no such phrase at all now, so the check is that the real
     // visit is what the facts show.
-    const { html } = await renderNotificationEmail(reviewRequestMessage({
+    const reviewMessage = reviewRequestMessage({
       guestName: 'Sivan', organizationName: 'Kikuzuki', locationName: 'Main Room',
       visitAt: formatTimestamp(context.visit_starts_at, 'en', context.visit_timezone), partySize: '6 guests',
       reviewUrl: 'https://review.example/r',
-    }), { platformDomain: 'proof.example' })
+    })
+    await assert.rejects(renderNotificationEmail(reviewMessage, { platformDomain: 'proof.example' }), /Subscribed and promotional email require an unsubscribe link/)
+    const { html, emailPurpose } = await renderNotificationEmail(reviewMessage, {
+      platformDomain: 'proof.example', unsubscribeUrl: 'https://proof.example/unsubscribe?user=guest-review&category=review_requests&token=preview',
+    })
+    assert.equal(emailPurpose, 'promotional')
     assert.match(html, /Sep 11, 2026, 8:00\s?PM/, 'the visit renders in the reservation timezone')
     assert.match(html, /6 guests/)
     assert.doesNotMatch(html, />\s*your reservation\s*</, 'the headline phrase is never rendered as a detail value')

@@ -1,29 +1,33 @@
 <template>
   <div class="flex min-h-0 flex-col gap-8 py-6" :data-onboarding-hydrated="hydrated ? 'true' : 'false'">
-    <div>
+    <div class="space-y-3">
+      <p class="text-sm font-medium text-muted">{{ resuming ? 'Your organization' : 'Welcome to KrabiClaw' }}</p>
       <h1 :class="dashboardTitleClass">
-        It's easy to get started on KrabiClaw
+        {{ resuming ? state.details.name : 'Make a home for your business' }}
       </h1>
+      <p class="text-base text-muted">{{ resuming ? 'Your saved setup is ready when you are.' : 'Start with the basics, add your own touch, and see your website take shape.' }}</p>
     </div>
 
     <ol class="flex flex-col">
       <li
-        v-for="(point, index) in POINTS"
+        v-for="point in POINTS"
         :key="point.title"
-        class="flex gap-5 border-b border-default py-5 first:pt-0 last:border-b-0"
+        class="flex items-start gap-4 border-b border-default py-6 first:pt-0 last:border-b-0"
       >
-        <span class="text-lg font-medium text-highlighted">{{ index + 1 }}</span>
+        <span class="grid size-12 shrink-0 place-items-center rounded-2xl bg-elevated text-highlighted" aria-hidden="true">
+          <UIcon :name="point.icon" class="size-6" />
+        </span>
         <span class="min-w-0 flex-1">
           <span class="block text-lg font-semibold text-highlighted">{{ point.title }}</span>
-          <span class="mt-1 block text-sm text-toned">{{ point.body }}</span>
+          <span class="mt-2 block text-sm leading-relaxed text-muted">{{ point.body }}</span>
         </span>
-        <UIcon :name="point.icon" class="size-8 shrink-0 text-muted" />
       </li>
     </ol>
 
     <UButton
       class="self-start"
       :label="resuming ? 'Pick up where you left off' : 'Get started'"
+      trailing-icon="i-lucide-arrow-right"
       @click="start"
     />
   </div>
@@ -48,18 +52,18 @@ const resuming = computed(() => state.value.draftId !== null)
 const POINTS = [
   {
     title: 'Tell us about your business',
-    body: 'What kind of business it is, and your Google Maps listing if you have one.',
+    body: 'Start with a name and the basics, or import your Google Maps listing.',
     icon: 'i-lucide-store',
   },
   {
     title: 'Make it yours',
-    body: 'Your address and hours, what you offer, and a colour and photo — we fill in what Google already knows.',
+    body: 'Choose your colours, font and photos. The preview shows your real website as you go.',
     icon: 'i-lucide-palette',
   },
   {
-    title: 'Publish',
-    body: 'Check the preview and go live on your included site address. You can keep editing any time.',
-    icon: 'i-lucide-rocket',
+    title: 'Take a look, then publish',
+    body: 'Review your website before it goes live. You can keep editing after you publish.',
+    icon: 'i-lucide-sprout',
   },
 ]
 

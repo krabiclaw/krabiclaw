@@ -10,6 +10,7 @@ import { applyResendEmailEvent, compareDeliveryStatus, getDeliveryById } from '.
 import { reconcileProductNewsContacts, reconcileProductNewsFromProvider, syncProductNewsContact } from '../../server/domain/product-news-contacts.ts'
 import { disableCategoryEmail, getNotificationPreferences, setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import { runArticleBroadcast } from '../../server/domain/article-broadcast.ts'
+import { buildUnsubscribeUrls } from '../../server/utils/unsubscribe.ts'
 
 const SEGMENT = 'segment-product-news'
 const TOPIC = 'topic-product-news'
@@ -19,7 +20,7 @@ const PROVIDER_ENV = {
   EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>',
   RESEND_PRODUCT_NEWS_SEGMENT_ID: SEGMENT,
   RESEND_PRODUCT_NEWS_TOPIC_ID: TOPIC,
-  NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example',
+  NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
 }
 
 interface FakeContact { id: string; email: string; unsubscribed: boolean; segments: Set<string>; topics: Map<string, 'opt_in' | 'opt_out'> }
@@ -161,10 +162,24 @@ const emailEvent = (type: string, emailId: string, extra: Record<string, unknown
   data: { email_id: emailId, created_at: '2026-09-27T00:00:00.000Z', from: 'hello@krabiclaw.com', to: ['guest@provider-proof.com'], subject: 'Proof', message_id: '<proof>', ...extra },
 }) as Parameters<typeof applyResendEmailEvent>[2]
 
-test('transactional email goes through resend.emails.send with the existing result semantics', async (t) => {
+test('email purpose controls Resend unsubscribe headers and invalid required state never reaches the provider', async (t) => {
   const resend = fakeResend(t)
+  const localUnsubscribe = await buildUnsubscribeUrls({
+    NUXT_PUBLIC_PLATFORM_DOMAIN: 'http://localhost:3000', EMAIL_REPLY_SECRET: 'local-unsubscribe-proof',
+  }, { userId: 'user-proof', category: 'reviews' }, 'subscribed')
+  assert(localUnsubscribe)
+  const footerUrl = new URL(localUnsubscribe.pageUrl)
+  const oneClickUrl = new URL(localUnsubscribe.oneClickUrl)
+  assert.equal(footerUrl.origin, 'http://localhost:3000')
+  assert.equal(oneClickUrl.origin, 'http://localhost:3000')
+  assert.equal(footerUrl.pathname, '/unsubscribe')
+  assert.equal(oneClickUrl.pathname, '/api/public/notifications/unsubscribe')
+  assert.equal(footerUrl.search, oneClickUrl.search)
+  assert.equal(footerUrl.searchParams.get('user'), 'user-proof')
+  assert.equal(footerUrl.searchParams.get('category'), 'reviews')
+  assert.match(footerUrl.searchParams.get('token')!, /^[a-f0-9]{32}$/)
   const input = {
-    to: 'guest@provider-proof.com', subject: 'Proof subject', html: '<p>Proof</p>', text: 'Proof', replyTo: 'reply@proof.example',
+    to: 'guest@provider-proof.com', subject: 'Proof subject', html: '<p>Proof</p>', text: 'Proof', replyTo: 'reply@proof.example', emailPurpose: 'transactional' as const,
     fromName: 'Proof Cafe', idempotencyKey: 'guest-thread-email:proof', unsubscribeOneClickUrl: 'https://proof.example/api/public/notifications/unsubscribe?token=t',
   }
 
@@ -174,8 +189,29 @@ test('transactional email goes through resend.emails.send with the existing resu
   assert.deepEqual(sent!.body, {
     from: 'Proof Cafe <hello@krabiclaw.com>', to: ['guest@provider-proof.com'], reply_to: 'reply@proof.example',
     subject: 'Proof subject', html: '<p>Proof</p>', text: 'Proof',
-    headers: { 'List-Unsubscribe': '<https://proof.example/api/public/notifications/unsubscribe?token=t>', 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
   })
+
+  for (const emailPurpose of [undefined, 'digest']) {
+    assert.deepEqual(await sendEmail(PROVIDER_ENV, { ...input, emailPurpose } as unknown as Parameters<typeof sendEmail>[1]), {
+      status: 'failed', code: 'EMAIL_PURPOSE_REQUIRED', error: 'EMAIL_PURPOSE_REQUIRED: a valid email purpose is required',
+    })
+  }
+  for (const emailPurpose of ['subscribed', 'promotional'] as const) {
+    assert.deepEqual(await sendEmail(PROVIDER_ENV, { ...input, emailPurpose, unsubscribeOneClickUrl: null }), {
+      status: 'failed', code: 'EMAIL_UNSUBSCRIBE_REQUIRED', error: 'EMAIL_UNSUBSCRIBE_REQUIRED: subscribed and promotional email require one-click unsubscribe',
+    })
+  }
+  assert.equal(resend.calls.length, 1, 'invalid email purpose or missing opt-out must not contact Resend')
+
+  for (const emailPurpose of ['subscribed', 'promotional'] as const) {
+    const messageId = `email-${resend.calls.length + 1}`
+    assert.deepEqual(await sendEmail(PROVIDER_ENV, { ...input, emailPurpose }), { status: 'sent', messageId })
+    assert.deepEqual(resend.calls.at(-1)!.body, {
+      from: 'Proof Cafe <hello@krabiclaw.com>', to: ['guest@provider-proof.com'], reply_to: 'reply@proof.example',
+      subject: 'Proof subject', html: '<p>Proof</p>', text: 'Proof',
+      headers: { 'List-Unsubscribe': '<https://proof.example/api/public/notifications/unsubscribe?token=t>', 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
+    })
+  }
 
   // log_only and the RFC 2606 domains never reach Resend; provider mode refuses
   // a reserved address with a coded failure rather than reporting it sent.
@@ -189,7 +225,7 @@ test('transactional email goes through resend.emails.send with the existing resu
   assert.deepEqual(await sendEmail(withoutSender, input), { status: 'failed', code: 'EMAIL_FROM_REQUIRED', error: 'EMAIL_FROM_REQUIRED: EMAIL_FROM is not configured' })
   await assert.rejects(sendEmail({ ...PROVIDER_ENV, EMAIL_DELIVERY_MODE: undefined }, input), { status: 503, data: { code: 'EMAIL_DELIVERY_MODE_REQUIRED', field: 'EMAIL_DELIVERY_MODE' } })
   await assert.rejects(sendEmail({ ...PROVIDER_ENV, EMAIL_DELIVERY_MODE: 'log-only' }, input), { status: 503, data: { code: 'INVALID_EMAIL_DELIVERY_MODE', field: 'EMAIL_DELIVERY_MODE' } })
-  assert.equal(resend.calls.length, 1)
+  assert.equal(resend.calls.length, 3)
 
   // A rejection Resend answered and a request it never answered both fail, with the reason.
   resend.failNext('POST /emails')

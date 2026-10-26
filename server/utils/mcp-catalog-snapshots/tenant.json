@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:da1959f26540de71cfb5590ea778eb64952c4f1f2a49dd3f6caeeb44bc266012",
-  "documentationFingerprint": "sha256:ca09793ae8a07a2911aef15222736501fc5e1dd4a4a822f3a2e11f426e37686d",
+  "fingerprint": "sha256:a50fb34e9b6644c15a9a02a16dae3d80f18b2f57986741cefda519be7a757211",
+  "documentationFingerprint": "sha256:527f600da313f25d51d046e6021b7738196a9589ff85795c2430e6d765723ca5",
   "tools": [
     {
       "name": "add_organization_language",
@@ -101664,6 +101664,10 @@
         "additionalProperties": false,
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
+          "changed": {
+            "description": "Whether this request changed the stored article. An equivalent save leaves its revision unchanged.",
+            "type": "boolean"
+          },
           "post": {
             "additionalProperties": false,
             "properties": {
@@ -103790,7 +103794,8 @@
           }
         },
         "required": [
-          "post"
+          "post",
+          "changed"
         ],
         "type": "object"
       },

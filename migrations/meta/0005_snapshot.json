@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "425bf0b7-bed9-44cd-9952-e4dab3356bd2",
+  "id": "18b50b72-82cb-47c7-a217-f88092908cde",
   "prevId": "499a588d-c1e1-4718-a0f3-aaeaa49dede4",
   "tables": {
     "account": {
@@ -2219,7 +2219,7 @@
       "checkConstraints": {
         "channel_sync_log_provider_check": {
           "name": "channel_sync_log_provider_check",
-          "value": "provider IN ('channex', 'google_calendar')"
+          "value": "provider = 'channex'"
         },
         "channel_sync_log_direction_check": {
           "name": "channel_sync_log_direction_check",
@@ -2227,7 +2227,7 @@
         },
         "channel_sync_log_kind_check": {
           "name": "channel_sync_log_kind_check",
-          "value": "kind IN ('booking_revision', 'availability', 'restrictions', 'calendar_event')"
+          "value": "kind IN ('booking_revision', 'availability', 'restrictions')"
         },
         "channel_sync_log_status_check": {
           "name": "channel_sync_log_status_check",
@@ -4241,123 +4241,6 @@
         "google_calendar_setup_organization_id_organization_id_fk": {
           "name": "google_calendar_setup_organization_id_organization_id_fk",
           "tableFrom": "google_calendar_setup",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "google_calendar_sync": {
-      "name": "google_calendar_sync",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "integration_revision": {
-          "name": "integration_revision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_id": {
-          "name": "channel_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "channel_token": {
-          "name": "channel_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "resource_id": {
-          "name": "resource_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "channel_expires_at": {
-          "name": "channel_expires_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sync_token": {
-          "name": "sync_token",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reschedules": {
-          "name": "reschedules",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": true
-        },
-        "last_pulled_at": {
-          "name": "last_pulled_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "last_error": {
-          "name": "last_error",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "google_calendar_sync_channel_unique": {
-          "name": "google_calendar_sync_channel_unique",
-          "columns": [
-            "channel_id"
-          ],
-          "isUnique": true
-        }
-      },
-      "foreignKeys": {
-        "google_calendar_sync_organization_id_organization_id_fk": {
-          "name": "google_calendar_sync_organization_id_organization_id_fk",
-          "tableFrom": "google_calendar_sync",
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
@@ -8090,6 +7973,157 @@
         "organization_domains_metadata_check": {
           "name": "organization_domains_metadata_check",
           "value": "metadata IS NULL OR (json_valid(metadata))"
+        }
+      }
+    },
+    "organization_goals": {
+      "name": "organization_goals",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "intent": {
+          "name": "intent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "constraints": {
+          "name": "constraints",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "target_at": {
+          "name": "target_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_by_user_id": {
+          "name": "updated_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "organization_goals_status_idx": {
+          "name": "organization_goals_status_idx",
+          "columns": [
+            "organization_id",
+            "status",
+            "updated_at"
+          ],
+          "isUnique": false
+        },
+        "organization_goals_scope_unique": {
+          "name": "organization_goals_scope_unique",
+          "columns": [
+            "organization_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "organization_goals_organization_id_organization_id_fk": {
+          "name": "organization_goals_organization_id_organization_id_fk",
+          "tableFrom": "organization_goals",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "organization_goals_created_by_user_id_user_id_fk": {
+          "name": "organization_goals_created_by_user_id_user_id_fk",
+          "tableFrom": "organization_goals",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "organization_goals_updated_by_user_id_user_id_fk": {
+          "name": "organization_goals_updated_by_user_id_user_id_fk",
+          "tableFrom": "organization_goals",
+          "tableTo": "user",
+          "columnsFrom": [
+            "updated_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "organization_goals_text_check": {
+          "name": "organization_goals_text_check",
+          "value": "length(trim(intent)) BETWEEN 1 AND 2000 AND (constraints IS NULL OR length(trim(constraints)) BETWEEN 1 AND 2000)"
+        },
+        "organization_goals_status_check": {
+          "name": "organization_goals_status_check",
+          "value": "status IN ('active', 'archived')"
+        },
+        "organization_goals_instants_check": {
+          "name": "organization_goals_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (target_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', target_at, '+0 days') IS target_at)"
         }
       }
     },
@@ -14368,6 +14402,202 @@
         "rate_limits_instants_check": {
           "name": "rate_limits_instants_check",
           "value": "(updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at) AND (expires_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at)"
+        }
+      }
+    },
+    "recommendation_feedback": {
+      "name": "recommendation_feedback",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "operation": {
+          "name": "operation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subject_id": {
+          "name": "subject_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "evidence_revision": {
+          "name": "evidence_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "goal_id": {
+          "name": "goal_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "goal_revision": {
+          "name": "goal_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "decision": {
+          "name": "decision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "defer_until": {
+          "name": "defer_until",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "recommendation_feedback_reference_unique": {
+          "name": "recommendation_feedback_reference_unique",
+          "columns": [
+            "organization_id",
+            "user_id",
+            "operation",
+            "subject_id",
+            "evidence_revision"
+          ],
+          "isUnique": true,
+          "where": "\"recommendation_feedback\".\"goal_id\" IS NULL"
+        },
+        "recommendation_feedback_goal_reference_unique": {
+          "name": "recommendation_feedback_goal_reference_unique",
+          "columns": [
+            "organization_id",
+            "user_id",
+            "operation",
+            "subject_id",
+            "evidence_revision",
+            "goal_id",
+            "goal_revision"
+          ],
+          "isUnique": true,
+          "where": "\"recommendation_feedback\".\"goal_id\" IS NOT NULL"
+        },
+        "recommendation_feedback_actor_idx": {
+          "name": "recommendation_feedback_actor_idx",
+          "columns": [
+            "organization_id",
+            "user_id",
+            "updated_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "recommendation_feedback_organization_id_organization_id_fk": {
+          "name": "recommendation_feedback_organization_id_organization_id_fk",
+          "tableFrom": "recommendation_feedback",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "recommendation_feedback_user_id_user_id_fk": {
+          "name": "recommendation_feedback_user_id_user_id_fk",
+          "tableFrom": "recommendation_feedback",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "recommendation_feedback_goal_scope_fk": {
+          "name": "recommendation_feedback_goal_scope_fk",
+          "tableFrom": "recommendation_feedback",
+          "tableTo": "organization_goals",
+          "columnsFrom": [
+            "organization_id",
+            "goal_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "recommendation_feedback_operation_check": {
+          "name": "recommendation_feedback_operation_check",
+          "value": "operation IN ('article.update', 'article.publish', 'guest_thread.reply') AND length(trim(subject_id)) > 0"
+        },
+        "recommendation_feedback_revision_check": {
+          "name": "recommendation_feedback_revision_check",
+          "value": "length(evidence_revision) = 64 AND evidence_revision NOT GLOB '*[^a-f0-9]*' AND ((goal_id IS NULL AND goal_revision IS NULL) OR (goal_id IS NOT NULL AND length(trim(goal_id)) > 0 AND goal_revision IS NOT NULL))"
+        },
+        "recommendation_feedback_decision_check": {
+          "name": "recommendation_feedback_decision_check",
+          "value": "decision IN ('accept', 'dismiss', 'defer', 'correct') AND ((decision = 'defer' AND defer_until IS NOT NULL) OR (decision <> 'defer' AND defer_until IS NULL)) AND (decision <> 'correct' OR note IS NOT NULL) AND (note IS NULL OR length(trim(note)) BETWEEN 1 AND 2000)"
+        },
+        "recommendation_feedback_instants_check": {
+          "name": "recommendation_feedback_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (goal_revision IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', goal_revision, '+0 days') IS goal_revision) AND (defer_until IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', defer_until, '+0 days') IS defer_until)"
         }
       }
     },

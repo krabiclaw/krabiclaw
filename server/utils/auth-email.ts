@@ -1,4 +1,4 @@
-import { renderNotificationEmail } from '~/server/emails/render'
+import { renderNotificationEmail, type RenderedNotificationEmail } from '~/server/emails/render'
 import { sendEmail, hashEmail } from '~/server/utils/email-delivery'
 import { resetPasswordMessage, verifyEmailMessage } from '~/server/notifications/guest-events'
 
@@ -19,11 +19,9 @@ function platformDomain(env: AuthEmailEnv): string {
 
 async function sendAuthEmail(
   env: AuthEmailEnv,
-  opts: {
+  opts: RenderedNotificationEmail & {
     to: string
     subject: string
-    html: string
-    text: string
   },
 ) {
   const result = await sendEmail(env, opts)
@@ -42,13 +40,12 @@ export async function sendPasswordResetEmail(
   opts: { email: string, resetUrl: string },
 ) {
   const currentPlatformDomain = platformDomain(env)
-  const { html, text } = await renderNotificationEmail(resetPasswordMessage({ resetUrl: opts.resetUrl }), { platformDomain: currentPlatformDomain })
+  const email = await renderNotificationEmail(resetPasswordMessage({ resetUrl: opts.resetUrl }), { platformDomain: currentPlatformDomain })
 
   await sendAuthEmail(env, {
     to: opts.email,
     subject: 'Reset your KrabiClaw password',
-    html,
-    text,
+    ...email,
   })
 }
 
@@ -57,12 +54,11 @@ export async function sendVerificationEmail(
   opts: { email: string, verificationUrl: string },
 ) {
   const currentPlatformDomain = platformDomain(env)
-  const { html, text } = await renderNotificationEmail(verifyEmailMessage({ verificationUrl: opts.verificationUrl }), { platformDomain: currentPlatformDomain })
+  const email = await renderNotificationEmail(verifyEmailMessage({ verificationUrl: opts.verificationUrl }), { platformDomain: currentPlatformDomain })
 
   await sendAuthEmail(env, {
     to: opts.email,
     subject: 'Verify your KrabiClaw email',
-    html,
-    text,
+    ...email,
   })
 }

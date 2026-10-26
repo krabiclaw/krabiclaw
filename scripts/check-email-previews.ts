@@ -38,10 +38,15 @@ console.warn = (...args: unknown[]) => { warnings.push(args.map(String).join(' '
 for (const entry of NOTIFICATION_CATALOG) {
   warnings.length = 0
   try {
+    const unsubscribeUrl = entry.message.category === 'product_news'
+      ? '{{{RESEND_UNSUBSCRIBE_URL}}}'
+      : 'https://krabiclaw.com/unsubscribe?x=preview'
     const { html, text } = await renderNotificationEmail(entry.message, {
       platformDomain: 'krabiclaw.com',
       preferencesUrl: 'https://krabiclaw.com/dashboard/account/profile/notifications',
-      unsubscribeUrl: 'https://krabiclaw.com/unsubscribe?x=preview',
+      // Supplying this to every purpose proves the renderer itself keeps
+      // transactional mail free of unsubscribe controls.
+      unsubscribeUrl,
     })
     if (!html.includes('email-surface')) failures.push(`${entry.id} did not render through EmailFrame`)
     // The mark is whose mail it is. KrabiClaw's crab is on its own mail only;
@@ -58,6 +63,31 @@ for (const entry of NOTIFICATION_CATALOG) {
     if (!text.toLowerCase().includes(entry.message.title.toLowerCase())) {
       failures.push(`${entry.id} does not show its own title`)
     }
+    const reason = entry.message.emailReason?.trim()
+    if (!reason) {
+      failures.push(`${entry.id} does not explain why the email was sent`)
+    } else {
+      const escapedReason = reason.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
+      if (!html.includes(escapedReason)) failures.push(`${entry.id} omits its delivery reason from HTML`)
+      if (!text.replace(/\s+/g, ' ').includes(reason.replace(/\s+/g, ' '))) failures.push(`${entry.id} omits its delivery reason from plain text`)
+    }
+    if (entry.message.emailPurpose === 'transactional') {
+      if (/unsubscribe/i.test(html) || /unsubscribe/i.test(text)) {
+        failures.push(`${entry.id} includes an unsubscribe control in transactional mail`)
+      }
+      if (/\/signup(?:[/?#&"'\s]|$)/i.test(html) || /\/signup(?:[/?#&"'\s]|$)/i.test(text)) {
+        failures.push(`${entry.id} promotes account signup in transactional mail`)
+      }
+      if (entry.audience === 'guest' && entry.message.hero) {
+        failures.push(`${entry.id} includes a decorative hero in a guest transaction`)
+      }
+    } else if (entry.message.emailPurpose === 'subscribed' || entry.message.emailPurpose === 'promotional') {
+      if (!html.includes(unsubscribeUrl) || !text.includes(unsubscribeUrl)) {
+        failures.push(`${entry.id} omits its unsubscribe URL from subscribed or promotional mail`)
+      }
+    } else {
+      failures.push(`${entry.id} has no supported email purpose`)
+    }
   } catch (error) {
     failures.push(`${entry.id} failed to render: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`)
   }
@@ -73,4 +103,4 @@ if (failures.length) {
   process.exit(1)
 }
 
-console.log(`Email catalog passed: ${NOTIFICATION_CATALOG.length} messages rendered, no colour written outside tokens`)
+console.log(`Email catalog passed: ${NOTIFICATION_CATALOG.length} messages rendered with delivery reasons and purpose-appropriate unsubscribe controls, no colour written outside tokens`)
