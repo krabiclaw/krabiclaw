@@ -1,7 +1,8 @@
 import { queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 
 export type OrganizationEventType =
-  | 'post.created' | 'post.published' | 'post.deleted' | 'post.channel_deleted' | 'article.created'
+  | 'post.created' | 'post.published' | 'post.deleted' | 'post.channel_deleted' | 'article.created' | 'article.updated' | 'article.published'
+  | 'goal.created' | 'goal.updated' | 'recommendation.feedback'
   | 'product.created' | 'product.updated' | 'product.deleted' | 'product.reordered'
   | 'product.category_created' | 'product.category_renamed' | 'product.category_deleted'
   | 'content.updated' | 'content.published' | 'media.uploaded' | 'media.deleted'
@@ -75,7 +76,7 @@ export function organizationEventQuery(event: OrganizationEvent): BatchQuery {
 }
 
 /** The scoped key a creation's audit row carries for its caller's idempotency key. */
-export function creationDedupeKey(kind: 'social_post' | 'article' | 'product' | 'location', organizationId: string, idempotencyKey: string): string {
+export function creationDedupeKey(kind: 'social_post' | 'article' | 'product' | 'location' | 'organization_goal', organizationId: string, idempotencyKey: string): string {
   return `create:${kind}:${organizationId}:${idempotencyKey}`
 }
 

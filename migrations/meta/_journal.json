@@ -36,6 +36,13 @@
       "when": 1792917501465,
       "tag": "0004_member_user_organization_unique",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793008494956,
+      "tag": "0005_business_progress",
+      "breakpoints": true
     }
   ]
 }
