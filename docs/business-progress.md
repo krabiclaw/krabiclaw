@@ -226,26 +226,27 @@ behavioral evaluations inspired by the owner-reported active surfaces. They are
 not owner/staff validation or evidence that a recommendation improved a business.
 
 On 2026-10-26, the local production Worker and real AI binding passed both
-focused tests, including six model decisions under `recommendation-preview-v6`:
+focused tests, including seven model decisions under `recommendation-preview-v8`:
 
 | Technical case | Actual decision | Domain elapsed time | Input/output tokens | Estimated model USD |
 | --- | --- | ---: | ---: | ---: |
-| Inbox is the only priority; article work can wait | Guest reply | 6.415 s | 2,087 / 139 | 0.000925 |
-| Same records; publish the explicitly approved guide and leave inbox alone | Article publication | 9.242 s | 2,105 / 139 | 0.000930 |
-| New exact-evidence correction requires attorney review first | No suggestion; explains known hold | 3.365 s | 2,313 / 34 | 0.000754 |
-| Review status explicitly unknown for the same revision | Needs context; asks whether review happened | 3.261 s | 2,318 / 80 | 0.000859 |
-| Requested guide is now published; no other work requested | No suggestion | 2.402 s | 1,893 / 44 | 0.000654 |
-| Fresh guest inbound and changed owner intent | Guest reply | 4.911 s | 1,949 / 139 | 0.000884 |
+| Inbox is the only priority; article work can wait | Guest reply | 6.444 s | 2,188 / 131 | 0.000936 |
+| Same records; publish the explicitly approved guide and leave inbox alone | Article publication | 6.119 s | 2,206 / 130 | 0.000939 |
+| Publication waits for separate authorization; direct client reply is approved | Guest reply; publication withheld | 6.522 s | 2,385 / 135 | 0.001003 |
+| New exact-evidence correction requires attorney review first | No suggestion; explains known hold | 2.986 s | 2,413 / 45 | 0.000808 |
+| Review status explicitly unknown for the same revision | Needs context; asks whether review happened | 3.245 s | 2,418 / 75 | 0.000877 |
+| Requested guide is now published; no other work requested | No suggestion | 3.536 s | 1,975 / 40 | 0.000669 |
+| Fresh guest inbound and changed owner intent | Guest reply | 5.723 s | 2,031 / 135 | 0.000899 |
 
 The current Today baseline kept the same attention/draft card IDs across the
-goal change, with no model inference. The preview changed selection. The six-call
-median domain latency was 4.138 seconds; these timings include source reads and revalidation, not
+goal change, with no model inference. The preview changed selection. The seven-call
+median domain latency was 5.723 seconds; these timings include source reads and revalidation, not
 network transit or representative production load. This is too little evidence
 to claim a general relevance rate or latency distribution.
 
 Token-only model estimates use the model page's published USD rates of 0.293
 per million input tokens and 2.253 per million output tokens: approximately
-USD 0.00501 for these six successful calls (13,240 reported tokens). They exclude Worker/D1 charges,
+USD 0.00613 for these seven successful calls (16,307 reported tokens). They exclude Worker/D1 charges,
 development retries and account billing adjustments; no invoice was verified.
 
 An earlier live prompt repeated the old publication-approval claim despite a
@@ -258,6 +259,12 @@ explain the former without another question and ask for the latter. Both cases
 withhold publication and preserve the authored goal and draft. This demonstrates
 why schema-valid output alone is insufficient and why new, withheld cases and
 owner judgment remain necessary.
+
+The mixed-action case also exposed early stopping at a blocked publication while
+an independently approved reply was supported. Decision selection now evaluates
+all candidates before choosing an overall state: supported work takes precedence,
+clarification is needed only when no independent work is supported, and a known
+hold alone does not suppress other useful actions.
 
 The current owner-reported observations remain Kikuzuki inbox use and NCLS MCP
 blog updates. Historical intake and product decisions add constraints, but no

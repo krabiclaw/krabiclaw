@@ -18,6 +18,9 @@
  * The default source is the deployed production Worker's `DB` binding unless
  * `--source` names a D1 database. This reads the live database even while the
  * repository configuration points to a prepared replacement.
+ * D1's native export owns snapshot consistency. While it creates the export,
+ * other requests to that source database are blocked; downloading the finished
+ * export does not block queries. Use --source-file for an existing local copy.
  *
  * `--out` alone is the preflight: the transformed target, its data-only payload
  * and its manifest are kept at that path and nothing remote is written. Beside a
@@ -99,6 +102,10 @@ if (values.source === 'DB' && !values['source-file']) {
  */
 const logDirectory = mkdtempSync(join(tmpdir(), 'krabiclaw-wrangler-logs-'))
 
+// Wrangler reports a one-hour signed download URL for the entire source. It
+// belongs only in the private process output, never in shared CI diagnostics.
+const redactExportUrls = (value: string) => value.replace(/https:\/\/[^\s"'<>]*(?:X-Amz-Signature|X-Amz-Credential|Signature)=[^\s"'<>]*/gi, '[redacted signed export URL]')
+
 function printWranglerLogs(): void {
   const names = readdirSync(logDirectory)
   if (names.length === 0) {
@@ -108,7 +115,7 @@ function printWranglerLogs(): void {
   for (const name of names) {
     const path = join(logDirectory, name)
     console.error(`--- ${path} ---`)
-    console.error(readFileSync(path, 'utf8'))
+    console.error(redactExportUrls(readFileSync(path, 'utf8')))
     console.error(`--- end ${path} ---`)
   }
 }
@@ -125,74 +132,23 @@ const run = (args: string[], json = false) => {
   } catch (error) {
     console.error(`wrangler ${args.join(' ')} failed.`)
     printWranglerLogs()
+    // Keep the original failure and stack, including captured process output,
+    // while removing credentials from every field Node prints for that error.
+    if (error instanceof Error) {
+      error.message = redactExportUrls(error.message)
+      if (error.stack) error.stack = redactExportUrls(error.stack)
+      for (const key of ['stdout', 'stderr']) {
+        const output = Reflect.get(error, key)
+        if (typeof output === 'string') Reflect.set(error, key, redactExportUrls(output))
+      }
+      const output = Reflect.get(error, 'output')
+      if (Array.isArray(output)) Reflect.set(error, 'output', output.map(value => typeof value === 'string' ? redactExportUrls(value) : value))
+    }
     throw error
   }
 }
 
-// Cloudflare's export operation rejects concurrent application queries for the
-// duration of the export. Copy rows with ordinary SELECTs instead; the existing
-// transfer audit still validates the copy before either target is written.
-// https://developers.cloudflare.com/d1/best-practices/import-export-data/
-function sourceRows<T>(sql: string): T[] {
-  const output = run(['d1', 'execute', values.source, '--remote', '--command', sql, '--json'], true)
-  const results = JSON.parse(output) as Array<{ success: boolean; results: T[] }>
-  if (results.length !== 1 || !results[0]!.success) throw new Error(`${values.source} snapshot query failed`)
-  return results[0]!.results
-}
-
 const identifier = (value: string) => '"' + value.replaceAll('"', '""') + '"'
-
-function copyProductionRows(path: string) {
-  const literal = (value: string) => "'" + value.replaceAll("'", "''") + "'"
-  // Keep D1's migration ledger in the source snapshot: the transfer must know
-  // which forward files have already run, including data-only migrations.
-  const catalog = "SELECT type, name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND tbl_name <> '__drizzle_migrations'"
-  const tableCatalog = `SELECT name, sql FROM (${catalog}) WHERE type = 'table'`
-  const tables = sourceRows<{ name: string; sql: string; column_names: string }>(
-    `SELECT name, sql, (SELECT json_group_array(name) FROM pragma_table_xinfo(tables.name) WHERE hidden = 0) AS column_names FROM (${tableCatalog}) tables ORDER BY name`,
-  )
-  const schemaObjects = sourceRows<{ name: string; phase: number; sql: string }>(
-    `SELECT name, CASE WHEN type = 'table' THEN 0 ELSE 2 END AS phase, sql FROM (${catalog}) ORDER BY phase, name`,
-  )
-  const queries = [`SELECT name AS table_name, CASE WHEN type = 'table' THEN 0 ELSE 2 END AS phase, sql AS statement FROM (${catalog})`]
-  for (const table of tables) {
-    if (omitJwks && table.name === 'jwks') continue
-    const names = (JSON.parse(table.column_names) as string[]).map(identifier)
-    const prefix = `INSERT INTO ${identifier(table.name)} (${names.join(',')}) VALUES (`
-    const expression = literal(prefix) + ' || ' + names.map(name => `quote(${name})`).join(" || ',' || ") + " || ');'"
-    queries.push(`SELECT ${literal(table.name)}, 1, ${expression} FROM ${identifier(table.name)}`)
-  }
-  // One SELECT gives all tables the same SQLite read snapshot. Include the
-  // catalog in that read and reject schema changes since column discovery.
-  // The existing buffer limit rejects oversized copies before target writes.
-  // workerd limits each compound SELECT to five terms. CTEs keep each group
-  // within that limit without forcing multiple full copies of the snapshot.
-  // https://github.com/cloudflare/workerd/blob/main/src/workerd/util/sqlite.c++
-  const ctes: string[] = []
-  let groups = queries
-  while (groups.length > 1) {
-    const next: string[] = []
-    for (let index = 0; index < groups.length; index += 5) {
-      const name = `snapshot_group_${ctes.length}`
-      ctes.push(`${name} AS (${groups.slice(index, index + 5).join(' UNION ALL ')})`)
-      next.push(`SELECT * FROM ${name}`)
-    }
-    groups = next
-  }
-  const rows = sourceRows<{ table_name: string; phase: number; statement: string; total_rows: number }>(
-    `WITH ${ctes.join(', ')} SELECT *, count(*) OVER () AS total_rows FROM (${groups[0]})`,
-  )
-  if (!rows.length || rows[0]!.total_rows !== rows.length) throw new Error(`Incomplete ${values.source} copy; no target data was written`)
-  // Order the complete single-snapshot read locally instead of sorting the
-  // full SQL dump inside D1.
-  rows.sort((left, right) => left.phase - right.phase || (left.table_name < right.table_name ? -1 : left.table_name > right.table_name ? 1 : 0))
-  const schema = rows.filter(row => row.phase !== 1)
-  if (schema.length !== schemaObjects.length || schema.some((row, index) => row.table_name !== schemaObjects[index]!.name || row.phase !== schemaObjects[index]!.phase || row.statement !== schemaObjects[index]!.sql)) {
-    throw new Error(`${values.source} schema changed during column discovery; no target data was written`)
-  }
-  writeFileSync(path, 'PRAGMA foreign_keys=OFF;\n' + rows.map(row => row.statement + (row.phase === 1 ? '' : ';')).join('\n'), { mode: 0o600 })
-  for (const table of tables) console.log(`Copied ${table.name}: ${rows.filter(row => row.phase === 1 && row.table_name === table.name).length} rows`)
-}
 
 // The baseline this transfer builds must be the one server/db/schema.ts
 // describes, or the payload is written for a schema no deploy will run.
@@ -201,7 +157,13 @@ execFileSync(process.execPath, ['scripts/check-schema-drift.mjs'], { cwd: proces
 const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-snapshot-'))
 try {
   const dumpPath = join(directory, 'source.sql')
-  if (!values['source-file']) copyProductionRows(dumpPath)
+  if (!values['source-file']) {
+    // D1 streams a consistent native export instead of materializing the whole
+    // database as one query response. The transfer below still owns validation,
+    // destination signing-key preservation, payload generation and load audits.
+    writeFileSync(dumpPath, '', { flag: 'wx', mode: 0o600 })
+    run(['d1', 'export', values.source, '--remote', '--output', dumpPath, '--skip-confirmation'], true)
+  }
 
   const targetPath = values.out ? resolve(values.out) : join(directory, 'target.sqlite')
   const payloadPath = values.out ? `${targetPath}.payload.sql` : join(directory, 'payload.sql')

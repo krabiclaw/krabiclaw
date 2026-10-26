@@ -144,6 +144,24 @@ test('owner intent drives grounded previews and evidence-bound feedback follows 
     expect(aged.considered.find(candidate => candidate.id === `guest_thread.reply:${threadId}`)?.eligibility.available).toBe(false)
     expect(aged.considered.find(candidate => candidate.id === `guest_thread.reply:${threadId}`)?.eligibility.reasons).toContain('stale_uncommitted_inbound')
 
+    const { goal: mixedGoal } = await responseBody<{ goal: BusinessGoal }>(await request.post(`${api}/goals`, { data: {
+      idempotencyKey: crypto.randomUUID(), intent: `Publish our approved guide "${edited.title}" and answer the recent client enquiry about consultation documents today.`,
+    } }), 201)
+    const { feedback: mixedHold } = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: {
+      operation: reference.operation, subjectId: postId, evidenceRevision: reference.evidenceRevision,
+      goalId: mixedGoal.id, goalRevision: mixedGoal.revision, decision: 'correct',
+      note: 'The consultation instructions are already attorney-approved for direct replies to clients. Website publication must wait for my separate publication authorization.',
+    } }))
+    const mixedPreview = await preview({ goalIds: [mixedGoal.id], availableMinutes: 30, limit: 1 })
+    expect(mixedPreview).toMatchObject({ decision: 'recommendations', goals: [mixedGoal] })
+    expect(mixedPreview.recommendations).toEqual([expect.objectContaining({
+      id: `guest_thread.reply:${threadId}`, reference: inboxPreview.recommendations[0]!.reference, goalIds: [mixedGoal.id],
+    })])
+    expect(mixedPreview.reasoning.model).toBeTruthy()
+    const { goal: archivedMixedGoal } = await responseBody<{ goal: BusinessGoal }>(await request.patch(`${api}/goals/${mixedGoal.id}`, {
+      data: { revision: mixedGoal.revision, status: 'archived' },
+    }))
+
     const feedbackRequest = {
       operation: reference.operation, subjectId: postId, evidenceRevision: reference.evidenceRevision,
       goalId: goal.id, goalRevision: currentGoal.revision, decision: 'dismiss', note: 'The current explanation is sufficient for this week.',
@@ -153,7 +171,10 @@ test('owner intent drives grounded previews and evidence-bound feedback follows 
     expect(feedbackReplay.feedback).toEqual(feedback)
     await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, decision: 'accept' } }), 409)
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.feedback).toEqual([expect.objectContaining({ id: feedback.id, actorId, decision: 'dismiss', note: feedbackRequest.note, applicability: { current: true, reasons: [] } })])
+    expect(progress.feedback).toEqual([
+      expect.objectContaining({ id: feedback.id, actorId, decision: 'dismiss', note: feedbackRequest.note, applicability: { current: true, reasons: [] } }),
+      { ...mixedHold, applicability: { current: false, reasons: ['goal_changed', 'goal_archived'] } },
+    ])
     const dismissed = await preview({ goalIds: [goal.id], availableMinutes: 0 })
     expect(dismissed.considered.find(candidate => candidate.id === `article.publish:${postId}`)?.eligibility.available).toBe(false)
     expect(dismissed.considered.find(candidate => candidate.id === `article.publish:${postId}`)?.eligibility.reasons).toContain('dismissed')
@@ -176,6 +197,7 @@ test('owner intent drives grounded previews and evidence-bound feedback follows 
     expect(correctionPreview).toMatchObject({ decision: 'no_suggestion', recommendations: [], questions: [] })
     expect(correctionPreview.summary).toMatch(/review|approv/i)
     expect(correctionPreview.summary).toMatch(/wait|hold|held|block|pending|requir|prerequis|need|until|before|first|not|no (?:work|action|operation)/i)
+    expect(correctionPreview.summary).not.toMatch(/(?:review|approval)\b[^.!?;]*\b(?:not|isn['’]t)\s+(?:required|needed|necessary)\b|\bno\s+(?:\w+\s+){0,3}(?:review|approval)\s+(?:is\s+)?(?:required|needed|necessary)\b|\bno (?:need|requirement) for (?:\w+\s+){0,3}(?:review|approval)\b/i)
     expect(correctionPreview.goals).toEqual([currentGoal])
     const { post: heldPost } = await responseBody<{ post: { id: string; status: string; updated_at: string } }>(await request.get(postUrl))
     expect(heldPost).toMatchObject({ id: postId, status: 'draft', updated_at: edited.updated_at })
@@ -204,7 +226,10 @@ test('owner intent drives grounded previews and evidence-bound feedback follows 
       expected_updated_at: edited.updated_at, excerpt: 'Updated guidance for existing clients.',
     } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.feedback).toEqual([expect.objectContaining({ id: feedback.id, decision: 'correct', applicability: { current: false, reasons: ['evidence_changed'] } })])
+    expect(progress.feedback).toEqual([
+      expect.objectContaining({ id: feedback.id, decision: 'correct', applicability: { current: false, reasons: ['evidence_changed'] } }),
+      { ...mixedHold, applicability: { current: false, reasons: ['evidence_changed', 'goal_changed', 'goal_archived'] } },
+    ])
     await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, revision: unknownCorrection.feedback.revision } }), 409)
     const changedReference = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'article.publish', subjectId: postId } }))
     expect(changedReference.reference.evidenceRevision).not.toBe(reference.evidenceRevision)
@@ -345,14 +370,14 @@ test('owner intent drives grounded previews and evidence-bound feedback follows 
     await writeFile(evaluationArtifact, JSON.stringify({
       evidenceType: 'synthetic_local_technical_cases',
       currentRuleBaseline: { beforeGoalChange: initialToday.cards.map(card => card.id), afterGoalChange: unchangedToday.cards.map(card => card.id) },
-      groundedPreviews: { inboxPriority: inboxPreview, publicationPriority: publicationPreview, correctionHold: correctionPreview, unknownReviewStatus: unknownReviewPreview, completedPublication, freshInbound: freshInboundPreview },
+      groundedPreviews: { inboxPriority: inboxPreview, publicationPriority: publicationPreview, mixedActionScope: mixedPreview, correctionHold: correctionPreview, unknownReviewStatus: unknownReviewPreview, completedPublication, freshInbound: freshInboundPreview },
       temporalEligibility: { staleUncommitted: aged, activeCommitment: commitmentPreview, endedCommitment: afterCommitment },
     }, null, 2))
     await testInfo.attach('recommendation-technical-evaluation.json', { path: evaluationArtifact, contentType: 'application/json' })
 
     const archived = await responseBody<{ goal: BusinessGoal }>(await request.patch(`${api}/goals/${goal.id}`, { data: { revision: currentGoal.revision, status: 'archived' } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
-    expect(progress.goals).toEqual([archived.goal])
+    expect(progress.goals).toEqual([archived.goal, archivedMixedGoal])
     expect(progress.feedback.find(item => item.id === newFeedback.feedback.id)?.applicability).toEqual({ current: false, reasons: ['evidence_changed', 'goal_changed', 'goal_archived'] })
     const noActiveGoalPreview = await preview({})
     expect(noActiveGoalPreview).toMatchObject({ decision: 'needs_context', goals: [], recommendations: [], reasoning: { model: null, usage: null } })
