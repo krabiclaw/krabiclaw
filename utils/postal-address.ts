@@ -25,6 +25,8 @@ export interface PostalAddress {
   postalCode?: string
 }
 
+export const POSTAL_REGION_CODE_PATTERN = '^[A-Z]{2}$'
+
 const OPTIONAL_TEXT = ['languageCode', 'locality', 'sublocality', 'administrativeArea', 'postalCode'] as const
 
 /**
@@ -42,8 +44,10 @@ export function parsePostalAddress(value: unknown): PostalAddress | null {
     throw new TypeError('A postal address is an object')
   }
   const record = source as Record<string, unknown>
-  if (typeof record.regionCode !== 'string' || !record.regionCode.trim()) {
-    throw new TypeError('A postal address names its regionCode')
+  const unsupportedField = Object.keys(record).find(field => field !== 'regionCode' && field !== 'addressLines' && !OPTIONAL_TEXT.some(allowed => allowed === field))
+  if (unsupportedField) throw new TypeError(`A postal address does not support ${unsupportedField}`)
+  if (typeof record.regionCode !== 'string' || !new RegExp(POSTAL_REGION_CODE_PATTERN).test(record.regionCode)) {
+    throw new TypeError('A postal address regionCode uses two uppercase letters')
   }
   if (!Array.isArray(record.addressLines) || !record.addressLines.every(line => typeof line === 'string')) {
     throw new TypeError('A postal address carries addressLines as strings')
@@ -112,7 +116,7 @@ export function postalAddressFromAnswers(answers: PostalAddressAnswers): PostalA
   if (answers.sublocality?.trim()) address.sublocality = answers.sublocality.trim()
   if (answers.region?.trim()) address.administrativeArea = answers.region.trim()
   if (answers.postalCode?.trim()) address.postalCode = answers.postalCode.trim()
-  return address
+  return parsePostalAddress(address)
 }
 
 /**

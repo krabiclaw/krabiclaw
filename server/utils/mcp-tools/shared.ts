@@ -1,5 +1,6 @@
 import { contentBlockDataSchema, contentBlockSchemaDefinitions, CONTENT_BLOCK_TYPES, type ContentBlockType } from '~/shared/content-registries'
 import { timezoneSchema } from '~/utils/timezone'
+import { POSTAL_REGION_CODE_PATTERN } from '~/utils/postal-address'
 import { openingHoursSchema, specialHoursSchema } from '~/shared/reservation-hours'
 import type { McpToolRole } from '~/server/utils/mcp-auth'
 import { SUPPORTED_CURRENCIES } from '~/shared/currencies'
@@ -87,7 +88,7 @@ export const specialHoursInputSchema = { ...specialHoursSchema, description: 'Ex
 export const postalAddressSchema = {
   type: ['object', 'null'],
   properties: {
-    regionCode: { type: 'string', minLength: 1, pattern: '\\S', description: 'ISO 3166-1 alpha-2 country code, e.g. TH.' },
+    regionCode: { type: 'string', pattern: POSTAL_REGION_CODE_PATTERN, description: 'Two-letter uppercase country code, e.g. TH.' },
     addressLines: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1, pattern: '\\S' }, description: 'Address lines in order, unbounded.' },
     languageCode: { type: 'string', description: 'BCP-47 tag when the address is written in a specific language.' },
     locality: { type: 'string', description: 'Town or city.' },
@@ -96,6 +97,7 @@ export const postalAddressSchema = {
     postalCode: { type: 'string' },
   },
   required: ['regionCode', 'addressLines'],
+  additionalProperties: false,
 } as const
 
 export const locationObject = {
@@ -883,7 +885,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   update_menu: { ...D, openWorldHint: true, idempotentHint: true },
   batch_create_products: { ...W, idempotentHint: true },
   create_blog_post: W,
-  create_location: { ...W, openWorldHint: true, idempotentHint: true },
+  create_location: { ...D, openWorldHint: true, idempotentHint: true },
   create_post: W,
   create_product: { ...W, openWorldHint: true, idempotentHint: true },
   create_site_page: { ...W, openWorldHint: true },
