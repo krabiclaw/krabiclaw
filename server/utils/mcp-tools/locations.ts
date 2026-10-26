@@ -101,7 +101,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
-        status: { type: 'string', enum: ['active', 'inactive'], description: 'active keeps the location on the website; inactive takes it off the website and frees its plan slot.' },
+        status: { type: 'string', enum: ['active', 'inactive'], description: 'Set active to enable the location, or inactive to hide it. This can change location or home usage billed on the existing subscription.' },
         stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'Public map precision for every place to stay at this location. General shows the area; specific shows its precise pin. Both keep the street address private until a confirmed booking. Omit to keep the saved choice.' },
         address: postalAddressSchema,
         latitude: { ...locationObject.properties.latitude, description: 'Saved map latitude. Supply longitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.' },

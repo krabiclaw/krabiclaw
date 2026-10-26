@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:552655e41137cce45de01763cf4c8debc038898d220e000d4a82d6d8e2f97d2e",
-  "documentationFingerprint": "sha256:d0663220fc3cdffbb4fcaad118d7ea522e5f5a167529a77c13e0994a0564acb0",
+  "fingerprint": "sha256:5dee6384bd78e86f70fa7caf913b14e072839a9ac0f678ec42cf268485f3f02b",
+  "documentationFingerprint": "sha256:7aa7183e704875bd3d49c7f681873612582a8d5917b6a01e4e182193cf142f1e",
   "tools": [
     {
       "name": "add_organization_language",
@@ -12352,7 +12352,7 @@
                 ]
               },
               "status": {
-                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "description": "Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.",
                 "enum": [
                   "active",
                   "inactive"
@@ -46685,7 +46685,7 @@
                 ]
               },
               "status": {
-                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "description": "Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.",
                 "enum": [
                   "active",
                   "inactive"
@@ -70023,7 +70023,7 @@
                 ]
               },
               "status": {
-                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "description": "Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.",
                 "enum": [
                   "active",
                   "inactive"
@@ -105332,7 +105332,7 @@
             "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date. A closure or dated hours on a date replace that whole date, including the previous day’s hours that run past midnight into it: those end at midnight. A closure wins over dated hours on the same date. Closures may overlap; a second dated-hours entry for the same date is rejected."
           },
           "status": {
-            "description": "active keeps the location on the website; inactive takes it off the website and frees its plan slot.",
+            "description": "Set active to enable the location, or inactive to hide it. This can change location or home usage billed on the existing subscription.",
             "enum": [
               "active",
               "inactive"
@@ -105865,7 +105865,7 @@
                 ]
               },
               "status": {
-                "description": "active is on the website and counts toward the plan's locations; inactive is off the website and not counted. A new location is active.",
+                "description": "Operational state. Inactive locations are hidden. Active locations follow the website’s publication rules; business locations and live homes are counted separately for billing.",
                 "enum": [
                   "active",
                   "inactive"
@@ -122073,7 +122073,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:4812e7e0d8579cf93d98f7eb518fc3208b22a46c80c58c18e7627a0e580c4a62",
-        "get_location": "sha256:6a8e35ed2d402f344ff6322e9cd5427a7140ce16d30ee16e1f298a1e55d41e70",
+        "get_location": "sha256:9be9af469b6443cefbaf891b2175198fc0a31d884c672ba0d08bf5ea5ee9ada4",
         "get_post": "sha256:90a66e74e4c1bd71f9898112b21121f2ae6e2ebc9bfdca6fbd1edf74f4014bec",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_site_page": "sha256:1e05ef7ca1c7b90eaabda92936432a76e82077025af242e698cfe5ba7c3952fd",
@@ -122116,7 +122116,7 @@
         "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:6a8e35ed2d402f344ff6322e9cd5427a7140ce16d30ee16e1f298a1e55d41e70",
+        "get_location": "sha256:9be9af469b6443cefbaf891b2175198fc0a31d884c672ba0d08bf5ea5ee9ada4",
         "get_product": "sha256:ececabba9903e0f21d2683a8a96473eea96725594c9a6e70650d33dcb3d91b58",
         "get_reservation_policy": "sha256:4045310c41d2fc80d5a07e206d3b6f9d4726bb5b6697f4941332034e1474980b",
         "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
