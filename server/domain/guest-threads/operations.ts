@@ -548,7 +548,7 @@ async function executeReply(
     }
   }
 
-  const recipient = await replyRecipient(db, context)
+  const recipient = await guestThreadReplyRecipient(db, context)
   if (typeof recipient === 'object' && recipient !== null) return recipient
   const guestEmail = recipient
 
@@ -654,7 +654,7 @@ async function executeReply(
  * and is emailed too when that account has a verified email; null means the
  * account inbox alone. Without either there is nowhere to reply to.
  */
-async function replyRecipient(db: DbClient, context: ThreadContext): Promise<string | null | NotFoundOutcome | Extract<OperationOutcome, { reason: 'guest_invite_required' }>> {
+export async function guestThreadReplyRecipient(db: DbClient, context: ThreadContext): Promise<string | null | NotFoundOutcome | Extract<OperationOutcome, { reason: 'guest_invite_required' }>> {
   let guestEmail = context.thread.payload.guest.email
   if (context.thread.kind === 'stay') {
     const stay = await queryFirst<{ guest_email: string | null }>(db, 'SELECT guest_email FROM stays WHERE organization_id = ? AND request_id = ?', [context.thread.organization_id, context.thread.id])

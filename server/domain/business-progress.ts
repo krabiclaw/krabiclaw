@@ -3,6 +3,7 @@ import { executeBatch, queryAll, queryAllPages, queryFirst, type DbClient } from
 import { assertOrganizationWideAccess, assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { listBusinessOutcomes, readBusinessProgressReference } from '~/server/utils/business-outcomes'
+import type { BusinessProgressReference } from '~/shared/business-outcomes'
 import { createBusinessGoalSchema, recommendationFeedbackSchema, updateBusinessGoalSchema, type BusinessGoal, type RecommendationFeedback, type RecommendationFeedbackView } from '~/shared/business-progress'
 
 interface GoalRow {
@@ -129,34 +130,53 @@ export async function saveRecommendationFeedback(db: DbClient, principal: Member
   return saved
 }
 
+export async function listBusinessGoals(db: DbClient, principal: MemberAccessPrincipal): Promise<BusinessGoal[]> {
+  await authorize(db, principal)
+  return (await queryAllPages<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId])).map(goalOf)
+}
+
+/** The same personal feedback source serves paged progress and on-demand selection. */
+export async function listRecommendationFeedback(db: DbClient, principal: MemberAccessPrincipal, page?: { limit: number; offset: number }): Promise<RecommendationFeedback[]> {
+  await authorize(db, principal)
+  const sql = 'SELECT * FROM recommendation_feedback WHERE organization_id = ? AND user_id = ? ORDER BY updated_at DESC, id DESC'
+  const params = [principal.organizationId, principal.userId]
+  const rows = page
+    ? await queryAll<FeedbackRow>(db, `${sql} LIMIT ? OFFSET ?`, [...params, page.limit + 1, page.offset])
+    : await queryAllPages<FeedbackRow>(db, sql, params)
+  return rows.map(feedbackOf)
+}
+
+export function recommendationFeedbackApplicability(value: RecommendationFeedback, reference: BusinessProgressReference | null, goals: BusinessGoal[], now: Date): RecommendationFeedbackView['applicability'] {
+  const reasons: RecommendationFeedbackView['applicability']['reasons'] = []
+  if (!reference) reasons.push('subject_missing')
+  else if (reference.evidenceRevision !== value.evidenceRevision) reasons.push('evidence_changed')
+  if (value.goalId) {
+    const goal = goals.find(item => item.id === value.goalId)
+    if (!goal || goal.revision !== value.goalRevision) reasons.push('goal_changed')
+    if (goal?.status === 'archived') reasons.push('goal_archived')
+  }
+  if (value.deferUntil && Date.parse(value.deferUntil) <= now.getTime()) reasons.push('defer_elapsed')
+  return { current: reasons.length === 0, reasons }
+}
+
 /** Authored intent, personal feedback and canonical evidence; no generated task, reward or completion store. */
 export async function readBusinessProgress(db: DbClient, principal: MemberAccessPrincipal, page: { limit?: number; offset?: number } = {}) {
   await authorize(db, principal)
   const outcomes = await listBusinessOutcomes(db, principal, page)
   const { limit, offset } = outcomes.pagination
-  const [goalRows, feedbackRows] = await Promise.all([
-    queryAllPages<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId]),
-    queryAll<FeedbackRow>(db, 'SELECT * FROM recommendation_feedback WHERE organization_id = ? AND user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?', [principal.organizationId, principal.userId, limit + 1, offset]),
-  ])
-  const goals = goalRows.map(goalOf)
+  const [goals, feedbackRows] = await Promise.all([listBusinessGoals(db, principal), listRecommendationFeedback(db, principal, { limit, offset })])
   const references = new Map<string, ReturnType<typeof readBusinessProgressReference>>()
-  const feedback = await Promise.all(feedbackRows.slice(0, limit).map(async (row): Promise<RecommendationFeedbackView> => {
-    const value = feedbackOf(row), reasons: RecommendationFeedbackView['applicability']['reasons'] = []
+  const now = new Date()
+  const feedback = await Promise.all(feedbackRows.slice(0, limit).map(async (value): Promise<RecommendationFeedbackView> => {
     const key = JSON.stringify([value.operation, value.subjectId])
     if (!references.has(key)) references.set(key, readBusinessProgressReference(db, principal, value))
+    let reference: BusinessProgressReference | null = null
     try {
-      if ((await references.get(key)!).evidenceRevision !== value.evidenceRevision) reasons.push('evidence_changed')
+      reference = await references.get(key)!
     } catch (error) {
       if (!(error instanceof HTTPError) || error.statusCode !== 404) throw error
-      reasons.push('subject_missing')
     }
-    if (value.goalId) {
-      const goal = goals.find(item => item.id === value.goalId)
-      if (!goal || goal.revision !== value.goalRevision) reasons.push('goal_changed')
-      if (goal?.status === 'archived') reasons.push('goal_archived')
-    }
-    if (value.deferUntil && Date.parse(value.deferUntil) <= Date.now()) reasons.push('defer_elapsed')
-    return { ...value, applicability: { current: reasons.length === 0, reasons } }
+    return { ...value, applicability: recommendationFeedbackApplicability(value, reference, goals, now) }
   }))
   const hasMore = feedbackRows.length > limit
   return { goals, feedback, feedbackPagination: { limit, offset, hasMore, nextOffset: hasMore ? offset + limit : null }, ...outcomes }

@@ -1,8 +1,9 @@
 # Business progress foundation
 
 This backend contract supports future web and native presentations of owner
-intent, useful work and recommendation feedback. There is no UI or new Today
-selector in this change. Booky Boo can consume the same domain operations when
+intent, useful work and recommendation feedback. Today keeps its current
+selector; the recommendation preview below is a separate evaluation surface
+until its behavior is accepted. Booky Boo can consume the same domain operations when
 its presentation reaches parity; none of these records require lodging.
 
 ## Canonical records
@@ -95,3 +96,161 @@ economic policy remain separate decisions under issues
 [#1606](https://github.com/krabiclaw/krabiclaw/issues/1606),
 [#1607](https://github.com/krabiclaw/krabiclaw/issues/1607) and
 [#1608](https://github.com/krabiclaw/krabiclaw/issues/1608).
+
+## Recommendation preview
+
+`POST /api/organizations/:organizationId/recommendations/preview` evaluates
+current canonical records without executing an action, storing a task, changing
+feedback, or recording an owner impression. Owner/admin authorization and the
+underlying content/operations permissions apply before context enters reasoning.
+Responses are private and not cached.
+
+```json
+{
+  "goalIds": ["an-explicit-active-goal-id"],
+  "availableMinutes": 20,
+  "limit": 2
+}
+```
+
+Omit `goalIds` to consider all active authored goals. Missing or foreign goals
+return 404; an explicitly requested archived goal returns 409. Missing intent
+produces `needs_context` with a targeted question. Available time remains
+unknown when absent or null; zero produces `no_suggestion` without calling a
+model. No operation has a manufactured duration, and the preview does not claim
+an action fits a finite budget when effort is unknown.
+
+An optional future `asOf` instant evaluates **current records at that clock**.
+It does not reconstruct historical state or authorize future execution. Omit it
+for the server's current time; past instants are refused. This allows evaluation
+of stale inbound messages, expired deferrals and future commitments without
+rewriting source timestamps or adding a test clock endpoint.
+
+The response is `{preview}` with:
+
+- A transient `previewId`, input `contextRevision`, `evaluatedAt` and exact
+  authored `goals`. A preview is not proof an owner saw a recommendation.
+- A decision: `recommendations`, `no_suggestion` or `needs_context`, a summary
+  and any targeted questions.
+- Recommendations containing a stable `operation:subjectId` identity, canonical
+  evidence reference, cited goal IDs, the canonical capability, intended outcome,
+  why-now interpretation and uncertainties. Rewording does not change identity.
+- All considered references with deterministic eligibility and allowed goal IDs,
+  including withheld work. Empty suggestions do not mean the business is done.
+- Coverage, unknowns and reasoning metadata: policy version, actual model when
+  called, elapsed milliseconds and token usage only when the provider reports it.
+
+### Selection and lifecycle
+
+The first bounded coverage is articles and guest conversations: up to 12 articles
+and 24 conversations, with explicit `hasMore` flags. These capabilities apply
+across business types. There is no vertical-specific recommendation list.
+Article text and messages are bounded excerpts; integrations, other capabilities
+and external business outcomes are outside this evidence coverage.
+
+Canonical domain facts decide permissions, publication prerequisites and basic
+conversation eligibility. Publication already recorded removes the publication
+candidate. A later member reply waits for fresh inbound; failed or unconfirmed
+delivery is exposed explicitly and never represented as successful delivery.
+Archive, block, resolution and required recipient/invite state are respected.
+Airbnb/provider preflight is not executed by a read-only preview and remains
+explicitly unavailable for selection in this first slice.
+
+Uncommitted inbound older than 14 days is withheld from autonomous discovery.
+This is an **unvalidated preview policy**, not evidence of owner preference or
+an assertion that younger messages must be answered. A noncancelled current or
+future commitment receives separate consideration. Stays use their actual
+checkout date in their timezone, separate from the inbox's mailbox grace.
+Nothing deletes, resolves or archives a conversation as it ages out of preview.
+
+Current dismissals and deferrals withhold their exact evidence reference. A
+goal-scoped choice removes only that goal from the candidate's allowed goals;
+another goal can supply a distinct reason to consider it. Corrections enter
+reasoning as authored feedback, without silently modifying the authored goal.
+Changed source evidence, a changed/archived goal or elapsed deferral uses the
+same applicability function as the progress API.
+
+### Reasoning boundary and failure behavior
+
+The existing Today rules are the comparison baseline: their fixed ordering is
+unaffected by authored goals. They remain in use by existing screens while the
+preview is evaluated. A new keyword-to-task rule table would introduce an
+additional intent taxonomy and mishandle negation or unfamiliar combinations.
+
+The preview therefore uses deterministic eligibility followed by one grounded
+Workers AI call to interpret natural-language intent over eligible evidence.
+It uses the existing `AI` binding and Cloudflare's native
+[JSON-schema response format](https://developers.cloudflare.com/workers-ai/features/json-mode/)
+with the documented
+[Llama 3.3 model](https://developers.cloudflare.com/workers-ai/models/llama-3.3-70b-instruct-fp8-fast/).
+There is no agent engine, tool execution loop, generated task persistence or
+second completion store. Model text is an interpretation, not owner-confirmed
+intent, permission, publication approval or achieved business impact.
+
+The application rejects unknown candidate IDs, ineligible candidates, duplicate
+choices, invalid goal citations and schema-inconsistent output. Source content
+is untrusted data. The full bounded context, intent and applicable feedback are
+read again after inference, including when the decision proposes nothing. A
+changed context returns 409 for a new preview. Execution still rechecks canonical
+authorization and source revision through the existing operation.
+
+A missing AI binding is 503. Inference errors fail visibly; invalid or
+ungrounded model output is 502. No rules fallback manufactures a recommendation
+after an inference failure. Oversized reasoning context produces `needs_context`
+and reports the limitation without silently dropping evidence. These constraints
+bound cost and latency; actual usage and runtime measurements accompany the
+technical evaluation rather than being presented as a billing guarantee.
+
+### Evaluation evidence
+
+`tests/e2e/business-progress.spec.ts` compares the current Today baseline and
+preview over the same disposable organization. It uses real CMS/MCP edits,
+publication, contact, reply, inbound-message and consultation-booking operations,
+plus the real AI binding. It records the authored cases, actual decisions,
+latency and reported token usage as a Playwright attachment.
+
+The cases exercise opposing natural-language priorities on the same available
+work, zero available time, correction and dismissal, changed source evidence,
+publication completion, new inbound, deferral expiry, and equally old
+uncommitted versus future-commitment conversations. These are technical
+behavioral evaluations inspired by the owner-reported active surfaces. They are
+not owner/staff validation or evidence that a recommendation improved a business.
+
+On 2026-10-26, the local production Worker and real AI binding passed both
+focused tests, including five model decisions under `recommendation-preview-v2`:
+
+| Technical case | Actual decision | Domain elapsed time | Input/output tokens | Estimated model USD |
+| --- | --- | ---: | ---: | ---: |
+| Inbox is the only priority; article work can wait | Guest reply | 7.716 s | 2,017 / 150 | 0.000929 |
+| Same records; publish the explicitly approved guide and leave inbox alone | Article publication | 5.052 s | 2,035 / 142 | 0.000916 |
+| New exact-evidence correction requires attorney review first | Needs context; asks about review | 3.014 s | 2,249 / 53 | 0.000778 |
+| Requested guide is now published; no other work requested | No suggestion | 3.296 s | 1,792 / 38 | 0.000611 |
+| Fresh guest inbound and changed owner intent | Guest reply | 6.493 s | 1,856 / 141 | 0.000861 |
+
+The current Today baseline kept the same attention/draft card IDs across the
+goal change; its two Wrangler request logs reported 35 ms and 55 ms, with no
+model inference. The preview changed selection. The five-call median domain latency
+was 5.052 seconds; these timings include source reads and revalidation, not
+network transit or representative production load. This is too little evidence
+to claim a general relevance rate or latency distribution.
+
+Token-only model estimates use the model page's published USD rates of 0.293
+per million input tokens and 2.253 per million output tokens: approximately
+USD 0.00410 for these five successful calls. They exclude Worker/D1 charges,
+development retries and account billing adjustments; no invoice was verified.
+
+An earlier live prompt repeated the old publication-approval claim despite a
+new correction. The retained correction case exposed that error. Version 2
+provides current corrections first, with their operation, evidence and revision,
+and explicitly makes them supersede contradictory older goal claims. The final
+run asked for the missing attorney review instead of recommending publication.
+This demonstrates why schema-valid output alone is insufficient and why new,
+withheld cases and owner judgment remain necessary.
+
+The current owner-reported observations remain Kikuzuki inbox use and NCLS MCP
+blog updates. Historical intake and product decisions add constraints, but no
+current customer-approved goal, available-time budget or ranked decision episode
+was located. Issue #1607 remains open for actual owner judgment, including
+disagreement and withheld cases. Issue #1606 remains open for accepting policy,
+broader evidence coverage and replacing the current Today selector. Issue #1608
+remains open for the economy decision.
