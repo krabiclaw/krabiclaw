@@ -6,6 +6,7 @@ import { guestPaymentMessage, ownerPaymentMessage } from './payment-events'
 import type { GuestPaymentNotificationEvent, PaymentNotificationEvent } from './payment-events'
 import {
   bookingCancelledMessage,
+  calendarSyncMessage,
   bookingChangeMessage,
   bookingReassignedMessage,
   bookingCreatedMessage,
@@ -155,6 +156,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(reservationCancelledMessage({ ...reservation, wasConfirmed: true })) },
   { id: 'booking-created', audience: 'owner', title: 'Owner — new experience booking', whatsappTemplate: 'new_reservation', message: ownerAlert(bookingCreatedMessage(booking)) },
   { id: 'booking-cancelled', audience: 'owner', title: 'Owner — booking cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(bookingCancelledMessage({ ...booking, wasConfirmed: false })) },
+  { id: 'calendar-event-deleted', audience: 'owner', title: 'Owner — booking event deleted in Google Calendar', message: ownerAlert(calendarSyncMessage({ kind: 'event_deleted', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', reason: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
+  { id: 'calendar-move-refused', audience: 'owner', title: 'Owner — booking could not follow its Google Calendar event', message: ownerAlert(calendarSyncMessage({ kind: 'move_refused', recordKind: 'consultation', guestName: 'Mina Park', whenLabel: 'Mon, Jul 20, 2026, 10:00 AM', reason: 'That time is outside Elena’s working hours', replyUrl: 'https://demo.krabiclaw.com/dashboard/demo/bookings/booking/preview-1', organizationName: studio })) },
   {
     id: 'stay-booked',
     audience: 'owner',

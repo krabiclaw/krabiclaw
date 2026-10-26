@@ -3,6 +3,7 @@ import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 import { organizationRoles } from '~/utils/organization-access'
 import { STAY_MAP_SHARING_MODES, type StayMapSharing } from '~/shared/stay-listing'
 import { coordinatesFailure } from '~/utils/location-map'
+import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { LOGO_SHAPES, type LogoPresentation } from '~/shared/media-placement-contract'
 
 /**
@@ -165,6 +166,12 @@ export function useDashboardOrganization() {
   const organization = computed(() => state.value?.organization ?? null)
   const organizationId = computed(() => organization.value?.id ?? null)
   const locations = computed(() => state.value?.locations ?? [])
+  /** What the organization's plan includes, by the one policy the server enforces. */
+  const entitlements = computed(() => {
+    const plan = organization.value?.effective_plan
+    if (!plan) throw createError({ statusCode: 500, statusMessage: 'Organization billing status is unavailable', fatal: true })
+    return getPlanEntitlements(plan)
+  })
   /** Whether the signed-in member's role may change the plan, by the same rule the billing endpoints enforce. */
   const canUpdateBilling = computed(() => {
     const role = organization.value?.role
@@ -194,6 +201,7 @@ export function useDashboardOrganization() {
     organizationId,
     locations,
     canUpdateBilling,
+    entitlements,
     organizationPaths,
     /** Re-runs the context request. For an explicit reload after a mutation. */
     refresh: () => refreshNuxtData(contextKey.value),

@@ -1,6 +1,11 @@
 /**
- * What each integration is, in the words the dashboard shows: the one canonical
- * description the Integrations index and every leaf read.
+ * What each connection is, in the words the dashboard shows: the one canonical
+ * description the Connections index and every leaf read.
+ *
+ * A **sync** keeps two sides in step on its own (Google Calendar, Airbnb,
+ * Google Maps); a **connection** links an account once and is used from here.
+ * `entitlement` names the plan capability a connection needs; the index says
+ * which plan includes it, and its leaf offers that plan.
  */
 export type IntegrationKey =
   | 'google-maps'
@@ -13,50 +18,55 @@ export type IntegrationKey =
   | 'instagram'
   | 'discord'
 
+export type IntegrationGroup = 'sync' | 'connection'
+
 export interface IntegrationDefinition {
   key: IntegrationKey
   name: string
   logo: string
+  group: IntegrationGroup
   /** One sentence: what connecting it gets the business. */
   purpose: string
+  /** The plan capability it needs; absent when every plan has it. */
+  entitlement?: string
 }
 
 export const INTEGRATIONS: readonly IntegrationDefinition[] = [
   {
-    key: 'google-maps', name: 'Google Maps', logo: 'i-logos-google-maps',
-    purpose: 'Each location matched to its Google Maps place: hours, photos, rating and reviews.',
+    key: 'google-calendar', name: 'Google Calendar sync', logo: 'i-logos-google-calendar', group: 'sync', entitlement: 'calendar_sync',
+    purpose: 'Busy on your calendar? Booked out on your website. New bookings show up on your calendar.',
   },
   {
-    key: 'google-search-console', name: 'Google Search Console', logo: 'i-logos-google-search-console',
-    purpose: 'Proof to Google that this site is yours.',
+    key: 'airbnb', name: 'Airbnb sync', logo: 'i-simple-icons-airbnb', group: 'sync', entitlement: 'channel_sync',
+    purpose: 'Reservations, nightly rates and open dates stay in step with Airbnb, so no night is sold twice.',
   },
   {
-    key: 'google-analytics', name: 'Google Analytics', logo: 'i-logos-google-analytics',
-    purpose: 'Website traffic, and where your bookings come from.',
+    key: 'google-maps', name: 'Google Maps sync', logo: 'i-logos-google-maps', group: 'sync', entitlement: 'google_places',
+    purpose: 'Hours, photos, rating and reviews from each location’s Google Maps listing, refreshed weekly.',
   },
   {
-    key: 'facebook', name: 'Facebook', logo: 'i-logos-facebook',
-    purpose: 'Posts from your site, published to your Facebook Page.',
+    key: 'google-analytics', name: 'Google Analytics', logo: 'i-logos-google-analytics', group: 'connection',
+    purpose: 'See who visits your website and which pages turn into bookings.',
   },
   {
-    key: 'instagram', name: 'Instagram', logo: 'i-skill-icons-instagram',
-    purpose: 'Photo posts, published to your Instagram professional account.',
+    key: 'google-search-console', name: 'Google Search Console', logo: 'i-logos-google-search-console', group: 'connection',
+    purpose: 'Show Google this site is yours so every page can be found.',
   },
   {
-    key: 'discord', name: 'Discord', logo: 'i-logos-discord-icon',
-    purpose: 'Announcements, posted to one channel in your server.',
+    key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads', group: 'connection', entitlement: 'marketing',
+    purpose: 'Run Search campaigns from your dashboard and ChatGPT, and see what they bring in.',
   },
   {
-    key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads',
-    purpose: 'Your ad spend and results in Insights, and campaigns run from your dashboard and ChatGPT.',
+    key: 'facebook', name: 'Facebook', logo: 'i-logos-facebook', group: 'connection', entitlement: 'managed_service',
+    purpose: 'Publish posts from your site to your Facebook Page.',
   },
   {
-    key: 'google-calendar', name: 'Google Calendar', logo: 'i-logos-google-calendar',
-    purpose: 'Your bookings on the calendar your team already uses.',
+    key: 'instagram', name: 'Instagram', logo: 'i-skill-icons-instagram', group: 'connection', entitlement: 'managed_service',
+    purpose: 'Publish photo posts to your Instagram professional account.',
   },
   {
-    key: 'airbnb', name: 'Airbnb', logo: 'i-simple-icons-airbnb',
-    purpose: 'Sync listings, reservations, rates, and guest messages directly to your dashboard.',
+    key: 'discord', name: 'Discord', logo: 'i-logos-discord-icon', group: 'connection', entitlement: 'managed_service',
+    purpose: 'Post announcements to one channel in your server.',
   },
 ]
 

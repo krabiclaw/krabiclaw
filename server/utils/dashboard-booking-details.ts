@@ -14,7 +14,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { localPartsAt } from '~/utils/timezone'
 import { appendEntry, getEntryById, GuestThreadEntryDedupeConflictError } from '~/server/domain/guest-threads/entries'
-import { requestBookingChange } from '~/server/domain/guest-threads/booking-changes'
+import { moveBooking, requestBookingChange } from '~/server/domain/guest-threads/booking-changes'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
@@ -368,7 +368,9 @@ export async function requestDashboardBookingChange(
   const thread = await getGuestRequest(context.db, row.id, row.organization_id, input.type)
   if (!thread) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   if (input.type === 'booking') await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.operational_id, sessionId: 'sessionId' in input.body && typeof input.body.sessionId === 'string' ? input.body.sessionId : undefined })
-  await requestBookingChange(context.db, context.env, thread, context.userId, input.body, input.body.idempotencyKey)
+  // `apply` moves it now and tells the guest; otherwise the guest is asked first.
+  if ('apply' in input.body && input.body.apply === true) await moveBooking(context.db, context.env, thread, { userId: context.userId }, input.body, input.body.idempotencyKey)
+  else await requestBookingChange(context.db, context.env, thread, context.userId, input.body, input.body.idempotencyKey)
   await publishGuestInboxThreadEvent(context.env, context.db, { threadId: threadId, type: 'thread.changed' })
   return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.id })
 }

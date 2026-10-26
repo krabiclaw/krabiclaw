@@ -21,6 +21,8 @@ export function getPlanEntitlements(plan: string): EntitlementsMap {
     review_requests: false,
     additional_languages: false,
     marketing: false,
+    calendar_sync: false,
+    channel_sync: false,
   }
 
   switch (plan) {
@@ -32,6 +34,10 @@ export function getPlanEntitlements(plan: string): EntitlementsMap {
         ...base,
         payments: plan !== 'growth',
         marketing: plan === 'marketing' || plan === 'business',
+        // Two-way Google Calendar sync and the Airbnb channel: Business keeps
+        // both sides in step for a team; Growth takes bookings on the site.
+        calendar_sync: plan === 'business',
+        channel_sync: plan === 'business',
         custom_pages: true,
         google_places: true,
         custom_domains: true,

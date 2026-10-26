@@ -19,11 +19,14 @@ member's working hours, timezone and time off. Existing bookings keep their
 assignment until an explicit reassignment. Approved member profiles introduce
 the person guests will meet on the service page.
 
-Google Calendar is optional. Connecting the business creates or reuses its
-KrabiClaw calendar and projects upcoming pending and confirmed bookings and
-reservations. Connecting a member's personal account can exclude busy times from
-new availability. Google event edits do not reschedule KrabiClaw bookings, and
-personal event titles and descriptions are not imported.
+Google Calendar sync is a Business feature. Connecting the business creates or
+reuses its KrabiClaw calendar and projects upcoming pending and confirmed
+bookings and reservations; an event moved there moves its booking through the
+same booking-move operation the dashboard and ChatGPT use, with its
+availability checks and guest email, while a deleted event is put back and the
+booking is raised for the owner's decision. Connecting a member's personal
+account excludes busy times from new availability. Personal event titles and
+descriptions are not imported.
 
 Google Cloud Console reports branding and data access verified as of 2026-10-04.
 Calendar uses non-sensitive scopes; the unused broad event scope was removed.

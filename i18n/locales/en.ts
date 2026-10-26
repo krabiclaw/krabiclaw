@@ -261,6 +261,8 @@ export default {
     "change_pending": "Your booking stays unchanged until you accept. This link expires in 7 days.",
     "change_accepted": "Changes accepted",
     "change_updated": "Your booking has been updated.",
+    "change_moved": "Your booking was moved",
+    "change_moved_detail": "The business moved your booking to a new time. Here are the updated details.",
     "change_declined": "Changes declined",
     "change_unchanged": "Your original booking is unchanged.",
     "change_accept": "Accept changes",

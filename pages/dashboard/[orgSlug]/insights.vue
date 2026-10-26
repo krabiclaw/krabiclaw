@@ -381,11 +381,7 @@
             </div>
           </section>
           <!-- The service, offered where its evidence is; it starts in Plan and billing. -->
-          <section v-if="!ads.managed" class="rounded-2xl p-6 ring ring-default" data-testid="insights-managed-ads">
-            <h2 class="text-xl font-semibold text-highlighted">Get more from this budget</h2>
-            <p class="mt-2 text-base text-muted">Chris hand-manages your campaigns against these numbers — budgets, creative direction and conversion rate — with a weekly meeting, for 10% of ad spend billed with your KrabiClaw fees.</p>
-            <UButton class="mt-4" label="See managed ads" :to="`/dashboard/${scope?.orgSlug}/billing/managed-ads`" />
-          </section>
+          <OfferCard v-if="!ads.managed" :offer="offer('managed_ads')" summary="Chris hand-manages your campaigns against these numbers, with a weekly meeting." data-testid="insights-managed-ads" />
           <section>
             <header class="mb-4"><h2 class="font-semibold text-highlighted">Campaigns by spend</h2></header>
             <p v-if="!ads.campaigns.length" class="text-sm text-muted">No campaigns in this account.</p>
@@ -409,6 +405,8 @@
 </template>
 
 <script setup lang="ts">
+import OfferCard from '~/components/dashboard/OfferCard.vue'
+import { offer } from '~/shared/offers'
 import AnalyticsTrendChart from '~/components/dashboard/AnalyticsTrendChart.vue'
 const dashboardApi = useDashboardApi()
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })

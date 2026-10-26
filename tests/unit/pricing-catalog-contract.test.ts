@@ -108,11 +108,16 @@ test('Business combines payments and ad management while existing contracts reta
   const business = getPlanEntitlements('business')
   const marketing = getPlanEntitlements('marketing')
   const commerce = getPlanEntitlements('commerce')
+  // Business keeps everything a Marketing contract had; what came later (the two syncs) is Business only.
   for (const [capability, value] of Object.entries(marketing)) {
-    if (capability !== 'plan') assert.equal(business[capability], value)
+    if (capability !== 'plan' && value === true) assert.equal(business[capability], true, capability)
   }
   assert.equal(business.payments, true)
   assert.equal(business.marketing, true)
+  assert.equal(business.calendar_sync, true)
+  assert.equal(business.channel_sync, true)
+  assert.equal(marketing.calendar_sync, false)
+  assert.equal(getPlanEntitlements('growth').channel_sync, false)
   assert.equal(marketing.payments, true)
   assert.equal(marketing.marketing, true)
   assert.equal(commerce.payments, true)
