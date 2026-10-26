@@ -107,6 +107,9 @@ if (inventoryFile) test.describe('published route inventory', () => {
         const errors: string[] = []
         const failedRequests: Request[] = []
         const successfulResponses = new Map<string, number>()
+        const requestRoutes = new WeakMap<Request, string>()
+        const decodedVideos = new Map<string, { route: string; current_src: string; ready_state: number; video_width: number; video_height: number }>()
+        page.on('request', request => requestRoutes.set(request, page.url()))
         const firstParty = (value: string) => {
           const host = new URL(value).hostname
           return host === new URL(target.origin).hostname || host === 'media.krabiclaw.com' || host === 'imagedelivery.net'
@@ -239,6 +242,11 @@ if (inventoryFile) test.describe('published route inventory', () => {
                     decoded: media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && media.videoWidth > 0 && media.videoHeight > 0,
                   }
                 }), { message: 'The rendered video must decode its own current frame without a media error' }).toEqual({ error: null, decoded: true })
+                const decoded = await video.evaluate(element => {
+                  const media = element as HTMLVideoElement
+                  return { route: location.href, current_src: media.currentSrc, ready_state: media.readyState, video_width: media.videoWidth, video_height: media.videoHeight }
+                })
+                if (successfulResponses.has(decoded.current_src)) decodedVideos.set(`${decoded.route}\n${decoded.current_src}`, decoded)
               }
               expect(await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth))).toBeLessThanOrEqual(width)
               await page.evaluate(() => window.scrollTo(0, 0))
@@ -276,7 +284,13 @@ if (inventoryFile) test.describe('published route inventory', () => {
                     return video ? { element: 'video', poster: video.poster, current_src: video.currentSrc, ready_state: video.readyState, video_width: video.videoWidth, video_height: video.videoHeight, error: null } : null
                   }, { value: failed.url(), successful: [...successfulResponses.keys()] })
                   : null
-                if (owner) resolvedDuplicateCancellations.push({ url: failed.url(), resource_type: resourceType, error, successful_responses: Object.fromEntries(successfulResponses), decoded_owner: owner })
+                // Navigation cancels the departed document's outstanding byte
+                // ranges. Accept only its exact resource already proven decoded;
+                // a failure belonging to this page still needs its live owner.
+                const sourceRoute = requestRoutes.get(failed)
+                const departedOwner = failed.method() === 'GET' && error === 'net::ERR_ABORTED' && resourceType === 'media'
+                  && sourceRoute !== url.href ? decodedVideos.get(`${sourceRoute}\n${failed.url()}`) : undefined
+                if (owner || departedOwner) resolvedDuplicateCancellations.push({ url: failed.url(), resource_type: resourceType, error, successful_responses: Object.fromEntries(successfulResponses), decoded_owner: owner ?? departedOwner })
                 else errors.push(`${failed.method()} ${failed.url()}: ${error}`)
               }
               if (resolvedDuplicateCancellations.length) await testInfo.attach(`resolved duplicate media cancellations ${index + 1} ${url.pathname}${url.search}`, {

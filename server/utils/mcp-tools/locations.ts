@@ -33,7 +33,7 @@ const calendarMutation = { ...locationMutation, properties: { ...locationMutatio
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'create_location',
-      description: 'Add a location to the selected business. It is created active, so it is on the business website as soon as this returns; update_location with status inactive takes it off. Every plan includes 2 active locations per business. Growth and Business then charge $49 per additional location per month on the business\'s one subscription, billed at the end of the period for the active locations at that time. Inactive locations and the locations of places to stay are not counted. Basic refuses a third active location. Returns its identity, status, timezone and saved timestamp; use get_location for its full details.',
+      description: 'Add an active business branch or office. It counts toward existing subscription usage and may increase the bill. It becomes public unless the website has published homes and this location has no published offering. Set hours with update_location; create homes with create_product.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -45,29 +45,24 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         website_url: { type: 'string', format: 'uri' },
         description: { type: 'string' },
         timezone: timezoneSchema,
-        opening_hours: { ...openingHoursInputSchema, description: `${openingHoursInputSchema.description} Omitted is the same as null.` },
-        special_hours: { ...specialHoursInputSchema, description: `${specialHoursInputSchema.description} Omitted, null and [] all mean no special hours.` },
       },
       required: ['title', 'idempotency_key', 'timezone'],
       outputSchema: {
         type: 'object',
         properties: {
+          organization_id: text,
           location: {
             type: 'object',
             properties: {
               id: locationObject.properties.id,
-              slug: locationObject.properties.slug,
               title: locationObject.properties.title,
               status: { ...locationObject.properties.status, description: 'Current operational status. New locations are active; a retry returns the saved location’s current status.' },
-              timezone: { type: 'string', description: 'Saved IANA timezone for this location.' },
-              updated_at: { type: 'string', description: 'Saved location update timestamp.' },
             },
-            required: ['id', 'slug', 'title', 'status', 'timezone', 'updated_at'],
+            required: ['id', 'title', 'status'],
             additionalProperties: false,
           },
-          context: workspaceContextObject,
         },
-        required: ['location', 'context'],
+        required: ['organization_id', 'location'],
         additionalProperties: false,
       },
     }),
@@ -109,7 +104,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Renaming keeps its saved public address.' },
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
-        status: { type: 'string', enum: ['active', 'inactive'], description: 'active keeps the location on the website; inactive takes it off the website and frees its plan slot.' },
+        status: { type: 'string', enum: ['active', 'inactive'], description: 'Set active to enable the location, or inactive to hide it. This can change location or home usage billed on the existing subscription.' },
         stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'Public map precision for every place to stay at this location. General shows the area; specific shows its precise pin. Both keep the street address private until a confirmed booking. Omit to keep the saved choice.' },
         address: postalAddressSchema,
         latitude: { ...locationObject.properties.latitude, description: 'Saved map latitude. Supply longitude in the same call; both null clears the coordinates. Omit both to keep the saved coordinates.' },
@@ -200,15 +195,12 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
       assertDomainSuccess(result);
       const location = (result.data as { location: LocationRecord }).location;
       return {
+        organization_id: organization.organizationId,
         location: {
           id: location.id,
-          slug: location.slug,
           title: location.title,
           status: location.status,
-          timezone: location.timezone,
-          updated_at: location.updated_at,
         },
-        context: await mutationContextPayload(organization, { locationId: location.id }),
       };
     }
     case "list_locations": {
