@@ -112,11 +112,11 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
       try {
         parsed = JSON.parse(String(message.data))
       } catch {
-        nextSocket.close(1002, 'Invalid dashboard invalidation')
+        nextSocket.close(4002, 'Invalid dashboard invalidation')
         return
       }
       if (!isDashboardInvalidation(parsed)) {
-        nextSocket.close(1002, 'Invalid dashboard invalidation')
+        nextSocket.close(4002, 'Invalid dashboard invalidation')
         return
       }
       if (seenEventIds.has(parsed.eventId)) return

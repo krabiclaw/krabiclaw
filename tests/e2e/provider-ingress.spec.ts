@@ -100,7 +100,7 @@ test('compact signed email reply persists once and rejects a changed address', a
     // The public routes resolve their tenant from the host, and this runs against
     // the platform's, so the tenant is named rather than inferred.
     headers: { 'x-preview-tenant': 'demo' },
-    data: { name, email: 'paulchrisluke@gmail.com', message: 'Please confirm the continuity check.', subject: 'general' },
+    data: { name, email: 'paulchrisluke+provider-ingress@gmail.com', message: 'Please confirm the continuity check.', subject: 'general' },
   })
   expect(submitted.status(), await submitted.text()).toBe(201)
   await test.step('authenticate owner and select organization', () => loginAs(request, baseURL!, 'user-e2e-demo-owner'), { timeout: 30_000 })

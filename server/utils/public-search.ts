@@ -1,3 +1,4 @@
+import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 import { HTTPError } from 'nitro'
 import { ARTICLE_COLLECTIONS, collectionArticlePath, isArticleCollection } from '~/utils/article-collections'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
@@ -428,7 +429,7 @@ export async function buildTenantBlogDocuments(db: DbClient, platformOrganizatio
     SELECT d.id, d.organization_id, d.title, d.slug, d.summary AS excerpt, ${articleCategoryNameSql('d.id')} AS category,
       d.metadata_json ->> '$.collection' AS collection, d.seo_keywords, s.theme_id, s.vertical
     FROM content_documents d JOIN organization s ON s.id = d.organization_id
-    WHERE d.kind = 'article' AND d.row_role = 'root' AND d.status = 'published' AND d.organization_id <> ? AND d.visibility = 'listed'${organizationId ? ' AND d.organization_id = ?' : ''}
+    WHERE d.kind = 'article' AND d.row_role = 'root' AND d.status = 'published' AND d.organization_id <> ? AND d.visibility = 'listed' AND ${publicTenantVisibilitySql('s', false)}${organizationId ? ' AND d.organization_id = ?' : ''}
     ORDER BY d.organization_id, d.published_at DESC, d.updated_at DESC
   `, [platformId, ...(organizationId ? [organizationId] : [])]), loadContentBodies(db, platformId, false, organizationId)])
 

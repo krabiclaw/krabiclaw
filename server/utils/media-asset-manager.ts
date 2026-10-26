@@ -591,7 +591,7 @@ export async function activateMediaAsset(
   if (updates.cloudflare_image_id !== undefined) { sets.push('cloudflare_image_id = ?'); params.push(updates.cloudflare_image_id) }
   params.push(id, organizationId)
   const [result] = await executeBatch(db, [
-    { query: `UPDATE media_assets SET ${sets.join(', ')} WHERE id = ? AND status = 'pending'`, params },
+    { query: `UPDATE media_assets SET ${sets.join(', ')} WHERE id = ? AND organization_id = ? AND status = 'pending'`, params },
     publicResourceCacheInvalidationQuery(organizationId, 'media-activate'),
   ])
   return Number(result?.meta?.changes ?? 0) > 0
@@ -671,7 +671,7 @@ function parseReferenceFlag(value: unknown, label: string): boolean {
   throw new Error(`Invalid ${label} reference-check result`)
 }
 
-async function getMediaStorageReferenceState(
+export async function getMediaStorageReferenceState(
   db: DbClient,
   input: {
     assetId: string

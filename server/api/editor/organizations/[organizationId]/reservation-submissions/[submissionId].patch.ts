@@ -40,9 +40,9 @@ export default defineHandler(async (event) => {
 
   const body = await readBody(event) as { status?: unknown }
   const status = cleanString(body.status, 20)
-  const action = (STATUS_TO_ACTION as Record<string, string>)[status]
+  const action = Object.hasOwn(STATUS_TO_ACTION, status) ? STATUS_TO_ACTION[status as keyof typeof STATUS_TO_ACTION] : undefined
   if (!action) {
-    return jsonResponse({ error: 'Invalid status. Must be one of: confirmed, cancelled, completed' }, { status: 400 })
+    return jsonResponse({ error: 'Invalid status. Must be cancelled' }, { status: 400 })
   }
 
 

@@ -604,6 +604,35 @@ function assertRetirementOnlyOfferSafety(snapshot, productsByPlan) {
   }
 }
 
+
+// Stripe refuses to deactivate a product's default price, so an active default
+// is cleared first; the product is archived last, when it is being retired.
+function retirementOperations(product, prices = [], archive) {
+  const operations = []
+  const activePrices = [...prices].filter(price => price.active !== false).sort((a, b) => a.id.localeCompare(b.id))
+  let expectedArchiveProduct = product
+  const defaultPriceId = typeof product.default_price === 'string' ? product.default_price.trim() : ''
+  const defaultPrice = activePrices.find(price => price.id === defaultPriceId)
+  if (defaultPrice) {
+    operations.push({
+      type: 'clear_product_default_price',
+      productId: product.id,
+      defaultPriceId,
+      expectedDefaultPriceId: defaultPriceId,
+      expectedDefaultPrice: defaultPrice,
+      expected: product,
+    })
+    expectedArchiveProduct = { ...product, default_price: null }
+  }
+  for (const price of activePrices) {
+    operations.push({ type: 'deactivate_price', productId: product.id, priceId: price.id, expected: price })
+  }
+  if (archive && product.active !== false) {
+    operations.push({ type: 'archive_product', productId: product.id, expected: expectedArchiveProduct })
+  }
+  return operations
+}
+
 export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductIds, canonicalProducts, scope = 'full' }) {
   const planningScope = normalizeCatalogPlanScope(scope)
   const { canonicalIds, productsByPlan } = resolveCanonicalProducts(
@@ -701,21 +730,7 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
     }
 
     for (const duplicate of products.filter(product => product.id !== existing?.id)) {
-      for (const price of [...(snapshot.pricesByProduct[duplicate.id] ?? [])]
-        .filter(price => price.active !== false)
-        .sort((a, b) => a.id.localeCompare(b.id))) {
-        destructiveOperations.push({
-          type: 'deactivate_price',
-          productId: duplicate.id,
-          priceId: price.id,
-          expected: price,
-        })
-      }
-      destructiveOperations.push({
-        type: 'archive_product',
-        productId: duplicate.id,
-        expected: duplicate,
-      })
+      destructiveOperations.push(...retirementOperations(duplicate, snapshot.pricesByProduct[duplicate.id], true))
     }
   }
 
@@ -724,40 +739,7 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
     const retiredProduct = retiredCatalogFamily(product) !== null
     const inactiveOfferedProduct = OFFERED_PLAN_IDS.includes(planId) && product.active === false
     if (!retiredProduct && !inactiveOfferedProduct) continue
-    const activePrices = [...(snapshot.pricesByProduct[product.id] ?? [])]
-      .filter(price => price.active !== false)
-      .sort((a, b) => a.id.localeCompare(b.id))
-    let expectedArchiveProduct = product
-    if (retiredProduct && product.active !== false) {
-      const defaultPriceId = typeof product.default_price === 'string' ? product.default_price.trim() : ''
-      const defaultPrice = activePrices.find(price => price.id === defaultPriceId)
-      if (defaultPrice) {
-        destructiveOperations.push({
-          type: 'clear_product_default_price',
-          productId: product.id,
-          defaultPriceId,
-          expectedDefaultPriceId: defaultPriceId,
-          expectedDefaultPrice: defaultPrice,
-          expected: product,
-        })
-        expectedArchiveProduct = { ...product, default_price: null }
-      }
-    }
-    for (const price of activePrices) {
-      destructiveOperations.push({
-        type: 'deactivate_price',
-        productId: product.id,
-        priceId: price.id,
-        expected: price,
-      })
-    }
-    if (retiredProduct && product.active !== false) {
-      destructiveOperations.push({
-        type: 'archive_product',
-        productId: product.id,
-        expected: expectedArchiveProduct,
-      })
-    }
+    destructiveOperations.push(...retirementOperations(product, snapshot.pricesByProduct[product.id], retiredProduct))
   }
 
   const operations = planningScope === 'offers-only'

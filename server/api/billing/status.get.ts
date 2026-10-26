@@ -3,6 +3,7 @@ import { cloudflareEnv, jsonResponse } from '../../utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { getOrganizationBillingStatus, getOrganizationSubscriptionPrice, scheduledPlanChange } from '../../utils/billing'
 import { resolveRequestedOrganization } from '~/server/utils/dashboard-context'
+import { assertRoleAllows } from '~/server/utils/member-access'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -30,6 +31,7 @@ export default defineHandler(async (event) => {
   if (!organization) {
     return jsonResponse({ error: 'No organization found' }, { status: 404 })
   }
+  await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { billing: ['read'] } })
 
   try {
     // Get billing status

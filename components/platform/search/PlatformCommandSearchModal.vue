@@ -29,7 +29,7 @@
             :class="[defaultTextClass, placeholderClass]"
             @keydown.down.prevent="moveSelection(1)"
             @keydown.up.prevent="moveSelection(-1)"
-            @keydown.enter.prevent="void openSelectedResult()"
+            @keydown.enter="event => { if (event.isComposing) return; event.preventDefault(); void openSelectedResult() }"
           >
           <button
             type="button"

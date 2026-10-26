@@ -81,28 +81,24 @@
         <section v-if="text(block.data.title) || text(block.data.description) || text(block.data.label)" class="my-12 rounded-3xl bg-elevated p-8 sm:p-12">
           <h2 v-if="text(block.data.title)" class="text-3xl font-semibold">{{ text(block.data.title) }}</h2>
           <p v-if="text(block.data.description)" class="mt-3 max-w-2xl text-muted">{{ text(block.data.description) }}</p>
-          <TenantPageButton v-if="text(block.data.label) && text(block.data.url)" class="mt-6" :label="text(block.data.label)" :url="text(block.data.url)" />
+          <TenantButton v-if="text(block.data.label) && text(block.data.url)" class="mt-6" :to="route(text(block.data.url))">{{ text(block.data.label) }}</TenantButton>
         </section>
       </template>
 
       <template v-else-if="block.type === 'callout'">
         <aside v-if="text(block.data.title) || text(block.data.body)" class="my-10 rounded-2xl border border-primary/30 bg-primary/5 p-6">
           <h2 v-if="text(block.data.title)" class="text-xl font-semibold">{{ text(block.data.title) }}</h2>
-          <div v-if="text(block.data.body)" class="prose mt-2 max-w-none whitespace-pre-wrap text-muted">{{ sanitize(text(block.data.body)) }}</div>
+          <div v-if="text(block.data.body)" class="prose mt-2 max-w-none whitespace-pre-wrap text-muted">{{ text(block.data.body) }}</div>
           <div v-if="buttons(block).length" class="mt-5 flex flex-wrap gap-3">
-            <TenantPageButton v-for="button in buttons(block)" :key="button.url + button.label" :label="button.label" :url="button.url" />
+            <TenantButton v-for="button in buttons(block)" :key="button.url + button.label" :to="route(button.url)">{{ button.label }}</TenantButton>
           </div>
         </aside>
       </template>
 
       <template v-else-if="block.type === 'button_group'">
         <div v-if="buttons(block).length" class="my-8 flex flex-wrap gap-3">
-          <TenantPageButton v-for="button in buttons(block)" :key="button.url + button.label" :label="button.label" :url="button.url" />
+          <TenantButton v-for="button in buttons(block)" :key="button.url + button.label" :to="route(button.url)">{{ button.label }}</TenantButton>
         </div>
-      </template>
-
-      <template v-else-if="block.type === 'feature_grid' && calculatorRows(block).length">
-        <TenantPagePricingCalculator :rows="calculatorRows(block)" :note="calculatorNote(block)" />
       </template>
 
       <template v-else-if="block.type === 'feature_grid' || block.type === 'testimonial_grid' || block.type === 'product_grid' || block.type === 'location_grid' || block.type === 'page_grid'">
@@ -115,7 +111,7 @@
               <h3 v-if="item.title" class="text-lg font-semibold">{{ item.title }}</h3>
               <span v-if="item.featured" class="mt-2 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t('site.posts.featured') }}</span>
               <p v-if="item.description || item.address" class="mt-2 text-sm leading-6 text-muted">{{ item.description }}<br v-if="item.description && item.address">{{ item.address }}</p>
-              <TenantPageButton v-if="item.url && itemLabel(item)" class="mt-4" :label="itemLabel(item)" :url="item.url" />
+              <TenantButton v-if="item.url && itemLabel(item)" class="mt-4" :to="route(item.url)">{{ itemLabel(item) }}</TenantButton>
             </article>
           </div>
           <p v-if="!gridItems(block).length" class="rounded-2xl border border-dashed border-default p-6 text-sm text-muted">This section has no published items yet.</p>
@@ -132,7 +128,7 @@
               <h3 class="text-lg font-semibold">{{ person.name }}</h3>
               <p v-if="person.role" class="text-sm text-muted">{{ person.role }}</p>
               <p v-if="person.bio" class="mt-2 text-sm leading-6 text-muted">{{ person.bio }}</p>
-              <TenantPageButton v-if="person.url" class="mt-4" :label="person.name" :url="person.url" />
+              <TenantButton v-if="person.url" class="mt-4" :to="route(person.url)">{{ person.name }}</TenantButton>
             </article>
           </div>
         </section>
@@ -147,12 +143,12 @@
               <p v-if="item.amount" class="text-3xl font-bold text-primary">{{ item.amount }}</p>
               <h3 class="mt-2 font-semibold">{{ item.title }}</h3>
               <p v-if="item.description" class="mt-2 text-sm text-muted">{{ item.description }}</p>
-              <TenantPageButton v-if="text(block.data.destination) && item.amount" class="mt-5" :label="`Donate ${item.amount}`" :url="text(block.data.destination)" />
+              <TenantButton v-if="text(block.data.destination) && item.amount" class="mt-5" :to="route(text(block.data.destination))">{{ `Donate ${item.amount}` }}</TenantButton>
             </article>
             <article v-if="text(block.data.destination)" class="rounded-2xl border border-default p-6">
               <h3 class="font-semibold">Custom Amount</h3>
               <p class="mt-2 text-sm text-muted">Choose your own donation amount</p>
-              <TenantPageButton class="mt-5" label="Donate custom amount" :url="text(block.data.destination)" />
+              <TenantButton class="mt-5" :to="route(text(block.data.destination))">Donate custom amount</TenantButton>
             </article>
           </div>
           <p v-if="!donationItems(block).length" class="rounded-2xl border border-dashed border-default p-6 text-sm text-muted">Donation choices are not configured.</p>
@@ -169,7 +165,7 @@ import type { TenantPageBlock, TenantPageHowToStep } from '~/utils/tenant-page-b
 import { h, type Component, type FunctionalComponent } from 'vue'
 import type { PublicTemplateSlug } from '~/utils/template-registry'
 import { tenantPageBlockPresentation } from '~/utils/tenant-page-presentation'
-import { overviewProseBlockId } from '~/utils/tenant-page-block-data'
+import { isInternalRoute, overviewProseBlockId } from '~/utils/tenant-page-block-data'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import ContentVideoEmbed from '~/components/content/ContentVideoEmbed.vue'
 import MediaPreview, { provideMediaPreviews } from '~/components/MediaPreview.vue'
@@ -186,11 +182,8 @@ const platformHome = computed(() => template.value === 'platform' && props.page.
 function presentationOf(block: TenantPageBlock): Component | null {
   return tenantPageBlockPresentation(template.value, block.type)
 }
-import { loadDomPurify } from '~/utils/dom-purify-loader'
-import { sanitizeHtmlForSsr } from '~/utils/markdown'
-
-const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
-const { t } = useI18n()
+const { t, localePath } = useI18n()
+function route(url: string) { return isInternalRoute(url) ? localePath(url) : url }
 /**
  * The page's blocks, in the order the page carries them — less the one the
  * service overview draws inside its own column, which would otherwise appear
@@ -236,10 +229,6 @@ type GridItem = { id?: string; title?: string; description?: string; address?: s
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
-}
-
-function sanitize(value: string): string {
-  return DOMPurify.sanitize(value)
 }
 
 /**
@@ -359,20 +348,6 @@ function donationItems(block: TenantPageBlock): GridItem[] {
 function buttons(block: TenantPageBlock): Array<{ label: string; url: string }> {
   if (!Array.isArray(block.data.buttons)) return []
   return block.data.buttons.filter((button): button is Record<string, unknown> => Boolean(button && typeof button === 'object')).map(button => ({ label: text(button.label), url: text(button.url) })).filter(button => button.label && button.url)
-}
-
-function calculatorRows(block: TenantPageBlock): unknown[][] {
-  const calculator = block.data.calculator
-  if (!calculator || typeof calculator !== 'object' || Array.isArray(calculator)) return []
-  const rows = (calculator as Record<string, unknown>).rows
-  return Array.isArray(rows) ? rows.filter(Array.isArray) as unknown[][] : []
-}
-
-function calculatorNote(block: TenantPageBlock): string | undefined {
-  const calculator = block.data.calculator
-  if (!calculator || typeof calculator !== 'object' || Array.isArray(calculator)) return undefined
-  const note = (calculator as Record<string, unknown>).note
-  return typeof note === 'string' ? note : undefined
 }
 </script>
 

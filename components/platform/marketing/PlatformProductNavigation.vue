@@ -6,14 +6,13 @@
     </div>
   </nav>
   <div v-else class="my-8 flex flex-wrap gap-3">
-    <TenantPageButton v-for="link in links" :key="link.url + link.label" :label="link.label" :url="link.url" />
+    <TenantButton v-for="link in links" :key="link.url + link.label" :to="link.url">{{ link.label }}</TenantButton>
   </div>
 </template>
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockRecords, blockText, isInternalRoute } from '~/utils/tenant-page-block-data'
-import TenantPageButton from '~/components/tenant-pages/TenantPageButton.vue'
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { localePath } = useI18n()
 const links = computed(() => blockRecords(props.block.data.buttons).flatMap(item => {

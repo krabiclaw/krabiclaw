@@ -55,7 +55,9 @@ const operationError = ref<string | null>(null)
 const { loading: googleLoading, error: googleError, signInWithGoogle } = useAuthOperation()
 watch(googleError, value => { operationError.value = value })
 
-if (route.query.verified === '1') notice.value = 'Your email is verified. You can sign in now.'
+// Better Auth returns a link it refused to the same callback with `error` added.
+if (route.query.verified === '1' && route.query.error) operationError.value = 'This verification link has expired or was already used. Sign in to get a new one.'
+else if (route.query.verified === '1') notice.value = 'Your email is verified. You can sign in now.'
 else if (route.query.reset === 'success') notice.value = 'Your password was updated. Sign in with your new password.'
 
 // The session is read through applicationFetch, which forwards the visitor's
@@ -73,12 +75,19 @@ function showVerification(email: string) {
   verificationEmail.value = email
 }
 
+function verificationCallback() {
+  const url = new URL('/login', window.location.origin)
+  url.searchParams.set('verified', '1')
+  if (redirect.value) url.searchParams.set('redirect', redirect.value)
+  return url.toString()
+}
+
 async function resendVerification() {
   if (!verificationEmail.value || resending.value) return
   resending.value = true
   operationError.value = null
   try {
-    const result = await authClient.sendVerificationEmail({ email: verificationEmail.value, callbackURL: `${window.location.origin}/login?verified=1` })
+    const result = await authClient.sendVerificationEmail({ email: verificationEmail.value, callbackURL: verificationCallback() })
     if (result?.error) operationError.value = result.error.message || 'Could not resend verification email.'
     else notice.value = `If ${verificationEmail.value} is registered, a fresh verification email is on the way.`
   } catch (error) {

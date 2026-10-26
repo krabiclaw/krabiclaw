@@ -185,6 +185,7 @@ export default definePlugin((nitroApp) => {
           SELECT route_path, updated_at FROM resource_localizations
            WHERE organization_id = ? AND locale = ? AND route_path IS NOT NULL
              AND (resource_type <> 'product' OR resource_id IN (SELECT value FROM json_each(?)))
+             AND (resource_type <> 'business_location' OR resource_id IN (SELECT bl.id FROM business_locations bl WHERE bl.organization_id = resource_localizations.organization_id AND ${publicLocationSql('bl')}))
            ORDER BY route_path
         `, [organizationId, candidate.locale, publicProductIds]),
         queryAll<{ path: string; updated_at: string }>(db, `

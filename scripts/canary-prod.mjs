@@ -81,7 +81,7 @@ async function main() {
         SELECT value, identifier, createdAt
         FROM verification
         WHERE (identifier = '${sqlEscape(phone)}' OR replace(identifier, '+', '') = '${sqlEscape(digits)}' OR replace(identifier, ' ', '') = '${sqlEscape(phone.replace(/\s+/g, ''))}')
-          AND expiresAt > datetime('now')
+          AND expiresAt > unixepoch()
         ORDER BY createdAt DESC
         LIMIT 5
       `)

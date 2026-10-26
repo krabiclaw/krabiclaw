@@ -57,8 +57,8 @@ export function socialCardRefreshNotice(summary: SocialCardRefreshSummary): Soci
   if (summary.failed === 0 && summary.skipped === 0) {
     return { message: `Social cards regenerated: ${detail}.`, color: 'success' }
   }
-  if (summary.failed === summary.total) {
-    return { message: `Social card regeneration failed for all ${summary.failed} items.`, color: 'error' }
+  if (completed === 0 && summary.failed > 0) {
+    return { message: `Social card regeneration failed: ${summary.failed} failed, ${summary.skipped} skipped.`, color: 'error' }
   }
   return {
     message: `Social cards partially regenerated: ${completed} completed, ${summary.failed} failed, ${summary.skipped} skipped.`,

@@ -32,7 +32,7 @@ export const ARTICLE_COLLECTIONS: Record<ArticleCollection, ArticleCollectionDef
 export const ARTICLE_COLLECTION_SLUGS = Object.keys(ARTICLE_COLLECTIONS) as ArticleCollection[]
 
 export function isArticleCollection(value: unknown): value is ArticleCollection {
-  return typeof value === 'string' && value in ARTICLE_COLLECTIONS
+  return typeof value === 'string' && Object.hasOwn(ARTICLE_COLLECTIONS, value)
 }
 
 /** The public path of a collection's category page: `{prefix}/category/{slug}`. */

@@ -73,8 +73,11 @@ const result = computed(() => calculateSlidingScaleRate({
 function onIncomeInput(event: Event) {
   const target = event.target as HTMLInputElement
   const next = target.value.replace(/[^0-9.]/g, '')
-  const parts = next.split('.')
-  if (parts.length > 2) return
+  // A second decimal point is refused, and the field keeps showing the value in use.
+  if (next.split('.').length > 2) {
+    target.value = income.value
+    return
+  }
   income.value = next
   target.value = next
 }

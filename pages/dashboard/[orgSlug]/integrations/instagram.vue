@@ -47,7 +47,8 @@ const { data: account, error: accountError } = await useAsyncData(
     if (!data?.user.name) throw new Error('Instagram did not return the account name.')
     return data.user
   },
-  { watch: [accountId] },
+  // The auth client carries the session cookie only from the browser.
+  { watch: [accountId], server: false },
 )
 
 interface ConnectionHealth { channels: Array<{ channel: string; problems: Array<{ code: string; message: string }> }> }

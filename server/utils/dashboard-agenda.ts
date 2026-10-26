@@ -122,7 +122,8 @@ function scopeParams(scope: AgendaScope, query: AgendaQuery): unknown[] {
 }
 
 // A buyer's row is one whose request they still own, which is the same
-// condition the account's activity and conversations read with.
+// condition the account's activity and conversations read with. The condition
+// names its request `r`, so no row reading it may use that alias itself.
 function scopeConditions(scope: AgendaScope, query: AgendaQuery, alias: string): string {
   return [
     scope.buyerUserId
@@ -236,9 +237,9 @@ export async function listAgenda(
   // A held table and a booked seat are their own rows, and each states one
   // instant in its own zone. The window here is deliberately broad in UTC; the
   // day a row belongs to is decided below, in that row's zone.
-  if (requestedKinds.has('reservation')) sourceQueries.push(queryAll(db, `${commonSelect('r', 'reservation', `agenda_reservation.starts_at, agenda_reservation.ends_at,
-    json_extract(r.payload_json, '$.guest.name') AS title, printf('%d%s guests', agenda_reservation.party_size, CASE json_extract(r.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END) AS subtitle, agenda_reservation.party_size, agenda_reservation.status`, {
-    joins: 'JOIN reservations agenda_reservation ON agenda_reservation.request_id = r.id',
+  if (requestedKinds.has('reservation')) sourceQueries.push(queryAll(db, `${commonSelect('rq', 'reservation', `agenda_reservation.starts_at, agenda_reservation.ends_at,
+    json_extract(rq.payload_json, '$.guest.name') AS title, printf('%d%s guests', agenda_reservation.party_size, CASE json_extract(rq.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END) AS subtitle, agenda_reservation.party_size, agenda_reservation.status`, {
+    joins: 'JOIN reservations agenda_reservation ON agenda_reservation.request_id = rq.id',
     timezone: 'agenda_reservation.timezone',
   })} ${staff ? `AND (${assignedLocationSql('l')})` : ''} AND agenda_reservation.status <> 'cancelled' AND agenda_reservation.starts_at BETWEEN ? AND ?`, [...params(), ...(staff ? [staff.userId, staff.userId] : []), broadFrom, broadTo]))
   if (requestedKinds.has('booking')) sourceQueries.push(queryAll(db, `${commonSelect('b', 'booking', `agenda_session.starts_at, agenda_session.ends_at,

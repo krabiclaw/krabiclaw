@@ -79,7 +79,7 @@ export function registerPageviewTracking() {
 
   const router = useRouter()
   const locales = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
-  const isTracked = (path: string) => isTrackablePath(resolveTenantLocalePath(path, locales.value.map(item => item.locale)).sourcePath) && !path.startsWith('/dev')
+  const isTracked = (path: string) => isTrackablePath(resolveTenantLocalePath(path, locales.value.map(item => item.locale)).sourcePath) && path !== '/dev' && !path.startsWith('/dev/')
 
   // The collector answers `ignored` for a request it deliberately does not record (a known bot), and
   // an error for one it could not. Neither is a persisted event. A failure is reported through the
