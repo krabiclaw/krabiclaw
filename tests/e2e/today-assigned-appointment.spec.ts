@@ -52,6 +52,7 @@ test('an assigned staff member can review a future online consultation from Toda
       details: { preparation: 'Bring your consultation questions.', cancellation_policy: 'Contact us before the appointment to cancel.' },
       variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }],
     } }), 201)).product
+    expect(product.image, 'The authored consultation has no Product photo').toBeNull()
     await body(await page.request.put(`${EDITOR}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1,
       confirmation_mode: 'review', online_payment_required: false, scheduling_mode: 'provider', assigned_member_id: actor.id, held_online: true } }), 200)
     await body(await page.request.put(`${EDITOR}/products/${product.id}/publication`, { data: { published: true } }), 200)
@@ -69,9 +70,9 @@ test('an assigned staff member can review a future online consultation from Toda
     requestId = booked.request_id
     expect(booked.status).toBe('pending')
     const bookingPath = `${DASHBOARD}/bookings/booking/${requestId}`
-    const read = await body<{ booking: { status: string; assignedMemberId: string; locationTitle: string } }>(
+    const read = await body<{ booking: { status: string; assignedMemberId: string; locationTitle: string; resourceImageUrl: string | null } }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online' })
+    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online', resourceImageUrl: null })
     await body(await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'member' },
     }), 200)
@@ -105,6 +106,7 @@ test('an assigned staff member can review a future online consultation from Toda
     expect((await savedDescription).status()).toBe(200)
     const descriptionReadback = await body<{ product: Product }>(await page.request.get(`${EDITOR}/products/${product.id}`), 200)
     expect(descriptionReadback.product).toMatchObject({ id: product.id, name: product.name, description, booking: { assigned_member_id: actor.id, held_online: true } })
+    expect(descriptionReadback.product.image, 'The independently read Product still has no authored photo').toBeNull()
     await expect(legalCards.getByTestId('editor-card-description')).toContainText(description)
     const forbiddenPreview = await memberContext.request.get(new URL(`${EDITOR}/context`, baseURL!).toString())
     expect(forbiddenPreview.status(), await forbiddenPreview.text()).toBe(404)
@@ -134,6 +136,24 @@ test('an assigned staff member can review a future online consultation from Toda
     await expect(attention).toHaveAttribute('href', bookingPath)
     await attention.click()
     await expect(memberPage).toHaveURL(new URL(bookingPath, baseURL!).toString())
+    const detail = memberPage.locator('#dashboard-panel-booking-details')
+    const todayPanel = memberPage.locator('#dashboard-panel-org-today')
+    await expect(detail.getByRole('heading', { name: 'Awaiting review', exact: true })).toBeVisible()
+    await expect(detail.locator('img'), 'An image-free consultation does not inherit organization artwork').toHaveCount(0)
+    await expect(todayPanel).toBeHidden()
+    await memberPage.setViewportSize({ width: 1440, height: 900 })
+    await expect(todayPanel).toBeVisible()
+    await expect(attention).toBeVisible()
+    await expect(detail).toBeVisible()
+    const todayBounds = await todayPanel.boundingBox()
+    const detailBounds = await detail.boundingBox()
+    expect(todayBounds).not.toBeNull()
+    expect(detailBounds).not.toBeNull()
+    expect(todayBounds!.x + todayBounds!.width).toBeLessThanOrEqual(detailBounds!.x + 1)
+    await expect(detail.locator('img')).toHaveCount(0)
+    await memberPage.setViewportSize({ width: 390, height: 844 })
+    await expect(todayPanel).toBeHidden()
+    await expect(detail).toBeVisible()
     const confirmed = memberPage.waitForResponse(response => new URL(response.url()).pathname.endsWith(`/guest-threads/${requestId}/operations/confirm`))
     await memberPage.getByRole('button', { name: 'Confirm consultation', exact: true }).click()
     expect((await confirmed).status()).toBe(200)

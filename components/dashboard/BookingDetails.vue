@@ -11,6 +11,9 @@
     the thread's leaf there is no column to own, so it is the body alone.
   -->
   <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="chrome">
+    <template #right>
+      <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close booking details" class="max-lg:hidden" />
+    </template>
     <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert
@@ -47,21 +50,11 @@
         />
         <div class="mt-6 flex flex-wrap gap-3">
           <UButton
-            v-for="action in availableActions"
-            :key="action.value"
-            :label="action.label"
-            :icon="action.icon"
-            :color="action.color"
-            variant="ghost"
-            :loading="pendingAction === action.value"
-            @click="action.value === 'cancel' && !booking.guestCanRetryCancellation ? openCancel() : runAction(action.value)"
-          />
-          <UButton
             v-if="canChangeBooking && !personalScope"
             :label="`Change ${noun}`"
             color="neutral"
             variant="soft"
-            :to="`${editorPath}/change`"
+            :to="{ path: `${editorPath}/change`, query: route.query }"
             @click="beginChange"
           />
           <UButton
@@ -92,7 +85,7 @@
         </div>
 
         <template v-if="booking.type === 'booking' && !personalScope">
-          <component :is="canChangeBooking ? NuxtLink : 'div'" :to="canChangeBooking ? `${editorPath}/team-member` : undefined" class="mt-6 flex items-center gap-4 border-y border-default py-6">
+          <component :is="canChangeBooking ? NuxtLink : 'div'" :to="canChangeBooking ? { path: `${editorPath}/team-member`, query: route.query } : undefined" class="mt-6 flex items-center gap-4 border-y border-default py-6">
             <span class="min-w-0 flex-1"><span class="block text-base font-medium text-highlighted">Team member</span><span class="block text-sm text-muted">{{ booking.assignedMemberName || (booking.assignedMemberId ? 'Previously assigned member' : booking.organizationName) }}</span></span>
             <UIcon v-if="canChangeBooking" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
           </component>
@@ -103,7 +96,7 @@
         <PaymentDetails v-for="detail in booking.payments" :key="detail.payment.id" :payment="detail.payment" :refunds="detail.refunds" :order="detail.order">
           <template v-if="!personalScope && detail.payment.captured_amount > detail.payment.refunded_amount" #actions>
             <!-- Airbnb's host sends money from the reservation; the amount is asked for on its own leaf. -->
-            <NuxtLink :to="{ path: `${editorPath}/refund`, query: { payment: detail.payment.id } }" class="flex items-center gap-4 border-t border-default py-4">
+            <NuxtLink :to="{ path: `${editorPath}/refund`, query: { ...route.query, payment: detail.payment.id } }" class="flex items-center gap-4 border-t border-default py-4">
               <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
               <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
             </NuxtLink>
@@ -116,7 +109,7 @@
             <p class="text-base font-medium text-highlighted">Who’s coming</p>
             <p class="mt-1 text-sm text-muted">{{ guestCountLabel }}</p>
           </div>
-          <component :is="purchase ? 'div' : NuxtLink" v-else-if="!personalScope && booking.guestName" :to="purchase ? undefined : `${editorPath}/guest`" class="flex items-center gap-4 py-4">
+          <component :is="purchase ? 'div' : NuxtLink" v-else-if="!personalScope && booking.guestName" :to="purchase ? undefined : { path: `${editorPath}/guest`, query: route.query }" class="flex items-center gap-4 py-4">
             <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" icon="i-lucide-user" size="md" class="shrink-0" />
             <span class="min-w-0 flex-1">
               <span class="block text-base font-medium text-highlighted">{{ booking.guestName }}</span>
@@ -138,7 +131,7 @@
             <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
           </button>
 
-          <NuxtLink v-if="!personalScope && !purchase" :to="`${editorPath}/notes`" class="flex items-center gap-4 border-t border-default py-4">
+          <NuxtLink v-if="!personalScope && !purchase" :to="{ path: `${editorPath}/notes`, query: route.query }" class="flex items-center gap-4 border-t border-default py-4">
             <span class="min-w-0 flex-1">
               <span class="block text-base font-medium text-highlighted">Your notes</span>
               <span class="block text-sm text-muted">{{ notesSummary }}</span>
@@ -153,6 +146,18 @@
               <span class="block text-sm text-muted">{{ formatCreatedAt(booking.createdAt) }}</span>
             </span>
           </div>
+        </div>
+        <div v-if="availableActions.length" class="mt-6 flex flex-wrap gap-3 border-t border-default pt-4">
+          <UButton
+            v-for="action in availableActions"
+            :key="action.value"
+            :label="action.label"
+            :icon="action.icon"
+            :color="action.color"
+            variant="ghost"
+            :loading="pendingAction === action.value"
+            @click="action.value === 'cancel' && !booking.guestCanRetryCancellation ? openCancel() : runAction(action.value)"
+          />
         </div>
       </template>
     </div>
@@ -273,6 +278,8 @@ const props = defineProps<{
   /** The account that booked, reading its own record: no team controls, its own cancel. */
   personalScope?: boolean
 }>()
+const recordLevel = useRouteLevel()
+const route = useRoute()
 
 type ActionColor = 'success' | 'error' | 'neutral'
 
@@ -562,7 +569,7 @@ async function sendChangeRequest() {
     )
     resource.value = response
     resetChangeDraft()
-    await navigateTo(editorPath.value)
+    await navigateTo({ path: editorPath.value, query: route.query })
   } catch (cause) {
     changeError.value = getErrorMessage(cause, 'Change request could not be sent')
   } finally {

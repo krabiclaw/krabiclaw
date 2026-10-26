@@ -13,7 +13,7 @@
         <NuxtLink
           v-for="note in b.booking.value.notes"
           :key="note.id"
-          :to="`${level.path.value}/${note.id}`"
+          :to="{ path: `${level.path.value}/${note.id}`, query: route.query }"
           class="block py-3"
           :aria-label="`Edit note: ${note.body}`"
         >
@@ -35,6 +35,7 @@ import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
 definePageMeta({ layout: 'dashboard' })
 
 const level = useRouteLevel()
+const route = useRoute()
 const b = inject(bookingEditorKey)!
 
 // This level writes a new note; a leaf below edits an existing one.

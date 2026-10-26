@@ -2,6 +2,9 @@
   <!-- One stay at a place to stay: who is coming, when, and what the host has collected. -->
   <!-- Inside the guest thread's leaf, which owns the column, it is the body alone. -->
   <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="embedded ? {} : { id: 'stay-details', title, column: 'leaf' }">
+    <template #right>
+      <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close stay details" class="max-lg:hidden" />
+    </template>
     <UAlert v-if="error" color="error" variant="soft" title="This stay could not be loaded" :description="getErrorMessage(error, 'Stay request failed')" />
     <div v-else-if="stay" class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
@@ -133,6 +136,7 @@ const props = defineProps<{
   /** The guest's own stay, read and cancelled from their account; stayId is then its activity ID. */
   personalScope?: boolean
 }>()
+const recordLevel = useRouteLevel()
 const dashboardApi = useDashboardApi()
 const { t } = useI18n()
 const route = useRoute()

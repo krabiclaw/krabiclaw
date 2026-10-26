@@ -728,7 +728,8 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page.getByRole('link', { name: 'Change date', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
 
-  await page.goto(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}/change`)
+  const changeContext = '?range=upcoming&locationId=loc-demo&kinds=reservation'
+  await page.goto(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}/change${changeContext}`)
   const beforeResponse = await page.request.get(
     `/api/dashboard/bookings/reservation/${upcomingBookingId}`,
     { params: { org: 'ember-slice-demo' } },
@@ -737,6 +738,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const before = await beforeResponse.json() as { booking: { partySize: number; threadId: string } }
   const targetPartySize = before.booking.partySize === 99 ? 98 : before.booking.partySize + 1
   await page.getByRole('link', { name: 'Change guests', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}/change/guests${changeContext}`)
   await page.getByRole('spinbutton', { name: 'Guests', exact: true }).fill(String(targetPartySize))
   await page.getByRole('button', { name: 'Done', exact: true }).click()
   const requestedAt = new Date().toISOString()
@@ -748,6 +750,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const changeResponse = await requestCompleted
   expect(changeResponse.status(), await changeResponse.text()).toBe(200)
   await expect(page.getByRole('heading', { name: 'Coming up', exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}${changeContext}`)
 
   const detail = await loadThreadDetail(page.request, before.booking.threadId, 'org-demo')
   const requests = detail.entries.filter(entry =>
