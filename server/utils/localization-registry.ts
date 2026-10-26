@@ -70,7 +70,7 @@ export const RESOURCE_LOCALIZATION_REGISTRY: Readonly<Record<LocalizedResourceTy
 
 function localizedShapeSchema(shape: ValueShape): Record<string, unknown> {
   if (shape === 'text') return { type: 'string' }
-  if (shape === 'string_array') return { type: 'array', items: { type: 'string', pattern: '\\S' } }
+  if (shape === 'string_array') return { type: 'array', items: { type: 'string', pattern: '^[\\s\\S]*\\S[\\s\\S]*$' } }
   if (shape === 'details') return productDetailsSchema(undefined, true)
   return { type: 'object', properties: Object.fromEntries(Object.entries(shape).map(([key, nested]) => [key, localizedShapeSchema(nested)])), additionalProperties: false }
 }
