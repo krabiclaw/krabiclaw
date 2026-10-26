@@ -138,9 +138,9 @@ review instructions must explicitly select Ember & Slice before the cases.
 The Review Tasting Experience has review confirmation, no required online
 collection and available future sessions. Review Online Tasting retains its
 required online collection. Ember's October payment list is empty and its
-seller Stripe account is not connected. `get_payments_usage.configured` describes
-plan fee pricing, not the seller account connection, and must not be used to
-infer payout availability.
+seller Stripe account is not connected. Plan fee configuration is separate
+from the seller account connection and must not be used to infer payout
+availability.
 
 The foreign private booking was independently read by its owner, denied to the
 reviewer with a 404, and read unchanged by its owner afterward. This read-only

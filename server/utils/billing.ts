@@ -216,10 +216,14 @@ export async function reportBillingUsageForSubscriptionEvent(env: CloudflareEnv,
   if (organizations[0]) await reportBillingUsage(env, db, organizations[0].id)
 }
 
-// A write batch ends with a guard that aborts it — a NOT NULL failure on a
-// column no other statement clears — when it leaves more live homes than the
-// bound. D1 rolls the batch back whole.
-function homeGuard(organizationId: string, bound: number): BatchQuery {
+// A NOT NULL failure aborts the whole D1 batch. A restricted write first checks
+// its observed count still holds, even if every home was concurrently deleted;
+// the final guard then refuses a count above its bound.
+function homeGuard(organizationId: string, bound: number, mode: 'upper_bound' | 'unchanged' = 'upper_bound'): BatchQuery {
+  if (mode === 'unchanged') return {
+    query: `UPDATE organization SET status = NULL WHERE id = ? AND (${ACTIVE_HOMES_SQL}) <> ?`,
+    params: [organizationId, organizationId, bound],
+  }
   return {
     query: `UPDATE products SET active = NULL WHERE organization_id = ? AND kind = 'stay' AND active = 1 AND (${ACTIVE_HOMES_SQL}) > ?`,
     params: [organizationId, organizationId, bound],
@@ -388,23 +392,36 @@ export async function requireHomeCapacity(env: CloudflareEnv, db: DbClient, orga
  * paid plan bills it, so it runs again unguarded; Basic runs it again guarded
  * at the count it includes and refuses past it with the 402. The first attempt
  * was rolled back whole, so the second is the only write. The count is then
- * reported to Stripe.
+ * reported to Stripe. A caller that cannot activate homes stops after that
+ * rollback, before reading the plan or retrying the write. Its starting count
+ * is checked inside the same batch; a stale observation refuses the write.
  */
 export async function executeWithinCapacity(
   env: CloudflareEnv,
   db: DbClient,
   organizationId: string,
   writes: BatchQuery[],
-  options: { operation?: string; action: string },
+  options: { operation?: string; action: string; allowHomeActivation?: boolean },
 ): Promise<D1Result[]> {
   const homes = await countActiveHomes(db, organizationId)
+  const startingGuard = options.allowHomeActivation === false ? [homeGuard(organizationId, homes, 'unchanged')] : []
   let results: D1Result[] | null = null
   try {
-    results = await executeBatch(db, [...writes, homeGuard(organizationId, homes)], { operation: options.operation })
+    results = (await executeBatch(db, [...startingGuard, ...writes, homeGuard(organizationId, homes)], { operation: options.operation })).slice(startingGuard.length)
   } catch (error) {
+    if (/NOT NULL constraint failed: organization\.status/.test(error instanceof Error ? error.message : String(error))) {
+      throw new HTTPError({ statusCode: 409, message: 'The live homes changed before this edit. Reload the current state and try again.', data: {
+        code: 'HOME_STATE_CHANGED', operation_completed: false,
+      }, cause: error })
+    }
     if (!guardFailure(error)) throw error
   }
   if (!results) {
+    if (options.allowHomeActivation === false) {
+      throw new HTTPError({ statusCode: 409, message: 'Make homes live in the dashboard.', data: {
+        code: 'HOME_ACTIVATION_REQUIRES_DASHBOARD', action_required: true, operation_completed: false,
+      } })
+    }
     const subscriptions = await readOrganizationSubscriptions(env, [organizationId])
     if (isKnownRecurringPlan(planFromSubscriptions(organizationId, subscriptions.get(organizationId) ?? []))) {
       results = await executeBatch(db, writes, { operation: options.operation })

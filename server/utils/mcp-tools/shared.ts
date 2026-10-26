@@ -841,7 +841,6 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   list_payments: R,
   get_payment: R,
   get_payment_payouts: R,
-  get_payments_usage: R,
   get_payments_dashboard_link: R,
   set_product_booking_config: { ...D, openWorldHint: true },
   delete_product_booking_config: { ...D, openWorldHint: true },

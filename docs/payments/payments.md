@@ -52,7 +52,7 @@ events on the business's own customer, timestamped when they are sent so they
 land in the open period. Each event's identifier and idempotency key derive
 from its source, so a repeat after a lost answer is the same event. Stripe's
 4xx refusal (other than rate limiting) is kept with its reason and not
-retried. `get_payments_usage` and Payments → Plan read the fee rates from the
+retried. Payments → Plan reads the fee rates from the
 subscription's own metered prices.
 
 The catalog goes to each Stripe account with `scripts/seed-stripe.mjs`
@@ -516,8 +516,7 @@ millisecond of that actual reporting day. Missing or invalid provider timezone
 stops activation/capture; there is no UTC default. Agreement eligibility
 compares the same actual day boundary with the recorded consent and connection
 instants. The Business subscription's ad-spend price bills it at the end of the
-period, and the plan screen and `get_payments_usage` show it as
-`ad_spend_rate_percent`. A Google Ads account in a currency other than USD, or
+period, and the plan screen reads it as `ad_spend_rate_percent`. A Google Ads account in a currency other than USD, or
 a day whose spend changed after it was queued, fails the task for that
 business rather than being converted or overwritten.
 

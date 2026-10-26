@@ -195,9 +195,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Creates a Google Ads Search campaign, ad group, keywords and responsive search ad in the connected account. It starts paused unless explicitly enabled; enabling can spend the account’s advertising budget.",
-        "open_world_justification": "Creates a campaign in the Google Ads account the business explicitly connected. It starts paused unless enabled; enabled campaigns can spend that account’s advertising budget on Google.",
-        "destructive_justification": "Creates a Google Ads Search campaign, ad group, keywords and responsive search ad in the connected account. It starts paused unless explicitly enabled; enabling can spend the account’s advertising budget."
+        "read_only_justification": "Creates a paused Google Ads Search campaign, ad group, keywords and responsive search ad in the connected account for review. This operation cannot enable it.",
+        "open_world_justification": "Creates a paused campaign in the Google Ads account the business explicitly connected. It remains paused for review.",
+        "destructive_justification": "Creates a paused Google Ads Search campaign, ad group, keywords and responsive search ad in the connected account for review. This operation cannot enable it."
       }
     },
     "create_home_room": {
@@ -735,9 +735,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads UTC tenant financial and usage summaries, retaining separate currency totals.",
-        "open_world_justification": "Reads UTC tenant financial and usage summaries, retaining separate currency totals. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads UTC tenant financial and usage summaries, retaining separate currency totals."
+        "read_only_justification": "Reads tenant payment totals for a UTC period, retaining separate currency totals.",
+        "open_world_justification": "Reads tenant payment totals for a UTC period, retaining separate currency totals. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads tenant payment totals for a UTC period, retaining separate currency totals."
       }
     },
     "get_payments_dashboard_link": {
@@ -750,18 +750,6 @@
         "read_only_justification": "Reads the selected organization and returns its authenticated payment settings URL; creates no account, onboarding session or financial record.",
         "open_world_justification": "Reads the selected organization and returns its authenticated payment settings URL; creates no account, onboarding session or financial record. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Reads the selected organization and returns its authenticated payment settings URL; creates no account, onboarding session or financial record."
-      }
-    },
-    "get_payments_usage": {
-      "annotations": {
-        "readOnlyHint": true,
-        "openWorldHint": false,
-        "destructiveHint": false
-      },
-      "justifications": {
-        "read_only_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox.",
-        "open_world_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox."
       }
     },
     "get_post": {

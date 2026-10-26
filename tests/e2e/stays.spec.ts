@@ -2863,7 +2863,7 @@ test('native MCP room tools author the same room identities and selected-photo c
 test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, slug, organizationId, call, productId } = await createStayHome(page, baseURL!)
+  const { request, headers, slug, organizationId, location, call, productId } = await createStayHome(page, baseURL!)
   const { previewLink, previewModal, previewIframe } = previewLocators(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   // The guest page is the one the editor previews, without the preview token.
@@ -2915,6 +2915,16 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   expect(hosted.error).toBeNull()
   expect(hosted.data!.product.stay).toMatchObject({ assigned_member_id: host.memberId, assigned_team_id: null })
   const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
+  const activationHandoff = { status: 409, code: 'HOME_ACTIVATION_REQUIRES_DASHBOARD', operation_completed: false, action_required: true, dashboard_url: `${baseURL}/dashboard/${slug}/products` }
+  const unpublishedNativeRead = await request.get(`${baseURL}${productEndpoint}`)
+  await expectStatus(unpublishedNativeRead, 200)
+  const unpublishedNative = (await unpublishedNativeRead.json() as { product: Product }).product
+  const refusedPublication = await call('set_product_publication', { product_id: productId, published: true })
+  expect(refusedPublication.data).toBeNull()
+  expect(JSON.parse(refusedPublication.error!)).toMatchObject(activationHandoff)
+  const unchangedPublication = await request.get(`${baseURL}${productEndpoint}`)
+  await expectStatus(unchangedPublication, 200)
+  expect((await unchangedPublication.json()).product).toEqual(unpublishedNative)
   const publicationBodies: unknown[] = []
   const availabilityBodies: unknown[] = []
   page.on('request', outgoing => {
@@ -2958,6 +2968,56 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   expect(listedProduct.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(true)
   expect(publicationBodies).toEqual([{ published: true }, { published: true }])
   expect(availabilityBodies).toEqual([])
+
+  // MCP can edit a home but activation is completed through its own dashboard.
+  // The independent editor reads prove each refusal leaves the saved home alone.
+  const pauseForMcp = await request.patch(`${baseURL}${productEndpoint}`, { headers, data: { active: false } })
+  await expectStatus(pauseForMcp, 200)
+  const pausedNativeRead = await request.get(`${baseURL}${productEndpoint}`)
+  await expectStatus(pausedNativeRead, 200)
+  const pausedNative = (await pausedNativeRead.json() as { product: Product }).product
+  expect(pausedNative.active).toBe(false)
+  expect(pausedNative.publications.find(item => item.organization_id === organizationId)!.published).toBe(true)
+  for (const operation of [
+    { name: 'update_product', args: { product_id: productId, active: true } },
+    { name: 'reconcile_products', args: { products: [{ product_id: productId, name: pausedNative.name, kind: 'stay', active: true }], idempotency_key: `${slug}-refused-home-activation` } },
+  ]) {
+    const refusedActivation = await call(operation.name, operation.args)
+    expect(refusedActivation.data, operation.name).toBeNull()
+    expect(JSON.parse(refusedActivation.error!), operation.name).toMatchObject(activationHandoff)
+    const unchangedHome = await request.get(`${baseURL}${productEndpoint}`)
+    await expectStatus(unchangedHome, 200)
+    expect((await unchangedHome.json()).product, operation.name).toEqual(pausedNative)
+  }
+  const resumeAfterMcp = await request.patch(`${baseURL}${productEndpoint}`, { headers, data: { active: true } })
+  await expectStatus(resumeAfterMcp, 200)
+  const resumedNative = await request.get(`${baseURL}${productEndpoint}`)
+  await expectStatus(resumedNative, 200)
+  expect((await resumedNative.json()).product).toMatchObject({ id: productId, active: true })
+  const locationEndpoint = `${baseURL}/api/organizations/${organizationId}/locations/${location.id}`
+  const pauseLocation = await request.patch(locationEndpoint, { headers, data: { status: 'inactive' } })
+  await expectStatus(pauseLocation, 200)
+  const inactiveLocationRead = await request.get(locationEndpoint)
+  await expectStatus(inactiveLocationRead, 200)
+  const inactiveLocation = (await inactiveLocationRead.json()).location
+  expect(inactiveLocation.status).toBe('inactive')
+  const homeAtInactiveLocationRead = await request.get(`${baseURL}${productEndpoint}`)
+  await expectStatus(homeAtInactiveLocationRead, 200)
+  const homeAtInactiveLocation = (await homeAtInactiveLocationRead.json()).product
+  const refusedLocation = await call('update_location', { location_id: location.id, status: 'active' })
+  expect(refusedLocation.data).toBeNull()
+  expect(JSON.parse(refusedLocation.error!)).toMatchObject(activationHandoff)
+  const unchangedLocation = await request.get(locationEndpoint)
+  await expectStatus(unchangedLocation, 200)
+  expect((await unchangedLocation.json()).location).toEqual(inactiveLocation)
+  const unchangedHomeAtLocation = await request.get(`${baseURL}${productEndpoint}`)
+  await expectStatus(unchangedHomeAtLocation, 200)
+  expect((await unchangedHomeAtLocation.json()).product).toEqual(homeAtInactiveLocation)
+  const resumeLocation = await request.patch(locationEndpoint, { headers, data: { status: 'active' } })
+  await expectStatus(resumeLocation, 200)
+  const resumedLocationRead = await request.get(locationEndpoint)
+  await expectStatus(resumedLocationRead, 200)
+  expect((await resumedLocationRead.json()).location).toMatchObject({ id: location.id, status: 'active' })
 
   const anonymousListing = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   try {
