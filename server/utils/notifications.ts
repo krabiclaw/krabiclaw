@@ -1,3 +1,4 @@
+import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
@@ -62,6 +63,7 @@ import { platformLocale } from '~/shared/platform-locales'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
+import { resolveBookingPresentation } from '~/utils/booking-presentation'
 
 const SUBJECT_LABELS: Record<string, string> = {
   general: 'General',
@@ -134,6 +136,8 @@ interface BookingNotificationInput extends OrganizationContext {
   email: string
   guestPhone?: string | null
   productTitle: string
+  /** The site's vertical decides what the owner calls this booking. */
+  vertical: string | null
   /**
    * The session instant and the zone it belongs to.
    *
@@ -1269,6 +1273,7 @@ export async function notifyBookingCreated(
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.guestPhone ?? null,
     date: prettyDate, time: prettyTime, partySize: String(opts.partySize),
     locationName: null, organizationName: studio, productTitle: opts.productTitle,
+    presentation: resolveBookingPresentation('booking', opts.vertical),
     notes: opts.notes ?? null, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
   })
   const guest = await guestPresentation(db, opts)
@@ -1511,6 +1516,7 @@ export async function notifyBookingCancelled(
     guestName: opts.guestName, guestEmail: opts.email, guestPhone: opts.guestPhone ?? null,
     date: prettyDate, time: prettyTime, partySize: String(opts.partySize),
     locationName: null, organizationName: studio, productTitle: opts.productTitle,
+    presentation: resolveBookingPresentation('booking', opts.vertical),
     notes: opts.notes ?? null, heroImageUrl: null, replyUrl: inboxUrl,
     wasConfirmed: confirmed,
   })
@@ -1645,7 +1651,7 @@ export async function notifyBookingReassigned(
   if (!row) throw new Error(`Booking ${opts.bookingId} disappeared before its reassignment was announced`)
   // A booking's conversation is contact-backed, so its guest name is recorded; only a missing conversation leaves it absent.
   if (row.request_id === null || row.guest_name === null) throw new HTTPError({ statusCode: 500, message: 'The reassigned booking has no guest conversation', data: { code: 'INVALID_GUEST_THREAD', field: 'request_id', booking_id: opts.bookingId } })
-  const memberName = async (memberId: string) => (await queryFirst<{ name: string }>(db, `SELECT COALESCE(NULLIF(ms.public_name,''), u.name, u.email) name FROM member m JOIN user u ON u.id=m.userId
+  const memberName = async (memberId: string) => (await queryFirst<{ name: string }>(db, `SELECT ${MEMBER_NAME_SQL} name FROM member m JOIN user u ON u.id=m.userId
     LEFT JOIN member_scheduling ms ON ms.member_id=m.id WHERE m.id=? AND m.organizationId=?`, [memberId, opts.organizationId]))?.name ?? null
   const toName = await memberName(opts.memberId)
   if (!toName) throw new Error(`Team member ${opts.memberId} is not in this organization`)
@@ -1974,11 +1980,11 @@ export async function notifyGuestCancellation(env: NotificationEnv, db: DbClient
   if (record.kind === 'booking' && !record.product_name?.trim()) throw new Error('Booking cancellation delivery requires its canonical offering')
   await publishGuestInboxThreadEvent(env, db, { threadId: request.id, type: 'thread.changed' })
 
-  const organization = await queryFirst<{ name?: string | null }>(db, 'SELECT name FROM organization WHERE id = ? LIMIT 1', [organizationId])
+  const organization = await queryFirst<{ name: string | null; vertical: string | null }>(db, 'SELECT name, vertical FROM organization WHERE id = ? LIMIT 1', [organizationId])
 
   if (record.kind === 'booking') {
     await notifyBookingCancelled(env, db, {
-      organizationId: request.organization_id, organizationName: organization?.name,
+      organizationId: request.organization_id, organizationName: organization?.name, vertical: organization?.vertical ?? null,
       locale: request.payload.guest.locale,
       locationId: record.location_id, bookingId: request.id, guestName: request.payload.guest.name,
       email: request.payload.guest.email, guestPhone: request.payload.guest.phone,

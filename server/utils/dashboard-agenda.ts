@@ -1,3 +1,4 @@
+import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { assertCalendarDate, isValidTimezone, instantDate, localDateAt, addLocalDays, localDateTimeToInstant } from '~/utils/timezone'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, type DbClient } from '~/server/db'
@@ -220,7 +221,7 @@ export async function listAgenda(
     /** The zone the row's instant was offered in; a post has none and reads the business's. */
     timezone?: string
   } = {}) => `
-    SELECT ${enrichment.assignedMember??'NULL'} assigned_member_id, ${enrichment.assignedMember?`(SELECT u.name FROM member m JOIN user u ON u.id=m.userId WHERE m.id=${enrichment.assignedMember} AND m.organizationId=${alias}.organization_id)`:'NULL'} assigned_member_name, ${alias}.id, ${kind === 'booking' ? 'agenda_booking.id' : kind === 'reservation' ? 'agenda_reservation.id' : 'NULL'} AS operational_id, ${kind === 'booking' ? 'agenda_booking.product_id' : 'NULL'} AS product_id, '${kind}' AS kind, ${fields}, ${alias}.organization_id,
+    SELECT ${enrichment.assignedMember??'NULL'} assigned_member_id, ${enrichment.assignedMember?`(SELECT ${MEMBER_NAME_SQL} FROM member m JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=${enrichment.assignedMember} AND m.organizationId=${alias}.organization_id)`:'NULL'} assigned_member_name, ${alias}.id, ${kind === 'booking' ? 'agenda_booking.id' : kind === 'reservation' ? 'agenda_reservation.id' : 'NULL'} AS operational_id, ${kind === 'booking' ? 'agenda_booking.product_id' : 'NULL'} AS product_id, '${kind}' AS kind, ${fields}, ${alias}.organization_id,
            s.name AS organization_name,
            ${alias}.location_id,
            l.title AS location_title,

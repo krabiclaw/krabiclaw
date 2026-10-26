@@ -37,7 +37,7 @@ export function parseTodayFeedQuery(query: Record<string, unknown>): TodayFeedQu
 }
 
 function card(input: Pick<TodayCard, 'id' | 'to' | 'eyebrow' | 'headline' | 'priority'> & Partial<TodayCard>): TodayCard {
-  return { description: null, imageUrl: null, imageIcon: 'i-lucide-circle-check', badgeImageUrl: null, badgeIcon: null,
+  return { description: null, imageUrl: null, imageFit: 'cover', imageIcon: 'i-lucide-circle-check', badgeImageUrl: null, badgeIcon: null,
     locationId: null, assignedMemberId: null, bookingKind: null, stayId: null, productId: null, stayChannel: null, occurrenceAt: null, timeZone: null, ...input }
 }
 
@@ -55,7 +55,7 @@ function attentionCard(thread: GuestThreadListItemViewModel, organization: Dashb
     headline: conversation ? `Review conversation: ${thread.participantLabel}` : pending ? `Review ${thread.guestName}’s ${noun}` : reply
       ? `Reply to ${thread.guestName}` : `Review ${thread.guestName}’s ${noun}`,
     description: [thread.locationLabel, thread.whenLabel, reply ? thread.preview?.text : null].filter(Boolean).join(' · '),
-    imageUrl: thread.imageUrl, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
+    imageUrl: thread.imageUrl, imageFit: thread.imageFit, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
     locationId: thread.locationId, productId: thread.productId, stayChannel: thread.stayChannel, assignedMemberId: thread.assignedMemberId, bookingKind,
     occurrenceAt: thread.occurrenceAt, timeZone: thread.timeZone,
   })

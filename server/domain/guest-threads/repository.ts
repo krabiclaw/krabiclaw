@@ -107,7 +107,8 @@ const PLACE_IMAGE_SQL = `
 
 const PLACE_IMAGE_COLUMNS = `COALESCE(ma_hero.kind, ma_logo.kind) AS place_image_kind,
       COALESCE(ma_hero.thumbnail_url, ma_logo.thumbnail_url) AS place_image_thumbnail_url,
-      COALESCE(ma_hero.public_url, ma_logo.public_url) AS place_image_public_url`
+      COALESCE(ma_hero.public_url, ma_logo.public_url) AS place_image_public_url,
+      ma_hero.id IS NULL AND ma_logo.id IS NOT NULL AND COALESCE(json_extract(mp_logo.presentation_json, '$.shape'), 'original') = 'original' AS place_image_whole`
 
 /** A stay's nights, read from its dates; it has no start time to localize. */
 function stayRecordLabel(row: { record_check_in_date: string | null; record_check_out_date: string | null; record_party_size: number | null }): string | null {
@@ -243,6 +244,7 @@ type GuestThreadListRow = GuestThreadRow & {
   place_image_kind: string | null
   place_image_thumbnail_url: string | null
   place_image_public_url: string | null
+  place_image_whole: number
 }
 
 function threadProductId(row: GuestThreadListRow): string | null {
@@ -381,6 +383,7 @@ export async function listGuestThreads(
       // Two renditions of one asset, not two sources: a row 60px wide takes the
       // thumbnail, and an asset with no rendition yet is served at full size.
       imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),
+      imageFit: row.place_image_whole ? 'contain' : 'cover',
       whenLabel: row.record_check_in_date ? stayRecordLabel(row)
         : row.record_starts_at && row.record_timezone ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
           : null,
@@ -511,6 +514,7 @@ export async function listOrganizationGuestThreads(
       // Two renditions of one asset, not two sources: a row 60px wide takes the
       // thumbnail, and an asset with no rendition yet is served at full size.
       imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),
+      imageFit: row.place_image_whole ? 'contain' : 'cover',
       whenLabel: row.record_check_in_date ? stayRecordLabel(row)
         : row.record_starts_at && row.record_timezone ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
           : null,

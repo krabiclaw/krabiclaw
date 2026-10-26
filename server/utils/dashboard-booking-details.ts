@@ -1,4 +1,5 @@
-import { readMemberScheduling } from '~/server/domain/member-scheduling'
+import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
+import { readMemberScheduling, refreshMemberBusy } from '~/server/domain/member-scheduling'
 import { getGuestRequest, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import type { H3Event } from 'nitro'
@@ -242,6 +243,9 @@ export async function loadDashboardBookingDetails(
   const row = await loadBookingRow(context.db, { organizationId: context.organization.id }, input.type, input.bookingId)
   if (!row) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
   await assertBookingAccess(context, row)
+  // The provider's busy status is read after the same refresh public
+  // availability performs; a failed refresh is stored as its busy_error.
+  if (row.assigned_member_id) await refreshMemberBusy(context.db, context.env, row.assigned_member_id)
   const canReadPayments=await roleAllows({organizationId:context.organization.id,role:context.organization.role,permissions:{payments:['read']}})
   return composeBookingDetails(context.db, row, input.type, { canReadPayments })
 }
@@ -291,7 +295,7 @@ async function composeBookingDetails(
       : queryFirst<{ contactPhone: string | null }>(db, 'SELECT contact_phone AS contactPhone FROM organization WHERE id = ?', [row.organization_id]),
   ])
 
-  const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null;busy_error:string|null;busy_checked_at:string|null;conflict:number}>(db,`SELECT u.name,ms.busy_error,ms.busy_checked_at,EXISTS(SELECT 1 FROM json_each(ms.busy_json) busy WHERE json_extract(busy.value,'$.start')<? AND json_extract(busy.value,'$.end')>?) conflict FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.ends_at,row.starts_at,row.assigned_member_id,row.organization_id]):null
+  const provider=!reader.buyerUserId&&row.assigned_member_id?await queryFirst<{name:string|null;busy_error:string|null;busy_checked_at:string|null;conflict:number}>(db,`SELECT ${MEMBER_NAME_SQL} name,ms.busy_error,ms.busy_checked_at,EXISTS(SELECT 1 FROM json_each(ms.busy_json) busy WHERE json_extract(busy.value,'$.start')<? AND json_extract(busy.value,'$.end')>?) conflict FROM member m LEFT JOIN user u ON u.id=m.userId LEFT JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE m.id=? AND m.organizationId=?`,[row.ends_at,row.starts_at,row.assigned_member_id,row.organization_id]):null
   const scheduling=!reader.buyerUserId&&row.assigned_member_id ? await readMemberScheduling(db,row.organization_id,row.assigned_member_id) : null
   const paymentIds=reader.buyerUserId
     ?await queryAll<{id:string}>(db,'SELECT id FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? AND buyer_user_id=? ORDER BY created_at,id',[row.organization_id,type,row.operational_id,reader.buyerUserId])

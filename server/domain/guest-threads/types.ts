@@ -120,6 +120,8 @@ export interface GuestThreadListItemViewModel {
   needsAttention: boolean
   /** The location hero the row leads with. Null when the thread or the location has none. */
   imageUrl: string | null
+  /** A business logo its owner shows whole is fitted inside the frame rather than cropped to fill it. */
+  imageFit: 'cover' | 'contain'
   /** When the booking behind this thread happens, in its own timezone. A contact thread has none. */
   whenLabel: string | null
   /** From `resolveGuestThreadMailbox`; the client never works these out from dates. */
