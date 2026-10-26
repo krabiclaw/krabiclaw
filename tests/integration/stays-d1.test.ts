@@ -1546,6 +1546,9 @@ test('home location sharing protects every public projection after localization 
       const locationReviews = await listOrganizationReviews(db, ORG, { locationId: 'cabin-site', publishedOnly: true })
       assert.equal(locationReviews.length, 1)
       assert.equal(locationReviews[0]!.original_reference, null)
+      // The site's review list includes location reviews, still projected for the private home.
+      const siteReview = (await listOrganizationReviews(db, ORG, { publishedOnly: true })).find(review => review.id === locationReviews[0]!.id)
+      assert.equal(siteReview?.original_reference, null)
     }
 
     assert.equal((await updateLocation(db, ORG, 'cabin-site', { latitude: null, longitude: null, maps_url: null }, OWNER, env)).status, 200)

@@ -16,7 +16,12 @@ function publicReviewRow(row: Record<string, unknown>, protectedLocation: boolea
   }
 }
 
+/**
+ * `locationId` names one location's reviews, `null` the reviews attached to no
+ * location, and omitting it lists every review on the site.
+ */
 export async function listOrganizationReviews(db: DbClient, organizationId: string, options: { publishedOnly?: boolean; locationId?: string | null } = {}) {
+  const locationFilter = options.locationId ? ' AND r.location_id = ?' : options.locationId === null ? ' AND r.location_id IS NULL' : ''
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT r.id, r.organization_id, r.location_id, r.author_name,
            r.rating, r.title, r.content, r.owner_reply, r.owner_reply_at, r.helpful_count, r.status, r.source,
@@ -24,7 +29,7 @@ export async function listOrganizationReviews(db: DbClient, organizationId: stri
            original_reference, google_review_metadata, publication_authorized, created_at, updated_at,
            ${publicReviewLocationProtectedSql('r')} AS is_stay_location
     FROM reviews r
-    WHERE r.organization_id = ? AND ${options.locationId ? 'r.location_id = ?' : 'r.location_id IS NULL'}${options.publishedOnly ? " AND r.status = 'approved'" : ''}
+    WHERE r.organization_id = ?${locationFilter}${options.publishedOnly ? " AND r.status = 'approved'" : ''}
     ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC
   `, options.locationId ? [organizationId, options.locationId] : [organizationId])
   return await attachReviewMedia(db, organizationId, rows.map(({ is_stay_location, ...row }) =>
