@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:c8cf5efb69d378c45f4510088599c0d367e95016c5ee09f5f31f550bcbd593e1",
-  "documentationFingerprint": "sha256:171a4d67feb749dc3f577acf141d4bc98f06756895c1ddf55c5794f16815c888",
+  "fingerprint": "sha256:542beaaa82442dbd44f74c11f909f487063db57a5e8d4050652f1b64aaf9f074",
+  "documentationFingerprint": "sha256:fff298038ce024537f44bf35943981ca23df01434419de5767619fb0c386e339",
   "tools": [
     {
       "name": "add_organization_language",
@@ -96,7 +96,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Add organization language"
       },
       "securitySchemes": [
         {
@@ -7255,7 +7256,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Append content block"
       },
       "securitySchemes": [
         {
@@ -7444,7 +7446,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Assign home photos to room"
       },
       "securitySchemes": [
         {
@@ -8108,7 +8111,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Attach media"
       },
       "securitySchemes": [
         {
@@ -11633,7 +11637,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Batch create products"
       },
       "securitySchemes": [
         {
@@ -12434,7 +12439,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Block dates"
       },
       "securitySchemes": [
         {
@@ -12537,7 +12543,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Cancel organization invitation"
       },
       "securitySchemes": [
         {
@@ -12721,7 +12728,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Cancel product booking"
       },
       "securitySchemes": [
         {
@@ -12790,7 +12798,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Cancel scheduled guest message"
       },
       "securitySchemes": [
         {
@@ -12965,7 +12974,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Cancel stay"
       },
       "securitySchemes": [
         {
@@ -13149,7 +13159,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Cancel table reservation"
       },
       "securitySchemes": [
         {
@@ -13333,7 +13344,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Confirm product booking"
       },
       "securitySchemes": [
         {
@@ -13469,7 +13481,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create article category"
       },
       "securitySchemes": [
         {
@@ -18717,7 +18730,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create blog post"
       },
       "securitySchemes": [
         {
@@ -18901,7 +18915,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create collection"
       },
       "securitySchemes": [
         {
@@ -18919,7 +18934,7 @@
     },
     {
       "name": "create_google_ads_search_campaign",
-      "title": "Create google ads search campaign",
+      "title": "Create Google Ads search campaign",
       "description": "Create a Google Ads Search campaign from supplied keywords, ad copy, destination URL and daily budget in the account currency returned by list_google_ads_campaigns. Creates one ad group and responsive search ad. Starts PAUSED unless ENABLED is explicitly requested; enabled campaigns can spend the connected account’s advertising budget. Each create call makes a new campaign; inspect the account before retrying an uncertain result.",
       "inputSchema": {
         "additionalProperties": false,
@@ -19037,7 +19052,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create Google Ads search campaign"
       },
       "securitySchemes": [
         {
@@ -19217,7 +19233,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create home room"
       },
       "securitySchemes": [
         {
@@ -19379,7 +19396,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create location"
       },
       "securitySchemes": [
         {
@@ -19630,7 +19648,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create message template"
       },
       "securitySchemes": [
         {
@@ -19769,7 +19788,8 @@
             "enum": [
               "listed",
               "unlisted"
-            ]
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -20151,7 +20171,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create post"
       },
       "securitySchemes": [
         {
@@ -27548,7 +27569,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create product"
       },
       "securitySchemes": [
         {
@@ -27690,7 +27712,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create product booking"
       },
       "securitySchemes": [
         {
@@ -27860,7 +27883,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create product session"
       },
       "securitySchemes": [
         {
@@ -27878,7 +27902,7 @@
     },
     {
       "name": "create_qa",
-      "title": "Create qa",
+      "title": "Create Q&A",
       "description": "Create authored Q&A in the explicit site, page or location scope. Omitted sort_order appends. This creates a new record on every call and is not idempotent: do not automatically retry an uncertain response. Imported Google content remains managed in Google.",
       "inputSchema": {
         "additionalProperties": false,
@@ -27976,7 +28000,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create Q&A"
       },
       "securitySchemes": [
         {
@@ -35590,7 +35615,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create site page"
       },
       "securitySchemes": [
         {
@@ -35822,7 +35848,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create stay"
       },
       "securitySchemes": [
         {
@@ -35956,7 +35983,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create table reservation"
       },
       "securitySchemes": [
         {
@@ -36025,7 +36053,8 @@
       "annotations": {
         "destructiveHint": false,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Create team"
       },
       "securitySchemes": [
         {
@@ -36084,7 +36113,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete article category"
       },
       "securitySchemes": [
         {
@@ -36144,7 +36174,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete blog post"
       },
       "securitySchemes": [
         {
@@ -36254,7 +36285,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete channel post"
       },
       "securitySchemes": [
         {
@@ -36308,7 +36340,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete collection"
       },
       "securitySchemes": [
         {
@@ -40062,7 +40095,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete content block"
       },
       "securitySchemes": [
         {
@@ -40156,7 +40190,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete home room"
       },
       "securitySchemes": [
         {
@@ -40210,7 +40245,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete media asset"
       },
       "securitySchemes": [
         {
@@ -40275,7 +40311,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete message template"
       },
       "securitySchemes": [
         {
@@ -40335,7 +40372,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete organization language"
       },
       "securitySchemes": [
         {
@@ -40393,7 +40431,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete post"
       },
       "securitySchemes": [
         {
@@ -40447,7 +40486,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete product"
       },
       "securitySchemes": [
         {
@@ -40501,7 +40541,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete product booking config"
       },
       "securitySchemes": [
         {
@@ -40519,7 +40560,7 @@
     },
     {
       "name": "delete_qa",
-      "title": "Delete qa",
+      "title": "Delete Q&A",
       "description": "Delete authored Q&A and its content document tree in its explicit scope. Imported Google records are protected.",
       "inputSchema": {
         "additionalProperties": false,
@@ -40591,7 +40632,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete Q&A"
       },
       "securitySchemes": [
         {
@@ -40750,7 +40792,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete resource localization"
       },
       "securitySchemes": [
         {
@@ -40832,7 +40875,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete site page"
       },
       "securitySchemes": [
         {
@@ -40924,7 +40968,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete stay payment"
       },
       "securitySchemes": [
         {
@@ -40982,7 +41027,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Delete team"
       },
       "securitySchemes": [
         {
@@ -41091,7 +41137,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Disable organization language"
       },
       "securitySchemes": [
         {
@@ -45038,7 +45085,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get blog post"
       },
       "securitySchemes": [
         {
@@ -45411,7 +45459,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get calendar"
       },
       "securitySchemes": [
         {
@@ -45568,7 +45617,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get channel post"
       },
       "securitySchemes": [
         {
@@ -45586,7 +45636,7 @@
     },
     {
       "name": "get_google_ads_campaign",
-      "title": "Get google ads campaign",
+      "title": "Get Google Ads campaign",
       "description": "Read a campaign in the connected Google Ads account when inspecting its status, budget, ad groups, keywords, responsive search ad copy or destination URLs.",
       "inputSchema": {
         "additionalProperties": false,
@@ -45742,7 +45792,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get Google Ads campaign"
       },
       "securitySchemes": [
         {
@@ -46061,7 +46112,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get guest conversation"
       },
       "securitySchemes": [
         {
@@ -46270,7 +46322,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get guest messaging context"
       },
       "securitySchemes": [
         {
@@ -46790,7 +46843,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get location"
       },
       "securitySchemes": [
         {
@@ -46894,7 +46948,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get member public profile"
       },
       "securitySchemes": [
         {
@@ -47314,7 +47369,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get member scheduling"
       },
       "securitySchemes": [
         {
@@ -47446,7 +47502,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get organization"
       },
       "securitySchemes": [
         {
@@ -48710,7 +48767,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get organization analytics"
       },
       "securitySchemes": [
         {
@@ -49090,7 +49148,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get organization settings"
       },
       "securitySchemes": [
         {
@@ -49331,7 +49390,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get payment"
       },
       "securitySchemes": [
         {
@@ -49499,7 +49559,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get payment payouts"
       },
       "securitySchemes": [
         {
@@ -49645,7 +49706,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get payment summary"
       },
       "securitySchemes": [
         {
@@ -49703,7 +49765,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get payments dashboard link"
       },
       "securitySchemes": [
         {
@@ -49856,7 +49919,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get payments usage"
       },
       "securitySchemes": [
         {
@@ -50196,7 +50260,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get post"
       },
       "securitySchemes": [
         {
@@ -52381,7 +52446,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get product"
       },
       "securitySchemes": [
         {
@@ -52582,7 +52648,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get product booking"
       },
       "securitySchemes": [
         {
@@ -53586,7 +53653,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get product catalog localization"
       },
       "securitySchemes": [
         {
@@ -53814,7 +53882,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get reservation policy"
       },
       "securitySchemes": [
         {
@@ -58241,7 +58310,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get resource localization"
       },
       "securitySchemes": [
         {
@@ -62081,7 +62151,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get site page"
       },
       "securitySchemes": [
         {
@@ -62246,7 +62317,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get social connections"
       },
       "securitySchemes": [
         {
@@ -62701,7 +62773,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get stay"
       },
       "securitySchemes": [
         {
@@ -63139,7 +63212,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get stay calendar"
       },
       "securitySchemes": [
         {
@@ -63334,7 +63408,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get team conversation"
       },
       "securitySchemes": [
         {
@@ -63506,7 +63581,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get website draft"
       },
       "securitySchemes": [
         {
@@ -63680,7 +63756,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Get workspace context"
       },
       "securitySchemes": [
         {
@@ -63796,7 +63873,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Invite organization member"
       },
       "securitySchemes": [
         {
@@ -63915,7 +63993,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List article categories"
       },
       "securitySchemes": [
         {
@@ -64214,7 +64293,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List blog posts"
       },
       "securitySchemes": [
         {
@@ -64386,7 +64466,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List channel posts"
       },
       "securitySchemes": [
         {
@@ -64559,7 +64640,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List collections"
       },
       "securitySchemes": [
         {
@@ -64577,7 +64659,7 @@
     },
     {
       "name": "list_google_ads_campaigns",
-      "title": "List google ads campaigns",
+      "title": "List Google Ads campaigns",
       "description": "List up to 100 non-removed campaigns in the connected Google Ads account, ordered by all-time spend, when reviewing campaign status, daily budget, spend, impressions, clicks and conversions.",
       "inputSchema": {
         "additionalProperties": false,
@@ -64676,7 +64758,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List Google Ads campaigns"
       },
       "securitySchemes": [
         {
@@ -64838,7 +64921,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List guest conversations"
       },
       "securitySchemes": [
         {
@@ -65192,7 +65276,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List location products"
       },
       "securitySchemes": [
         {
@@ -65210,7 +65295,7 @@
     },
     {
       "name": "list_location_qa",
-      "title": "List location qa",
+      "title": "List location Q&A",
       "description": "Read Q&A for an explicit location. This tool lists authored and imported Q&A. Authored Q&A can be managed through the CMS and authored Q&A tools; imported Google question and answer content is managed in Google.",
       "inputSchema": {
         "additionalProperties": false,
@@ -65329,7 +65414,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List location Q&A"
       },
       "securitySchemes": [
         {
@@ -65503,7 +65589,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List location reviews"
       },
       "securitySchemes": [
         {
@@ -65617,7 +65704,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List locations"
       },
       "securitySchemes": [
         {
@@ -65824,7 +65912,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List media assets"
       },
       "securitySchemes": [
         {
@@ -66020,7 +66109,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List message templates"
       },
       "securitySchemes": [
         {
@@ -66118,7 +66208,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List organization locales"
       },
       "securitySchemes": [
         {
@@ -66292,7 +66383,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List organization members"
       },
       "securitySchemes": [
         {
@@ -66310,7 +66402,7 @@
     },
     {
       "name": "list_organization_qa",
-      "title": "List organization qa",
+      "title": "List organization Q&A",
       "description": "Read the site’s general Q&A, or the Q&A of one page when page_path is provided. This tool lists authored and imported Q&A. Authored Q&A can be managed through the CMS and authored Q&A tools; imported Google question and answer content is managed in Google.",
       "inputSchema": {
         "additionalProperties": false,
@@ -66431,7 +66523,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List organization Q&A"
       },
       "securitySchemes": [
         {
@@ -66600,7 +66693,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List organization reviews"
       },
       "securitySchemes": [
         {
@@ -66736,7 +66830,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List organizations"
       },
       "securitySchemes": [
         {
@@ -66910,7 +67005,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List payments"
       },
       "securitySchemes": [
         {
@@ -67288,7 +67384,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List posts"
       },
       "securitySchemes": [
         {
@@ -67465,7 +67562,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List product booking sessions"
       },
       "securitySchemes": [
         {
@@ -67706,7 +67804,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List product bookings"
       },
       "securitySchemes": [
         {
@@ -68055,7 +68154,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List products"
       },
       "securitySchemes": [
         {
@@ -68271,7 +68371,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List scheduled guest messages"
       },
       "securitySchemes": [
         {
@@ -68460,7 +68561,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List site pages"
       },
       "securitySchemes": [
         {
@@ -68645,7 +68747,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List stays"
       },
       "securitySchemes": [
         {
@@ -68844,7 +68947,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List table reservations"
       },
       "securitySchemes": [
         {
@@ -68932,7 +69036,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List team conversation recipients"
       },
       "securitySchemes": [
         {
@@ -69191,7 +69296,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List team conversations"
       },
       "securitySchemes": [
         {
@@ -69297,7 +69403,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "List teams"
       },
       "securitySchemes": [
         {
@@ -69357,7 +69464,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Mark team conversation read"
       },
       "securitySchemes": [
         {
@@ -70151,7 +70259,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Open dates"
       },
       "securitySchemes": [
         {
@@ -70275,7 +70384,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Publish blog post"
       },
       "securitySchemes": [
         {
@@ -70384,7 +70494,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Publish organization language"
       },
       "securitySchemes": [
         {
@@ -70558,7 +70669,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Publish post"
       },
       "securitySchemes": [
         {
@@ -70696,7 +70808,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Publish website"
       },
       "securitySchemes": [
         {
@@ -80017,7 +80130,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Put resource localization"
       },
       "securitySchemes": [
         {
@@ -80441,7 +80555,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": true
+        "readOnlyHint": true,
+        "title": "Query organization analytics"
       },
       "securitySchemes": [
         {
@@ -80520,7 +80635,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reassign product booking"
       },
       "securitySchemes": [
         {
@@ -80630,7 +80746,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reconcile post publication"
       },
       "securitySchemes": [
         {
@@ -84204,7 +84321,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reconcile products"
       },
       "securitySchemes": [
         {
@@ -84386,7 +84504,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Record stay payment"
       },
       "securitySchemes": [
         {
@@ -84570,7 +84689,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reject product booking"
       },
       "securitySchemes": [
         {
@@ -85233,7 +85353,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Remove media"
       },
       "securitySchemes": [
         {
@@ -85313,7 +85434,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Remove organization member"
       },
       "securitySchemes": [
         {
@@ -85380,7 +85502,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Remove product location"
       },
       "securitySchemes": [
         {
@@ -85513,7 +85636,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reorder article categories"
       },
       "securitySchemes": [
         {
@@ -85784,7 +85908,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reorder blog posts"
       },
       "securitySchemes": [
         {
@@ -85974,7 +86099,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reorder collections"
       },
       "securitySchemes": [
         {
@@ -86661,7 +86787,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reorder media"
       },
       "securitySchemes": [
         {
@@ -86679,7 +86806,7 @@
     },
     {
       "name": "reorder_qa",
-      "title": "Reorder qa",
+      "title": "Reorder Q&A",
       "description": "Set sort positions of authored Q&A records in one explicit scope. Every id must be distinct, manual and in scope; otherwise no record is reordered. Imported Google records are protected.",
       "inputSchema": {
         "additionalProperties": false,
@@ -86765,7 +86892,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reorder Q&A"
       },
       "securitySchemes": [
         {
@@ -92430,7 +92558,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Replace content block"
       },
       "securitySchemes": [
         {
@@ -92605,7 +92734,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Replace product weekly schedule"
       },
       "securitySchemes": [
         {
@@ -93755,7 +93885,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Replace resource localizations"
       },
       "securitySchemes": [
         {
@@ -93894,7 +94025,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Reply to guest"
       },
       "securitySchemes": [
         {
@@ -94066,7 +94198,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Request product booking change"
       },
       "securitySchemes": [
         {
@@ -94250,7 +94383,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Request table reservation change"
       },
       "securitySchemes": [
         {
@@ -94975,7 +95109,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Save media attachment"
       },
       "securitySchemes": [
         {
@@ -95287,7 +95422,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Save website draft"
       },
       "securitySchemes": [
         {
@@ -95487,7 +95623,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Send team message"
       },
       "securitySchemes": [
         {
@@ -95773,7 +95910,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set collection products"
       },
       "securitySchemes": [
         {
@@ -95858,7 +95996,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set consultation mode"
       },
       "securitySchemes": [
         {
@@ -95961,7 +96100,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set guest conversation archived"
       },
       "securitySchemes": [
         {
@@ -96761,7 +96901,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set media"
       },
       "securitySchemes": [
         {
@@ -96900,7 +97041,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set member busy calendars"
       },
       "securitySchemes": [
         {
@@ -97110,7 +97252,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set member scheduling"
       },
       "securitySchemes": [
         {
@@ -97292,7 +97435,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set product booking config"
       },
       "securitySchemes": [
         {
@@ -97369,7 +97513,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set product location"
       },
       "securitySchemes": [
         {
@@ -97436,7 +97581,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set product publication"
       },
       "securitySchemes": [
         {
@@ -98010,7 +98156,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set stay nights"
       },
       "securitySchemes": [
         {
@@ -98081,7 +98228,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set team member"
       },
       "securitySchemes": [
         {
@@ -98282,7 +98430,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Set workspace context"
       },
       "securitySchemes": [
         {
@@ -98358,7 +98507,8 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Start team conversation"
       },
       "securitySchemes": [
         {
@@ -98505,7 +98655,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update article category"
       },
       "securitySchemes": [
         {
@@ -103798,7 +103949,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update blog post"
       },
       "securitySchemes": [
         {
@@ -103978,7 +104130,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update collection"
       },
       "securitySchemes": [
         {
@@ -103996,7 +104149,7 @@
     },
     {
       "name": "update_google_ads_campaign",
-      "title": "Update google ads campaign",
+      "title": "Update Google Ads campaign",
       "description": "Pause, enable or change the daily budget of a selected campaign in the connected Google Ads account. Supply status, the budget_id/daily_budget_micros pair, or both. Read get_google_ads_campaign or list_google_ads_campaigns for the current budget ID and account currency first. Enabling or raising a budget can increase advertising spend; changing a shared budget affects every campaign using it.",
       "inputSchema": {
         "additionalProperties": false,
@@ -104097,7 +104250,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update Google Ads campaign"
       },
       "securitySchemes": [
         {
@@ -104302,7 +104456,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update home accessibility"
       },
       "securitySchemes": [
         {
@@ -105041,7 +105196,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update home room"
       },
       "securitySchemes": [
         {
@@ -105992,7 +106148,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update location"
       },
       "securitySchemes": [
         {
@@ -106076,7 +106233,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update media asset"
       },
       "securitySchemes": [
         {
@@ -106234,7 +106392,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update member public profile"
       },
       "securitySchemes": [
         {
@@ -107252,7 +107411,8 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update menu"
       },
       "securitySchemes": [
         {
@@ -107513,7 +107673,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update message template"
       },
       "securitySchemes": [
         {
@@ -107602,7 +107763,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update organization member role"
       },
       "securitySchemes": [
         {
@@ -108358,7 +108520,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update organization settings"
       },
       "securitySchemes": [
         {
@@ -108489,7 +108652,8 @@
             "enum": [
               "listed",
               "unlisted"
-            ]
+            ],
+            "type": "string"
           }
         },
         "required": [
@@ -108872,7 +109036,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update post"
       },
       "securitySchemes": [
         {
@@ -112947,7 +113112,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update product"
       },
       "securitySchemes": [
         {
@@ -113137,7 +113303,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update product session"
       },
       "securitySchemes": [
         {
@@ -113155,7 +113322,7 @@
     },
     {
       "name": "update_qa",
-      "title": "Update qa",
+      "title": "Update Q&A",
       "description": "Update at least one authored Q&A field in its explicit scope. Omitted fields retain their values. Imported Google records and translations cannot be edited through this tool.",
       "inputSchema": {
         "additionalProperties": false,
@@ -113288,7 +113455,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update Q&A"
       },
       "securitySchemes": [
         {
@@ -113622,7 +113790,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update reservation policy"
       },
       "securitySchemes": [
         {
@@ -121240,7 +121409,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update site page"
       },
       "securitySchemes": [
         {
@@ -121592,7 +121762,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": true,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update stay"
       },
       "securitySchemes": [
         {
@@ -121911,7 +122082,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update stay arrival guide"
       },
       "securitySchemes": [
         {
@@ -121984,7 +122156,8 @@
       "annotations": {
         "destructiveHint": true,
         "openWorldHint": false,
-        "readOnlyHint": false
+        "readOnlyHint": false,
+        "title": "Update team"
       },
       "securitySchemes": [
         {
@@ -122017,18 +122190,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:9c517297465828aedfd83e7b92030e7e89127ab1a7a42d0196f3012b9897c580",
-        "get_product": "sha256:19582f1ba107d91e05e9309033fde9a180c3327ff55365297f103b46b3a510d9",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "list_collections": "sha256:f1480899f8b4162aa9ef697a519d79f12b81961755df5289fcb00af90395958b",
-        "list_location_products": "sha256:f16bd3ef28012a1199a02fa1138e5788aa0be9e67d95ac82afd6ecae98ea417a",
-        "list_locations": "sha256:ea68c975138b46900acbd6b37ba43fde700a830954c84717c22330d878a829ea",
-        "list_organizations": "sha256:a4a05425a7b910a81efe4a7fdf2b0a7e3d458cb90495753de26a829ba0b8ce8e",
-        "reconcile_products": "sha256:4e5212e1226907665d3d50a5d040b6c80d6d3cb27778ab35a558ed118275a47f",
-        "reorder_collections": "sha256:b73018d9b895b41128b3638b881cddcddc09abae3996ae20ce09df7be1f2a53c",
-        "set_collection_products": "sha256:8d935c0488b4c4b95d215ae1d7fa4fa9d82e4622e23d3cde83b090912c6c3a6a",
-        "update_menu": "sha256:11c33784895c6e13af416149961a5240416258d459aa0bbc2546e020532147f6",
-        "update_product": "sha256:77a90583d33421b4e764d383458187b31fa2d910623e32ec65b8ec9267efcc84"
+        "create_product": "sha256:6a42e7db3b5bc9c39eb21a5a173d3f73071180fe589b39c08f04fd044ce42355",
+        "get_product": "sha256:85af069d6c1877e9d89374b36417ab02b4fd18541b7ab3eaba6d0ce447c6569d",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "list_collections": "sha256:7eb8f62291a619df46fa146bc6142f898aac1de8bda513b7a0bf92182faff563",
+        "list_location_products": "sha256:3d072da910400920fd6ff0679ad8d99e1fdf2494d6f0d7feb3bee5082ce13d9e",
+        "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
+        "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
+        "reconcile_products": "sha256:e47c5884c5879f725996e6d92ee7f66cf8e43bbf274b4514ae1b0c180e9c6598",
+        "reorder_collections": "sha256:c8ad3c90e1fe802222fc5c184e33daa7f2f71b24f6161eddc408f1b1e485a59b",
+        "set_collection_products": "sha256:16e3e08ee87d86dcb6735b1d2fc9a43600aca70ea8715af3aadfdce5690b8463",
+        "update_menu": "sha256:3c5ffa9c26ccd30f026fc2acf7896cc0d2021f54575e79182d9c2505e3a8bf93",
+        "update_product": "sha256:7ae90e59106d0720fe6d1fcc62831c886be7ceffdac2c006a309ed87684a14c2"
       }
     },
     {
@@ -122051,10 +122224,10 @@
         "text": "Call create_post with a new idempotency_key and this body: <body> If the user supplied or approved media, pass it as create_post media in the order they want it shown: the cover first, then the gallery. Publish only to: <destinations>. For Facebook, Instagram or Discord, call get_social_connections and use the exact target_id and connection_revision it returns; if the destination is not connected or has a problem, say so instead of publishing elsewhere. Show the user the draft's preview_url, then call publish_post with the post's updated_at as expected_updated_at and one target per named destination. Report each outcome exactly as returned. processing means call publish_post again later to finish the same post; unknown means use reconcile_post_publication, never publish again."
       },
       "toolContracts": {
-        "create_post": "sha256:c8fc156e74bf129b6de204194ac904c26aef2e4ec7149e4e773ed89a52a61373",
-        "get_social_connections": "sha256:bea06237a59954160d1cfa054e8522ec975422ae7b156c2b29d1908e682c0be0",
-        "publish_post": "sha256:926ee0b75633314fe9aee610c2482b759ab16a446bc6f9d510c4fd0401768efc",
-        "reconcile_post_publication": "sha256:322a73b98b9dc9f9aeb69034756503fe26b9cad0a4bb25086aacfeb9aceb49ff"
+        "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
+        "get_social_connections": "sha256:ce06b442ff3f389bf517c54c51ff4fb762a7bde099820d26f260139f1e3d1686",
+        "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
+        "reconcile_post_publication": "sha256:00cccb196535fe18cb6304fbe3ee58fa254a10a02ff44e5039300d3be42f9d38"
       }
     },
     {
@@ -122072,14 +122245,14 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:053086d1f503626d6f4bcea8f6a8cea4f8928fbdbb66d4e15af467cea80255ef",
-        "create_product": "sha256:9c517297465828aedfd83e7b92030e7e89127ab1a7a42d0196f3012b9897c580",
-        "get_product": "sha256:19582f1ba107d91e05e9309033fde9a180c3327ff55365297f103b46b3a510d9",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "list_locations": "sha256:ea68c975138b46900acbd6b37ba43fde700a830954c84717c22330d878a829ea",
-        "list_product_booking_sessions": "sha256:e7a91bde3bd3cea8b952e2f933e6e30def428c2f3dfba3d3376f777662b34d54",
-        "list_products": "sha256:77be30724a15a4b2208f59de1f1ac48bd00ec2fef5f851edabeea733e73c76c7",
-        "save_media_attachment": "sha256:4b98374c4cb263e39719df1d2034c2c4fc7ebbb78b39ccddd0d260633cb57007"
+        "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
+        "create_product": "sha256:6a42e7db3b5bc9c39eb21a5a173d3f73071180fe589b39c08f04fd044ce42355",
+        "get_product": "sha256:85af069d6c1877e9d89374b36417ab02b4fd18541b7ab3eaba6d0ce447c6569d",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
+        "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
+        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93"
       }
     },
     {
@@ -122091,25 +122264,25 @@
         "text": "Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts. For internal team messages use list_team_conversations and get_team_conversation. Select actual teammates with list_team_conversation_recipients; start_team_conversation reuses the same participants and explicit stay or location context. Use send_team_message only for the requested internal message, then read it back. Reading does not mark a thread read; mark_team_conversation_read changes only the caller’s read position. Team chat is separate from guest replies and Better Auth Team/group management. Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action. Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion. Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google. Report failed deliveries and actions awaiting guest acceptance accurately."
       },
       "toolContracts": {
-        "cancel_product_booking": "sha256:ff18c37321fc44b4bca6e12df96627c7a53be7561703a7ae3be570403a8178ce",
-        "cancel_table_reservation": "sha256:07328e0dfa5ec3a9668e20c2241ab36ae571617d56ed5c621720046d28747866",
-        "confirm_product_booking": "sha256:d515620b9022fe58479715059504358521f27f6c6a7b1715ad784efe990a4d15",
-        "get_guest_conversation": "sha256:2ad0264437d7aa316e3d7c822b5494e93a19ae8195f1a69c6be4d0a9f4c76ad5",
-        "get_product_booking": "sha256:22f14b45cfc3ac4dd78ccf22a4d7d119acb0b274fb551e2e82a41a374f14732e",
-        "get_team_conversation": "sha256:450333d4d3b1615d7ba9b9163e91512ef77688ef8b06222413e55a180d43becf",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "list_guest_conversations": "sha256:81229ef6c7185bff308a177b05171492b4ec7e08578e50bca848776784551d23",
-        "list_location_reviews": "sha256:501403a261359154505a1e6c8efeb7e30b5563bec444581caa0fbc8524b112fc",
-        "list_locations": "sha256:ea68c975138b46900acbd6b37ba43fde700a830954c84717c22330d878a829ea",
-        "list_team_conversation_recipients": "sha256:c2266d2c8249f0534a3626fb7c804091ee110f7d01db71ed495585bb622b373a",
-        "list_team_conversations": "sha256:1a89479d902f6c0c557acd1494a97dcf88ae4cbbec39fbe18e45aec4bf2e9f51",
-        "mark_team_conversation_read": "sha256:804903f2ef9e96eacb4fd5112212e77fdb908cb6ca786b1f253d1d20b8dcf6e4",
-        "reject_product_booking": "sha256:07e35518721a5ca79bdb8eea2f93d247844d86da5279359eb5a00678609b4e67",
-        "reply_to_guest": "sha256:0523e3ee3fac55be4a44ac1d2af42ec1396672b848546effdceec66402733da4",
-        "request_product_booking_change": "sha256:a46e4cddecdad051e1ae6bab8a3a3af8b085225926d5254bd92e2ffbc4448539",
-        "request_table_reservation_change": "sha256:ac2636803b80a34ce16303f53751196c3ac803098bf0892f43416691fcd8bd7a",
-        "send_team_message": "sha256:a59890bfb4379c2203e4d8c6827269e4581f2c85342d517c463507d0f86fddb1",
-        "start_team_conversation": "sha256:0b5e755a6ee67a3ffef81deca8c1a89ce11d8859f167e76c9abaaf2fb686d349"
+        "cancel_product_booking": "sha256:a90b3075935852ee847849f1774addc7077bac2636dd83439a792db5a98c9ca3",
+        "cancel_table_reservation": "sha256:7c17a97a9f730249ce112981850351006406adab44d5230f8306953e4450b165",
+        "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
+        "get_guest_conversation": "sha256:48379654b6842489124993bdd57cd4a175bbd3d5d5ab02e535641e57e76bb4e5",
+        "get_product_booking": "sha256:f556f5a1b85a50415d2ec9d1464f44b876afced7651eb51aabd5445eca9ebcaa",
+        "get_team_conversation": "sha256:fb0eae689fdfa8508658a4477f7fec885ba4b044d464772e4d6182d918c11532",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
+        "list_location_reviews": "sha256:346fe43967ce2b4471bc28305e8c70fd33357d1b53a4b1dcb10bfecf9551474d",
+        "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
+        "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
+        "list_team_conversations": "sha256:a3cf820b44e56f72650242953972e6ea834da9dc713a3e14f76ae9ee99edaf95",
+        "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
+        "reject_product_booking": "sha256:d391fc30d744361aecae959a6e0530b4193bb3366cf9da36cc2a7e2011088357",
+        "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
+        "request_product_booking_change": "sha256:e9cce3235c32d9e0f0e8a5337a7c5a84561a6ac8da9cc1768a21d6d50979b95d",
+        "request_table_reservation_change": "sha256:68fb2e0b0be4e52175dd5a83326c05b3b5f2b1fdf8032a7b995577726a170b5d",
+        "send_team_message": "sha256:a7e3d79ac0e34594d49274dc922d3d34b13e390b335cd63f2d73f1e53d973171",
+        "start_team_conversation": "sha256:f69dfb163eafc2e710179a5b429fb979adfe847be9c6397cadb16d2d186d4064"
       }
     },
     {
@@ -122121,15 +122294,15 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and list_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Check if hero media, brand logo, favicon, and bookable offerings (such as places to stay or menu items via product_grid) are present, and ask the user for any missing brand assets. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:053086d1f503626d6f4bcea8f6a8cea4f8928fbdbb66d4e15af467cea80255ef",
-        "get_site_page": "sha256:7686047734e4faa079e3298a87ac64942453a5b0bc9fcc48f98f0949bce15f58",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "list_media_assets": "sha256:c9b475fd218d4ac713c5aa5903d75803cced35e3d596c9e595bedd8e505a0e5e",
-        "list_site_pages": "sha256:174b2659600cbb3b9b8e6c07f6aee45872215a7f651f37fdc489b3d227f57ef3",
-        "remove_media": "sha256:316f9606ce277b39cef49472b6fbc4594beb8634d95d245357009e020529b72b",
-        "reorder_media": "sha256:94179ddf88b683d05466f3efe4983affec023a40c8b48c217f8f8fe144814826",
-        "set_media": "sha256:08a40d651a3d9b8fff9e7070cf9c19c5b9b51eeb342c40697abfdf8e2c7b5e18",
-        "update_site_page": "sha256:09dce25deba7c6dac969e14293a2b0a60a2db1a10bc3907856b7ff74a0c2751b"
+        "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
+        "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
+        "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
+        "remove_media": "sha256:70c3ad05014d52e9ce95b1a4363d6ab8b23b0d1ffd37c31b03a3da6684d49943",
+        "reorder_media": "sha256:2ba6530e10b65684d8efd9d9543c6e3a62e760a988d7a876abe7962ff0fb7e75",
+        "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
+        "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
       }
     },
     {
@@ -122141,14 +122314,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:053086d1f503626d6f4bcea8f6a8cea4f8928fbdbb66d4e15af467cea80255ef",
-        "get_location": "sha256:1590f9d15c72d846a4fa2ecae88ede8ec786a803fb15371f96add947eacf4447",
-        "get_post": "sha256:e5e418f9d278c0a5d58d5ce98cc8d533f1468589eb93286763ccf7751139ac02",
-        "get_product": "sha256:19582f1ba107d91e05e9309033fde9a180c3327ff55365297f103b46b3a510d9",
-        "get_site_page": "sha256:7686047734e4faa079e3298a87ac64942453a5b0bc9fcc48f98f0949bce15f58",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "save_media_attachment": "sha256:4b98374c4cb263e39719df1d2034c2c4fc7ebbb78b39ccddd0d260633cb57007",
-        "set_media": "sha256:08a40d651a3d9b8fff9e7070cf9c19c5b9b51eeb342c40697abfdf8e2c7b5e18"
+        "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
+        "get_location": "sha256:b53963ed6e4f3dbfd31d1e7d4f28ef9a954336ec7941310dbdcbec955b7176af",
+        "get_post": "sha256:1bfb415fc3917a3aad29e1b1ae44db4a092b10dd169974b39c89832c4a69017d",
+        "get_product": "sha256:85af069d6c1877e9d89374b36417ab02b4fd18541b7ab3eaba6d0ce447c6569d",
+        "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "save_media_attachment": "sha256:dd3e83b857a53f97fa3f6a27e1788dc247133a954108a09e5f7c200b4a1e3a93",
+        "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b"
       }
     },
     {
@@ -122160,20 +122333,20 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Check for missing brand assets like logo, favicon, social card, palette colors, hero media, and about page story. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:9c517297465828aedfd83e7b92030e7e89127ab1a7a42d0196f3012b9897c580",
-        "get_organization": "sha256:13bb5ed85a1de133f77a72c11ff044ccb8d9e8deee3499f1cdcb68c95e7aa363",
-        "get_site_page": "sha256:7686047734e4faa079e3298a87ac64942453a5b0bc9fcc48f98f0949bce15f58",
-        "get_website_draft": "sha256:7a1687efb1ebd9bac35990db6bcd7a64460cf8d5d15c0ff45b8c3a12314ee212",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "list_locations": "sha256:ea68c975138b46900acbd6b37ba43fde700a830954c84717c22330d878a829ea",
-        "list_organizations": "sha256:a4a05425a7b910a81efe4a7fdf2b0a7e3d458cb90495753de26a829ba0b8ce8e",
-        "list_products": "sha256:77be30724a15a4b2208f59de1f1ac48bd00ec2fef5f851edabeea733e73c76c7",
-        "list_site_pages": "sha256:174b2659600cbb3b9b8e6c07f6aee45872215a7f651f37fdc489b3d227f57ef3",
-        "publish_website": "sha256:05a589b7e9290ed0e487f8a1aaedc318871525ec9715a62048eedd00f01610eb",
-        "save_website_draft": "sha256:09791352d452e7aae127bfa19b4952cd03db6aceeb667a61f41a688d18f29745",
-        "update_menu": "sha256:11c33784895c6e13af416149961a5240416258d459aa0bbc2546e020532147f6",
-        "update_organization_settings": "sha256:cf66a85f0b22c79adf8477d7aadf26bfa5c917767ab864b1a598060214f41a0b",
-        "update_site_page": "sha256:09dce25deba7c6dac969e14293a2b0a60a2db1a10bc3907856b7ff74a0c2751b"
+        "create_product": "sha256:6a42e7db3b5bc9c39eb21a5a173d3f73071180fe589b39c08f04fd044ce42355",
+        "get_organization": "sha256:7659406922dc74826fdfd890dc16fb069dbc35c3af276860b62306848b471f06",
+        "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
+        "get_website_draft": "sha256:3fc96867bd2ccb2dbd9ece2124b0b7250cce1219a6da69d014dc81985d1bba23",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
+        "list_organizations": "sha256:9edf9d564e3c56a28961d41b27d0694753b5c31e889b63ebc171b6478336e901",
+        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
+        "publish_website": "sha256:939b1ce7c3fd387584cc132ae36ef88ea13eb064617de0ba0764e5a81f572f3f",
+        "save_website_draft": "sha256:e65a7a223712c5d820ccd7d2ec84abb8da6602e898a89516f1a1caf4d17d171b",
+        "update_menu": "sha256:3c5ffa9c26ccd30f026fc2acf7896cc0d2021f54575e79182d9c2505e3a8bf93",
+        "update_organization_settings": "sha256:1a600f7c7a066cfe36d906e8b9a90070be26be9e7b678da716c64bb783e22faa",
+        "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
       }
     },
     {
@@ -122185,17 +122358,17 @@
         "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:1590f9d15c72d846a4fa2ecae88ede8ec786a803fb15371f96add947eacf4447",
-        "get_product": "sha256:19582f1ba107d91e05e9309033fde9a180c3327ff55365297f103b46b3a510d9",
-        "get_reservation_policy": "sha256:22e5fc6facd0510d1d633d5c1947157e19afc26f2ec3e81bebf2035fa783fb14",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "list_locations": "sha256:ea68c975138b46900acbd6b37ba43fde700a830954c84717c22330d878a829ea",
-        "list_product_booking_sessions": "sha256:e7a91bde3bd3cea8b952e2f933e6e30def428c2f3dfba3d3376f777662b34d54",
-        "list_products": "sha256:77be30724a15a4b2208f59de1f1ac48bd00ec2fef5f851edabeea733e73c76c7",
-        "replace_product_weekly_schedule": "sha256:43e22234e643ec6bfb303f553a4ec9eea136f57654fed8a65d5f82ae32374eae",
-        "set_product_booking_config": "sha256:a51176e9f101d18f81a2e5077004d06a89c7739ecc251d9dfadd261c5eb77211",
-        "update_product": "sha256:77a90583d33421b4e764d383458187b31fa2d910623e32ec65b8ec9267efcc84",
-        "update_reservation_policy": "sha256:70155ef4cfe9b6822c5feede89ef77845fa6906e77ea45b61ccff5526819a103"
+        "get_location": "sha256:b53963ed6e4f3dbfd31d1e7d4f28ef9a954336ec7941310dbdcbec955b7176af",
+        "get_product": "sha256:85af069d6c1877e9d89374b36417ab02b4fd18541b7ab3eaba6d0ce447c6569d",
+        "get_reservation_policy": "sha256:939cd1d0c196d026936d36387ae1f90f236738b40e92ab6341523a0f9320c85a",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
+        "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
+        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "replace_product_weekly_schedule": "sha256:cc5f48fb054661e70ce26d988fc12a29f4325c7fc59b5b20852fb98d0e0e2451",
+        "set_product_booking_config": "sha256:349460de334343f13114d406912f7eb1ee8902d9004fa899fa2564e7fc1242b6",
+        "update_product": "sha256:7ae90e59106d0720fe6d1fcc62831c886be7ceffdac2c006a309ed87684a14c2",
+        "update_reservation_policy": "sha256:7dd8f0cb74352e584d3ed4f97fcef2a2265bd75e490c57fdcf076c7398d8b774"
       }
     },
     {
@@ -122207,15 +122380,15 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, list_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language: high-impact hero image or video, logo and favicon, brand colors, offerings showcase on the homepage, and host story with portrait on the about page. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:053086d1f503626d6f4bcea8f6a8cea4f8928fbdbb66d4e15af467cea80255ef",
-        "get_site_page": "sha256:7686047734e4faa079e3298a87ac64942453a5b0bc9fcc48f98f0949bce15f58",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "list_media_assets": "sha256:c9b475fd218d4ac713c5aa5903d75803cced35e3d596c9e595bedd8e505a0e5e",
-        "list_products": "sha256:77be30724a15a4b2208f59de1f1ac48bd00ec2fef5f851edabeea733e73c76c7",
-        "list_site_pages": "sha256:174b2659600cbb3b9b8e6c07f6aee45872215a7f651f37fdc489b3d227f57ef3",
-        "set_media": "sha256:08a40d651a3d9b8fff9e7070cf9c19c5b9b51eeb342c40697abfdf8e2c7b5e18",
-        "update_product": "sha256:77a90583d33421b4e764d383458187b31fa2d910623e32ec65b8ec9267efcc84",
-        "update_site_page": "sha256:09dce25deba7c6dac969e14293a2b0a60a2db1a10bc3907856b7ff74a0c2751b"
+        "attach_media": "sha256:b6f84ecad030ec9ec81a253682c86d6f8a10dc0c3b35564c873c21bbdbace35a",
+        "get_site_page": "sha256:f338d72e6cf0e9a9112655bc5f41602ea60b52ff7f9f3921e9868c0173abf7e0",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "list_media_assets": "sha256:97b5782d44d8cf6d41886665ca3b9eb4c48d0f6bedd95989ec2f671c4a651ee7",
+        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "list_site_pages": "sha256:5a49aa342807192ee45d329880f2f459d1914154e9a04a43562c0ea3587879cc",
+        "set_media": "sha256:79e758a2b687c65350fa364dd1169fb47edc54c166f71d2c1ccee5a380a1295b",
+        "update_product": "sha256:7ae90e59106d0720fe6d1fcc62831c886be7ceffdac2c006a309ed87684a14c2",
+        "update_site_page": "sha256:77c97d779b70b40a74b6fd07968e03255dad018d149d6094cfdd3bcd246081c4"
       }
     },
     {
@@ -122227,17 +122400,17 @@
         "text": "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff."
       },
       "toolContracts": {
-        "create_post": "sha256:c8fc156e74bf129b6de204194ac904c26aef2e4ec7149e4e773ed89a52a61373",
-        "get_guest_conversation": "sha256:2ad0264437d7aa316e3d7c822b5494e93a19ae8195f1a69c6be4d0a9f4c76ad5",
-        "get_organization_analytics": "sha256:ed1464269d2ca5c432ba0b11eb6624c27afd2e9450eaaf196a98e8114320f88d",
-        "get_product": "sha256:19582f1ba107d91e05e9309033fde9a180c3327ff55365297f103b46b3a510d9",
-        "get_workspace_context": "sha256:61414123b54475193842f000386a7c895d5d8471af521d977f32a54f81e1cd57",
-        "list_guest_conversations": "sha256:81229ef6c7185bff308a177b05171492b4ec7e08578e50bca848776784551d23",
-        "list_product_booking_sessions": "sha256:e7a91bde3bd3cea8b952e2f933e6e30def428c2f3dfba3d3376f777662b34d54",
-        "list_products": "sha256:77be30724a15a4b2208f59de1f1ac48bd00ec2fef5f851edabeea733e73c76c7",
-        "publish_post": "sha256:926ee0b75633314fe9aee610c2482b759ab16a446bc6f9d510c4fd0401768efc",
-        "reply_to_guest": "sha256:0523e3ee3fac55be4a44ac1d2af42ec1396672b848546effdceec66402733da4",
-        "update_product": "sha256:77a90583d33421b4e764d383458187b31fa2d910623e32ec65b8ec9267efcc84"
+        "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
+        "get_guest_conversation": "sha256:48379654b6842489124993bdd57cd4a175bbd3d5d5ab02e535641e57e76bb4e5",
+        "get_organization_analytics": "sha256:3f37e5014639f5dd6702f1715ed115454c66affa9e0854c5b0611dea6964bc56",
+        "get_product": "sha256:85af069d6c1877e9d89374b36417ab02b4fd18541b7ab3eaba6d0ce447c6569d",
+        "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
+        "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
+        "list_product_booking_sessions": "sha256:fdcf715f6c14aff05a8147ea3b792666cbeacf121462706a79b93df3739bdbd7",
+        "list_products": "sha256:b63a776a294b67bfd333b13846276fbee57dbe2e5970445e20c7c843cac85057",
+        "publish_post": "sha256:10402907cb24b4e5a40aad8a874039e36fca793e2453e87bec83015218572c2c",
+        "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
+        "update_product": "sha256:7ae90e59106d0720fe6d1fcc62831c886be7ceffdac2c006a309ed87684a14c2"
       }
     }
   ]

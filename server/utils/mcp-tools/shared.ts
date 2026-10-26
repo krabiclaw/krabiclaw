@@ -28,6 +28,7 @@ export interface McpToolAnnotations {
   openWorldHint: boolean
   destructiveHint: boolean
   idempotentHint?: boolean
+  title?: string
 }
 
 export interface McpToolSecurityScheme {
@@ -1025,6 +1026,9 @@ export function validateToolAnnotations(name: string, annotations: McpToolAnnota
   }
 }
 
+// Proper nouns and abbreviations in tool names, as the derived title spells them.
+const TOOL_TITLE_WORDS: Record<string, string> = { google: 'Google', ads: 'Ads', qa: 'Q&A' }
+
 export function withToolAnnotations(definition: RawMcpToolDefinition): McpToolDefinition {
   const annotations = TOOL_ANNOTATIONS_BY_NAME.get(definition.name)
   if (!annotations) {
@@ -1032,18 +1036,19 @@ export function withToolAnnotations(definition: RawMcpToolDefinition): McpToolDe
   }
 
   validateToolAnnotations(definition.name, annotations)
-  const action = definition.name.replaceAll('_', ' ')
+  const action = definition.name.split('_').map(word => TOOL_TITLE_WORDS[word] ?? word).join(' ')
+  const title = definition.title?.trim() || action.charAt(0).toUpperCase() + action.slice(1)
 
   return {
     ...definition,
-    title: definition.title?.trim() || action.charAt(0).toUpperCase() + action.slice(1),
+    title,
     inputSchema: { ...definition.inputSchema, additionalProperties: false },
     outputSchema: {
       ...definition.outputSchema,
       description: [definition.outputSchema.description, MCP_TOOL_RESULT_DESCRIPTION].filter(Boolean).join(' '),
     },
     securitySchemes: MCP_TOOL_SECURITY_SCHEMES,
-    annotations,
+    annotations: { title, ...annotations },
   }
 }
 
