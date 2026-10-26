@@ -387,6 +387,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@better-auth/utils@npm:^0.4.0":
+  version: 0.4.3
+  resolution: "@better-auth/utils@npm:0.4.3"
+  dependencies:
+    "@noble/hashes": "npm:^2.0.1"
+  checksum: 10c0/0405234a6605fbd811aa8dce8aafd428c5997d2ee5e8630dd50632506cd4c020f2b7dae5af099c4a8be0435245d72a172298983118908b9f57b1351340a6e086
+  languageName: node
+  linkType: hard
+
 "@better-auth/utils@npm:^0.5.0":
   version: 0.5.0
   resolution: "@better-auth/utils@npm:0.5.0"
@@ -396,7 +405,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@better-fetch/fetch@npm:1.3.2":
+"@better-fetch/fetch@npm:1.3.2, @better-fetch/fetch@npm:^1.1.21":
   version: 1.3.2
   resolution: "@better-fetch/fetch@npm:1.3.2"
   checksum: 10c0/f58099149868c65e05d965f590819fadb0fcce126ce5e4ada70753a69e94bc1d6e2e361a817e520efc243b87589a8ef14bc00e555412fab661f15218d8be116f
@@ -6328,6 +6337,23 @@ __metadata:
   languageName: node
   linkType: hard
 
+"better-call@npm:2.0.6":
+  version: 2.0.6
+  resolution: "better-call@npm:2.0.6"
+  dependencies:
+    "@better-auth/utils": "npm:^0.4.0"
+    "@better-fetch/fetch": "npm:^1.1.21"
+    rou3: "npm:^0.7.12"
+    set-cookie-parser: "npm:^3.0.1"
+  peerDependencies:
+    zod: ^4.0.0
+  peerDependenciesMeta:
+    zod:
+      optional: true
+  checksum: 10c0/53e2eed6042a155cd7a17a1f5b0be97807e1e0bb3ddf472ff569d99b959b75204c5990e5958137b415867740c9fff25060ed0420a2370c9f384dd2293b7c5996
+  languageName: node
+  linkType: hard
+
 "better-sqlite3@npm:^12.11.1":
   version: 12.11.1
   resolution: "better-sqlite3@npm:12.11.1"
@@ -9464,10 +9490,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"kysely@npm:0.28.17":
-  version: 0.28.17
-  resolution: "kysely@npm:0.28.17"
-  checksum: 10c0/70573292d8d60a1e29be9b432c1b25fe21d4806ecd5e9859b5ba8d2af799769878f4b3d91731ffe3e03744c7291476fe843640d31741f3637e20c3c49afea3c5
+"kysely@npm:0.29.6":
+  version: 0.29.6
+  resolution: "kysely@npm:0.29.6"
+  checksum: 10c0/262a2111944cc82dcb10e840fef4e374467abe0d6aa9c1272df2ca6199155c59bb0f3ca17f856c20b719cbdd5d2e641d3464faeab409680098dc35b514119798
   languageName: node
   linkType: hard
 
@@ -10595,7 +10621,7 @@ __metadata:
     "@vue-email/text": "npm:0.0.3"
     ajv: "npm:8.20.0"
     better-auth: "patch:better-auth@npm%3A1.7.6#~/patches/better-auth-npm-1.7.6.patch"
-    better-call: "npm:1.4.0"
+    better-call: "npm:2.0.6"
     better-sqlite3: "npm:^12.11.1"
     cookie-es: "npm:^3.1.1"
     cross-env: "npm:^10.1.0"
@@ -10608,7 +10634,7 @@ __metadata:
     html-to-text: "npm:10.0.1"
     isomorphic-dompurify: "npm:^4.4.0"
     jose: "npm:^6.2.12"
-    kysely: "npm:0.28.17"
+    kysely: "npm:0.29.6"
     libphonenumber-js: "npm:^1.13.14"
     lighthouse: "npm:^13.5.0"
     marked: "npm:^18.0.14"
@@ -12093,6 +12119,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"rou3@npm:^0.7.12":
+  version: 0.7.12
+  resolution: "rou3@npm:0.7.12"
+  checksum: 10c0/2ea87ddd91a5d0f9d9671fa2bb714f57566eae33ecb24e8a61bb298aca8c226483e59cafe1c60297ac9aa58b2b6ad506447374cdbff4e99cf0f9f72a9dae09dc
+  languageName: node
+  linkType: hard
+
 "rou3@npm:^0.8.1":
   version: 0.8.1
   resolution: "rou3@npm:0.8.1"
@@ -12226,7 +12259,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"set-cookie-parser@npm:^3.1.2":
+"set-cookie-parser@npm:^3.0.1, set-cookie-parser@npm:^3.1.2":
   version: 3.1.2
   resolution: "set-cookie-parser@npm:3.1.2"
   checksum: 10c0/ea3d4fba5affd57f2a4c2e5172d701c4c17645879f9fddf1331622ae556210d840cdcb6666f0d71288ad545e31db5927bf49696051928e0186e079588cd5ddb0
