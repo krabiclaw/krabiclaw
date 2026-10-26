@@ -233,15 +233,15 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@better-auth/cimd@npm:1.7.5":
-  version: 1.7.5
-  resolution: "@better-auth/cimd@npm:1.7.5"
+"@better-auth/cimd@npm:1.7.6":
+  version: 1.7.6
+  resolution: "@better-auth/cimd@npm:1.7.6"
   peerDependencies:
-    "@better-auth/core": ^1.7.5
-    "@better-auth/oauth-provider": ^1.7.5
-    better-auth: ^1.7.5
+    "@better-auth/core": ^1.7.6
+    "@better-auth/oauth-provider": ^1.7.6
+    better-auth: ^1.7.6
     better-call: 1.4.0
-  checksum: 10c0/d4b559b7168058a6061b990f7d4ca3b5847e7f93113081e18855dfed3330c1f445b084481204301804e7bfd066d2b28b83864d8d897528f3d1b29572abf275bb
+  checksum: 10c0/f9b1c7b5a8c50edf192be131aef69ddf0bfca95f83c8360a49c8b947e2da21173fef77795f3b1357340b009b32401445aae26b0a7a5bc7edd4a2c3455220c78f
   languageName: node
   linkType: hard
 
@@ -264,6 +264,28 @@ __metadata:
     "@opentelemetry/api":
       optional: true
   checksum: 10c0/6424170fe4555ad8541e515d2c5cc6fa54d220c182c37d564410e54e0a8bd1c5d16f104a245c47c966b6d4cffeb3b0de557419992f5c5ce27584451b28deea8c
+  languageName: node
+  linkType: hard
+
+"@better-auth/core@npm:1.7.6":
+  version: 1.7.6
+  resolution: "@better-auth/core@npm:1.7.6"
+  dependencies:
+    "@opentelemetry/semantic-conventions": "npm:^1.41.1"
+    "@standard-schema/spec": "npm:^1.1.0"
+    zod: "npm:^4.5.4"
+  peerDependencies:
+    "@better-auth/utils": 0.4.2
+    "@better-fetch/fetch": 1.3.2
+    "@opentelemetry/api": ^1.9.0
+    better-call: 1.4.0
+    jose: ^6.1.0
+    kysely: ^0.28.5 || ^0.29.0
+    nanostores: ^1.0.1
+  peerDependenciesMeta:
+    "@opentelemetry/api":
+      optional: true
+  checksum: 10c0/6546346327204cee687b31a15f9eab80553a597ea48f15eadd57110d8179ac1434f5985145978c8367498144bf3ba4e47163bb6badbfed68b3e49ab3ecaad613
   languageName: node
   linkType: hard
 
@@ -319,19 +341,19 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@better-auth/oauth-provider@npm:1.7.5":
-  version: 1.7.5
-  resolution: "@better-auth/oauth-provider@npm:1.7.5"
+"@better-auth/oauth-provider@npm:1.7.6":
+  version: 1.7.6
+  resolution: "@better-auth/oauth-provider@npm:1.7.6"
   dependencies:
     jose: "npm:^6.2.3"
     zod: "npm:^4.5.4"
   peerDependencies:
-    "@better-auth/core": ^1.7.5
+    "@better-auth/core": ^1.7.6
     "@better-auth/utils": 0.4.2
     "@better-fetch/fetch": 1.3.2
-    better-auth: ^1.7.5
+    better-auth: ^1.7.6
     better-call: 1.4.0
-  checksum: 10c0/c3c71b7ef6d87bed651221ec4a34793c33c5e15bd95178ce58e5d623196c731e81e4cf21cc2659d5b1d4ddf6ed1423c236cc5991cc1b597b11bded7ff776825a
+  checksum: 10c0/b5be8d2bbb01e189f3d251bf6c0ed8df5a9a10940bb4ce30c10a74201dbf13a06bb431230568383408665b01744380df2269673d8eabe7ff6d0b8d4a7d30c60d
   languageName: node
   linkType: hard
 
@@ -352,18 +374,18 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@better-auth/stripe@npm:1.7.5":
-  version: 1.7.5
-  resolution: "@better-auth/stripe@npm:1.7.5"
+"@better-auth/stripe@npm:1.7.6":
+  version: 1.7.6
+  resolution: "@better-auth/stripe@npm:1.7.6"
   dependencies:
     defu: "npm:^6.1.5"
     zod: "npm:^4.5.4"
   peerDependencies:
-    "@better-auth/core": ^1.7.5
-    better-auth: ^1.7.5
+    "@better-auth/core": ^1.7.6
+    better-auth: ^1.7.6
     better-call: 1.4.0
     stripe: ^18 || ^19 || ^20 || ^21 || ^22
-  checksum: 10c0/7782026061ee43ba1fc8f9327c06da1448180ee7c5e01dcdec7e680fe00886e5a4afb8d1ec185d84dccb933cf0ea14ed8aaffb9d54c1fca41c63cfeb4b87137b
+  checksum: 10c0/1a030ed7e8446891f6b86c7b80e24e633b2a9e8daa6d8e8809473d903aea37a5273ea1d96ac38d5d85a014cf14e03001cd95228a4c343739a8f4fc2574fe8ec6
   languageName: node
   linkType: hard
 
@@ -387,7 +409,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@better-auth/utils@npm:^0.5.0":
+"@better-auth/utils@npm:0.5.0, @better-auth/utils@npm:^0.5.0":
   version: 0.5.0
   resolution: "@better-auth/utils@npm:0.5.0"
   dependencies:
@@ -10538,11 +10560,11 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "nuxt-app@workspace:."
   dependencies:
-    "@better-auth/cimd": "npm:1.7.5"
-    "@better-auth/core": "npm:1.7.5"
-    "@better-auth/oauth-provider": "npm:1.7.5"
-    "@better-auth/stripe": "npm:1.7.5"
-    "@better-auth/utils": "npm:0.4.2"
+    "@better-auth/cimd": "npm:1.7.6"
+    "@better-auth/core": "npm:1.7.6"
+    "@better-auth/oauth-provider": "npm:1.7.6"
+    "@better-auth/stripe": "npm:1.7.6"
+    "@better-auth/utils": "npm:0.5.0"
     "@better-fetch/fetch": "npm:1.3.2"
     "@cloudflare/workers-types": "npm:5.20260926.1"
     "@fontsource-variable/jost": "npm:^5.3.0"
