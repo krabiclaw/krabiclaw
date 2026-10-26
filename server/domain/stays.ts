@@ -857,7 +857,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),
-  }, access.actorId, { idempotencyKey, home: true })
+  }, access.actorId, { idempotencyKey })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
   if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')

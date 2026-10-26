@@ -193,7 +193,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     title: 'Pricing Plans',
     path: '/pricing',
     snippet: 'Compare tiers, billing, and what each plan unlocks.',
-    body: 'Pricing compares Basic, Growth and Business, their capabilities, and billing. Business includes online payments and direct stay booking. Read the current pricing page for setup requirements, additional locations and usage charges.',
+    body: 'Pricing compares Basic, Growth and Business, their capabilities, and billing. Business includes online payments and direct stay booking. Read the current pricing page for setup requirements, additional homes and usage charges.',
     icon: 'credit-card',
     section: 'Platform',
     keywords: ['pricing', 'plan', 'billing', 'upgrade', 'business', 'lodging', 'stays'],

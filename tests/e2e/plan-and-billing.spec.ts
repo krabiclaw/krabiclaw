@@ -184,7 +184,7 @@ test.describe('Plan and billing', () => {
         await expect(card).toContainText('$49/mo')
         await expect(card).toContainText(/Renews \w{3} \d{1,2}, \d{4}/)
         await expect(card.getByRole('link', { name: 'Upgrade to Business', exact: true })).toBeVisible()
-        await expect(index.getByTestId('editor-row-locations')).toContainText('included, then $49 per additional location per month')
+        await expect(index.getByTestId('editor-row-locations')).toHaveCount(0)
         await expect(index.getByTestId('editor-row-portal')).toContainText('Card, invoices and receipts, cancel')
         await expect(index.getByTestId('editor-row-cancel')).toHaveCount(0)
 

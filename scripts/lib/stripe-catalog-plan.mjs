@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, INCLUDED_LOCATIONS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalHomePrice, additionalLocationPrice } from '../../shared/billing-model.ts'
+import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_HOMES, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalHomePrice } from '../../shared/billing-model.ts'
 
 export const CATALOG_PLAN_SCHEMA_VERSION = 14
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
@@ -16,8 +16,8 @@ export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
 export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, ...BILLING_METER_KEYS, 'site_language', 'strategy'])
 export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
-// The former rental-unit product family is retired; live homes use the homes meter.
-export const RETIRED_PRODUCT_FAMILIES = Object.freeze(['rental_units'])
+// The former rental-unit and location product families are retired: live homes use the homes meter, and locations are not billed.
+export const RETIRED_PRODUCT_FAMILIES = Object.freeze(['rental_units', 'locations'])
 export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
 export const STRIPE_CATALOG_REQUEST_TIMEOUT_MS = 10_000
 const SUPPORTED_OPERATION_TYPES = new Set([
@@ -55,7 +55,6 @@ export const PLAN_DEFINITIONS = Object.freeze([
     imagePath: 'scripts/assets/stripe/growth.jpg',
     features: [
       'Business websites for restaurants, experiences, law firms and lodging',
-      `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`,
       `${INCLUDED_HOMES} homes included, then ${additionalHomePrice()}`,
       'Your own domain (yourbusiness.com)',
       'Update supported content, menus and photos through ChatGPT',

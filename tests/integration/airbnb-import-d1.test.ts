@@ -897,7 +897,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     await retry()
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
     assert.deepEqual(await job(), { state: 'done', last_error_code: null, attempts: 2, lease_token: null, lease_until: null })
-    assert.deepEqual(receipts, [{ event: 'krabiclaw_locations', customer: 'cus_paid_host', value: '0' }, { event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '1' }])
+    assert.deepEqual(receipts, [{ event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '1' }])
     assert.equal(channex.seen.filter(entry => entry.method !== 'GET').length, providerWrites, 'billing recovery does not repeat provider mutations')
     assert.equal((await readStayHome(db, manager, prepared.product_id)).live, true)
 
@@ -917,7 +917,7 @@ test('a paid home retains a failed meter report and retries terminal billing bef
     await requestAirbnbSync(env, db, ORG, OWNER, { stop: [prepared.product_id] })
     assert.equal((await runAirbnbSyncJobs(env, Date.now() + 60_000)).done, 1)
     assert.deepEqual(await job(), { state: 'done', last_error_code: null, attempts: 0, lease_token: null, lease_until: null })
-    assert.deepEqual(receipts.slice(2), [{ event: 'krabiclaw_locations', customer: 'cus_paid_host', value: '0' }, { event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '0' }])
+    assert.deepEqual(receipts.slice(1), [{ event: 'krabiclaw_homes', customer: 'cus_paid_host', value: '0' }])
     assert.equal(channex.seen.filter(entry => entry.method !== 'GET').length, stoppedWrites)
   } finally {
     globalThis.fetch = realFetch

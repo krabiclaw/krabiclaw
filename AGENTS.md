@@ -262,7 +262,7 @@ KrabiClaw's own subscription and fee.
 Read the current primary [Stripe pricing](https://stripe.com/pricing) before
 changing pricing copy. Preserve the actual amounts, charge basis, currency,
 billing interval and conditions. Every plan charge is on the business's one
-Stripe subscription; additional locations and fees are metered and billed at
+Stripe subscription; additional homes and fees are metered and billed at
 the end of each period (`docs/payments/payments.md`). Public pages and their Markdown, SEO and LLM projections use the
 same canonical published pricing content.
 
