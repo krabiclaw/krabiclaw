@@ -171,19 +171,41 @@ test('owner intent drives grounded previews and evidence-bound feedback follows 
     await writeFile(correctionArtifact, JSON.stringify(correctionPreview, null, 2))
     await testInfo.attach('correction-preview.json', { path: correctionArtifact, contentType: 'application/json' })
     expect(correctionPreview.reasoning.model).toBeTruthy()
-    expect(correctionPreview.decision).toBe('needs_context')
-    expect(correctionPreview.recommendations.some(candidate => candidate.id === `article.publish:${postId}`)).toBe(false)
-    expect(correctionPreview.questions.some(question => /\b(attorney|lawyer|counsel|legal team)\b/i.test(question)
-      && /\b(review(?:ed)?|approv(?:al|ed)?)\b/i.test(question)), 'The correction requires clarification about the attorney review').toBe(true)
+    // This correction states a known hold; the next revision explicitly makes
+    // review status unknown and therefore requires clarification instead.
+    expect(correctionPreview).toMatchObject({ decision: 'no_suggestion', recommendations: [], questions: [] })
+    expect(correctionPreview.summary).toMatch(/review|approv/i)
+    expect(correctionPreview.summary).toMatch(/wait|hold|held|block|pending|requir|prerequis|need|until|before|first|not|no (?:work|action|operation)/i)
     expect(correctionPreview.goals).toEqual([currentGoal])
+    const { post: heldPost } = await responseBody<{ post: { id: string; status: string; updated_at: string } }>(await request.get(postUrl))
+    expect(heldPost).toMatchObject({ id: postId, status: 'draft', updated_at: edited.updated_at })
     await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, revision: feedback.revision, decision: 'accept' } }), 409)
+
+    const unknownCorrection = await responseBody<{ feedback: RecommendationFeedback }>(await request.put(`${api}/recommendation-feedback`, { data: {
+      ...feedbackRequest, revision: correction.feedback.revision, decision: 'correct',
+      note: 'I do not know whether an attorney has reviewed this revision; publication must wait until that is confirmed.',
+    } }))
+    expect(unknownCorrection.feedback).toMatchObject({ id: feedback.id, decision: 'correct' })
+    expect(unknownCorrection.feedback.revision).not.toBe(correction.feedback.revision)
+    const unknownReviewPreview = await preview({ goalIds: [goal.id], availableMinutes: 30, limit: 1 })
+    const unknownReviewArtifact = testInfo.outputPath('unknown-review-preview.json')
+    await writeFile(unknownReviewArtifact, JSON.stringify(unknownReviewPreview, null, 2))
+    await testInfo.attach('unknown-review-preview.json', { path: unknownReviewArtifact, contentType: 'application/json' })
+    expect(unknownReviewPreview.reasoning.model).toBeTruthy()
+    expect(unknownReviewPreview).toMatchObject({ decision: 'needs_context', recommendations: [] })
+    expect(unknownReviewPreview.questions.some(question => /review|approv/i.test(question)), 'Clarify the explicitly unknown review status').toBe(true)
+    expect(unknownReviewPreview.goals).toEqual([currentGoal])
+    expect(unknownReviewPreview.considered.find(candidate => candidate.id === `article.publish:${postId}`)?.reference).toEqual(reference)
+    const { post: unknownReviewPost } = await responseBody<{ post: { id: string; status: string; updated_at: string } }>(await request.get(postUrl))
+    expect(unknownReviewPost).toMatchObject({ id: postId, status: 'draft', updated_at: edited.updated_at })
+    await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, revision: correction.feedback.revision, decision: 'accept' } }), 409)
 
     const changedArticle = await responseBody<{ post: { updated_at: string } }>(await request.patch(postUrl, { data: {
       expected_updated_at: edited.updated_at, excerpt: 'Updated guidance for existing clients.',
     } }))
     progress = await responseBody<Progress>(await request.get(`${api}/progress`))
     expect(progress.feedback).toEqual([expect.objectContaining({ id: feedback.id, decision: 'correct', applicability: { current: false, reasons: ['evidence_changed'] } })])
-    await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, revision: correction.feedback.revision } }), 409)
+    await responseBody(await request.put(`${api}/recommendation-feedback`, { data: { ...feedbackRequest, revision: unknownCorrection.feedback.revision } }), 409)
     const changedReference = await responseBody<{ reference: BusinessProgressReference }>(await request.get(`${api}/progress/reference`, { params: { operation: 'article.publish', subjectId: postId } }))
     expect(changedReference.reference.evidenceRevision).not.toBe(reference.evidenceRevision)
     const afterEvidenceChange = await preview({ goalIds: [goal.id], availableMinutes: 0 })
@@ -323,7 +345,7 @@ test('owner intent drives grounded previews and evidence-bound feedback follows 
     await writeFile(evaluationArtifact, JSON.stringify({
       evidenceType: 'synthetic_local_technical_cases',
       currentRuleBaseline: { beforeGoalChange: initialToday.cards.map(card => card.id), afterGoalChange: unchangedToday.cards.map(card => card.id) },
-      groundedPreviews: { inboxPriority: inboxPreview, publicationPriority: publicationPreview, correctionHold: correctionPreview, completedPublication, freshInbound: freshInboundPreview },
+      groundedPreviews: { inboxPriority: inboxPreview, publicationPriority: publicationPreview, correctionHold: correctionPreview, unknownReviewStatus: unknownReviewPreview, completedPublication, freshInbound: freshInboundPreview },
       temporalEligibility: { staleUncommitted: aged, activeCommitment: commitmentPreview, endedCommitment: afterCommitment },
     }, null, 2))
     await testInfo.attach('recommendation-technical-evaluation.json', { path: evaluationArtifact, contentType: 'application/json' })
@@ -375,6 +397,8 @@ test('business progress read-only contract uses the explicitly configured canary
     unverified: ['public_visibility', 'operation_completion', 'recipient_notification', 'conversation_resolution', 'business_goal_achievement'],
   })
   expect(second.coverage).toEqual(first.coverage)
+  // These are fresh reads: edits/deletions can change goals and feedback,
+  // while new activity can shift page membership. Compare retained versions.
   for (const goal of first.goals) {
     const repeated = second.goals.find(item => item.id === goal.id && item.revision === goal.revision)
     if (!repeated) continue
@@ -392,8 +416,10 @@ test('business progress read-only contract uses the explicitly configured canary
     const repeated = second.outcomes.find(item => item.id === outcome.id)
     if (!repeated) continue
     expect(repeated, 'A canonical occurrence keeps its identity across progress reads').toMatchObject({
-      id: outcome.id, event: outcome.event, subject: outcome.subject, occurredAt: outcome.occurredAt,
+      id: outcome.id, event: outcome.event, subject: outcome.subject, actor: { kind: outcome.actor.kind }, occurredAt: outcome.occurredAt,
     })
+    // Account deletion can redact attribution through its SET NULL foreign key.
+    if (repeated.actor.userId !== null) expect(repeated.actor.userId).toBe(outcome.actor.userId)
   }
   for (const outcome of [...first.outcomes, ...second.outcomes]) {
     expect(['guest', 'member', 'system', 'cloudflare']).toContain(outcome.actor.kind)

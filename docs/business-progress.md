@@ -226,35 +226,38 @@ behavioral evaluations inspired by the owner-reported active surfaces. They are
 not owner/staff validation or evidence that a recommendation improved a business.
 
 On 2026-10-26, the local production Worker and real AI binding passed both
-focused tests, including five model decisions under `recommendation-preview-v2`:
+focused tests, including six model decisions under `recommendation-preview-v6`:
 
 | Technical case | Actual decision | Domain elapsed time | Input/output tokens | Estimated model USD |
 | --- | --- | ---: | ---: | ---: |
-| Inbox is the only priority; article work can wait | Guest reply | 7.716 s | 2,017 / 150 | 0.000929 |
-| Same records; publish the explicitly approved guide and leave inbox alone | Article publication | 5.052 s | 2,035 / 142 | 0.000916 |
-| New exact-evidence correction requires attorney review first | Needs context; asks about review | 3.014 s | 2,249 / 53 | 0.000778 |
-| Requested guide is now published; no other work requested | No suggestion | 3.296 s | 1,792 / 38 | 0.000611 |
-| Fresh guest inbound and changed owner intent | Guest reply | 6.493 s | 1,856 / 141 | 0.000861 |
+| Inbox is the only priority; article work can wait | Guest reply | 6.415 s | 2,087 / 139 | 0.000925 |
+| Same records; publish the explicitly approved guide and leave inbox alone | Article publication | 9.242 s | 2,105 / 139 | 0.000930 |
+| New exact-evidence correction requires attorney review first | No suggestion; explains known hold | 3.365 s | 2,313 / 34 | 0.000754 |
+| Review status explicitly unknown for the same revision | Needs context; asks whether review happened | 3.261 s | 2,318 / 80 | 0.000859 |
+| Requested guide is now published; no other work requested | No suggestion | 2.402 s | 1,893 / 44 | 0.000654 |
+| Fresh guest inbound and changed owner intent | Guest reply | 4.911 s | 1,949 / 139 | 0.000884 |
 
 The current Today baseline kept the same attention/draft card IDs across the
-goal change; its two Wrangler request logs reported 35 ms and 55 ms, with no
-model inference. The preview changed selection. The five-call median domain latency
-was 5.052 seconds; these timings include source reads and revalidation, not
+goal change, with no model inference. The preview changed selection. The six-call
+median domain latency was 4.138 seconds; these timings include source reads and revalidation, not
 network transit or representative production load. This is too little evidence
 to claim a general relevance rate or latency distribution.
 
 Token-only model estimates use the model page's published USD rates of 0.293
 per million input tokens and 2.253 per million output tokens: approximately
-USD 0.00410 for these five successful calls. They exclude Worker/D1 charges,
+USD 0.00501 for these six successful calls (13,240 reported tokens). They exclude Worker/D1 charges,
 development retries and account billing adjustments; no invoice was verified.
 
 An earlier live prompt repeated the old publication-approval claim despite a
-new correction. The retained correction case exposed that error. Version 2
-provides current corrections first, with their operation, evidence and revision,
-and explicitly makes them supersede contradictory older goal claims. The final
-run asked for the missing attorney review instead of recommending publication.
-This demonstrates why schema-valid output alone is insufficient and why new,
-withheld cases and owner judgment remain necessary.
+new correction. Other live evaluations exposed redundant questions after
+completion, action labels that confused review with publication, and unknown
+review status being treated as a known hold. Current corrections are supplied
+first and supersede contradictory earlier goal claims. The final contract
+distinguishes a known unmet prerequisite from a decision-changing unknown:
+explain the former without another question and ask for the latter. Both cases
+withhold publication and preserve the authored goal and draft. This demonstrates
+why schema-valid output alone is insufficient and why new, withheld cases and
+owner judgment remain necessary.
 
 The current owner-reported observations remain Kikuzuki inbox use and NCLS MCP
 blog updates. Historical intake and product decisions add constraints, but no

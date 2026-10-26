@@ -11,7 +11,7 @@ import { recommendationPreviewSchema, type RecommendationPreview } from '~/share
 import type { BusinessProgressOperation } from '~/shared/business-outcomes'
 
 const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
-const POLICY_VERSION = 'recommendation-preview-v4'
+const POLICY_VERSION = 'recommendation-preview-v6'
 // This is an explicit, bounded evaluation over current records, not a historical replay.
 const MAX_MODEL_CONTEXT_BYTES = 18_000
 const CAPABILITY_NAMES = {
@@ -45,7 +45,7 @@ Return only the requested JSON schema. Keep summary, intendedOutcome and whyNow 
 Select at most the requested limit. Select only supplied candidate IDs and cite at least one of that candidate's allowedGoalIds.
 Goals and constraints are the owner's actual words. Read their meaning, including negation and changed priorities. Do not match keywords or infer preferences from business category.
 CURRENT CORRECTIONS OVERRIDE CONFLICTING CLAIMS IN EARLIER GOAL TEXT for their cited operation and evidence. In particular, a newer correction that review or approval is still needed supersedes an earlier goal's approval claim. Read currentCorrections before goals. Apply the correction's actual meaning, without treating every correction as a dismissal or silently modifying the stored goal. Acceptance is not completion.
-When a correction creates a prerequisite that current facts do not prove satisfied, do not recommend that operation. Return needs_context with a targeted question if no supplied operation can resolve it. Review alone is not an article update or publication; do not mislabel review as a write operation.
+Distinguish an unknown prerequisite from a known unmet prerequisite. Unknown is not false: never turn "I do not know whether review happened" into a claim that review has not happened. If the operation would be useful once that unknown fact is confirmed, return needs_context and ask whether it has happened. This clarification takes precedence over no_suggestion. If the owner instead establishes that review is still required, return no_suggestion and explain the known hold without asking them to repeat it. Neither case permits the blocked operation. Review alone is not an article update or publication; do not mislabel review as a write operation.
 Recommend only when current source evidence supports usefulness for the cited goal now. A draft, an available API or an unanswered status alone does not establish demand.
 Use the canonical capability's actual operation as the action. Readiness, approval and configuration are prerequisites, not proof the operation was performed. Completion requires recorded evidence of the requested change.
 Distinguish new inbound messages, waiting on the guest, active commitments, cancelled/ended commitments, and old uncommitted conversations. An active commitment is context to consider, not automatic proof that a reply is owed.
