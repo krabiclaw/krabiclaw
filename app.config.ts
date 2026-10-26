@@ -100,7 +100,12 @@ export default defineAppConfig({
     // One card and one empty state across the dashboard: the padding and the
     // corner are these, never a page's own.
     card: {
-      slots: { root: 'rounded-2xl', body: 'p-6 sm:p-6' }
+      slots: { root: 'rounded-2xl', body: 'p-6 sm:p-6' },
+      variants: {
+        variant: {
+          record: { root: 'bg-elevated shadow-[0_0_0_1px_rgb(0_0_0/0.02),0_8px_24px_rgb(0_0_0/0.10)]' }
+        }
+      }
     },
     empty: {
       slots: { root: 'rounded-2xl' }

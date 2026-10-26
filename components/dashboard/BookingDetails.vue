@@ -1,9 +1,7 @@
 <template>
   <!--
     One record, opened beneath Today, Calendar or the guest thread it belongs
-    to. This is the summary;
-    the things that change it — the request, a note, the guest — are levels of
-    their own under the record's canonical URL, which both mounts link to.
+    to. Changes and guest details open beneath its canonical URL.
   -->
   <!--
     The provider owns its chrome: the levels below inject what this component
@@ -12,148 +10,147 @@
   -->
   <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="chrome">
     <template #right>
-      <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close booking details" class="max-lg:hidden" />
+      <UButton v-if="!embedded && recordLevel.to.value" :to="recordLevel.to.value" icon="i-lucide-x" color="neutral" variant="ghost" aria-label="Close booking details" />
     </template>
     <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
-      <UAlert
-        v-if="actionError"
-        class="mb-5"
-        color="error"
-        variant="soft"
-        icon="i-lucide-circle-alert"
-        :description="actionError"
-      />
+      <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <template v-if="booking">
-        <!-- The business reads who is coming; the account reads what it booked and where. A purchase is what was bought, for both. -->
-        <div class="text-center">
-          <img v-if="booking.resourceImageUrl" :src="booking.resourceImageUrl" alt="" class="mx-auto mb-6 aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover">
-          <div v-if="!personalScope && !purchase && booking.guestName" class="relative mx-auto mb-8" :class="booking.partySize && booking.partySize > 1 ? 'h-30 w-38' : 'size-22'">
-            <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" :text="booking.guestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0 size-22 text-4xl" :ui="{ fallback: 'text-highlighted' }" />
-            <span v-if="booking.partySize && booking.partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-2xl font-semibold text-highlighted" :aria-label="`${booking.partySize - 1} other guests`">+{{ booking.partySize - 1 }}</span>
+        <div class="flex flex-col items-center pb-12 text-center" :class="!booking.resourceImageUrl ? 'pt-10' : undefined">
+          <img v-if="booking.resourceImageUrl" :src="booking.resourceImageUrl" alt="" class="mb-10 aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover">
+          <div v-if="!personalScope && !purchase && booking.guestName" class="relative mx-auto mb-6 shrink-0 md:mb-8" :class="booking.partySize && booking.partySize > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36'">
+            <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" :text="booking.guestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0" :class="booking.partySize && booking.partySize > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
+            <span v-if="booking.partySize && booking.partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="otherGuestLabel">+{{ booking.partySize - 1 }}</span>
           </div>
-          <h2 class="break-words font-semibold text-highlighted" :class="personalScope || purchase ? 'text-2xl' : 'mx-auto max-w-sm text-3xl leading-tight'">{{ personalScope || purchase ? booking.resourceTitle : partyTitle }}</h2>
-          <p class="mt-2 break-words text-base text-muted">{{ subline }}</p>
+          <h2 class="max-w-full break-words text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ personalScope || purchase ? booking.resourceTitle : partyTitle }}</h2>
+          <p class="mt-4 break-words text-base text-muted">{{ subline }}</p>
         </div>
 
-        <!-- Airbnb's "Change requested", for both sides and both kinds: the proposal is out and the record stays as it is until the guest answers. -->
-        <UAlert
-          v-if="booking.pendingChange"
-          class="mt-4"
-          color="info"
-          variant="soft"
-          icon="i-lucide-clock"
-          :title="personalScope ? `${booking.organizationName} requested a change` : 'Change requested'"
-          :description="`${booking.pendingChange.afterLabel} · ${booking.pendingChange.partySize} ${booking.pendingChange.partySize === 1 ? 'guest' : 'guests'}${personalScope ? '' : ` · Waiting for ${firstName(booking.guestName ?? '')} to respond`}`"
-          :actions="personalScope ? [
-            { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', onClick: () => answerChange('accept') },
-            { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', onClick: () => answerChange('decline') },
-          ] : undefined"
-        />
+        <div class="space-y-4">
+          <UAlert
+            v-if="booking.pendingChange"
+            color="info"
+            variant="soft"
+            icon="i-lucide-clock"
+            :title="personalScope ? `${booking.organizationName} requested a change` : 'Change requested'"
+            :description="`${booking.pendingChange.afterLabel} · ${booking.pendingChange.partySize} ${booking.pendingChange.partySize === 1 ? recordCopy?.guestLabel : recordCopy?.guestsLabelPlural}${personalScope ? '' : ` · Waiting for ${firstName(booking.guestName ?? '')} to respond`}`"
+            :actions="personalScope ? [
+              { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', onClick: () => answerChange('accept') },
+              { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', onClick: () => answerChange('decline') },
+            ] : undefined"
+          />
 
-        <div v-if="!purchase" class="mt-8 grid grid-cols-2 gap-4 border-t border-default pt-6">
-          <div>
-            <p class="text-base font-semibold text-highlighted">Date</p>
-            <p class="mt-1 text-base text-muted">{{ formattedDate }}</p>
-          </div>
-          <div>
-            <p class="text-base font-semibold text-highlighted">Time</p>
-            <p class="mt-1 text-base text-muted">{{ formattedTime }}</p>
-          </div>
-        </div>
+          <UCard v-if="!purchase" variant="record">
+            <div class="grid grid-cols-2 divide-x divide-default">
+              <div class="min-w-0 pe-6">
+                <h3 class="text-base font-semibold text-highlighted">Date</h3>
+                <p class="mt-1 text-sm text-muted">{{ formattedDate }}</p>
+              </div>
+              <div class="min-w-0 ps-6 text-right">
+                <h3 class="text-base font-semibold text-highlighted">Time</h3>
+                <p class="mt-1 text-sm text-muted">{{ formattedTime }}</p>
+              </div>
+            </div>
+          </UCard>
 
-        <template v-if="booking.type === 'booking' && !personalScope">
-          <component :is="canChangeBooking ? NuxtLink : 'div'" :to="canChangeBooking ? { path: `${editorPath}/team-member`, query: route.query } : undefined" class="mt-6 flex items-center gap-4 border-y border-default py-6">
-            <span class="min-w-0 flex-1"><span class="block text-base font-medium text-highlighted">Team member</span><span class="block text-sm text-muted">{{ booking.assignedMemberName || (booking.assignedMemberId ? 'Previously assigned member' : booking.organizationName) }}</span></span>
-            <UIcon v-if="canChangeBooking" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-          </component>
-          <UAlert v-if="booking.providerConflict" class="mt-4" color="warning" description="This booking overlaps a busy time. Contact your guest to change it." />
-          <UAlert v-if="booking.providerCalendarStatus" class="mt-4" color="warning" :description="booking.providerCalendarStatus" />
-        </template>
-
-        <div class="mt-6 border-t border-default pt-2">
-          <NuxtLink v-if="!personalScope && !purchase" :to="{ path: `${editorPath}/notes`, query: route.query }" class="flex items-center gap-4 py-4">
-            <span class="min-w-0 flex-1">
-              <span class="block text-base font-medium text-highlighted">Your notes</span>
-              <span class="block text-sm text-muted">{{ notesSummary }}</span>
-            </span>
-            <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-          </NuxtLink>
-          <!-- The business opens the guest; the account reads its own party, as Airbnb's "Who's coming". A purchase names its buyer and nothing opens. -->
-          <div v-if="personalScope && !purchase" class="py-4">
-            <p class="text-base font-medium text-highlighted">Who’s coming</p>
-            <p class="mt-1 text-sm text-muted">{{ guestCountLabel }}</p>
-          </div>
-          <component :is="purchase ? 'div' : NuxtLink" v-else-if="!personalScope && booking.guestName" :to="purchase ? undefined : { path: `${editorPath}/guest`, query: route.query }" class="flex items-center gap-4 border-t border-default py-4">
-            <span class="min-w-0 flex-1">
-              <span class="block text-base font-medium text-highlighted">{{ purchase ? 'Buyer' : 'Guests' }}</span>
-              <span class="block text-sm text-muted"><span>{{ booking.guestName }}</span><template v-if="!purchase"> · {{ guestCountLabel }}</template></span>
-            </span>
-            <UIcon v-if="!purchase" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-          </component>
-
-          <div v-if="booking.requests" class="border-t border-default py-4">
-            <p class="text-base font-medium text-highlighted">{{ personalScope ? 'Your requests' : 'Guest requests' }}</p>
-            <p class="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted">{{ booking.requests }}</p>
-          </div>
-
-          <button v-if="!purchase" type="button" class="flex w-full items-center gap-4 border-t border-default py-4 text-left" @click="policyOpen = true">
-            <span class="min-w-0 flex-1">
-              <span class="block text-base font-medium text-highlighted">Cancellation policy</span>
-              <span class="block text-sm text-muted">{{ cancellationSummary }}</span>
-            </span>
-            <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-          </button>
-
-        </div>
-
-        <PaymentDetails v-for="detail in booking.payments" :key="detail.payment.id" :payment="detail.payment" :refunds="detail.refunds" :order="detail.order">
-          <template v-if="!personalScope && detail.payment.captured_amount > detail.payment.refunded_amount" #actions>
-            <NuxtLink :to="{ path: `${editorPath}/refund`, query: { ...route.query, payment: detail.payment.id } }" class="flex items-center gap-4 border-t border-default py-4">
-              <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
-              <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-            </NuxtLink>
+          <template v-if="booking.type === 'booking' && !personalScope">
+            <UCard variant="record">
+              <component :is="canChangeBooking ? NuxtLink : 'div'" :to="canChangeBooking ? { path: `${editorPath}/team-member`, query: route.query } : undefined" class="flex items-center gap-4">
+                <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-highlighted">{{ recordCopy?.assigneeLabel }}</span><span class="mt-1 block text-sm text-muted">{{ booking.assignedMemberName || (booking.assignedMemberId ? 'Previously assigned member' : booking.organizationName) }}</span></span>
+                <UIcon v-if="canChangeBooking" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+              </component>
+            </UCard>
+            <UAlert v-if="booking.providerConflict" color="warning" :description="`This ${noun} overlaps a busy time. Contact your ${recordCopy?.guestLabel} to change it.`" />
+            <UAlert v-if="booking.providerCalendarStatus" color="warning" :description="booking.providerCalendarStatus" />
           </template>
-        </PaymentDetails>
 
-        <div v-if="availableActions.length || (canChangeBooking && !personalScope)" class="mt-6 flex flex-wrap gap-3 border-t border-default py-4">
-          <UButton
-            v-if="canChangeBooking && !personalScope"
-            :label="`Change ${noun}`"
-            color="neutral"
-            variant="ghost"
-            :to="{ path: `${editorPath}/change`, query: route.query }"
-            @click="beginChange"
-          />
-          <UButton
-            v-for="action in availableActions"
-            :key="action.value"
-            :label="action.label"
-            :icon="action.icon"
-            :color="action.color"
-            variant="ghost"
-            :loading="pendingAction === action.value"
-            @click="action.value === 'cancel' && !booking.guestCanRetryCancellation ? openCancel() : runAction(action.value)"
-          />
+          <UCard v-if="!personalScope && !purchase" variant="record">
+            <h3 class="text-base font-semibold text-highlighted">Your notes</h3>
+            <div v-if="booking.notes.length" class="mt-4 divide-y divide-default">
+              <NuxtLink v-for="note in booking.notes" :key="note.id" :to="{ path: `${editorPath}/notes/${note.id}`, query: route.query }" class="block py-3 first:pt-0" :aria-label="`Edit note: ${note.body}`">
+                <span class="block whitespace-pre-wrap text-sm text-highlighted">{{ note.body }}</span>
+                <span class="mt-1 block text-xs text-dimmed">{{ formatCreatedAt(note.createdAt) }}</span>
+              </NuxtLink>
+            </div>
+            <div v-if="!selectedNote" class="group mt-4">
+              <div class="flex items-center gap-3">
+                <span class="flex size-12 shrink-0 items-center justify-center rounded-xl bg-muted" aria-hidden="true"><UIcon name="i-lucide-circle-plus" class="size-5" /></span>
+                <UTextarea v-model="noteDraft" aria-label="Add a note to yourself" placeholder="Add a note to yourself" variant="none" :rows="1" autoresize maxlength="2000" :disabled="noteSaving" class="min-w-0 flex-1" @blur="saveNewNote" />
+              </div>
+              <p class="mt-2 hidden text-right text-xs text-muted group-focus-within:block">{{ 2000 - noteDraft.length }} characters available</p>
+              <UAlert v-if="noteError" class="mt-3" color="error" variant="soft" :description="noteError" :actions="[{ label: 'Retry', color: 'neutral' as const, loading: noteSaving, onClick: saveNewNote }]" />
+            </div>
+          </UCard>
+
+          <UCard v-if="personalScope && !purchase" variant="record">
+            <h3 class="text-base font-semibold text-highlighted">Who’s coming</h3>
+            <p class="mt-1 text-sm text-muted">{{ guestCountLabel }}</p>
+          </UCard>
+          <UCard v-else-if="!personalScope && booking.guestName" variant="record">
+            <component :is="purchase ? 'div' : NuxtLink" :to="purchase ? undefined : { path: `${editorPath}/guest`, query: route.query }" class="block" :aria-label="`${purchase ? 'Buyer' : guestHeading} ${booking.guestName}${purchase ? '' : ` · ${guestCountLabel}`}`">
+              <h3 class="text-base font-semibold text-highlighted">{{ purchase ? 'Buyer' : guestHeading }}</h3>
+              <div class="mt-4 flex items-center gap-4">
+                <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" :text="booking.guestName.slice(0, 1).toUpperCase()" size="xl" class="size-12 bg-muted" aria-hidden="true" />
+                <span class="min-w-0 flex-1 text-base text-highlighted">{{ booking.guestName }}</span>
+                <UIcon v-if="!purchase" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+              </div>
+              <div v-if="!purchase && booking.partySize && booking.partySize > 1" class="mt-4 flex items-center gap-4">
+                <span class="flex size-12 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold" aria-hidden="true">+{{ booking.partySize - 1 }}</span>
+                <span class="text-base text-highlighted">{{ otherGuestLabel }}</span>
+              </div>
+            </component>
+          </UCard>
+
+          <UCard v-if="booking.requests" variant="record">
+            <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Your requests' : `${recordCopy?.guestLabel.charAt(0).toUpperCase()}${recordCopy?.guestLabel.slice(1)} requests` }}</h3>
+            <p class="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted">{{ booking.requests }}</p>
+          </UCard>
+
+          <UCard v-if="!purchase" as="button" type="button" variant="record" class="w-full text-left" @click="policyOpen = true">
+            <span class="flex items-center gap-4">
+              <span class="min-w-0 flex-1"><span class="block text-base font-semibold text-highlighted">Cancellation policy</span><span class="mt-1 block text-sm text-muted">{{ cancellationSummary }}</span></span>
+              <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+            </span>
+          </UCard>
+
+          <PaymentDetails v-for="detail in booking.payments" :key="detail.payment.id" :payment="detail.payment" :refunds="detail.refunds" :order="detail.order">
+            <template v-if="!personalScope && detail.payment.captured_amount > detail.payment.refunded_amount" #actions>
+              <NuxtLink :to="{ path: `${editorPath}/refund`, query: { ...route.query, payment: detail.payment.id } }" class="flex items-center gap-4 border-t border-default py-4">
+                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
+                <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+              </NuxtLink>
+            </template>
+          </PaymentDetails>
+
+          <UCard v-if="!purchase || availableActions.length" as="button" type="button" variant="record" class="w-full text-left" @click="manageOpen = true">
+            <span class="flex items-center gap-4"><span class="min-w-0 flex-1 text-base font-semibold text-highlighted">Manage {{ noun }}</span><UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" /></span>
+          </UCard>
+          <UCard variant="record">
+            <p class="text-base font-semibold text-highlighted">{{ purchase ? 'Purchase date' : 'Booking date' }}</p>
+            <p class="mt-1 text-sm text-muted">{{ formatCreatedAt(booking.createdAt) }}</p>
+          </UCard>
         </div>
-        <div class="border-t border-default py-4">
-          <p class="text-base font-medium text-highlighted">{{ capitalize(noun) }} made</p>
-          <p class="mt-1 text-sm text-muted">{{ formatCreatedAt(booking.createdAt) }}</p>
-        </div>
-        <div v-if="embedded && (messageTo || contactCallTo)" class="mt-4 flex flex-wrap justify-center gap-3">
-          <UButton v-if="messageTo" :to="messageTo" :label="personalScope ? 'Message' : 'Message guest'" color="neutral" class="rounded-full px-5" />
-          <UButton v-if="contactCallTo" :to="contactCallTo" label="Call" color="neutral" class="rounded-full px-5" />
+        <div v-if="embedded && (messageTo || contactCallTo)" class="mt-8 flex flex-wrap justify-center gap-3">
+          <UButton v-if="messageTo" :to="messageTo" label="Message" :aria-label="personalScope ? 'Message' : `Message ${recordCopy?.guestLabel}`" color="neutral" class="h-14 rounded-full px-8 shadow-lg" />
+          <UButton v-if="contactCallTo" :to="contactCallTo" label="Call" color="neutral" class="h-14 rounded-full px-8 shadow-lg" />
         </div>
       </template>
     </div>
     <template v-if="!embedded && booking && (messageTo || contactCallTo)" #footer>
       <div class="flex flex-wrap justify-center gap-3">
-        <UButton v-if="messageTo" :to="messageTo" :label="personalScope ? 'Message' : 'Message guest'" color="neutral" class="h-12 rounded-full px-5" />
-        <UButton v-if="contactCallTo" :to="contactCallTo" label="Call" color="neutral" class="h-12 rounded-full px-5" />
+        <UButton v-if="messageTo" :to="messageTo" label="Message" :aria-label="personalScope ? 'Message' : `Message ${recordCopy?.guestLabel}`" color="neutral" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" />
+        <UButton v-if="contactCallTo" :to="contactCallTo" label="Call" color="neutral" class="pointer-events-auto h-14 rounded-full px-8 shadow-lg" />
       </div>
     </template>
   </component>
 
+  <DashboardListItemDialog v-model:open="manageOpen" :title="`Manage ${noun}`" :show-actions="false" :error="actionError">
+    <div v-if="booking" class="divide-y divide-default">
+      <NuxtLink v-if="canChangeBooking && !personalScope" :to="{ path: `${editorPath}/change`, query: route.query }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false; beginChange()"><span>Change {{ noun }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
+      <NuxtLink v-if="!purchase" :to="{ path: personalScope ? `/dashboard/account/calendar/${booking.bookingDate}` : `/dashboard/${orgSlug}/calendar/${booking.bookingDate}`, query: !personalScope && booking.locationId ? { locationId: booking.locationId } : undefined }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>View on calendar</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
+      <UButton v-for="action in availableActions" :key="action.value" :label="action.label" :icon="action.icon" :color="action.color" variant="ghost" block class="justify-start py-4" :loading="pendingAction === action.value" @click="selectAction(action.value)" />
+    </div>
+  </DashboardListItemDialog>
   <DashboardListItemDialog v-model:open="policyOpen" :title="booking?.policy?.heading || 'Cancellation policy'" :show-actions="false">
     <div v-if="booking" class="space-y-4">
       <div v-if="booking.policy?.items.length" class="space-y-3">
@@ -258,6 +255,7 @@ import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDia
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { htmlToPlainText } from '~/utils/markdown'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 
 const props = defineProps<{
   bookingType: DashboardRecordType
@@ -305,15 +303,16 @@ const subline = computed(() => {
 const partyTitle = computed(() => {
   if (!booking.value) return ''
   const size = booking.value.partySize ?? 0
-  return size > 1 ? `${booking.value.guestName}'s group of ${size}` : booking.value.guestName ?? ''
+  const name = firstName(booking.value.guestName ?? '')
+  return size > 1 ? `${name}’s group of ${size}` : name
 })
-const notesSummary = computed(() => {
-  const count = booking.value?.notes.length ?? 0
-  if (count === 0) return 'Only your team can see these notes'
-  return count === 1 ? '1 note' : `${count} notes`
+const recordCopy = computed(() => booking.value ? getVerticalCopy(booking.value.vertical) : null)
+const guestHeading = computed(() => {
+  const label = recordCopy.value?.guestsLabelPlural ?? ''
+  return label.charAt(0).toUpperCase() + label.slice(1)
 })
-
-const guestCountLabel = computed(() => `${booking.value?.partySize ?? 0} ${(booking.value?.partySize ?? 0) === 1 ? 'guest' : 'guests'}`)
+const guestCountLabel = computed(() => `${booking.value?.partySize ?? 0} ${booking.value?.partySize === 1 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}`)
+const otherGuestLabel = computed(() => `${(booking.value?.partySize ?? 0) - 1} other ${booking.value?.partySize === 2 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}`)
 const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text
   ?? (booking.value?.policy?.additional_notes_html ? htmlToPlainText(booking.value.policy.additional_notes_html) : 'No cancellation terms have been configured.'))
 const messageTo = computed(() => {
@@ -325,6 +324,7 @@ const callTo = computed(() => booking.value?.guestPhone ? `tel:${booking.value.g
 const contactCallTo = computed(() => props.personalScope ? booking.value?.contactPhone ? `tel:${booking.value.contactPhone}` : null : callTo.value)
 
 const policyOpen = ref(false)
+const manageOpen = ref(false)
 const session = authClient.useSession()
 // The buyer's answer to a change, on the record itself; the email link records the same decision.
 const answering = ref<'accept' | 'decline' | null>(null)
@@ -473,10 +473,6 @@ function firstName(name: string) {
   return name.trim().split(/\s+/)[0] || name
 }
 
-function capitalize(value: string) {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : ''
-}
-
 function formatCreatedAt(value: string) {
   return formatTimestamp(value, 'en', 'UTC', { dateStyle: 'medium' })
 }
@@ -495,6 +491,31 @@ watch(realtime.event, (event) => {
 watch(realtime.connectionEpoch, (epoch) => {
   if (epoch > 0) void refreshDetails()
 })
+
+// A blur save and the navigation it caused share one write. Failed text stays
+// visible on the record rather than being replaced by the next note's draft.
+let pendingNewNote: Promise<boolean> | null = null
+function saveNewNote(): Promise<boolean> {
+  if (pendingNewNote) return pendingNewNote
+  if (selectedNote.value || !noteDraft.value.trim()) return Promise.resolve(true)
+  pendingNewNote = saveNote().then((saved) => {
+    if (saved) openNote(null)
+    return saved
+  }).finally(() => { pendingNewNote = null })
+  return pendingNewNote
+}
+function saveBeforeNavigation() {
+  return selectedNote.value ? !noteSaving.value : saveNewNote()
+}
+onBeforeRouteUpdate(saveBeforeNavigation)
+onBeforeRouteLeave(saveBeforeNavigation)
+
+function selectAction(action: string) {
+  if (action === 'cancel' && !booking.value?.guestCanRetryCancellation) {
+    manageOpen.value = false
+    openCancel()
+  } else void runAction(action)
+}
 
 async function saveNote() {
   if (!noteDraft.value.trim()) return false
@@ -589,6 +610,7 @@ async function runAction(action: string) {
     await refreshDetails()
     actionAttempt.value = null
     cancelOpen.value = false
+    manageOpen.value = false
   } catch (cause) {
     const approvalUrl=isRecord(cause)&&isRecord(cause.data)&&isRecord(cause.data.data)&&typeof cause.data.data.financial_approval_url==='string'?cause.data.data.financial_approval_url:null
     if(approvalUrl) await navigateTo(approvalUrl)

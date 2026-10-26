@@ -155,7 +155,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   const [cardTelemetry] = await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/telemetry' && response.request().postDataJSON()?.action === 'today_card_click'), arrival.click()])
   await expectStatus(cardTelemetry, 200)
   expect(new URL(cardTelemetry.url()).searchParams.get('org')).toBe(slug)
-  await expect(page.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
 
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
   await page.getByRole('button', { name: 'Record payment' }).click()
@@ -3868,12 +3868,12 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await calendarStay.click()
       await expect(page).toHaveURL(calendarStayURL.href)
       const calendarStayDetails = page.locator('#dashboard-panel-stay-details')
-      await expect(calendarStayDetails.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
+      await expect(calendarStayDetails.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
       await page.setViewportSize({ width: 390, height: 844 })
-      const stayBack = calendarStayDetails.getByTestId('dashboard-navbar-back')
-      await expect(stayBack).toBeVisible()
-      await expect(stayBack).toHaveAttribute('href', `/dashboard/${slug}/calendar${calendarStayURL.search}`)
-      await stayBack.click()
+      const stayClose = calendarStayDetails.getByRole('link', { name: 'Close stay details', exact: true })
+      await expect(stayClose).toBeVisible()
+      await expect(stayClose).toHaveAttribute('href', `/dashboard/${slug}/calendar${calendarStayURL.search}`)
+      await stayClose.click()
       await expect(page).toHaveURL(`/dashboard/${slug}/calendar${calendarStayURL.search}`)
       await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
       await page.setViewportSize({ width: 1440, height: 900 })
@@ -3948,7 +3948,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(arrival).toHaveCount(1)
       await expect(arrival).toHaveAttribute('href', arrivalPath)
       await arrival.click()
-      await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
+      await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
       await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
       await expect(cleanerPage.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
       await cleanerPage.goto(`/dashboard/${slug}?range=upcoming`)
@@ -3957,7 +3957,7 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       await expect(departure).toContainText('Ana leaves in 2 days with 2 guests')
       await expect(departure).toHaveAttribute('href', `${arrivalPath}?range=upcoming`)
       await departure.click()
-      await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
+      await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
 
       // Another device's edit updates the assigned stay without navigation. An
       // ordered later event proves that the intervening other-home event was filtered.
@@ -3966,7 +3966,8 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
       expect(renamed.error).toBeNull()
       expect(renamed.data!.saved_fields).toEqual({ guest_name: 'Ana Live' })
       expect(renamed.data!.channel_push).toBeNull()
-      await expect(cleanerPage.getByRole('heading', { name: 'Ana Live Silva', level: 2, exact: true })).toBeVisible()
+      await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
+      await expect(cleanerPage.getByText('Ana Live Silva', { exact: true })).toBeVisible()
       const privateStay = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[1]!.id })
       expect((await call('update_stay', { stay_id: stays[1]!.id, expected_version: privateStay.data!.stay.version, notes: 'Other home only' })).error).toBeNull()
       const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, notes: 'Visible live note' })
@@ -4053,14 +4054,15 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const openedRead = cleanerPage.waitForResponse(response => response.request().method() === 'GET'
       && new URL(response.url()).pathname === `/api/dashboard/stays/${stay.id}`)
     expect((await cleanerPage.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`))?.status()).toBe(200)
-    await expect(cleanerPage.getByRole('heading', { name: 'Membership Guest', level: 2, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
     // The real first-open reconciliation read proves the app socket completed
     // its upgrade before the other device publishes the event under assertion.
     expect((await openedRead).status()).toBe(200)
     const renamed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: stay.version, guest_name: 'Membership Live' } })
     await expectStatus(renamed, 200)
     const version = (await renamed.json() as { stay: { version: number } }).stay.version
-    await expect(cleanerPage.getByRole('heading', { name: 'Membership Live', level: 2, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByText('Membership Live', { exact: true })).toBeVisible()
     await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
     const socket = sockets.find(socket => !socket.isClosed())
     expect(socket).toBeDefined()

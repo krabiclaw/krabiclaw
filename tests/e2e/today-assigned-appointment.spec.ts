@@ -155,7 +155,8 @@ test('an assigned staff member can review a future online consultation from Toda
     await expect(todayPanel).toBeHidden()
     await expect(detail).toBeVisible()
     const confirmed = memberPage.waitForResponse(response => new URL(response.url()).pathname.endsWith(`/guest-threads/${requestId}/operations/confirm`))
-    await memberPage.getByRole('button', { name: 'Confirm consultation', exact: true }).click()
+    await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
+    await memberPage.getByRole('dialog', { name: 'Manage consultation', exact: true }).getByRole('button', { name: 'Confirm consultation', exact: true }).click()
     expect((await confirmed).status()).toBe(200)
     const persisted = await body<{ booking: { status: string; assignedMemberId: string } }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)

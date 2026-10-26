@@ -1794,8 +1794,8 @@ test.describe('dashboard pane hierarchy', () => {
         await expect(page).toHaveURL(`/dashboard/account/activity/${item.kind}/${item.id}`)
         await expect(page.getByRole('heading', { name: item.title, exact: true })).toBeVisible()
         await expect(page.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(paymentCount)
-        // The record opens beside Past activity; its own Back returns to that list.
-        await page.locator('#dashboard-panel-account-booking-details [data-testid="dashboard-navbar-back"]').click()
+        // The record opens beside Past activity; closing it returns to that list.
+        await page.locator('#dashboard-panel-account-booking-details').getByRole('link', { name: 'Close booking details', exact: true }).click()
         await expect(page).toHaveURL('/dashboard/account/activity')
       } else if (!cancelled.length) {
         await expect(page.getByText('No past activity yet', { exact: true })).toBeVisible()
@@ -1895,7 +1895,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(change)
   })
 
-  test('a booking opened from the calendar goes Back to its day, and from Today to Today', async ({ page }) => {
+  test('a booking opened from the calendar closes to its day, and from Today to Today', async ({ page }) => {
     const agenda = await page.request.get('/api/dashboard/agenda', { params: { org: 'ember-slice-demo', from: '2000-01-01', to: '2100-01-01' } })
     expect(agenda.status()).toBe(200)
     const { items } = await agenda.json() as { items: Array<{ kind: string; dayKey: string; to: string }> }
@@ -1904,24 +1904,24 @@ test.describe('dashboard pane hierarchy', () => {
     const day = `${ORG}/calendar/${reservation!.dayKey}`
     const fromCalendar = `${day}/reservation/${reservation!.to.split('/').at(-1)}`
 
-    // The same record, mounted under the day: Back is the day and Calendar is the lit tab.
+    // The same record, mounted under the day: Close is the day and Calendar is the lit tab.
     await page.setViewportSize(NARROW)
     await open(page, fromCalendar)
     await expectPanes(page, ['booking-details'])
-    const back = page.locator('#dashboard-panel-booking-details [data-testid="dashboard-navbar-back"]')
-    await expect(back).toHaveAttribute('href', day)
+    const close = page.locator('#dashboard-panel-booking-details').getByRole('link', { name: 'Close booking details', exact: true })
+    await expect(close).toHaveAttribute('href', day)
     await expect(page.locator('[aria-current="page"]', { hasText: 'Calendar' }).first()).toBeVisible()
     await expect(page.locator('[aria-current="page"]', { hasText: 'Today' })).toHaveCount(0)
-    await back.click()
+    await close.click()
     await expect(page).toHaveURL(day)
     await expectPanes(page, ['calendar-day'])
 
     await open(page, reservation!.to)
-    await expect(page.locator('#dashboard-panel-booking-details [data-testid="dashboard-navbar-back"]')).toHaveAttribute('href', ORG)
+    await expect(close).toHaveAttribute('href', ORG)
     await expect(page.locator('[aria-current="page"]', { hasText: 'Today' }).first()).toBeVisible()
 
     // A direct link and reload retain Today as the actual parent, so the same
-    // range and filters remain beside the record and survive mobile Back.
+    // range and filters remain beside the record and survive mobile Close.
     const context = '?range=upcoming&kinds=reservation'
     await page.setViewportSize(WIDE)
     await open(page, `${reservation!.to}${context}`)
@@ -1937,16 +1937,14 @@ test.describe('dashboard pane hierarchy', () => {
     await page.getByRole('link', { name: 'Close booking details', exact: true }).click()
     await expect(page).toHaveURL(`${ORG}${context}`)
     await expectPanes(page, ['org-today'])
-    await open(page, `${reservation!.to}${context}`)
-    await page.locator('#dashboard-panel-booking-details').getByRole('link', { name: /^Your notes/ }).click()
-    await expect(page).toHaveURL(`${reservation!.to}/notes${context}`)
-    await page.locator('#dashboard-panel-booking-notes').getByRole('button', { name: 'Cancel', exact: true }).click()
+    await open(page, `${reservation!.to}/change${context}`)
+    await expect(page).toHaveURL(`${reservation!.to}/change/location${context}`)
+    await page.locator('#dashboard-panel-booking-change').getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(`${reservation!.to}${context}`)
     await page.setViewportSize(PHONE)
     await expectPanes(page, ['booking-details'])
-    const todayBack = page.locator('#dashboard-panel-booking-details [data-testid="dashboard-navbar-back"]')
-    await expect(todayBack).toHaveAttribute('href', `${ORG}${context}`)
-    await todayBack.click()
+    await expect(close).toHaveAttribute('href', `${ORG}${context}`)
+    await close.click()
     await expect(page).toHaveURL(`${ORG}${context}`)
     await expectPanes(page, ['org-today'])
     await expect(today.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
