@@ -7,7 +7,7 @@ import { H3, HTTPError } from 'nitro/h3'
 import { hashPassword } from 'better-auth/crypto'
 import * as schema from '../../server/db/schema.ts'
 import { AirbnbConnection, type ImportContentReport } from '../../server/integrations/channex/airbnb-connection.ts'
-import { createStay, createStayHome, deliverPendingChannelNights, readStayHome, setStayNights, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
+import { createStay, createStayHome, deliverPendingChannelNights, readStayCalendar, readStayHome, setStayNights, stayHomeInput, updateStayHome } from '../../server/domain/stays.ts'
 import { deleteMediaAsset, getMediaAsset } from '../../server/utils/media-asset-manager.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
@@ -509,9 +509,15 @@ test('a connected home can resend its full calendar without tearing down its map
       const response = await app.request(Object.assign(new Request(`${BASE}/api/organizations/${organization}/integrations/airbnb/imports/${product}/calendar`, { method: 'POST', headers: { ...(authenticated ? { cookie } : {}), origin: BASE } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       return { status: response.status, body: await response.json() as Record<string, unknown> }
     }
-    assert.equal((await call(ORG, productId, false)).status, 401)
-    assert.equal((await call('another-organization')).status, 404)
-    assert.equal((await call(ORG, 'another-home')).status, 404)
+    const unauthenticated = await call(ORG, productId, false)
+    assert.equal(unauthenticated.status, 401)
+    assert.deepEqual(unauthenticated.body.data, { code: 'UNAUTHORIZED', field: 'session' })
+    const foreignOrganization = await call('another-organization')
+    assert.equal(foreignOrganization.status, 404)
+    assert.deepEqual(foreignOrganization.body.data, { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' })
+    const missingHome = await call(ORG, 'another-home')
+    assert.equal(missingHome.status, 404)
+    assert.deepEqual(missingHome.body.data, { code: 'IMPORT_NOT_FOUND' })
     const mapping = await db.prepare('SELECT property_id, room_type_id, rate_plan_id, channel_id, enabled, import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first()
     const channel = structuredClone(channex.channel)
     const messages = channex.messagesProperty
@@ -566,12 +572,18 @@ test('a connected home can resend its full calendar without tearing down its map
     assert.deepEqual(requests, [])
     assert.deepEqual(await db.prepare('SELECT state, retry_at, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state, retry_at').bind(productId).all().then(result => result.results), [{ state: 'pending', retry_at: pause!.retry_at, nights: 500 }])
     assert.equal(await db.prepare('SELECT attempts FROM channel_night_pushes WHERE product_id = ? AND date = ?').bind(productId, addDays(today(), 21)).first('attempts'), 1)
+    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: addDays(today(), 21), to: addDays(today(), 22) })).nights.map(night => [night.date, night.price_minor, night.channel]),
+      [[addDays(today(), 21), 25500, { state: 'pending', detail: pause!.detail }]])
     // The existing delivery task completes the queued full sync, without another manual request or any mapping operation.
     await db.prepare("UPDATE channel_night_pushes SET retry_at = '2000-01-01T00:00:00.000Z' WHERE product_id = ?").bind(productId).run()
     assert.deepEqual(await deliverPendingChannelNights(db, env), { homes: 1 })
     assertFull()
     assert.equal(channex.restrictions[addDays(today(), 21)]!.rate, '255.00')
     assert.deepEqual(await db.prepare('SELECT state, COUNT(*) AS nights FROM channel_night_pushes WHERE product_id = ? GROUP BY state').bind(productId).all().then(result => result.results), [{ state: 'pushed', nights: 500 }])
+    assert.deepEqual((await readStayCalendar(db, manager, { productId, from: addDays(today(), 20), to: addDays(today(), 22) })).nights.map(night => [night.date, night.price_minor, night.channel]),
+      [[addDays(today(), 20), 24500, { state: 'pushed', detail: null }], [addDays(today(), 21), 25500, { state: 'pushed', detail: null }]])
+    assert.deepEqual(await db.prepare("SELECT state, json_extract(sent_json, '$.rate') AS rate, attempts, retry_at FROM channel_night_pushes WHERE product_id = ? AND date = ?").bind(productId, addDays(today(), 21)).first(),
+      { state: 'pushed', rate: '255.00', attempts: 0, retry_at: null })
     assert.deepEqual(channex.channel, channel)
     assert.equal(channex.messagesProperty, messages)
     // The first full-sync call can outlive its lease. A booking's new delivery must not be overwritten by the old second batch.
@@ -587,7 +599,9 @@ test('a connected home can resend its full calendar without tearing down its map
     assert.equal(channex.availability[addDays(today(), 30)], 0)
     assert.equal(channex.availability[addDays(today(), 31)], 0)
     await connection.deactivate(productId)
-    assert.equal((await call()).status, 409)
+    const stopped = await call()
+    assert.equal(stopped.status, 409)
+    assert.deepEqual(stopped.body.data, { code: 'CHANNEL_PROPERTY_NOT_READY' })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

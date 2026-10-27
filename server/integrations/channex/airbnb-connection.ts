@@ -1080,8 +1080,8 @@ export class AirbnbConnection {
     // An explicit recovery resends every value; a single-type property also discarded a field we may have recorded sending.
     if (lease || minimum !== 'both') await forgetConfirmedNights(this.db, mapping.product_id, lease)
     if (minimum !== 'both') {
-      await this.save(row, { pending_step: 'update_min_stay_type' })
       await lease?.check()
+      await this.save(row, { pending_step: 'update_min_stay_type' })
       const updated = await channexRequest(this.env, path, 'PUT', { property: { settings: { min_stay_type: 'both' } } })
       const settings = provided(() => object(resource(updated.data, 'property').attributes.settings, 'property.settings'))
       if (settings.min_stay_type !== 'both') fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex did not enable both minimum-stay restrictions. The calendar was not sent.')

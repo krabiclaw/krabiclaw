@@ -10,7 +10,7 @@ import { SUBMISSIONS_TOOLS } from '~/server/utils/mcp-tools/submissions'
 import { recommendationPreviewSchema, type RecommendationPreview } from '~/shared/recommendation-preview'
 import type { BusinessProgressOperation } from '~/shared/business-outcomes'
 
-const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
+const MODEL = '@cf/openai/gpt-oss-120b'
 const POLICY_VERSION = 'recommendation-preview-v10'
 // This is an explicit, bounded evaluation over current records, not a historical replay.
 const MAX_MODEL_CONTEXT_BYTES = 18_000
@@ -20,7 +20,7 @@ const CAPABILITY_NAMES = {
   'guest_thread.reply': 'reply_to_guest',
 } satisfies Record<BusinessProgressOperation, string>
 
-const summarySchema = z.string().min(1).max(900)
+const summarySchema = z.string().min(1).max(900).describe('State the decisive current fact and its consequence. If an operation is held for prerequisite work, name that specific outstanding work rather than merely saying it is on hold. Distinguish a known unmet prerequisite from an unknown status.')
 const questionSchema = z.string().min(1).max(400)
 const recommendationSchema = z.object({
     intendedOutcome: z.string().min(1).max(600),
@@ -45,7 +45,7 @@ If the owner says not to publish or to leave the inbox alone, honor that constra
 Publication status/category are source facts; publication approval is known only when the owner explicitly supplies it. The text of an article is not publication approval.
 No effort estimates have been measured. Never invent task duration, claim an action fits a time budget, or introduce dates/deadlines absent from source facts. Report uncertainty when needed.
 The intendedOutcome and whyNow are your interpretations, not observed business impact or guaranteed results. Cite source facts in plain language without inventing clients, events or claims.
-Evaluate EVERY eligible candidate against the selected goals and current corrections before choosing the overall decision. Do not stop at the first held, unknown or completed action. Apply this decision order: (1) If ANY independently useful action is supported, return recommendations for supported actions, even when another requested action is held or needs clarification. Apply the requested limit after identifying supported actions. Include no questions; put nonblocking uncertainty in uncertainties. (2) Only if NO independently useful action is supported and a missing or conflicting fact could enable useful work, return needs_context with one or two targeted questions and no recommendations. (3) Otherwise return no_suggestion with empty recommendations and questions, naming the specific prerequisite work required by any current hold. Do not ask about a blocked action while independently supported work is available.
+Evaluate EVERY eligible candidate against the selected goals and current corrections before choosing the overall decision. Do not stop at the first held, unknown or completed action. Apply this decision order: (1) If ANY independently useful action is supported, return recommendations for supported actions, even when another requested action is held or needs clarification. Apply the requested limit after identifying supported actions. Include no questions; put nonblocking uncertainty in uncertainties. (2) Only if NO independently useful action is supported, return needs_context for genuinely unknown or conflicting facts that could enable a candidate not already subject to an established owner hold. A known hold is not missing information: do not ask whether its required work has happened. An explicitly unknown prerequisite status remains a fact worth clarifying. Include one or two targeted questions and no recommendations. (3) Otherwise return no_suggestion with empty recommendations and questions, naming the specific prerequisite work required by any current hold. Do not ask about a blocked action while independently supported work is available.
 Do not recommend integrating new tools or capabilities outside the supplied evidence coverage. Do not interpret an empty or partial context as proof the business has completed all work.`
 
 /** A read-only, on-demand selection. It persists neither tasks nor impressions and invokes no write capability. */
@@ -147,14 +147,30 @@ export async function previewRecommendations(db: DbClient, principal: MemberAcce
   let output: unknown
   try {
     output = await ai.run(MODEL, {
-      messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: payload }],
-      response_format: { type: 'json_schema', json_schema: responseSchema }, max_tokens: 1800, temperature: 0,
+      instructions: SYSTEM, input: payload, stream: false,
+      text: { format: { type: 'json_schema', name: 'recommendation_preview', schema: responseSchema, strict: true } },
+      reasoning: { effort: 'medium' }, max_output_tokens: 4096, temperature: 0,
     })
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'Recommendation reasoning did not complete.', data: { code: 'RECOMMENDATION_AI_FAILED' }, cause })
   }
-  if (!output || typeof output !== 'object' || !('response' in output)) throw new HTTPError({ statusCode: 502, message: 'Recommendation reasoning returned no structured response', data: { code: 'RECOMMENDATION_OUTPUT_INVALID' } })
-  const decision = modelDecisionSchema.safeParse(output.response)
+  const completed = z.object({
+    status: z.literal('completed'),
+    output: z.array(z.discriminatedUnion('type', [
+      z.object({ type: z.literal('reasoning') }),
+      z.object({ type: z.literal('message'), role: z.literal('assistant'), status: z.literal('completed'),
+        content: z.array(z.object({ type: z.literal('output_text'), text: z.string().min(1) })).min(1) }),
+    ])).min(1),
+    usage: z.object({ input_tokens: z.number().int().nonnegative(), output_tokens: z.number().int().nonnegative(), total_tokens: z.number().int().nonnegative() }).optional(),
+  }).safeParse(output)
+  if (!completed.success) throw new HTTPError({ statusCode: 502, message: 'Recommendation reasoning returned no completed structured response', data: { code: 'RECOMMENDATION_OUTPUT_INVALID', issues: completed.error.flatten() } })
+  let structured: unknown
+  try {
+    structured = JSON.parse(completed.data.output.flatMap(item => item.type === 'message' ? item.content.map(part => part.text) : []).join(''))
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 502, message: 'Recommendation reasoning returned invalid JSON', data: { code: 'RECOMMENDATION_OUTPUT_INVALID' }, cause })
+  }
+  const decision = modelDecisionSchema.safeParse(structured)
   if (!decision.success) throw new HTTPError({ statusCode: 502, message: 'Recommendation reasoning returned an invalid decision', data: { code: 'RECOMMENDATION_OUTPUT_INVALID', issues: decision.error.flatten() } })
   const selected = decision.data
   if (selected.decision === 'recommendations') {
@@ -188,9 +204,7 @@ export async function previewRecommendations(db: DbClient, principal: MemberAcce
   result.summary = selected.summary
   if (selected.decision === 'needs_context') result.questions = selected.questions
   result.reasoning.model = MODEL
-  if ('usage' in output && output.usage && typeof output.usage === 'object') {
-    const usage = z.object({ prompt_tokens: z.number().int().nonnegative(), completion_tokens: z.number().int().nonnegative(), total_tokens: z.number().int().nonnegative() }).safeParse(output.usage)
-    if (usage.success) result.reasoning.usage = { promptTokens: usage.data.prompt_tokens, completionTokens: usage.data.completion_tokens, totalTokens: usage.data.total_tokens }
-  }
+  const usage = completed.data.usage
+  if (usage) result.reasoning.usage = { promptTokens: usage.input_tokens, completionTokens: usage.output_tokens, totalTokens: usage.total_tokens }
   return complete()
 }
