@@ -248,7 +248,7 @@ export class AirbnbConnection {
           const renewed = await execute(this.db, 'UPDATE channex_connections SET updated_at = ? WHERE organization_id = ? AND operation_id = ?', [now(), this.organizationId, operationId])
           return renewed.meta.changes === 1 ? null : new HTTPError({ statusCode: 409, message: 'The Airbnb connection changed. Refresh and try again.', data: { code: 'CONNECTION_CHANGED' } })
         } catch (cause) {
-          throw new HTTPError({ statusCode: 503, message: 'The Airbnb connection lock could not be renewed.', data: { code: 'CONNECTION_RENEWAL_FAILED' }, cause })
+          throw new HTTPError({ statusCode: 503, message: 'The Airbnb update could not continue. Refresh to check the connection status.', data: { code: 'CONNECTION_RENEWAL_FAILED' }, cause })
         }
       }, async (check) => {
         this.operationCheck = check

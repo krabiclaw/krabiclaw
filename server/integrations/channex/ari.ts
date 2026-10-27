@@ -355,9 +355,9 @@ export async function withDeliveryLease<T>(db: DbClient, productId: string, acti
   return withLeaseHeartbeat(LEASE_MS / 3, async () => {
     try {
       const renewed = await execute(db, "UPDATE product_channel_mappings SET delivery_lease_until = ? WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [new Date(Date.now() + LEASE_MS).toISOString(), productId, token])
-      return renewed.meta.changes === 1 ? null : new HTTPError({ statusCode: 409, message: 'The calendar delivery lease was lost. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: productId } })
+      return renewed.meta.changes === 1 ? null : new HTTPError({ statusCode: 409, message: 'This home’s sync changed during the update. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: productId } })
     } catch (cause) {
-      throw new HTTPError({ statusCode: 503, message: 'The calendar delivery lease could not be renewed. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_RENEWAL_FAILED', product_id: productId }, cause })
+      throw new HTTPError({ statusCode: 503, message: 'The calendar update could not continue. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_RENEWAL_FAILED', product_id: productId }, cause })
     }
   }, check => action({ token, check }), async () => {
     await execute(db, "UPDATE product_channel_mappings SET delivery_lease = NULL, delivery_lease_until = NULL WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [productId, token])
