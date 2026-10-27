@@ -16,6 +16,10 @@ Screen Recording permission for the terminal that runs it.
 | `build.py` | Cut list (`cut.json`) → HyperFrames `index.html`: trimmed and sped-up clips, captions, title and closing cards. |
 | `youtube_upload.py` | Puts the MP4 into YouTube Studio's upload field and sets title, description, not-for-kids, Unlisted. |
 
+Recording requires the window ID set by `open_window()` or `CHROME_WINDOW_ID`.
+The recorder matches that window's current title and geometry and refuses
+missing or ambiguous matches; another Chrome window is never substituted.
+
 ## Workflow
 
 1. **Script.** One line per scene: what is shown, the caption, the result

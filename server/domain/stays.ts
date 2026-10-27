@@ -1294,9 +1294,9 @@ async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, pro
  * enabled or not: an import's inventory, or a home syncing again. Fails the
  * way a save's push fails; the caller decides what its import does with it.
  */
-export async function syncStayCalendar(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, mapping: ChannexMapping): Promise<ChannelPush> {
+export async function syncStayCalendar(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, mapping: ChannexMapping, lease?: string): Promise<ChannelPush> {
   const home = await readStayHome(db, access, productId)
-  return pushStayCalendar(db, env, access.organizationId, home, mapping, (from, to) => homeNights(db, access.organizationId, home, from, to))
+  return pushStayCalendar(db, env, access.organizationId, home, mapping, (from, to) => homeNights(db, access.organizationId, home, from, to), lease)
 }
 
 /**

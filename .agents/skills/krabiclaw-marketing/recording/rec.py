@@ -162,17 +162,24 @@ def shot(name):
 
 def start(name):
     """Record the window to clips/<name>.mov with winrec (built next to this file)."""
+    window_id = str(W)
+    if not window_id.isdigit() or int(window_id) <= 0:
+        raise RuntimeError("Set the recording window with open_window() or CHROME_WINDOW_ID before start().")
+    title = osa(f'tell application "Google Chrome" to return name of window id {window_id}')
+    if not title:
+        raise RuntimeError(f"Recording window {window_id} has no title.")
     binary = f"{HERE}/winrec"
-    if not os.path.exists(binary):
-        subprocess.run(["swiftc", "-O", f"{HERE}/winrec.swift", "-o", binary], check=True)
+    source = f"{HERE}/winrec.swift"
+    if not os.path.exists(binary) or os.path.getmtime(source) > os.path.getmtime(binary):
+        subprocess.run(["swiftc", "-O", source, "-o", binary], check=True)
     log = open(f"{S}/clips/{name}.log", "w")
-    recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov"], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov", title], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     with open(f"{S}/rec.pid", "w") as f:
         f.write(str(recorder.pid))  # stop() may run in a later process
     end = time.time() + 6
     while time.time() < end:
         out = open(f"{S}/clips/{name}.log").read()
-        if "recording" in out:
+        if "recording" in out.splitlines():
             time.sleep(0.5); return
         if recorder.poll() is not None:
             raise RuntimeError(out)

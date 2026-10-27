@@ -43,7 +43,7 @@ The write path Channex will ask to see:
 | Mapping | `product_channel_mappings` (property, room type, rate plan per home) |
 | Task IDs | `channel_sync_log.task_id` on every ARI call |
 | Bookings | webhook `POST /api/integrations/channex/webhook` → `applyBookingRevision` (`booking-revisions.ts`) → `GET /booking_revisions/:id` is the booking, landed as a stay, then `POST /booking_revisions/:id/ack`; `channex-revision-feed` reads unacknowledged revisions every 10 minutes. Nothing reads `GET /bookings/:id`: Channex counts that as `booking_received_via_booking_find` and refuses it |
-| Full sync again | In iOS **Menu → Channels → Airbnb → Choose listings to sync**, stop the selected home and sync it again (steps below). Stopping forgets what Channex confirmed; syncing again sends the 500 nights ahead at the `mapping` stage, one call of each kind, before Channex maps the listing again |
+| Full sync again | **Menu → Connections → Airbnb → Connected listings → Full sync** beside the selected syncing home → `POST /api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar` (no body). The existing outbox resends the home's actual 500 future nights in one restrictions and one availability call, preserving its channel mapping and Messages installation |
 
 ## Before the run
 
@@ -56,15 +56,14 @@ The write path Channex will ask to see:
    Channex discards the unused minimum under a single-type mode, even when
    KrabiClaw sent it. Missing or unknown modes fail the sync visibly.
 
-   Redo test 1 for an existing home from iOS **Menu → Channels → Airbnb →
-   Choose listings to sync**. Uncheck only the certification home, choose
-   **Stop syncing 1 listing**, and confirm with that same button in the
-   confirmation sheet. Wait for the stop to finish. Return to **Choose
-   listings to sync**, check the same home, choose **Sync 1 listing**, and
-   confirm with that same button. Do this before tests 2 to 10: the full sync
-   records what Channex holds for every night, so each later save sends only
-   the field the test changes. Website **Listing status** only controls
-   whether the home is listed or unlisted; it does not stop Airbnb syncing.
+   Redo test 1 for an existing syncing home in the dashboard: **Menu →
+   Connections → Airbnb → Connected listings → Full sync** beside that
+   home's name. The action requires an owner or admin with channel sync
+   access. Wait for its result; if delivery is pending, read the reason and
+   let the existing outbox retry rather than clicking again. Do this before
+   tests 2 to 10: the full sync records what Channex holds for every night,
+   so each later save sends only the field the test changes. The home's
+   existing connection and mapping stay in place throughout.
 2. Register the webhook for the staging account, then check it again without
    `--apply`; it must report `unchanged`:
 
@@ -99,7 +98,7 @@ choose the start and end night, **Edit selected nights**.
 
 | # | Test | Action in KrabiClaw | Calls |
 | --- | --- | --- | --- |
-| 1 | Full sync, 500 days | **Connect Airbnb** imports the home and sends its 500 nights (import stage `inventory`); for an existing home, stop and restart only that home's sync through **Choose listings to sync**, as described above. Every night carries rate, both minimum-stay fields, max stay, closed to arrival, closed to departure and stop sell. Set varied prices and rules on Airbnb first: Channex refuses uniform data. | 1 restrictions, 1 availability per home |
+| 1 | Full sync, 500 days | **Connect Airbnb** imports the home and sends its 500 nights (import stage `inventory`); for an existing syncing home, choose its **Full sync** action as described above. Every night carries rate, both minimum-stay fields, max stay, closed to arrival, closed to departure and stop sell. Set varied prices and rules on Airbnb first: Channex refuses uniform data. | 1 restrictions, 1 availability per home |
 | 2 | Single date, single rate | Home A, 22 Nov: **Nightly price** 333 | 1 restrictions |
 | 3 | Single date, several rates | Not applicable: one room type and one rate plan per home. Say so on the form | — |
 | 4 | Several dates, several rates | Home A, 1–10 Nov: 241. Home B, 10–16 Nov: 312.66. B&B: not modelled | 1 per home, one date range each |
@@ -111,7 +110,7 @@ choose the start and end night, **Edit selected nights**.
 | 10 | Several dates availability | Add a host stay on home A for 10–16 Nov and home B for 17–24 Nov, then cancel each; submit the cancel's task (availability 1 over the range) | 1 availability per home per action |
 | 11 | Booking receiving | Create, modify and cancel a booking on a Booking.com test channel launched on home A's property. Each revision arrives by webhook, is landed from the revision itself and acknowledged; the stay appears, moves and cancels in the dashboard | revision, ack |
 | 12 | Rate limits | Show the outbox and the per-property count above; save 11 changes to one home within a minute and show the 11th leaving its nights pending with their retry time | — |
-| 13 | Update logic | Only changed values are sent: delivery compares each night with what Channex last confirmed (`sent_json`). There is no timed full sync. A full sync happens when a home is imported and when a stopped home is turned on again | — |
+| 13 | Update logic | Only changed values are sent: delivery compares each night with what Channex last confirmed (`sent_json`). There is no timed full sync. A full sync happens at import, reactivation or an explicit **Full sync** request | — |
 | 14 | Extra notes | See the answers below | — |
 
 A Booking CRS (`Offline`) booking is not a channel KrabiClaw accepts
@@ -129,6 +128,26 @@ account.
   direct bookings pay through Stripe.
 - **PCI:** KrabiClaw stores no card data; card payments go through Stripe
   Checkout and Elements.
+
+## Review video
+
+Record the real PMS actions and the same property's Channex staging **Logs**,
+continuously or in clearly separated sections. Show the selected home and its
+mapped property, room type and rate plan so each request can be tied to the
+action. Choose an available future night with no other inventory claim for
+the booking scenarios; preserve existing stays and rules.
+
+| Scenario | PMS action | Evidence in Channex Logs |
+| --- | --- | --- |
+| Create a booking | Add a one-night stay, then show it on the home's calendar | One availability update for that night, from 1 to 0; no restrictions update or unrelated dates |
+| Move the booking | Edit that same stay to one week later, keeping it one night; show its new dates | One availability batch reopening the old night to 1 and closing the new night to 0; no restrictions update or unrelated dates |
+| Full sync | Choose **Full sync** beside that same home in **Connections → Airbnb** | Exactly one restrictions task and one availability task covering the same 500 future nights, with actual varied calendar values and both minimum-stay fields in every restriction object |
+
+Open the requests and returned task IDs, not just their success labels. Equal
+consecutive nights may be compressed into date ranges; expand the ranges when
+checking 500-night coverage. A full sync preserves the same property and
+channel mapping. After recording, cancel the test stay through the PMS and
+verify its occupied night reopens in Channex.
 
 ## Submitting
 
