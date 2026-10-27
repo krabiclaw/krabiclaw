@@ -285,6 +285,9 @@ const openNoteId = ref<string | null>(null)
 const selectedNote = computed(() => booking.value?.notes.find(note => note.id === openNoteId.value))
 
 const { resource, booking, error, presentation, noun, pageTitle, orgSlug, purchase, refresh: refreshDetails } = await useBookingDetails(props.bookingType, props.bookingId, props.personalScope)
+watchEffect(() => {
+  if (error.value && !booking.value) showError(error.value)
+})
 
 const formattedDate = computed(() => booking.value ? formatCalendarDate(booking.value.bookingDate, 'en') : '')
 const formattedTime = computed(() => {

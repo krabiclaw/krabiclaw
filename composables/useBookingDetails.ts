@@ -41,9 +41,6 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
   )
 
   const booking = computed(() => resource.value?.booking ?? null)
-  watchEffect(() => {
-    if (error.value && !booking.value) showError(error.value)
-  })
 
   // The one vocabulary. `resolveBookingPresentation` refuses a missing vertical
   // rather than guessing, so it is only asked once the booking has loaded.
