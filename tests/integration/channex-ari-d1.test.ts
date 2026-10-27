@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { HTTPError } from 'nitro'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, createProductsBatch, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
 import { cancelStay, createStay, deliverPendingChannelNights, readStayCalendar, releaseLapsedStayHolds, setStayNights, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { withDeliveryLease } from '../../server/integrations/channex/ari.ts'
+import { errorChainForTelemetry } from '../../shared/error-telemetry.ts'
 
 // A connected home's night changes reach Channex: closed nights, prices and
 // stay rules as restrictions, held and booked nights as availability, each
@@ -110,6 +113,70 @@ async function boot() {
     throw error
   }
 }
+
+test('an ARI request keeps its delivery lease alive beyond its original expiry and a competing save stays queued', { timeout: 60_000 }, async (context) => {
+  const { runtime, db, env, connected } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  const savedDate = day(50), queuedDate = day(51), untilDate = day(52)
+  context.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() })
+  try {
+    channex.during = async () => {
+      if (channex.sent.at(-1)!.path !== '/availability') return
+      channex.during = undefined
+      const original = await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first<{ delivery_lease: string; delivery_lease_until: string }>()
+      assert.ok(original!.delivery_lease)
+      for (let minute = 0; minute < 3; minute++) {
+        context.mock.timers.tick(60_000)
+        await context.waitFor(async () => {
+          const renewed = await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first<{ delivery_lease: string; delivery_lease_until: string }>()
+          assert.equal(renewed!.delivery_lease, original!.delivery_lease)
+          assert(Date.parse(renewed!.delivery_lease_until) > Date.now())
+        }, { timeout: 10_000 })
+      }
+      assert(Date.now() > Date.parse(original!.delivery_lease_until))
+      const queued = await setStayNights(db, env, manager, { product_id: connected, from: queuedDate, to: untilDate, price_minor: 195_00 })
+      assert.equal(queued.channel_push?.state, 'pending')
+      assert.deepEqual(channex.sent.map(request => request.path), ['/restrictions', '/availability'])
+    }
+    assert.deepEqual((await setStayNights(db, env, manager, { product_id: connected, from: savedDate, to: queuedDate, price_minor: 185_00 })).channel_push, { state: 'pushed', detail: null })
+    assert.deepEqual(channex.sent.map(request => [request.path, [...byNight(request.values).keys()]]), [
+      ['/restrictions', [savedDate]], ['/availability', [savedDate]], ['/restrictions', [queuedDate]], ['/availability', [queuedDate]],
+    ])
+    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
+    context.mock.timers.tick(60_000)
+    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
+  } finally {
+    context.mock.timers.reset()
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a failed delivery lease renewal remains owned until its action finishes and reports the recorded reason', { timeout: 120_000 }, async (context) => {
+  const { runtime, db, connected } = await boot()
+  try {
+    await db.prepare(`CREATE TRIGGER refuse_lease_renewal BEFORE UPDATE OF delivery_lease_until ON product_channel_mappings
+      WHEN OLD.delivery_lease IS NOT NULL AND NEW.delivery_lease_until IS NOT NULL
+      BEGIN SELECT RAISE(ABORT, 'Lease renewal refused'); END`).run()
+    const refused = (error: unknown) => {
+      assert(error instanceof HTTPError)
+      assert.equal(error.status, 503)
+      assert.deepEqual(error.data, { code: 'CHANNEL_DELIVERY_RENEWAL_FAILED', product_id: connected })
+      assert(errorChainForTelemetry(error).some(entry => entry.message.includes('Lease renewal refused')))
+      return true
+    }
+    await assert.rejects(withDeliveryLease(db, connected, async (lease) => {
+      await context.waitFor(() => assert.throws(() => lease.check(), refused), { timeout: 90_000 })
+      assert.equal(await db.prepare('SELECT delivery_lease FROM product_channel_mappings WHERE product_id = ?').bind(connected).first('delivery_lease'), lease.token)
+      return true
+    }), refused)
+    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
+  } finally {
+    await runtime.dispose()
+  }
+})
 
 test('lapsed hold failures retain their claims and report every failure after independent holds release', async () => {
   const { runtime, db, env, connected, local } = await boot()

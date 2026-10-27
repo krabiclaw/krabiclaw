@@ -1,10 +1,10 @@
 # Channex PMS certification
 
 Authority: [PMS certification tests](https://docs.channex.io/api-v.1-documentation/pms-certification-tests.md).
-Channex issues production credentials only after the 14 tests, the form and a
-live screenshare review pass. Run the tests from the staging dashboard
-(`https://staging.krabiclaw.com`) or the iOS app connected to staging, never
-from a script: Channex rejects scripts, Postman collections and
+Channex issues production credentials only after the tests, the form and a
+recorded demonstration or live screenshare review pass. Run the tests from
+the staging dashboard (`https://staging.krabiclaw.com`) or the iOS app connected
+to staging, never from a script: Channex rejects scripts, Postman collections and
 certification-only screens.
 
 ## How KrabiClaw maps onto Channex
@@ -155,8 +155,11 @@ verify its occupied night reopens in Channex.
 2. Send the [certification form](https://forms.gle/xA8F3eSYBPBd8apYA) with the
    task IDs, the answers above, test 3 as not applicable and the single-unit
    adaptation for tests 4–10 (tests 9 and 10 submit the cancel's task).
-3. In the screenshare, repeat any test from the dashboard while Channex
-   watches the calls.
+3. After the form passes, record the three review scenarios above. Once the
+   owner approves the video, upload it with access for anyone with the link
+   and send that link with the Channex staging property ID to
+   `evan@channex.io`. Channex can also review the same actions in a live
+   screenshare.
 
 ## After certification: production cutover
 

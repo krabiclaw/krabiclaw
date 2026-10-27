@@ -20,7 +20,7 @@ import { channexCreate, channexGet, channexRequest, ChannexError, type ChannexEn
 import { ChannexDataError, object, relationship, resource, string, type JsonRecord, type Resource } from './data'
 import { CALENDAR_NIGHTS, DETAIL_FIELDS, PHOTO_WIDTH, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DescriptionField, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
-import { forgetConfirmedNights, withDeliveryLease, type ChannexMapping } from './ari'
+import { forgetConfirmedNights, withDeliveryLease, type ChannexMapping, type DeliveryLease } from './ari'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 
@@ -1050,7 +1050,7 @@ export class AirbnbConnection {
    * a call it did not confirm): the stage is asked again later. A refusal
    * fails the import for review with Channex's reason.
    */
-  private async syncCalendar(row: ConnectionRow, mapping: MappingRow, lease?: string): Promise<SuccessfulChannelPush> {
+  private async syncCalendar(row: ConnectionRow, mapping: MappingRow, lease?: DeliveryLease): Promise<SuccessfulChannelPush> {
     const propertyId = string(mapping.property_id, 'property_id')
     const path = `/properties/${encodeURIComponent(propertyId)}`
     const property = await channexGet(this.env, path, 'property')
@@ -1060,6 +1060,7 @@ export class AirbnbConnection {
     if (lease || minimum !== 'both') await forgetConfirmedNights(this.db, mapping.product_id, lease)
     if (minimum !== 'both') {
       await this.save(row, { pending_step: 'update_min_stay_type' })
+      lease?.check()
       const updated = await channexRequest(this.env, path, 'PUT', { property: { settings: { min_stay_type: 'both' } } })
       const settings = provided(() => object(resource(updated.data, 'property').attributes.settings, 'property.settings'))
       if (settings.min_stay_type !== 'both') fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex did not enable both minimum-stay restrictions. The calendar was not sent.')
