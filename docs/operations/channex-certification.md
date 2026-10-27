@@ -49,15 +49,13 @@ The write path Channex will ask to see:
 1. On Channex staging, connect two Airbnb test listings to one staging
    organization with **Connect Airbnb** in the dashboard. The import creates
    each home's property, room type and rate plan and sends its full sync.
-   A property created before 2026-10-26 has `min_stay_type: arrival`; set it
-   to `both` once with the Update Property API before its full sync is redone:
+   Before each full sync, KrabiClaw reads the property's minimum-stay mode.
+   An existing property using only arrival or through stay is changed to
+   `both`, verified, and its confirmed calendar forgotten before delivery:
+   Channex discards the unused minimum under a single-type mode, even when
+   KrabiClaw sent it. Missing or unknown modes fail the sync visibly.
 
-   ```sh
-   curl -X PUT "$CHANNEX_BASE_URL/properties/<property id>" -H "user-api-key: $CHANNEX_API_KEY" \
-     -H 'content-type: application/json' -d '{"property":{"settings":{"min_stay_type":"both"}}}'
-   ```
-
-   Then redo test 1 for that home (**Turn off**, **Turn on**) before any of
+   Redo test 1 for an existing home (**Turn off**, **Turn on**) before any of
    tests 2 to 10: the full sync records what Channex holds for every night,
    so each later save sends only the field the test changes.
 2. Register the webhook for the staging account, then check it again without
@@ -77,6 +75,14 @@ The write path Channex will ask to see:
    FROM channel_sync_log WHERE provider = 'channex' AND direction = 'outbound'
    ORDER BY created_at DESC LIMIT 20;
    ```
+
+   Open those exact tasks in the property's Channex **Logs**. For test 1,
+   inspect every restriction object: each must contain `min_stay_arrival`
+   and `min_stay_through`, and the date ranges must cover all 500 nights.
+   Check the availability task covers the same dates. For test 5, verify
+   both minimum-stay fields carry the requested value on the exact test
+   date. A `pushed` row and `sent_json` alone do not prove Channex retained
+   the fields.
 
 Home A stands in for Twin Room, home B for Double Room. Dates are in 2026
 unless stated. Every action is in **Calendar** for that home: **Select nights**,

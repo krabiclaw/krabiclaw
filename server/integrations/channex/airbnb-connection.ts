@@ -17,7 +17,7 @@ import { PRODUCT_LIMITS } from '~/shared/product-limits'
 import { STAY_ARRIVAL_TEXT_LIMITS } from '~/shared/stay-arrival'
 import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/shared/stay-listing'
 import { channexCreate, channexGet, channexRequest, ChannexError, type ChannexEnv } from './client'
-import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
+import { ChannexDataError, object, relationship, resource, string, type JsonRecord, type Resource } from './data'
 import { CALENDAR_NIGHTS, DETAIL_FIELDS, PHOTO_WIDTH, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DescriptionField, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
 import { forgetConfirmedNights, type ChannexMapping } from './ari'
@@ -1036,7 +1036,19 @@ export class AirbnbConnection {
    * fails the import for review with Channex's reason.
    */
   private async syncCalendar(mapping: MappingRow): Promise<boolean> {
-    const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, { property_id: string(mapping.property_id, 'property_id'), room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') })
+    const propertyId = string(mapping.property_id, 'property_id')
+    const path = `/properties/${encodeURIComponent(propertyId)}`
+    const property = await channexGet(this.env, path, 'property')
+    const minimum = provided(() => string(object(property.attributes.settings, 'property.settings').min_stay_type, 'property.settings.min_stay_type'))
+    if (minimum !== 'both' && minimum !== 'arrival' && minimum !== 'through') fail(502, 'INVALID_PROVIDER_RESPONSE', `Channex returned an unknown minimum-stay type: ${minimum}`)
+    if (minimum !== 'both') {
+      // Channex discards the unused minimum under a single-type setting, even if our outbox recorded sending it.
+      await forgetConfirmedNights(this.db, mapping.product_id)
+      const updated = await channexRequest(this.env, path, 'PUT', { property: { settings: { min_stay_type: 'both' } } })
+      const settings = provided(() => object(resource(updated.data, 'property').attributes.settings, 'property.settings'))
+      if (settings.min_stay_type !== 'both') fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex did not enable both minimum-stay restrictions. The calendar was not sent.')
+    }
+    const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, { property_id: propertyId, room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') })
     if (pushed.state === 'needs_review') fail(502, 'PROVIDER_VERIFICATION_FAILED', `Channex rejected part of the calendar: ${pushed.detail} The import needs review before connecting Airbnb.`)
     return pushed.state === 'pending'
   }
