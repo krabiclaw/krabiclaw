@@ -5,6 +5,7 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { blawbyTestExtraHeaders } from './test-env'
 import type { Product } from '../../server/types/products'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 const ORGANIZATION = 'org-ncls-blawby'
 const SLUG = 'north-carolina-legal-services'
@@ -70,13 +71,18 @@ test('an assigned staff member can review a future online consultation from Toda
     requestId = booked.request_id
     expect(booked.status).toBe('pending')
     const bookingPath = `${DASHBOARD}/bookings/booking/${requestId}`
-    const read = await body<{ booking: { status: string; assignedMemberId: string; locationTitle: string } }>(
+    const read = await body<{ booking: DashboardBookingDetails }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online' })
+    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online', canReassignProvider: true })
     await body(await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'member' },
     }), 200)
     roleChanged = true
+    const assignedRead = await body<{ booking: DashboardBookingDetails }>(
+      await memberContext.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
+    expect(assignedRead.booking).toMatchObject({ id: requestId, assignedMemberId: actor.id, canReassignProvider: false })
+    const providerPath = `/api/dashboard/bookings/booking/${assignedRead.booking.operationalBookingId}/provider`
+    await body(await memberContext.request.get(providerPath, { params: { org: SLUG } }), 404)
 
     const today = await body<TodayFeedPayload>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect(today.cards.find(card => card.id === `attention:${requestId}`)).toMatchObject({ priority: 'attention', to: bookingPath, assignedMemberId: actor.id, occurrenceAt: session.starts_at, bookingKind: 'booking' })
@@ -157,13 +163,22 @@ test('an assigned staff member can review a future online consultation from Toda
     await memberPage.setViewportSize({ width: 390, height: 844 })
     await expect(todayPanel).toBeHidden()
     await expect(detail).toBeVisible()
-    await detail.getByRole('link').filter({ hasText: 'Attorney or legal team' }).click()
-    const assignment = memberPage.locator('#dashboard-panel-booking-team-member')
+    await expect(detail.getByText('Attorney or legal team', { exact: true })).toBeVisible()
+    await expect(detail.getByRole('link').filter({ hasText: 'Attorney or legal team' })).toHaveCount(0)
+    await dismissPreviewToolbar(page)
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect((await page.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
+    const ownerDetail = page.locator('#dashboard-panel-booking-details')
+    const providerRead = page.waitForResponse(response => new URL(response.url()).pathname === providerPath)
+    await ownerDetail.getByRole('link').filter({ hasText: 'Attorney or legal team' }).click()
+    const providers = await body<{ members: Array<{ id: string; current: boolean }> }>(await providerRead, 200)
+    expect(providers.members.find(member => member.id === actor.id)?.current).toBe(true)
+    const assignment = page.locator('#dashboard-panel-booking-team-member')
     await expect(assignment.getByRole('heading', { name: 'Attorney or legal team', exact: true })).toBeVisible()
     await expect(assignment).toContainText('Your client and both attorneys are told.')
     await expect(assignment.getByRole('radio', { checked: true })).toHaveAccessibleName('Assigned attorney')
     await assignment.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(memberPage).toHaveURL(new URL(bookingPath, baseURL!).toString())
+    await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
     await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
     await memberPage.getByRole('dialog', { name: 'Manage consultation', exact: true }).getByRole('link', { name: 'Change consultation', exact: true }).click()
     const change = memberPage.locator('#dashboard-panel-booking-change')
@@ -188,6 +203,9 @@ test('an assigned staff member can review a future online consultation from Toda
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
     await memberPage.reload()
     await expect(detail.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+    expect((await memberPage.goto(new URL(`${bookingPath}/team-member`, baseURL!).toString()))?.status()).toBe(200)
+    await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
+    await expect(memberPage.locator('#dashboard-panel-booking-team-member')).toHaveCount(0)
     const missingId = crypto.randomUUID()
     const missingRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/bookings/booking/${missingId}`)
     await memberPage.goto(`${DASHBOARD}/bookings/booking/${missingId}/change/guests`)

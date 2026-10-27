@@ -17,6 +17,7 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
     && isRecord(value.booking)
     && typeof value.booking.id === 'string'
     && typeof value.booking.organizationId === 'string'
+    && typeof value.booking.canReassignProvider === 'boolean'
     && (value.booking.guestName === null || typeof value.booking.guestName === 'string')
     && Array.isArray(value.booking.notes)
     && (value.booking.policy === null || isRecord(value.booking.policy))
