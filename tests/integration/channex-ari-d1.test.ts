@@ -160,6 +160,7 @@ test('a failed delivery lease renewal remains owned until its action finishes an
     await db.prepare(`CREATE TRIGGER refuse_lease_renewal BEFORE UPDATE OF delivery_lease_until ON product_channel_mappings
       WHEN OLD.delivery_lease IS NOT NULL AND NEW.delivery_lease_until IS NOT NULL
       BEGIN SELECT RAISE(ABORT, 'Lease renewal refused'); END`).run()
+    context.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() })
     const refused = (error: unknown) => {
       assert(error instanceof HTTPError)
       assert.equal(error.status, 503)
@@ -168,12 +169,25 @@ test('a failed delivery lease renewal remains owned until its action finishes an
       return true
     }
     await assert.rejects(withDeliveryLease(db, connected, async (lease) => {
-      await context.waitFor(() => assert.throws(() => lease.check(), refused), { timeout: 90_000 })
+      const originalUntil = await db.prepare('SELECT delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first<string>('delivery_lease_until')
+      context.mock.timers.tick(60_000)
+      await context.waitFor(() => assert.rejects(lease.check(), refused), { timeout: 10_000 })
+      await db.prepare('DROP TRIGGER refuse_lease_renewal').run()
+      context.mock.timers.tick(60_000)
+      await context.waitFor(async () => {
+        const until = await db.prepare('SELECT delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first<string>('delivery_lease_until')
+        assert(Date.parse(until!) > Date.now())
+      }, { timeout: 10_000 })
+      context.mock.timers.tick(60_000)
+      assert(Date.now() > Date.parse(originalUntil!))
       assert.equal(await db.prepare('SELECT delivery_lease FROM product_channel_mappings WHERE product_id = ?').bind(connected).first('delivery_lease'), lease.token)
+      assert.equal(await withDeliveryLease(db, connected, async () => true), null)
+      await assert.rejects(lease.check(), refused)
       return true
     }), refused)
     assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
   } finally {
+    context.mock.timers.reset()
     await runtime.dispose()
   }
 })

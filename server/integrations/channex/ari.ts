@@ -78,7 +78,7 @@ const LEASE_MS = 120_000
 const ROUNDS = 3
 
 export interface ChannexMapping { property_id: string; room_type_id: string; rate_plan_id: string }
-export interface DeliveryLease { token: string; check(): void }
+export interface DeliveryLease { token: string; check(): Promise<void> }
 type Mapping = ChannexMapping
 
 /** A night's values as Channex takes them: availability on the room, price and rules on the rate plan. */
@@ -249,7 +249,7 @@ export async function pushStayCalendar(db: DbClient, env: ChannexEnv, organizati
 
 /** Forget what Channex confirmed for a home: its next delivery sends every night whole. */
 export async function forgetConfirmedNights(db: DbClient, productId: string, lease?: DeliveryLease): Promise<void> {
-  lease?.check()
+  await lease?.check()
   await execute(db, `UPDATE channel_night_pushes SET sent_json = NULL WHERE product_id = ? AND provider = 'channex'
     AND (? IS NULL OR EXISTS (SELECT 1 FROM product_channel_mappings m WHERE m.product_id = channel_night_pushes.product_id AND m.provider = 'channex' AND m.delivery_lease = ?))`, [productId, lease?.token ?? null, lease?.token ?? null])
   if (lease && !await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [productId, lease.token])) {
@@ -262,7 +262,7 @@ function addDays(date: string, count: number): string {
 }
 
 async function queueAndDeliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, dates: readonly string[], read: StayNightReader, lease?: DeliveryLease): Promise<ChannelPush | null> {
-  lease?.check()
+  await lease?.check()
   const from = today(home.timezone)
   const queued = [...new Set(dates.filter(date => date >= from))].sort()
   if (!queued.length) return null
@@ -302,36 +302,34 @@ export async function deliverStayNights(db: DbClient, env: ChannexEnv, organizat
 }
 
 /**
- * One property lease for ordinary deliveries and an explicit full-sync's
- * confirmation reset plus delivery. Null means another operation holds it.
+ * Renew a live lock and drain renewal before cleanup. A returned error proves
+ * ownership loss; a thrown renewal failure stays visible while renewal continues.
  */
-export async function withDeliveryLease<T>(db: DbClient, productId: string, action: (lease: DeliveryLease) => Promise<T>): Promise<T | null> {
-  const token = crypto.randomUUID()
-  const claimed = await execute(db, `UPDATE product_channel_mappings SET delivery_lease = ?, delivery_lease_until = ?
-    WHERE product_id = ? AND provider = 'channex' AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)`,
-  [token, new Date(Date.now() + LEASE_MS).toISOString(), productId, new Date().toISOString()])
-  if (claimed.meta.changes !== 1) return null
+export async function withLeaseHeartbeat<T>(interval: number, renew: () => Promise<Error | null>, action: (check: () => Promise<void>) => Promise<T>, cleanup: () => void | Promise<void>): Promise<T> {
   const failures: unknown[] = []
-  const lease: DeliveryLease = { token, check() { if (failures.length) throw failures[0] } }
   let active = true
+  let owned = true
   let renewal = Promise.resolve()
-  // A live HTTP request and its provider call can outlast the lease's crash-recovery window.
-  // Renew serially while the action is alive; a failure is read before another send and returned to its caller.
+  const check = async () => {
+    await renewal
+    if (failures.length) throw failures[0]
+  }
+  // Keep protecting an in-flight action after a renewal error; its check retains the failure.
   const heartbeat = setInterval(() => {
     renewal = renewal.then(async () => {
-      if (!active || failures.length) return
+      if (!active || !owned) return
       try {
-        const renewed = await execute(db, "UPDATE product_channel_mappings SET delivery_lease_until = ? WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [new Date(Date.now() + LEASE_MS).toISOString(), productId, token])
-        if (renewed.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'The calendar delivery lease was lost. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: productId } })
-      } catch (error) {
-        failures.push(error instanceof HTTPError ? error : new HTTPError({ statusCode: 503, message: 'The calendar delivery lease could not be renewed. Its remaining changes stay queued.',
-          data: { code: 'CHANNEL_DELIVERY_RENEWAL_FAILED', product_id: productId }, cause: error }))
-      }
+        const lost = await renew()
+        if (lost) {
+          owned = false
+          failures.push(lost)
+        }
+      } catch (error) { failures.push(error) }
     })
-  }, LEASE_MS / 3)
+  }, interval)
   let value!: T
   try {
-    value = await action(lease)
+    value = await action(check)
   } catch (error) {
     if (!failures.includes(error)) failures.push(error)
   } finally {
@@ -339,12 +337,31 @@ export async function withDeliveryLease<T>(db: DbClient, productId: string, acti
     clearInterval(heartbeat)
     await renewal
     try {
-      await execute(db, "UPDATE product_channel_mappings SET delivery_lease = NULL, delivery_lease_until = NULL WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [productId, token])
+      await cleanup()
     } catch (error) { failures.push(error) }
   }
   if (failures.length === 1) throw failures[0]
   if (failures.length) throw new AggregateError(failures, failures.map(error => error instanceof Error ? error.message : String(error)).join('; '))
   return value
+}
+
+/** One renewable property lease for ordinary delivery and an explicit full sync's reset plus delivery. */
+export async function withDeliveryLease<T>(db: DbClient, productId: string, action: (lease: DeliveryLease) => Promise<T>): Promise<T | null> {
+  const token = crypto.randomUUID()
+  const claimed = await execute(db, `UPDATE product_channel_mappings SET delivery_lease = ?, delivery_lease_until = ?
+    WHERE product_id = ? AND provider = 'channex' AND (delivery_lease_until IS NULL OR delivery_lease_until <= ?)`,
+  [token, new Date(Date.now() + LEASE_MS).toISOString(), productId, new Date().toISOString()])
+  if (claimed.meta.changes !== 1) return null
+  return withLeaseHeartbeat(LEASE_MS / 3, async () => {
+    try {
+      const renewed = await execute(db, "UPDATE product_channel_mappings SET delivery_lease_until = ? WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [new Date(Date.now() + LEASE_MS).toISOString(), productId, token])
+      return renewed.meta.changes === 1 ? null : new HTTPError({ statusCode: 409, message: 'The calendar delivery lease was lost. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_CHANGED', product_id: productId } })
+    } catch (cause) {
+      throw new HTTPError({ statusCode: 503, message: 'The calendar delivery lease could not be renewed. Its remaining changes stay queued.', data: { code: 'CHANNEL_DELIVERY_RENEWAL_FAILED', product_id: productId }, cause })
+    }
+  }, check => action({ token, check }), async () => {
+    await execute(db, "UPDATE product_channel_mappings SET delivery_lease = NULL, delivery_lease_until = NULL WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [productId, token])
+  })
 }
 
 async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader, lease?: DeliveryLease): Promise<void> {
@@ -362,7 +379,7 @@ async function deliver(db: DbClient, env: ChannexEnv, organizationId: string, ho
  * Channex has not confirmed to it.
  */
 async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, mapping: Mapping, read: StayNightReader, lease: DeliveryLease): Promise<boolean> {
-  lease.check()
+  await lease.check()
   if (!await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [home.product_id, lease.token])) return false
   const now = new Date().toISOString()
   const due = await queryAll<OutboxRow>(db, `SELECT date, state, detail, sent_json, attempts, retry_at, updated_at FROM channel_night_pushes
@@ -422,7 +439,7 @@ async function sendDue(db: DbClient, env: ChannexEnv, organizationId: string, ho
     const span = `${batch[0]!.row.date}..${batch.at(-1)!.row.date}`
     try {
       if (!await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE product_id = ? AND provider = 'channex' AND delivery_lease = ?", [home.product_id, lease.token])) return false
-      lease.check()
+      await lease.check()
       const result = await send(batch)
       const refused = refusals(result, kind, batch.map(change => change.row.date))
       const task = ariTask(result, refused.size > 0)

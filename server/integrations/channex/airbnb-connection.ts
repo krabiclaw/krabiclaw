@@ -20,7 +20,7 @@ import { channexCreate, channexGet, channexRequest, ChannexError, type ChannexEn
 import { ChannexDataError, object, relationship, resource, string, type JsonRecord, type Resource } from './data'
 import { CALENDAR_NIGHTS, DETAIL_FIELDS, PHOTO_WIDTH, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DescriptionField, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
-import { forgetConfirmedNights, withDeliveryLease, type ChannexMapping, type DeliveryLease } from './ari'
+import { forgetConfirmedNights, withDeliveryLease, withLeaseHeartbeat, type ChannexMapping, type DeliveryLease } from './ari'
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 
@@ -139,7 +139,7 @@ export interface ImportInput {
 /** Where Airbnb sends the person back after signing in: the native app. */
 export const AIRBNB_CALLBACK = 'krabiclaw://airbnb/callback'
 const SIGN_IN_LIFETIME_MS = 2 * 60 * 60 * 1000
-/** A lock untouched this long belongs to a request that ended without releasing it. */
+/** Crash-recovery window; live actions conditionally renew their operation timestamp. */
 const ABANDONED_LOCK_MS = 15 * 60 * 1000
 /**
  * Photos one content-stage call fetches from Airbnb. A listing's photos are
@@ -192,6 +192,7 @@ export class AirbnbConnection {
   private readonly env: CloudflareEnv & ChannexEnv
   private readonly organizationId: string
   private readonly userId: string
+  private operationCheck: (() => Promise<void>) | undefined
 
   constructor(db: DbClient, env: CloudflareEnv, organizationId: string, userId: string, signal?: AbortSignal) {
     this.db = db
@@ -210,6 +211,7 @@ export class AirbnbConnection {
 
   /** Writes fields while this call still holds the lock it took. */
   private async save(row: ConnectionRow, values: Partial<ConnectionRow>): Promise<void> {
+    await this.operationCheck?.()
     const entries = Object.entries(values)
     const result = await execute(this.db, `
       UPDATE channex_connections SET ${entries.map(([key]) => `${key} = ?`).join(', ')}, updated_at = ?
@@ -219,14 +221,12 @@ export class AirbnbConnection {
     Object.assign(row, values)
   }
 
-  private async locked<T>(action: (row: ConnectionRow) => Promise<T>): Promise<T> {
+  private async locked<T>(action: (row: ConnectionRow, check: () => Promise<void>) => Promise<T>): Promise<T> {
     this.checkSlice()
     await execute(this.db, "INSERT INTO channex_connections (organization_id, status) VALUES (?, 'not_connected') ON CONFLICT (organization_id) DO NOTHING", [this.organizationId])
     const operationId = crypto.randomUUID()
-    // Every step under the lock writes updated_at, so a lock left untouched for
-    // ABANDONED_LOCK_MS belongs to a request the runtime ended before its catch
-    // could run. With no provider write named it is released; with one, the
-    // write may have applied, so the connection is held for review instead.
+    // The timestamp is a crash-recovery window; live actions renew it conditionally.
+    // A stale pending write may have applied and is held for review; a stale lock without one can be reclaimed.
     const abandonedBefore = new Date(Date.now() - ABANDONED_LOCK_MS).toISOString()
     await execute(this.db, `UPDATE channex_connections SET status = 'needs_review', updated_at = ?
       WHERE organization_id = ? AND operation_id IS NOT NULL AND pending_step IS NOT NULL AND updated_at < ? AND status <> 'needs_review'`,
@@ -239,16 +239,34 @@ export class AirbnbConnection {
       fail(409, 'CONNECTION_BUSY', 'Airbnb setup is running. Refresh before continuing.')
     }
     const row = (await this.row())!
+    let refusedWrite = false
     try {
       if (row.status === 'needs_review') fail(409, 'CONNECTION_NEEDS_REVIEW', 'This Airbnb connection needs support review before continuing.')
       this.checkSlice()
-      const result = await action(row)
+      const result = await withLeaseHeartbeat(ABANDONED_LOCK_MS / 3, async () => {
+        try {
+          const renewed = await execute(this.db, 'UPDATE channex_connections SET updated_at = ? WHERE organization_id = ? AND operation_id = ?', [now(), this.organizationId, operationId])
+          return renewed.meta.changes === 1 ? null : new HTTPError({ statusCode: 409, message: 'The Airbnb connection changed. Refresh and try again.', data: { code: 'CONNECTION_CHANGED' } })
+        } catch (cause) {
+          throw new HTTPError({ statusCode: 503, message: 'The Airbnb connection lock could not be renewed.', data: { code: 'CONNECTION_RENEWAL_FAILED' }, cause })
+        }
+      }, async (check) => {
+        this.operationCheck = check
+        try { return await action(row, check) } catch (error) {
+          refusedWrite = error instanceof ChannexError && error.writeRefused
+          throw error
+        }
+      }, () => { this.operationCheck = undefined })
       await this.save(row, { operation_id: null, pending_step: null })
       return result
     } catch (error) {
       // A write that was sent and not provably refused stays locked for review.
-      const uncertain = row.pending_step !== null && !(error instanceof ChannexError && error.writeRefused)
-      await this.save(row, uncertain ? { status: 'needs_review' } : { operation_id: null, pending_step: null })
+      const uncertain = row.pending_step !== null && !refusedWrite && !(error instanceof ChannexError && error.writeRefused)
+      try {
+        await this.save(row, uncertain ? { status: 'needs_review' } : { operation_id: null, pending_step: null })
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], [error, cleanupError].map(cause => cause instanceof Error ? cause.message : String(cause)).join('; '), { cause: cleanupError })
+      }
       if (uncertain && error instanceof ChannexError && !error.uncertain) throw new ChannexError(`The pending Channex write needs review because its verification failed: ${error.message}`, error.status, true, error.data)
       throw error
     }
@@ -1031,14 +1049,17 @@ export class AirbnbConnection {
 
   /** Resend a connected home's calendar without changing its Airbnb mapping or Messages installation. */
   async syncFullCalendar(productId: string): Promise<{ product_id: string; channel_push: SuccessfulChannelPush }> {
-    return this.locked(async (row) => {
+    return this.locked(async (row, check) => {
       if (row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before syncing the calendar.')
       await this.requireChannelSync()
       const mapping = await queryFirst<MappingRow>(this.db, "SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [this.organizationId, productId])
       if (!mapping || mapping.channel_id !== row.channel_id) fail(404, 'IMPORT_NOT_FOUND', 'Listing import not found')
       if (mapping.import_stage !== 'complete' || mapping.enabled !== 1) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'Finish connecting this home before syncing its full calendar.')
       // The connection lock protects setup; the delivery lease also excludes normal calendar writes' deliveries.
-      const pushed = await withDeliveryLease(this.db, productId, lease => this.syncCalendar(row, mapping, lease))
+      const pushed = await withDeliveryLease(this.db, productId, lease => this.syncCalendar(row, mapping, { token: lease.token, check: async () => {
+        await check()
+        await lease.check()
+      } }))
       if (!pushed) fail(409, 'CHANNEL_DELIVERY_BUSY', 'A calendar update for this home is under way. Try the full sync again after it finishes.')
       return { product_id: productId, channel_push: pushed }
     })
@@ -1060,7 +1081,7 @@ export class AirbnbConnection {
     if (lease || minimum !== 'both') await forgetConfirmedNights(this.db, mapping.product_id, lease)
     if (minimum !== 'both') {
       await this.save(row, { pending_step: 'update_min_stay_type' })
-      lease?.check()
+      await lease?.check()
       const updated = await channexRequest(this.env, path, 'PUT', { property: { settings: { min_stay_type: 'both' } } })
       const settings = provided(() => object(resource(updated.data, 'property').attributes.settings, 'property.settings'))
       if (settings.min_stay_type !== 'both') fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex did not enable both minimum-stay restrictions. The calendar was not sent.')
