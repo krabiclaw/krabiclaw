@@ -19,8 +19,7 @@
         :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
       />
       <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
-      <div class="flex flex-col items-center pb-12 text-center" :class="!homeImageUrl ? 'pt-10' : undefined">
-        <img v-if="homeImageUrl" :src="homeImageUrl" :alt="recordHome?.name ?? ''" class="mb-10 aspect-square w-full max-w-80 shrink-0 rounded-2xl object-cover">
+      <div class="flex flex-col items-center pb-12 pt-10 text-center">
         <div v-if="!personalScope && guest.state === 'named'" class="relative mb-6 shrink-0 md:mb-8" :class="guestCount > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36'">
           <UAvatar :alt="guest.name" :text="guestFirstName?.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0" :class="guestCount > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
           <span v-if="guestCount > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="`${guestCount - 1} other guests`">+{{ guestCount - 1 }}</span>
@@ -40,12 +39,12 @@
       <div class="grid grid-cols-2 divide-x divide-default">
         <div class="min-w-0 pe-6">
           <h3 class="text-base font-semibold text-highlighted">Check-in</h3>
-          <p class="mt-1 text-base text-muted">{{ formatCalendarDate(stay.check_in_date, 'en') }}</p>
+          <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_in_date, 'en') }}</p>
           <p v-if="checkInTime" class="mt-1 text-sm text-muted">{{ checkInTime }}</p>
         </div>
         <div class="min-w-0 ps-6 text-right">
           <h3 class="text-base font-semibold text-highlighted">Checkout</h3>
-          <p class="mt-1 text-base text-muted">{{ formatCalendarDate(stay.check_out_date, 'en') }}</p>
+          <p class="mt-1 text-sm text-muted">{{ formatCalendarDate(stay.check_out_date, 'en') }}</p>
           <p v-if="recordHome" class="mt-1 text-sm text-muted">By {{ formatTime(recordHome.check_out_time, 'en') }}</p>
         </div>
       </div>
@@ -257,7 +256,6 @@ const { data: hostHomeData, error: homeError, refresh: refreshHostHome } = await
 )
 const hostHome = computed(() => hostHomeData.value?.home ?? null)
 const recordHome = computed(() => home.value ?? hostHome.value)
-const homeImageUrl = computed(() => home.value ? home.value.image_url : hostHome.value?.photos[0]?.url ?? null)
 const checkInTime = computed(() => recordHome.value
   ? stayCheckInWindow(formatTime(recordHome.value.check_in_time, 'en'), hostHome.value?.check_in_end_time ? formatTime(hostHome.value.check_in_end_time, 'en') : null)
   : null)

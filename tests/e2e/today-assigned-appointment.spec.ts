@@ -70,9 +70,9 @@ test('an assigned staff member can review a future online consultation from Toda
     requestId = booked.request_id
     expect(booked.status).toBe('pending')
     const bookingPath = `${DASHBOARD}/bookings/booking/${requestId}`
-    const read = await body<{ booking: { status: string; assignedMemberId: string; locationTitle: string; resourceImageUrl: string | null } }>(
+    const read = await body<{ booking: { status: string; assignedMemberId: string; locationTitle: string } }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online', resourceImageUrl: null })
+    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online' })
     await body(await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'member' },
     }), 200)
@@ -139,7 +139,9 @@ test('an assigned staff member can review a future online consultation from Toda
     const detail = memberPage.locator('#dashboard-panel-booking-details')
     const todayPanel = memberPage.locator('#dashboard-panel-org-today')
     await expect(detail.getByRole('heading', { name: 'Awaiting review', exact: true })).toBeVisible()
-    await expect(detail.locator('img'), 'An image-free consultation does not inherit organization artwork').toHaveCount(0)
+    const identity = detail.getByRole('heading', { name: guestFirstName, level: 2, exact: true })
+    await expect(identity).toBeVisible()
+    await expect(identity.locator('..').locator(':scope > div > [data-slot="root"]')).toHaveText(guestFirstName.slice(0, 1))
     await expect(todayPanel).toBeHidden()
     await memberPage.setViewportSize({ width: 1440, height: 900 })
     await expect(todayPanel).toBeVisible()
@@ -150,7 +152,7 @@ test('an assigned staff member can review a future online consultation from Toda
     expect(todayBounds).not.toBeNull()
     expect(detailBounds).not.toBeNull()
     expect(todayBounds!.x + todayBounds!.width).toBeLessThanOrEqual(detailBounds!.x + 1)
-    await expect(detail.locator('img')).toHaveCount(0)
+    await expect(identity).toBeVisible()
     await memberPage.setViewportSize({ width: 390, height: 844 })
     await expect(todayPanel).toBeHidden()
     await expect(detail).toBeVisible()

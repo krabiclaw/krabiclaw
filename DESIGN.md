@@ -174,9 +174,9 @@ Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
 Booked activity opens beneath Today: desktop keeps the agenda beside the
 bounded, vertical record summary; below the pane breakpoint the record is one
 screen and Close returns to the same range and filters. Calendar and Messages
-use the same detail components inside their existing context. Real resource
-photography belongs to that record; organization social artwork is not a
-substitute booking cover.
+use the same detail components inside their existing context. Record summaries
+begin with guest identity, without a resource cover. Resource photography
+belongs to its catalog and website surfaces.
 The existing stay domain owns homes, assignments, nights and payments; Today
 projects its arrivals and departures rather than creating a lodging service or
 second lifecycle. Cleaner cards show the guest's first name, party size, home,
@@ -1117,15 +1117,9 @@ the guest's first initial at 30px/36px; never invent companion portraits.
 The 32px semibold party title has a 36px line height and tight tracking:
 the guest's first name, or “Ana’s group of 2” from the actual party. The Guests
 card retains the full name and party facts. Dates and nights follow the title,
-then the resource name. Without a cover, avatars begin 64px below the header;
+then the resource name. Avatars begin 64px below the header;
 leave 24px/32px between cluster and title, 16px before dates and 48px before the
 first facts card.
-
-The owner-requested 320px square resource cover above the avatars is a
-KrabiClaw addition: it is absent from the live Airbnb host web reference.
-It uses only the resource's own media, begins 24px below the header and leaves
-40px before the avatars. Organization social artwork cannot stand in for it,
-and an absent cover remains absent.
 
 Arrival facts come first in record cards. Booking private team notes use the
 existing ledger composer inline, with a focused leaf for editing a saved note;

@@ -663,11 +663,11 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
   const detailPanel = page.locator('#dashboard-panel-booking-details')
+  const body = detailPanel.locator(':scope > [data-slot="body"]')
   const summaryResponse = await page.request.get(`/api/dashboard/bookings/reservation/${bookingIds[0]}`, { params: { org: 'ember-slice-demo' } })
   await expectStatus(summaryResponse, 200)
   const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
   expect(summary).toMatchObject({ guestName, guestPhone: '+12025550123', partySize: 2 })
-  expect(summary.resourceImageUrl, 'This reservation has its location’s actual authored picture').not.toBeNull()
   expect(summary.threadId).not.toBeNull()
   const priorViewport = page.viewportSize()!
   let desktopCountWidth: number | undefined
@@ -681,11 +681,6 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     await expect(identity).toBeInViewport()
     await expect(message).toBeInViewport()
     await expect(call).toBeInViewport()
-    const picture = detailPanel.locator('img[alt=""]')
-    await expect(picture).toHaveCount(1)
-    await expect(picture).toHaveAttribute('src', summary.resourceImageUrl!)
-    await expect(picture).toHaveJSProperty('complete', true)
-    expect(await picture.evaluate(image => (image as HTMLImageElement).naturalWidth), 'The actual location picture loads').toBeGreaterThan(0)
     const otherGuests = detailPanel.getByLabel(`${summary.partySize! - 1} other ${summary.partySize === 2 ? 'guest' : 'guests'}`, { exact: true })
     const guestGroup = otherGuests.locator('..')
     const mainAvatar = guestGroup.locator(':scope > [data-slot="root"]')
@@ -693,7 +688,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     await expect(mainAvatar).toHaveCount(1)
     if (summary.guestImageUrl) await expect(guestGroup.getByAltText(summary.guestName!, { exact: true })).toHaveAttribute('src', summary.guestImageUrl)
     else await expect(mainAvatar).toHaveText(summary.guestName!.trim().slice(0, 1))
-    const pictureBounds = (await picture.boundingBox())!
+    const bodyBounds = (await body.boundingBox())!
     const guestBounds = (await guestGroup.boundingBox())!
     const avatarBounds = (await mainAvatar.boundingBox())!
     const countBounds = (await otherGuests.boundingBox())!
@@ -708,12 +703,8 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     expect(countBounds.x + countBounds.width / 2).toBeGreaterThan(avatarBounds.x + avatarBounds.width / 2)
     if (width === 1728) desktopCountWidth = countBounds.width
     else expect(desktopCountWidth, 'The desktop guest counter is larger than the phone counter').toBeGreaterThan(countBounds.width)
-    expect(pictureBounds.width, 'The property photo leads as a substantial cover, not an avatar thumbnail').toBeGreaterThanOrEqual(280)
-    expect(pictureBounds.width).toBeLessThanOrEqual((await detailPanel.boundingBox())!.width)
-    expect(pictureBounds.height).toBe(pictureBounds.width)
-    expect(pictureBounds.y + pictureBounds.height).toBeLessThanOrEqual(guestBounds.y)
-    expect(guestBounds.y + guestBounds.height).toBeLessThanOrEqual(identityBounds.y)
-    expect(Math.abs(pictureBounds.x + pictureBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
+    expect(guestBounds.y - bodyBounds.y, 'The guest cluster leads 64px below the record header').toBe(64)
+    expect(identityBounds.y - guestBounds.y - guestBounds.height, 'The party title follows the guest cluster at the measured Airbnb spacing').toBe(width === 1728 ? 32 : 24)
     expect(Math.abs(guestBounds.x + guestBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
     expect(Math.abs(identityBounds.x + identityBounds.width / 2 - paneCenter), 'The record header centers in its visible pane').toBeLessThanOrEqual(1)
     expect(await identity.evaluate(element => getComputedStyle(element).textAlign)).toBe('center')
@@ -744,8 +735,6 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
       expect(detailBounds.x).toBeGreaterThanOrEqual(agendaBounds.x + agendaBounds.width - 1)
     } else await expect(todayPanel).toBeHidden()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    const body = detailPanel.locator(':scope > [data-slot="body"]')
-    const bodyBounds = (await body.boundingBox())!
     const footer = detailPanel.locator(':scope > div').filter({ has: page.getByRole('link', { name: 'Message guest', exact: true }) })
     await expect(footer).toHaveCount(1)
     const footerBounds = (await footer.boundingBox())!
@@ -753,7 +742,8 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     const callBefore = await call.boundingBox()
     expect(Math.abs((messageBefore!.x + callBefore!.x + callBefore!.width) / 2 - paneCenter), 'Contact actions center in the same visible pane as the record header').toBeLessThanOrEqual(1)
     const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
-    expect(maximum, 'The actual reservation summary has a scroll end at this viewport').toBeGreaterThan(0)
+    // A short record may fit without scrolling; its native end must still
+    // expose the final metadata above the pinned contact actions.
     await page.mouse.move(bodyBounds.x + 4, bodyBounds.y + bodyBounds.height / 2)
     await page.mouse.wheel(0, maximum + bodyBounds.height)
     await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)

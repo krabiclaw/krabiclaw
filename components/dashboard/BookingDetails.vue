@@ -16,14 +16,14 @@
     <div v-else class="min-w-0 [overflow-wrap:anywhere]">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <template v-if="booking">
-        <div class="flex flex-col items-center pb-12 text-center" :class="!booking.resourceImageUrl ? 'pt-10' : undefined">
-          <img v-if="booking.resourceImageUrl" :src="booking.resourceImageUrl" alt="" class="mb-10 aspect-square w-full max-w-80 rounded-2xl bg-elevated object-cover">
+        <div class="flex flex-col items-center pb-12 pt-10 text-center">
           <div v-if="!personalScope && !purchase && booking.guestName" class="relative mx-auto mb-6 shrink-0 md:mb-8" :class="booking.partySize && booking.partySize > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36'">
             <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" :text="booking.guestName.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0" :class="booking.partySize && booking.partySize > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
             <span v-if="booking.partySize && booking.partySize > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="otherGuestLabel">+{{ booking.partySize - 1 }}</span>
           </div>
           <h2 class="max-w-full break-words text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ personalScope || purchase ? booking.resourceTitle : partyTitle }}</h2>
-          <p class="mt-4 break-words text-base text-muted">{{ subline }}</p>
+          <p class="mt-4 break-words text-base text-muted">{{ purchase ? `${booking.type === 'order' ? 'Ordered' : 'Paid'} ${formattedDate}` : formattedDate }}</p>
+          <p v-if="personalScope ? booking.organizationName : purchase ? booking.guestName : booking.resourceTitle" class="mt-1 break-words text-base text-muted">{{ personalScope ? booking.organizationName : purchase ? booking.guestName : booking.resourceTitle }}</p>
         </div>
 
         <div class="space-y-4">
@@ -290,13 +290,6 @@ const formattedDate = computed(() => booking.value ? formatCalendarDate(booking.
 const formattedTime = computed(() => {
   if (!booking.value?.bookingTime) return ''
   return formatTime(booking.value.bookingTime, 'en')
-})
-// Under the title: when, then where it was booked or who bought it.
-const subline = computed(() => {
-  if (!booking.value) return ''
-  const when = purchase ? `${booking.value.type === 'order' ? 'Ordered' : 'Paid'} ${formattedDate.value}` : formattedDate.value
-  const who = props.personalScope ? booking.value.organizationName : purchase ? booking.value.guestName : booking.value.resourceTitle
-  return [when, who].filter(Boolean).join(' · ')
 })
 // Airbnb's host-side stay page titles the party, not the listing: "Chris's
 // group of 2". A single guest is just their name.

@@ -82,7 +82,6 @@ export interface DashboardBookingDetails {
   locationSlug: string | null
   locationTitle: string
   resourceTitle: string
-  resourceImageUrl: string | null
   /** Null for a purchase made without an account. */
   guestName: string | null
   guestEmail: string | null
@@ -193,15 +192,6 @@ function localTimeOf(row: Pick<BookingRow, 'starts_at' | 'timezone'>): string {
   return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
 }
 
-// A booking shows its experience's picture and a reservation its location's.
-async function loadResourceImage(db: DbClient, row: BookingRow, type: DashboardBookingType) {
-  const [ownerType, ownerId] = type === 'booking' && row.experience_id
-    ? ['product' as const, row.experience_id]
-    : ['business_location' as const, row.location_id]
-  if (!ownerId) return null
-  return (await loadOwnerPictures(db, row.organization_id, ownerType, [ownerId], { organizationFallback: false })).get(ownerId)?.imageUrl ?? null
-}
-
 /** The latest proposal on the thread with no acceptance or decline answering it. */
 async function pendingBookingChange(db: DbClient, threadId: string | null): Promise<DashboardBookingDetails['pendingChange']> {
   if (!threadId) return null
@@ -285,8 +275,7 @@ async function composeBookingDetails(
     productKind = assertProductKind(row.product_kind)
     policy = productPolicySummarySource(validateProductDetails(productKind, JSON.parse(row.product_details_json!)))
   }
-  const [resourceImageUrl, policyLocale, notes, timeZone, contact] = await Promise.all([
-    loadResourceImage(db, row, type),
+  const [policyLocale, notes, timeZone, contact] = await Promise.all([
     policy ? getSourceLocale(db,row.organization_id) : Promise.resolve(null),
     reader.buyerUserId ? Promise.resolve([]) : listInternalNotes(db, row.request_id),
     Promise.resolve(row.timezone),
@@ -320,7 +309,6 @@ async function composeBookingDetails(
     locationSlug: row.location_slug,
     locationTitle: row.location_id === null ? 'Online' : row.location_title!,
     resourceTitle: row.experience_title || (row.location_id === null ? 'Online' : row.location_title!),
-    resourceImageUrl,
     guestName: row.guest_name,
     guestEmail: row.guest_email,
     guestPhone: row.guest_phone,
@@ -443,11 +431,6 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
   const detail = await readPaymentDetails(db, payment.organization_id, paymentId)
   const snapshot: unknown = JSON.parse(detail.payment.price_snapshot_json)
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
-  const line = detail.order ? await queryFirst<{ product_id: string | null }>(db, 'SELECT product_id FROM payment_order_lines WHERE order_id = ? ORDER BY rowid LIMIT 1', [detail.order.id]) : null
-  // A purchase keeps the item's own photo or the place it was sold.
-  const resourceImageUrl = (line?.product_id ? (await loadOwnerPictures(db, payment.organization_id, 'product', [line.product_id], { organizationFallback: false })).get(line.product_id)?.imageUrl : null)
-    ?? (payment.location_id ? (await loadOwnerPictures(db, payment.organization_id, 'business_location', [payment.location_id], { organizationFallback: false })).get(payment.location_id)?.imageUrl : null)
-    ?? null
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {
     assignedMemberId: null, assignedMemberName: null, providerConflict: false, providerCalendarStatus: null, operationalUpdatedAt: payment.updated_at,
@@ -461,7 +444,6 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     locationSlug: payment.location_slug,
     locationTitle: payment.location_id === null ? 'Online' : payment.location_title ?? 'Online',
     resourceTitle: snapshot.title,
-    resourceImageUrl,
     guestName: payment.buyer_name,
     guestEmail: payment.buyer_email,
     guestPhone: null,
