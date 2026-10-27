@@ -28,7 +28,7 @@
         alt=""
         :icon="item.imageIcon"
         class="size-14 sm:size-20"
-        :ui="{ icon: 'size-7 sm:size-10', image: item.imageFit === 'contain' ? 'object-contain p-1.5 sm:p-2' : undefined }"
+        :ui="{ root: isOffer ? 'rounded-none bg-transparent' : undefined, icon: 'size-7 sm:size-10', image: isOffer ? 'object-contain' : item.imageFit === 'contain' ? 'object-contain p-1.5 sm:p-2' : undefined }"
       />
 
       <div v-if="item.badgeImageUrl || item.badgeIcon" class="absolute bottom-0 right-0 flex size-8 items-center justify-center overflow-hidden rounded-xl border-2 border-default bg-default shadow-sm sm:size-11">
@@ -50,6 +50,7 @@ const props = defineProps<{
 }>()
 
 const telemetry = useDashboardTelemetry()
+const isOffer = computed(() => props.item.id.startsWith('offer:'))
 
 function onCardClick() {
   telemetry.track({
