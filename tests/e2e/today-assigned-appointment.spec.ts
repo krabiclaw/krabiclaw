@@ -176,7 +176,7 @@ test('an assigned staff member can review a future online consultation from Toda
     const assignment = page.locator('#dashboard-panel-booking-team-member')
     await expect(assignment.getByRole('heading', { name: 'Attorney or legal team', exact: true })).toBeVisible()
     await expect(assignment).toContainText('Your client and both attorneys are told.')
-    await expect(assignment.getByRole('radio', { checked: true })).toHaveAccessibleName('Assigned attorney')
+    await expect(assignment.getByRole('radio', { checked: true })).toHaveAccessibleName('Assigned attorney Current')
     await assignment.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
     await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
