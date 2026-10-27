@@ -171,6 +171,12 @@ Booking occurrences retain their own location's timezone. Future bookings
 needing a decision belong in Today now and retain their actual booking date.
 
 Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
+Booked activity opens beneath Today: desktop keeps the agenda beside the
+bounded, vertical record summary; below the pane breakpoint the record is one
+screen and Close returns to the same range and filters. Calendar and Messages
+use the same detail components inside their existing context. Record summaries
+begin with guest identity, without a resource cover. Resource photography
+belongs to its catalog and website surfaces.
 The existing stay domain owns homes, assignments, nights and payments; Today
 projects its arrivals and departures rather than creating a lodging service or
 second lifecycle. Cleaner cards show the guest's first name, party size, home,
@@ -283,9 +289,10 @@ Three separate questions, three separate answers. None is derived from another.
   Earnings. Catalog, Today, Calendar, Messages and Menu are primary
   destinations and have no exit. A nested level never declares one.
 
-The booking mounts keep their own affiliation: a booking opened from Today is a
-root that exits to Today and lights it; the same booking under a calendar day
-is a child of the calendar, which lights Calendar.
+The booking mounts keep their own affiliation: a booking opened from Today is
+its child and lights Today; the same booking under a calendar day is a child of
+the calendar, which lights Calendar. The route parent supplies both the context
+pane and Back, including on reload and deep links.
 
 ### Who owns what
 
@@ -463,7 +470,7 @@ All/Suggested pills and search to find choices while keeping selected facts
 across those views. Add dishes selects actual existing records. Neither a
 filter pill nor a search result creates a new catalog value or section.
 
-**A box means "choose me" or "open me".** Rows are separated by a 1px
+**A border marks a choice or destination.** Rows are separated by a 1px
 hairline with 24px of padding. A bordered card is a selectable choice or a
 value that opens a leaf. It is never a container for a control: a checkbox in
 a card, a switch in a card, a field in a card are each a row.
@@ -540,36 +547,44 @@ and desktop widths before treating a mapping as complete.
 **Everything starts at the gutter.** Nuxt UI's panel gutter (`px-4 sm:px-6`,
 `dashboardGutterClass`) is the one horizontal edge, the same as the top nav's:
 Back or ✕, the title, the rows, the fields and Cancel all start on it, and
-nothing is centred. A component inside a panel adds no outer padding, scroll
+editing content keeps that edge. A record summary centres its bounded content
+and contact actions within its own pane. A component inside a panel adds no outer padding, scroll
 container or column of its own; a row whose highlight reaches the pane's edge
 pulls itself into the gutter (`-mx-4`) so its text keeps the edge. A level that
-scrolls itself (`fill`) pads its own rows with the gutter. Every footer is
-framed by the panel — gutter, hairline, `py-3` — and holds only its row.
+scrolls itself (`fill`) pads its own rows with the gutter. Commit footers are
+framed by the panel — gutter, hairline, `py-3` — and hold only their row.
+Record contact actions use the shell's floating footer without a border.
 
 **One header row, decided by the shell.** As Airbnb's: a tab root opens on its
 large title with its actions on the same row and no bar above it; a pushed
 level puts a round Back first — on its own row above the title on a phone,
 inline before it from `lg` — with the actions at the right of that row; a
 leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
-title large. Back, ✕ and every action are the same round button. Pages
+title large. Host booking and stay records use the compact status header
+specified below. Back, ✕ and every action are the same round button. Pages
 supply `title`, `lead` and `#right`; they never place a title or an action
 themselves.
 
 **Reuse the card that owns the job.** Saved editor summaries use
 `EditorNavigationList`'s cards; selectable choices use the native radio or
-checkbox control. Other content cards use `UCard variant="subtle"`, with their
-padding and corner from `app.config.ts`; a content card that links renders as
-that link. An empty list or
+checkbox control. Coherent record-detail sections use `UCard variant="record"`:
+24px body padding, a 16px radius, an elevated background and the measured subtle
+shadow from `app.config.ts`, separated by 16px. Payment and order summaries use
+that same variant. Other content cards use `UCard variant="subtle"`, with their
+padding and corner from the theme; a content card that links renders as that
+link. An empty list or
 record is `UEmpty`. Status that belongs to the whole dashboard — the live
 connection, a failed background refresh — is the shell's one banner above the
 navigation, never a box repeated inside each screen; a screen shows only its
 own failures.
 
 **Controls fill their pane's inner width.** Below `lg` a level is the whole
-screen or a drawer; above it the native panel owns its width. Paired indexes
-and leaves have no second width cap inside that panel. The title, field and
-footer share its gutter. Explicit standalone `column` screens retain the
-shared reading or leaf width; a calendar or grid takes the available frame.
+screen or a drawer; above it the native panel owns its width. Paired editor
+indexes and leaves use that full inner width. A booking or stay record retains
+its centred 504px maximum inner width at every screen size, including paired
+panes. The title, field and commit footer share the shell's gutter. Explicit
+standalone `column` screens retain their shared width; a calendar or grid takes
+the available frame.
 
 **A level alone in the frame is one of three things, and the empty right side
 of a desktop window is never the fourth.** Content that scales — a grid, a
@@ -579,20 +594,23 @@ first row where there is a pane, as Account settings, Connections,
 Plan and billing and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
 Only a list of records with nothing of its own to open — Notifications, Past
 activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
-booking's notes, a calendar day) stands alone as a column, and says which in
-`DashboardIndexPanel column`: `reading` for the records, `leaf` for the screen.
-Beside a child every index fills its own pane. Standalone widths live in
-`dashboardColumnWidths`; a page never states one. A column's title heads it,
-as a leaf's does. Every level title is `dashboardTitleClass`.
+calendar day) stands alone as a column, and says which in
+`DashboardIndexPanel column`: `reading` for lists of records, `leaf` for the
+screen, `record` for a booking or stay summary. The record shell owns its 24px
+body gutter and centres its maximum 504px inner column at every width.
+Beside a child the panel fills its own pane; record content keeps that bound.
+Widths live in `dashboardColumnWidths`; a page never states one. Editor level
+titles use `dashboardTitleClass`; record headers use the compact rule below.
 
 **The text control follows the task.** The live Airbnb Title editor uses
 outlined fields and embedded labels; Listing description uses a plain textarea
 (desktop and phone, October 24, 2026). Do not infer a blanket rule against
 field borders. Structured names, dates, times and addresses may retain visible
 boundaries. Narrative prose uses the installed textarea's `none` variant,
-without redundant labels or inner padding, and its native autoresize API.
-Fields fill their pane. Width changes invoke that same sizing API where needed;
-do not add a second textarea-sizing implementation. Rich Markdown and article
+without redundant labels or inner padding. Fields fill their pane. Prose that
+grows with its content and pane width uses the installed `useTextareaAutosize`
+helper as its sole sizing owner; do not also enable the textarea's `autoresize`
+or observe its own height. Rich Markdown and article
 canvases retain their own native editing controls.
 
 **Preview belongs to customer-facing saved content.** Product, Page, Post,
@@ -615,7 +633,8 @@ and revision checks. Saving a private language does not publish it. Dashboard
 and MCP use the same operations and owners.
 
 **Sizes come from the theme.** Controls are `lg` — 16px text, 44px tall, 8px
-radius — and the commit bar's Save is the one `xl` (48px). Body text is 16px
+radius — and the commit bar's Save is `xl` (48px). Record contact pills use the
+56px floating-action size below. Body text is 16px
 `text-highlighted`; sub-labels and counters are 14px `text-muted`. Focus is a
 2px `text-highlighted` ring, not the brand colour. Buttons, Save included,
 are neutral: navy in light, white in dark. Coral marks status and selection
@@ -1084,8 +1103,44 @@ price per variant and never offers a product-level amount the server has
 nowhere to put.
 
 **The picture leads.** Rows lead with a thumbnail; a leaf leads with the image
-large. When there is no image, show a muted icon in the *same footprint* so a
-list does not reflow between rows that have one and rows that do not.
+large when editing the photo itself. Booking and stay summaries follow the
+live Airbnb host **web** detail, on desktop and mobile. Their shared record
+shell has a 64px header with a centred 16px status title and Close ✕ on the
+right at every width. The status is an actual domain fact; a personal stay can
+retain its own title and status indication.
+
+The host identity is centred. A group's primary avatar is 84px on mobile and
+112px on desktop, beside a raised 64px/84px companion circle containing the
+actual remaining guest count in bold 9px/12px text. The cluster is
+140×120px/184×160px, raising the companion by 36px/48px. A singleton uses a
+108px/144px avatar. Use the real Better Auth portrait when available, otherwise
+the guest's first initial at 30px/36px; never invent companion portraits.
+The 32px semibold party title has a 36px line height and tight tracking:
+the guest's first name, or “Ana’s group of 2” from the actual party. The Guests
+card retains the full name and party facts. Dates and nights follow the title,
+then the resource name. Avatars begin 64px below the header;
+leave 24px/32px between cluster and title, 16px before dates and 48px before the
+first facts card.
+
+Arrival facts come first in record cards. Booking private team notes use the
+existing ledger composer inline, with a focused leaf for editing a saved note;
+there is no separate Notes index. Guests and cancellation follow, then total,
+payment, management and actual booking metadata. Stay request text is labelled
+Guest requests; it is guest-readable and is never relabelled private team
+notes. Stays do not gain a private-notes field or a fabricated conversation.
+Unavailable facts never become invented rows. Payment summaries retain their
+purchase identity and canonical payment facts.
+
+Message and Call are compact 56px neutral floating pills, centred 40px above
+the pane's bottom without a footer border while facts scroll. With contact
+actions, the shell keeps 136px of bottom content space clear: its 24px body
+gutter plus 112px inside the record. The host's visible label is Message,
+with an accessible name that identifies the guest or client. Personal stay
+messaging retains Message host.
+Embedded thread details keep contact actions at the end of their existing leaf.
+Member portraits use avatars, and photo grids respond to their pane's width.
+List rows without an image show a muted icon in the same footprint so the list
+does not reflow; this does not create a placeholder record cover.
 
 **Unsupported routes 404, and so does a record that is not there.** The level
 that cannot render its record or concern for this organization raises Nuxt's
@@ -1163,13 +1218,14 @@ Stripe id, or a UTC qualifier in something a customer or tenant reads. Status
 that must be re-read from a provider is re-read on load, not behind a button.
 
 **The picture leads, from real data.** Cards and rows carry the thing's photo —
-the place, the offering, the person's account picture — with an icon in the
-same footprint when there is none. Avatars come from Better Auth's
+the place, the offering, the person's account picture. List thumbnails keep an
+icon in the same footprint when there is none; a record cover remains absent.
+Avatars come from Better Auth's
 `user.image` through the record that owns it; never a placeholder face.
 
-**Beautiful is the shared shell plus Airbnb's structure.** Rounded cards with a
-hairline ring, 24px rows separated by hairlines, one big figure per card, soft
-secondary buttons and one filled primary — and nothing else. A screen that
+**Beautiful is the shared shell plus Airbnb's structure.** Use the theme's
+coherent record cards, 24px rows separated by hairlines, one big figure per
+card, soft secondary buttons and one filled primary. A screen that
 needs a new visual device needs a reason written beside it.
 
 ## Where we deliberately differ from Airbnb

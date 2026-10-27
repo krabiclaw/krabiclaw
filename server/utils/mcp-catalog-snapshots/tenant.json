@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:a50fb34e9b6644c15a9a02a16dae3d80f18b2f57986741cefda519be7a757211",
-  "documentationFingerprint": "sha256:527f600da313f25d51d046e6021b7738196a9589ff85795c2430e6d765723ca5",
+  "fingerprint": "sha256:183b9935d4d69b73cce6e933be94df1ef9913db8edff861a1a9cb7605e5d1b81",
+  "documentationFingerprint": "sha256:49ac767331e7b931d533acdcf00abc38159c8fc87e40bea403bd5d4898d2095c",
   "tools": [
     {
       "name": "add_organization_language",
@@ -62330,6 +62330,13 @@
                   "null"
                 ]
               },
+              "guest_image_url": {
+                "description": "The linked Better Auth account’s current portrait. Null for guests without an account portrait.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "guest_name": {
                 "type": [
                   "string",
@@ -62594,6 +62601,7 @@
               "version",
               "created_at",
               "updated_at",
+              "guest_image_url",
               "payments",
               "online_payment",
               "paid_minor",

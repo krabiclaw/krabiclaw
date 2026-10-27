@@ -1,13 +1,13 @@
 <template>
   <!-- Airbnb's reservation page: what was bought, then "Payment info" with the amount paid and a receipt row. -->
-  <section v-if="order" class="mt-6 border-t border-default pt-6">
+  <UCard v-if="order" as="section" variant="record">
     <h2 class="text-base font-semibold text-highlighted">Order details</h2>
     <div v-for="line in order.lines" :key="line.id" class="mt-4 flex items-start justify-between gap-4 text-base">
       <span class="text-highlighted">{{ line.title }} <span class="text-muted">× {{ line.quantity }}</span></span>
       <span class="shrink-0 text-muted">{{ paymentMoney(line.quantity * line.unit_amount, line.currency) }}</span>
     </div>
-  </section>
-  <section class="mt-6 border-t border-default pt-6">
+  </UCard>
+  <UCard as="section" variant="record">
     <h2 class="text-base font-semibold text-highlighted">Payment info</h2>
     <div class="mt-4">
       <p class="text-base font-medium text-highlighted">{{ amountLabel }}</p>
@@ -31,7 +31,7 @@
       </NuxtLink>
       <slot name="actions" />
     </div>
-  </section>
+  </UCard>
 </template>
 
 <script setup lang="ts">

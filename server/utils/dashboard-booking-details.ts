@@ -6,7 +6,7 @@ import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
-import { assertResourceAccess, assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
+import { assertResourceAccess, assertAssignedBookingAccess, isOrganizationWideRole, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { productPolicySummarySource, renderBookingPolicySummary, type RenderedBookingPolicySummary } from '~/server/utils/reservations'
 import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-summary'
 import { assertProductKind, validateProductDetails, type ProductKind } from '~/shared/product-details'
@@ -50,6 +50,8 @@ interface BookingRow {
   experience_id: string | null
   experience_title: string | null
   session_id: string | null
+  scheduling_mode: string | null
+  session_status: string | null
   request_id: string | null
   cancellation_used_at: string | null
   created_at: string
@@ -72,6 +74,8 @@ export interface DashboardBookingDetails {
   assignedMemberName: string | null
   providerConflict: boolean
   providerCalendarStatus: string | null
+  /** A future provider occurrence the caller may reassign through Better Auth. */
+  canReassignProvider: boolean
   operationalUpdatedAt: string
   operationalBookingId: string
   type: DashboardRecordType
@@ -82,7 +86,6 @@ export interface DashboardBookingDetails {
   locationSlug: string | null
   locationTitle: string
   resourceTitle: string
-  resourceImageUrl: string | null
   /** Null for a purchase made without an account. */
   guestName: string | null
   guestEmail: string | null
@@ -158,7 +161,7 @@ async function loadBookingRow(
   // refers to — a reservation or a booking — not on the thread. The thread
   // carries the conversation and the guest.
   return queryFirst<BookingRow>(db, `SELECT r.id, record.id AS operational_id, r.organization_id, s.name AS organization_name, s.vertical,
-    record.assigned_member_id, record.operational_updated_at, record.policy_json, record.product_kind, record.product_details_json, record.location_id, l.slug AS location_slug, l.title AS location_title,
+    record.assigned_member_id, record.operational_updated_at, record.policy_json, record.product_kind, record.product_details_json, record.scheduling_mode, record.session_status, record.location_id, l.slug AS location_slug, l.title AS location_title,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS requests,
     record.product_id AS experience_id, record.product_name AS experience_title, record.product_session_id AS session_id,
@@ -166,10 +169,11 @@ async function loadBookingRow(
     FROM requests r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json
+      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, ps.status AS session_status
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN products p ON p.id = b.product_id
+        LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
       UNION ALL
-      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at, res.policy_json, NULL, NULL FROM reservations res
+      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at, res.policy_json, NULL, NULL, NULL, NULL FROM reservations res
     ) record ON record.request_id = r.id
     LEFT JOIN business_locations l ON l.id = record.location_id
     WHERE r.id = ? AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
@@ -191,15 +195,6 @@ function localDateOf(row: Pick<BookingRow, 'starts_at' | 'timezone'>): string {
 function localTimeOf(row: Pick<BookingRow, 'starts_at' | 'timezone'>): string {
   const parts = localPartsAt(new Date(row.starts_at), row.timezone)
   return `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
-}
-
-// A booking shows its experience's picture and a reservation its location's.
-async function loadResourceImage(db: DbClient, row: BookingRow, type: DashboardBookingType) {
-  const [ownerType, ownerId] = type === 'booking' && row.experience_id
-    ? ['product' as const, row.experience_id]
-    : ['business_location' as const, row.location_id]
-  if (!ownerId) return null
-  return (await loadOwnerPictures(db, row.organization_id, ownerType, [ownerId])).get(ownerId)?.imageUrl ?? null
 }
 
 /** The latest proposal on the thread with no acceptance or decline answering it. */
@@ -248,7 +243,10 @@ export async function loadDashboardBookingDetails(
   // availability performs; a failed refresh is stored as its busy_error.
   if (row.assigned_member_id) await refreshMemberBusy(context.db, context.env, row.assigned_member_id)
   const canReadPayments=await roleAllows({organizationId:context.organization.id,role:context.organization.role,permissions:{payments:['read']}})
-  return composeBookingDetails(context.db, row, input.type, { canReadPayments })
+  const canReassignProvider = input.type === 'booking' && row.scheduling_mode === 'provider' && row.session_status === 'scheduled'
+    && ['pending', 'confirmed'].includes(row.status) && row.starts_at > new Date().toISOString() && isOrganizationWideRole(context.organization.role)
+    && await roleAllows({ organizationId: context.organization.id, role: context.organization.role, permissions: { members: ['update'] } })
+  return composeBookingDetails(context.db, row, input.type, { canReadPayments, canReassignProvider })
 }
 
 /**
@@ -272,7 +270,7 @@ async function composeBookingDetails(
   db: DbClient,
   row: BookingRow,
   type: DashboardBookingType,
-  reader: { canReadPayments: boolean; buyerUserId?: undefined } | { buyerUserId: string; canReadPayments?: undefined },
+  reader: { canReadPayments: boolean; canReassignProvider: boolean; buyerUserId?: undefined } | { buyerUserId: string; canReadPayments?: undefined; canReassignProvider?: undefined },
 ): Promise<DashboardBookingDetails> {
   if (row.location_id !== null && !row.location_title) throw new HTTPError({ statusCode: 500, message: 'The booking location is missing its title' })
 
@@ -286,8 +284,7 @@ async function composeBookingDetails(
     productKind = assertProductKind(row.product_kind)
     policy = productPolicySummarySource(validateProductDetails(productKind, JSON.parse(row.product_details_json!)))
   }
-  const [resourceImageUrl, policyLocale, notes, timeZone, contact] = await Promise.all([
-    loadResourceImage(db, row, type),
+  const [policyLocale, notes, timeZone, contact] = await Promise.all([
     policy ? getSourceLocale(db,row.organization_id) : Promise.resolve(null),
     reader.buyerUserId ? Promise.resolve([]) : listInternalNotes(db, row.request_id),
     Promise.resolve(row.timezone),
@@ -311,6 +308,7 @@ async function composeBookingDetails(
     && await canRetryGuestReservationRefund(db, { organizationId: row.organization_id, reservationId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
   return {
     assignedMemberId: row.assigned_member_id, assignedMemberName:provider?.name??null,providerConflict:Boolean(provider?.conflict),providerCalendarStatus: scheduling?.calendar_ids.length && scheduling.calendar_status !== 'ready' ? scheduling.busy_error || `Busy-calendar status: ${scheduling.calendar_status}` : null,operationalUpdatedAt:row.operational_updated_at,
+    canReassignProvider: reader.canReassignProvider === true,
     id: row.id,
     operationalBookingId: row.operational_id,
     type,
@@ -321,7 +319,6 @@ async function composeBookingDetails(
     locationSlug: row.location_slug,
     locationTitle: row.location_id === null ? 'Online' : row.location_title!,
     resourceTitle: row.experience_title || (row.location_id === null ? 'Online' : row.location_title!),
-    resourceImageUrl,
     guestName: row.guest_name,
     guestEmail: row.guest_email,
     guestPhone: row.guest_phone,
@@ -446,15 +443,10 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
   const detail = await readPaymentDetails(db, payment.organization_id, paymentId)
   const snapshot: unknown = JSON.parse(detail.payment.price_snapshot_json)
   if (!snapshot || typeof snapshot !== 'object' || !('title' in snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()) throw new Error('Purchase has no immutable title')
-  const line = detail.order ? await queryFirst<{ product_id: string | null }>(db, 'SELECT product_id FROM payment_order_lines WHERE order_id = ? ORDER BY rowid LIMIT 1', [detail.order.id]) : null
-  // The picture is the item's; failing that, the place it was sold; failing that, the business's own mark — as the booking screen leads with its place.
-  const resourceImageUrl = (line?.product_id ? (await loadOwnerPictures(db, payment.organization_id, 'product', [line.product_id])).get(line.product_id)?.imageUrl : null)
-    ?? (payment.location_id ? (await loadOwnerPictures(db, payment.organization_id, 'business_location', [payment.location_id])).get(payment.location_id)?.imageUrl : null)
-    ?? (await loadOwnerPictures(db, payment.organization_id, 'organization', [payment.organization_id])).get(payment.organization_id)?.imageUrl
-    ?? null
   const contact = payment.location_id ? await resolveLocationContact(db, payment.organization_id, payment.location_id) : { contactPhone: payment.contact_phone }
   return {
     assignedMemberId: null, assignedMemberName: null, providerConflict: false, providerCalendarStatus: null, operationalUpdatedAt: payment.updated_at,
+    canReassignProvider: false,
     id: paymentId,
     operationalBookingId: detail.order?.id ?? paymentId,
     type: detail.order ? 'order' : 'payment',
@@ -465,7 +457,6 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     locationSlug: payment.location_slug,
     locationTitle: payment.location_id === null ? 'Online' : payment.location_title ?? 'Online',
     resourceTitle: snapshot.title,
-    resourceImageUrl,
     guestName: payment.buyer_name,
     guestEmail: payment.buyer_email,
     guestPhone: null,

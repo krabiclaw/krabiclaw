@@ -41,6 +41,7 @@ export function isStayArrivalGuide(value: unknown): value is StayArrivalGuide {
 
 export function isGuestStay(value: unknown): value is GuestStay {
   if (!isRecord(value) || typeof value.organization_id !== 'string' || !isRecord(value.stay) || typeof value.stay.id !== 'string' || !isRecord(value.home)) return false
+  if (value.stay.guest_image_url !== null && typeof value.stay.guest_image_url !== 'string') return false
   const home = value.home
   return typeof home.name === 'string' && (home.location === null || isRecord(home.location))
     && (home.arrival_guide === null || isStayArrivalGuide(home.arrival_guide))

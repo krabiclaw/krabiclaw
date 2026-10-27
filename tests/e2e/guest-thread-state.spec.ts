@@ -10,6 +10,7 @@ import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { E2E_DEMO_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHeaders, potteryHouseTestExtraHeaders, tenantTestExtraHeaders, testBaseUrl } from './test-env'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 interface NotificationView {
   id: string
@@ -562,7 +563,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expectStatus(await page.request.put(reservationConfig,{data:{duration_minutes:60,expected_updated_at:policy.updated_at}}),200)
 
   const now = Date.now()
-  const firstName = `Maya${now}`
+  const firstName = 'Maya'
   const guestName = `${firstName} Chen`
   const guestEmail = `maya-${now}@example.test`
   const availability = await page.request.get('/api/public/reservations/availability', {
@@ -594,7 +595,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const bookingIds: string[] = []
   for (const [name, email, plan] of [
     [guestName, guestEmail, todaySlot!],
-    [`Priya${now} Patel`, `priya-${now}@example.test`, now + 86_400_000],
+    ['Priya Patel', `priya-${now}@example.test`, now + 86_400_000],
   ] as const) {
     let date: string
     let time: string
@@ -657,45 +658,193 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(localDateAt(new Date(upcomingCard!.occurrenceAt!), timezone) > localToday.date).toBe(true)
   expect(upcomingFeed.cards.some(card => card.id === `reservation:${bookingIds[0]}`)).toBe(false)
 
-  await page.getByTestId('today-card').filter({ hasText: reviewCard!.headline }).click()
+  await page.locator(`[data-card-id="${reviewCard!.id}"]`).click()
   await expect(page.getByRole('heading', { name: 'Currently hosting', exact: true })).toBeVisible()
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
-  await page.getByRole('link', { name: guestName }).last().click()
+  const detailPanel = page.locator('#dashboard-panel-booking-details')
+  const body = detailPanel.locator(':scope > [data-slot="body"]')
+  const summaryResponse = await page.request.get(`/api/dashboard/bookings/reservation/${bookingIds[0]}`, { params: { org: 'ember-slice-demo' } })
+  await expectStatus(summaryResponse, 200)
+  const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
+  expect(summary).toMatchObject({ guestName, guestPhone: '+12025550123', partySize: 2 })
+  expect(summary.threadId).not.toBeNull()
+  const priorViewport = page.viewportSize()!
+  let desktopCountWidth: number | undefined
+  for (const width of [1728, 390]) {
+    await page.setViewportSize({ width, height: 940 })
+    const identity = detailPanel.getByRole('heading', { level: 2, name: `${firstName}’s group of ${summary.partySize}`, exact: true })
+    const message = detailPanel.getByRole('link', { name: 'Message guest', exact: true })
+    const call = detailPanel.getByRole('link', { name: 'Call', exact: true })
+    await expect(message).toHaveAttribute('href', `/dashboard/ember-slice-demo/messages/${encodeURIComponent(summary.threadId!)}`)
+    await expect(call).toHaveAttribute('href', `tel:${summary.guestPhone}`)
+    await expect(identity).toBeInViewport()
+    await expect(message).toBeInViewport()
+    await expect(call).toBeInViewport()
+    const otherGuests = detailPanel.getByLabel(`${summary.partySize! - 1} other ${summary.partySize === 2 ? 'guest' : 'guests'}`, { exact: true })
+    const guestGroup = otherGuests.locator('..')
+    const mainAvatar = guestGroup.locator(':scope > [data-slot="root"]')
+    await expect(guestGroup).toBeInViewport()
+    await expect(mainAvatar).toHaveCount(1)
+    if (summary.guestImageUrl) await expect(guestGroup.getByAltText(summary.guestName!, { exact: true })).toHaveAttribute('src', summary.guestImageUrl)
+    else await expect(mainAvatar).toHaveText(summary.guestName!.trim().slice(0, 1))
+    const bodyBounds = (await body.boundingBox())!
+    const guestBounds = (await guestGroup.boundingBox())!
+    const avatarBounds = (await mainAvatar.boundingBox())!
+    const countBounds = (await otherGuests.boundingBox())!
+    const identityBounds = (await identity.boundingBox())!
+    const paneBounds = (await detailPanel.boundingBox())!
+    const paneCenter = paneBounds.x + paneBounds.width / 2
+    expect(avatarBounds.width, 'The guest is dominant within the group').toBeGreaterThan(countBounds.width)
+    expect(avatarBounds.height).toBeGreaterThan(countBounds.height)
+    expect(avatarBounds.height).toBe(avatarBounds.width)
+    expect(countBounds.height).toBe(countBounds.width)
+    expect(countBounds.y, 'The smaller guest count is raised beside the guest').toBeLessThan(avatarBounds.y)
+    expect(countBounds.x + countBounds.width / 2).toBeGreaterThan(avatarBounds.x + avatarBounds.width / 2)
+    if (width === 1728) desktopCountWidth = countBounds.width
+    else expect(desktopCountWidth, 'The desktop guest counter is larger than the phone counter').toBeGreaterThan(countBounds.width)
+    expect(guestBounds.y - bodyBounds.y, 'The guest cluster leads 64px below the record header').toBe(64)
+    expect(identityBounds.y - guestBounds.y - guestBounds.height, 'The party title follows the guest cluster at the measured Airbnb spacing').toBe(width === 1728 ? 32 : 24)
+    expect(Math.abs(guestBounds.x + guestBounds.width / 2 - paneCenter)).toBeLessThanOrEqual(1)
+    expect(Math.abs(identityBounds.x + identityBounds.width / 2 - paneCenter), 'The record header centers in its visible pane').toBeLessThanOrEqual(1)
+    expect(await identity.evaluate(element => getComputedStyle(element).textAlign)).toBe('center')
+    const paymentInfo = detailPanel.getByRole('heading', { name: 'Payment info', exact: true })
+    await expect(paymentInfo).toHaveCount(summary.payments?.length ?? 0)
+    const sections = [
+      detailPanel.getByText('Date', { exact: true }),
+      detailPanel.getByText('Your notes', { exact: true }),
+      detailPanel.getByRole('link', { name: `Guests ${summary.guestName} · ${summary.partySize} guests`, exact: true }),
+      detailPanel.getByRole('button', { name: /^Cancellation policy/ }),
+      ...await paymentInfo.all(),
+      detailPanel.getByRole('button', { name: 'Manage reservation', exact: true }),
+      detailPanel.getByText('Booking date', { exact: true }),
+    ]
+    for (let at = 1; at < sections.length; at++) {
+      const previous = (await sections[at - 1]!.boundingBox())!
+      const current = (await sections[at]!.boundingBox())!
+      expect(current.y, 'The reservation’s sections follow their reading order vertically').toBeGreaterThan(previous.y)
+    }
+    const date = (await detailPanel.getByText('Date', { exact: true }).boundingBox())!
+    const time = (await detailPanel.getByText('Time', { exact: true }).boundingBox())!
+    expect(time.y).toBe(date.y)
+    const todayPanel = page.locator('#dashboard-panel-org-today')
+    if (width === 1728) {
+      await expect(todayPanel).toBeVisible()
+      const agendaBounds = (await todayPanel.boundingBox())!
+      const detailBounds = (await detailPanel.boundingBox())!
+      expect(detailBounds.x).toBeGreaterThanOrEqual(agendaBounds.x + agendaBounds.width - 1)
+    } else await expect(todayPanel).toBeHidden()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    const footer = detailPanel.locator(':scope > div').filter({ has: page.getByRole('link', { name: 'Message guest', exact: true }) })
+    await expect(footer).toHaveCount(1)
+    const footerBounds = (await footer.boundingBox())!
+    const messageBefore = await message.boundingBox()
+    const callBefore = await call.boundingBox()
+    expect(Math.abs((messageBefore!.x + callBefore!.x + callBefore!.width) / 2 - paneCenter), 'Contact actions center in the same visible pane as the record header').toBeLessThanOrEqual(1)
+    const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
+    // A short record may fit without scrolling; its native end must still
+    // expose the final metadata above the pinned contact actions.
+    await page.mouse.move(bodyBounds.x + 4, bodyBounds.y + bodyBounds.height / 2)
+    await page.mouse.wheel(0, maximum + bodyBounds.height)
+    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    await expect(message).toBeInViewport({ ratio: 1 })
+    await expect(call).toBeInViewport({ ratio: 1 })
+    expect(await message.boundingBox()).toEqual(messageBefore)
+    expect(await call.boundingBox()).toEqual(callBefore)
+    const recordMade = detailPanel.getByText('Booking date', { exact: true }).locator('..')
+    await expect(recordMade).toBeInViewport({ ratio: 1 })
+    const madeBounds = (await recordMade.boundingBox())!
+    expect(madeBounds.y + madeBounds.height, 'The final metadata clears the pinned actions').toBeLessThanOrEqual(footerBounds.y + 1)
+    const endCapture = testInfo.outputPath(`reservation-details-end-${width}.png`)
+    await page.screenshot({ path: endCapture, ...(width === 1728 ? { clip: paneBounds } : { fullPage: false }) })
+    await testInfo.attach(`reservation-details-end-${width}`, { path: endCapture, contentType: 'image/png' })
+    await page.mouse.wheel(0, -maximum - bodyBounds.height)
+    await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
+    const capture = testInfo.outputPath(`reservation-details-${width}.png`)
+    // Show the actual desktop detail pane without publishing copied
+    // conversations elsewhere in Today's local fixture. Mobile is this record.
+    const detailBounds = (await detailPanel.boundingBox())!
+    await page.screenshot({ path: capture, ...(width === 1728 ? { clip: detailBounds } : { fullPage: false }) })
+    await testInfo.attach(`reservation-details-${width}`, { path: capture, contentType: 'image/png' })
+  }
+  await page.setViewportSize(priorViewport)
+  await detailPanel.getByRole('link', { name: `Guests ${summary.guestName} · ${summary.partySize} guests`, exact: true }).click()
   await expect(page.getByText(guestEmail, { exact: true })).toBeVisible()
   await page.goBack()
 
   const note = `Today page note ${Date.now()}`
-  // The row is named for what it holds, and its second line counts the notes
-  // once there are any, so only the name itself is matched.
-  // Your notes is a level of the record: the new note is written there and the
-  // ones already written are leaves below it.
-  await page.getByRole('link', { name: /^Your notes/ }).click()
-  await page.getByLabel('New note', { exact: true }).fill(note)
-  await page.getByRole('button', { name: 'Save', exact: true }).click()
-  await expect(page.getByText(note, { exact: true })).toBeVisible()
-  await page.getByRole('link', { name: `Edit note: ${note}` }).click()
+  const noteContext = '?range=upcoming&locationId=loc-demo&kinds=reservation'
+  const recordPath = `/dashboard/ember-slice-demo/bookings/reservation/${bookingIds[0]}`
+  const noteEndpoint = `/api/dashboard/bookings/reservation/${bookingIds[0]}/notes`
+  await page.goto(`${baseURL}${recordPath}${noteContext}`)
+  const noteInput = detailPanel.getByRole('textbox', { name: 'Add a note to yourself', exact: true })
+  await noteInput.fill(note)
+  const noteWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'POST')
+  await detailPanel.getByText('Your notes', { exact: true }).click()
+  const noteResponse = await noteWrite
+  await expectStatus(noteResponse, 200)
+  expect(noteResponse.request().postDataJSON()).toMatchObject({ note, idempotencyKey: expect.any(String) })
+  expect(noteResponse.request().postDataJSON()).not.toHaveProperty('noteId')
+  await expect(noteInput).toHaveValue('')
+  const notedThread = await loadThreadDetail(page.request, summary.threadId!, 'org-demo')
+  const addedNotes = notedThread.entries.filter(entry => entry.eventName === 'internal_note.added' && entry.body === note)
+  expect(addedNotes).toHaveLength(1)
+  expect(addedNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: note, payload: { private: true } })
+  const notePath = `${recordPath}/notes/${addedNotes[0]!.id}${noteContext}`
+  const editNote = detailPanel.getByRole('link', { name: `Edit note: ${note}`, exact: true })
+  await expect(editNote).toHaveAttribute('href', notePath)
+  const secondNote = `${note} added while opening the saved note`
+  await noteInput.fill(secondNote)
+  const secondWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint
+    && response.request().method() === 'POST' && response.request().postDataJSON().note === secondNote)
+  // Clicking the saved note causes blur and navigation together, without an
+  // artificial pause between the real writer and the route transition.
+  await editNote.click()
+  const secondResponse = await secondWrite
+  await expectStatus(secondResponse, 200)
+  expect(secondResponse.request().postDataJSON()).toMatchObject({ note: secondNote, idempotencyKey: expect.any(String) })
+  const secondThread = await loadThreadDetail(page.request, summary.threadId!, 'org-demo')
+  const secondNotes = secondThread.entries.filter(entry => entry.eventName === 'internal_note.added' && entry.body === secondNote)
+  expect(secondNotes).toHaveLength(1)
+  expect(secondNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: secondNote, payload: { private: true } })
+  await expect(page).toHaveURL(`${baseURL}${notePath}`)
   await expect(page.getByLabel('Note', { exact: true })).toHaveValue(note)
+  await expect(noteInput).toHaveCount(0)
   // Beside its index a leaf carries only Save — Airbnb's shape at two columns,
   // measured 2026-09-21 — so leaving one here is the index's own Back. Cancel
   // belongs to the sheet the leaf becomes below `lg`. The rule is the leaf's, so
-  // it is asserted inside the leaf: the index beside it keeps the Cancel that
-  // abandons the note it is writing.
+  // it is asserted inside the leaf. The record is its direct parent.
   await expect(page.locator('#dashboard-panel-booking-note').getByRole('button', { name: 'Cancel', exact: true })).toBeHidden()
   await expect(page.locator('#dashboard-panel-booking-note').getByRole('button', { name: 'Save', exact: true })).toBeVisible()
-  // Back is a link to the level above, never the browser's history.
-  await page.getByRole('link', { name: 'Back', exact: true }).click()
+  const revisedNote = `${note} revised`
+  await page.getByLabel('Note', { exact: true }).fill(revisedNote)
+  const noteRevisionWrite = page.waitForResponse(response => new URL(response.url()).pathname === noteEndpoint && response.request().method() === 'POST')
+  await page.locator('#dashboard-panel-booking-note').getByRole('button', { name: 'Save', exact: true }).click()
+  const noteRevisionResponse = await noteRevisionWrite
+  await expectStatus(noteRevisionResponse, 200)
+  expect(noteRevisionResponse.request().postDataJSON()).toEqual({ note: revisedNote, idempotencyKey: expect.any(String), noteId: addedNotes[0]!.id, revisionId: addedNotes[0]!.id })
+  await expect(page).toHaveURL(`${baseURL}${recordPath}${noteContext}`)
+  await expect(noteInput).toHaveValue('')
+  const revisedThread = await loadThreadDetail(page.request, summary.threadId!, 'org-demo')
+  const revisedNotes = revisedThread.entries.filter(entry => entry.eventName === 'internal_note.updated' && entry.body === revisedNote)
+  expect(revisedNotes).toHaveLength(1)
+  expect(revisedNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: revisedNote,
+    payload: { private: true, noteId: addedNotes[0]!.id, revisionId: addedNotes[0]!.id } })
+  await expect(detailPanel.getByRole('link', { name: `Edit note: ${revisedNote}`, exact: true })).toHaveAttribute('href', notePath)
 
   // Change is a mode of the booking leaf, not a dialog over it: the action is a
   // link, every field is a row of the same staged draft, and one footer commit
   // sends the request the guest confirms.
-  await page.getByRole('link', { name: 'Change reservation', exact: true }).click()
+  await detailPanel.getByRole('button', { name: 'Manage reservation', exact: true }).click()
+  const manage = page.getByRole('dialog', { name: 'Manage reservation', exact: true })
+  await manage.getByRole('link', { name: 'Change reservation', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'What do you want to change?', exact: true })).toBeVisible()
   await expect(page.getByText(`${firstName} confirms the change before anything moves.`)).toBeVisible()
   await expect(page.getByRole('link', { name: 'Change date', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
 
-  await page.goto(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}/change`)
+  const changeContext = '?range=upcoming&locationId=loc-demo&kinds=reservation'
+  await page.goto(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}/change${changeContext}`)
   const beforeResponse = await page.request.get(
     `/api/dashboard/bookings/reservation/${upcomingBookingId}`,
     { params: { org: 'ember-slice-demo' } },
@@ -704,6 +853,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const before = await beforeResponse.json() as { booking: { partySize: number; threadId: string } }
   const targetPartySize = before.booking.partySize === 99 ? 98 : before.booking.partySize + 1
   await page.getByRole('link', { name: 'Change guests', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}/change/guests${changeContext}`)
   await page.getByRole('spinbutton', { name: 'Guests', exact: true }).fill(String(targetPartySize))
   await page.getByRole('button', { name: 'Done', exact: true }).click()
   const requestedAt = new Date().toISOString()
@@ -715,6 +865,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const changeResponse = await requestCompleted
   expect(changeResponse.status(), await changeResponse.text()).toBe(200)
   await expect(page.getByRole('heading', { name: 'Coming up', exact: true })).toBeVisible({ timeout: 30_000 })
+  await expect(page).toHaveURL(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}${changeContext}`)
 
   const detail = await loadThreadDetail(page.request, before.booking.threadId, 'org-demo')
   const requests = detail.entries.filter(entry =>

@@ -48,7 +48,8 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string;
     : input.assigned || presentation?.noun === 'consultation' ? `${presentation!.label} with ${firstName} ${when}`
       : `${firstName} arrives ${when}${guests ? ` · ${guests}` : ''}`
   return {
-    id: item.id, to: item.to, eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }), headline,
+    id: item.id, to: input.personal ? item.to.replace(/^\/dashboard\/account\/activity\//, '/dashboard/account/bookings/') : item.to,
+    eyebrow: item.stayMoment === 'current' ? 'Currently hosting' : formatTimestamp(item.startsAt, 'en', item.timeZone, { hour: 'numeric', minute: '2-digit' }), headline,
     description: input.personal ? [...new Set([item.subtitle, item.locationTitle].filter((part): part is string => !!part && part !== item.title))].join(' · ')
       : [...new Set([item.resourceTitle, item.kind === 'booking' && item.locationId === null ? 'Online' : item.locationTitle, item.stayMoment === 'turnover' ? 'Next guests arrive the same day' : null].filter((part): part is string => !!part))].join(' · '),
     imageUrl: input.personal ? item.resourceImageUrl : item.guestImageUrl, imageFit: 'cover', imageIcon: input.personal ? resourceIcon : 'i-lucide-user',

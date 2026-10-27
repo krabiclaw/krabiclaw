@@ -19,7 +19,12 @@
      <UAvatar :src="editor.draft.value.public_photo_url ?? undefined" icon="i-lucide-user" size="3xl" class="mb-6" />
      <div class="flex gap-3"><UButton color="neutral" variant="outline" :disabled="!accountPhoto" @click="editor.draft.value.public_photo_url = accountPhoto">Use your account photo</UButton><UButton v-if="editor.draft.value.public_photo_url" color="neutral" variant="ghost" @click="editor.draft.value.public_photo_url = null">Remove photo</UButton></div>
     </template>
-    <DashboardCoverPhotoField v-else-if="concern === 'photo'" :organization-id="editor.organizationId" :model-value="photoId" :preview-url="editor.draft.value.public_photo_url" @change="photo" />
+    <template v-else-if="concern === 'photo'">
+     <MediaPicker :organization-id="editor.organizationId" accept="image" title="Select profile photo" :disabled="editor.saving.value" @change="photo">
+      <span class="inline-flex items-center gap-4"><UAvatar :src="editor.draft.value.public_photo_url ?? undefined" icon="i-lucide-user" size="3xl" /><span class="text-sm font-medium text-highlighted">{{ editor.draft.value.public_photo_url ? 'Change photo' : 'Add a photo' }}</span></span>
+     </MediaPicker>
+     <UButton v-if="editor.draft.value.public_photo_url" class="mt-4" color="neutral" variant="ghost" :disabled="editor.saving.value" label="Remove photo" @click="photo(null)" />
+    </template>
     <SettingRow v-else-if="concern === 'published'" v-model="editor.draft.value.public_approved" label="Publish profile" />
     <UButton v-if="editor.recovery.value?.status === 'conflict'" class="mt-6" color="neutral" variant="outline" :loading="editor.saving.value" @click="editor.load">Use saved values</UButton>
   </template>
@@ -28,7 +33,7 @@
 <script setup lang="ts">
 import {useTextareaAutosize} from '@vueuse/core'
 import BookingTimezoneSelect from '~/components/booking/BookingTimezoneSelect.vue'
-import DashboardCoverPhotoField,{type CoverPhotoAsset} from './DashboardCoverPhotoField.vue'
+import MediaPicker,{type MediaSummary} from '~/lib/components/workspace/media/MediaPicker.vue'
 import SettingRow from './SettingRow.vue'
 import {accountEditorKey} from './AccountProfilePage.vue'
 import {useMemberAvailabilityEditor} from '~/composables/useMemberAvailabilityEditor'
@@ -59,7 +64,6 @@ function remove(slot:WorkingHours){if(editor.draft.value.weekly)editor.draft.val
 function add(){if(day.value&&editor.draft.value.weekly)editor.draft.value.weekly.push({weekday:day.value.value,start:'09:00',end:'17:00'})}
 function setAvailable(value:boolean){if(value)add();else if(day.value&&editor.draft.value.weekly)editor.draft.value.weekly=editor.draft.value.weekly.filter(w=>w.weekday!==day.value!.value)}
 async function save(){await editor.save(day.value?'weekly':props.concern)}
-const photoId=ref<string|null>(null)
-function photo(asset:CoverPhotoAsset|null){if(asset&&!asset.public_url){editor.error.value='This photo is not ready yet.';return}photoId.value=asset?.asset_id??null;editor.draft.value.public_photo_url=asset?.public_url??null}
+function photo(asset:MediaSummary|null){if(asset&&!asset.public_url){editor.error.value='This photo is not ready yet.';return}editor.draft.value.public_photo_url=asset?.public_url??null}
 onBeforeUnmount(editor.revert)
 </script>

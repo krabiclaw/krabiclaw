@@ -17,6 +17,7 @@ export function isBookingDetailsResponse(value: unknown): value is { booking: Da
     && isRecord(value.booking)
     && typeof value.booking.id === 'string'
     && typeof value.booking.organizationId === 'string'
+    && typeof value.booking.canReassignProvider === 'boolean'
     && (value.booking.guestName === null || typeof value.booking.guestName === 'string')
     && Array.isArray(value.booking.notes)
     && (value.booking.policy === null || isRecord(value.booking.policy))
@@ -57,7 +58,7 @@ export async function useBookingDetails(bookingType: DashboardRecordType, bookin
     if (purchase) return booking.value.payments?.[0] ? paymentStateLabel(booking.value.payments[0].payment) : 'Purchase'
     if (booking.value.status === 'pending') return 'Awaiting review'
     if (booking.value.status === 'cancelled') return 'Cancelled'
-    if (booking.value.bookingDate === referenceDay.value) return personalScope ? 'Today' : 'Currently hosting'
+    if (booking.value.bookingDate === referenceDay.value) return personalScope || booking.value.vertical === 'service' ? 'Today' : 'Currently hosting'
     if (booking.value.bookingDate > referenceDay.value) return 'Coming up'
     return `Past ${noun.value}`
   })

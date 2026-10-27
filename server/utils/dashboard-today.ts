@@ -48,14 +48,15 @@ function attentionCard(thread: GuestThreadListItemViewModel, organization: Dashb
   const conversation = thread.guestName === null
   const bookingKind = thread.submissionType === 'contact' || conversation && thread.operationalStatus === null ? null : thread.submissionType
   const pending = bookingKind === 'booking' && thread.operationalStatus === 'pending'
-  const reply = conversation || thread.submissionType === 'contact' || thread.latestMessageFromGuest
+  const cancelled = (bookingKind === 'booking' || bookingKind === 'reservation') && thread.operationalStatus === 'cancelled'
+  const reply = conversation || thread.submissionType === 'contact' || thread.latestMessageFromGuest || cancelled
   const noun = bookingKind === 'stay' ? 'stay' : bookingKind ? resolveBookingPresentation(bookingKind, organization.vertical).noun : null
   return card({
     id: `attention:${thread.id}`, priority: 'attention',
     to: bookingKind !== null && bookingKind !== 'stay' && (pending || !reply) ? bookingEditorPath(organization.slug, bookingKind, thread.id) : guestConversationPath(organization.slug, thread.id),
     eyebrow: pending ? 'Awaiting your decision' : 'Needs attention',
-    headline: conversation ? `Review conversation: ${thread.participantLabel}` : pending ? `Review ${thread.guestName}’s ${noun}` : reply
-      ? `Reply to ${thread.guestName}` : `Review ${thread.guestName}’s ${noun}`,
+    headline: conversation && !cancelled ? `Review conversation: ${thread.participantLabel}` : pending ? `Review ${thread.guestName}’s ${noun}` : reply
+      ? `Reply to ${thread.guestName ?? thread.participantLabel}` : `Review ${thread.guestName}’s ${noun}`,
     description: [thread.locationLabel, thread.whenLabel, reply ? thread.preview?.text : null].filter(Boolean).join(' · '),
     imageUrl: thread.imageUrl, imageFit: thread.imageFit, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
     locationId: thread.locationId, productId: thread.productId, stayChannel: thread.stayChannel, assignedMemberId: thread.assignedMemberId, bookingKind,
@@ -70,7 +71,7 @@ async function attentionThreads(db: DbClient, organization: DashboardOrganizatio
       organizationId: organization.id, principal, userId: organization.userId, conversationState: 'needs_attention',
       locationId: input.locationId, assignedMemberId: input.assignedMemberId, limit: 200, offset,
     })
-    threads.push(...page.filter(thread => !thread.manuallyArchived && (thread.mailbox === 'current' || thread.latestMessageFromGuest)
+    threads.push(...page.filter(thread => !thread.manuallyArchived && (thread.mailbox === 'current' || thread.latestMessageFromGuest || thread.submissionType !== 'stay' && thread.operationalStatus === 'cancelled')
       && (!input.kinds?.length || thread.submissionType !== 'contact' && input.kinds.includes(thread.submissionType))))
     if (page.length < 200) return threads
   }

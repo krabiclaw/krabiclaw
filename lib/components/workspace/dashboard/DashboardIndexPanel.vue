@@ -15,18 +15,18 @@
         lg Back sits beside it. A control that names what the whole level shows —
         Today's range — takes the title's place, and the title is announced only.
       -->
-      <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-4 pb-2 pt-4 sm:pt-6" :class="dashboardGutterClass">
-        <slot name="leading"><DashboardNavbarLeading /></slot>
+      <div class="shrink-0 items-center gap-x-3" :class="[dashboardGutterClass, column === 'record' ? 'grid min-h-16 grid-cols-[2.5rem_minmax(0,1fr)_2.5rem] py-3' : 'flex flex-wrap gap-y-4 pb-2 pt-4 sm:pt-6']">
+        <slot name="leading"><DashboardNavbarLeading v-if="column !== 'record'" /></slot>
         <div v-if="$slots.center" class="flex min-w-0 flex-1 items-center">
           <h1 class="sr-only">{{ title }}</h1>
           <slot name="center" />
         </div>
-        <div v-else class="min-w-0 flex-1" :class="level.to.value ? 'max-lg:order-last max-lg:basis-full' : undefined">
-          <h1 :class="dashboardTitleClass">{{ title }}</h1>
+        <div v-else class="min-w-0" :class="column === 'record' ? 'col-start-2 row-start-1 text-center' : ['flex-1', level.to.value ? 'max-lg:order-last max-lg:basis-full' : undefined]">
+          <h1 :class="column === 'record' ? 'text-base font-semibold text-highlighted' : dashboardTitleClass">{{ title }}</h1>
           <p v-if="lead" class="mt-2 text-base text-muted">{{ lead }}</p>
         </div>
         <!-- Every action is the same round 40px button, whatever size a page asked for. A list editor's controls land in the span (dashboardPanelActionsKey). -->
-        <div class="ms-auto flex shrink-0 items-center gap-2 [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full">
+        <div class="flex shrink-0 items-center gap-2 [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full" :class="column === 'record' ? 'col-start-3 row-start-1 justify-end' : 'ms-auto'">
           <slot name="right" />
           <span :id="actionsId" class="flex items-center gap-2 empty:hidden" />
         </div>
@@ -35,15 +35,17 @@
 
     <template #body>
       <!-- Alone it uses the frame, as Airbnb's listing grid does; beside a child it is a column. -->
-      <div class="w-full" :class="[width, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
+      <div class="w-full" :class="[width, column === 'record' && $slots.footer ? 'pb-28' : undefined, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
         <slot />
       </div>
     </template>
 
     <!-- A list whose order is itself a draft — sections, links — commits from here. -->
     <template v-if="$slots.footer" #footer>
-      <div class="shrink-0" :class="[dashboardGutterClass, footerClass ?? 'border-t border-default py-3']">
-        <slot name="footer" />
+      <div class="shrink-0" :class="[dashboardGutterClass, footerClass ?? (column === 'record' ? 'pointer-events-none absolute inset-x-0 bottom-10 z-10' : 'border-t border-default py-3')]">
+        <div class="w-full" :class="width">
+          <slot name="footer" />
+        </div>
       </div>
     </template>
   </UDashboardPanel>
@@ -98,13 +100,14 @@ const level = useRouteLevel()
 // A level that scrolls itself pads its own rows, so the body gives up its padding.
 const panelUi = computed((): { body?: string } => {
   const fill: boolean = props.fill
+  if (props.column === 'record') return { body: 'p-6 sm:p-6' }
   return { body: fill ? 'p-0 sm:p-0 gap-0' : undefined }
 })
 const pair = computed(() => level.mode.value === 'pair')
 // Paired panels own their width; an explicit column caps a standalone screen.
 const width = computed((): string | undefined => {
   const column: DashboardColumn | undefined = props.column
-  if (pair.value) return undefined
+  if (pair.value && column !== 'record') return undefined
   return column ? dashboardColumnWidths[column] : undefined
 })
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.

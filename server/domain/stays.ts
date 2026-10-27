@@ -133,6 +133,8 @@ export interface StayOnlinePayment {
  * paid_minor is both, net of refunds. Channel stays are paid through their channel.
  */
 export interface StayDetail extends Stay {
+  /** The linked Better Auth account's current portrait; unlinked guests have none. */
+  guest_image_url: string | null
   payments: StayPayment[]
   online_payment: StayOnlinePayment | null
   paid_minor: number
@@ -1195,8 +1197,9 @@ async function staysOverlapping(db: DbClient, access: StayAccess, input: { from:
 
 export async function getStay(db: DbClient, access: StayAccess, stayId: string): Promise<StayDetail> {
   const scope = visibleHomes(access)
-  const row = await queryFirst<Record<string, unknown>>(db, `
-    SELECT ${STAY_COLUMNS} FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+  const row = await queryFirst<Record<string, unknown> & Pick<StayDetail, 'guest_image_url'>>(db, `
+    SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url
+      FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE s.organization_id = ? AND s.id = ? AND ${scope.sql}`, [access.organizationId, stayId, ...scope.params])
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
@@ -1217,7 +1220,7 @@ export async function getStay(db: DbClient, access: StayAccess, stayId: string):
   const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (onlinePayment ? onlinePayment.captured_minor - onlinePayment.refunded_minor : 0)
   const status = stay.owner === 'channel' ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
-  return { ...stay, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status }
+  return { ...stay, guest_image_url: row.guest_image_url, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status }
 }
 
 /** Every night of [from, to) at one home: whether it is free, its price and rules, and the stay holding it. */
@@ -1720,7 +1723,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
   if (owned.request_id) await ownedBuyerRequest(db, buyerUserId, owned.request_id)
   const [stay, pictures] = await Promise.all([
     getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id),
-    loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id]),
+    loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id], { organizationFallback: false }),
   ])
   if (stay.user_id !== buyerUserId || stay.owner !== 'app') fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
   const cancellation = stay.status !== 'cancelled' && owned.paid_online === 1
