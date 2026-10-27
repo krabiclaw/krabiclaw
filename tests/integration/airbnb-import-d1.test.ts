@@ -53,7 +53,7 @@ function daysBetween(from: string, to: string): number {
 }
 
 interface FakeBody {
-  property: { title: string }
+  property: { title?: string; settings?: Record<string, unknown> }
   connection_link: { token: string; title: string }
   values: Array<{ date_from: string; date_to: string; availability: number; rate: string; min_stay_arrival: number; min_stay_through: number; max_stay: number; closed_to_arrival: boolean; closed_to_departure: boolean; stop_sell: boolean; rate_plan_id: string }>
   mapping: { rate_plan_id: string; settings: { listing_id: string } }
@@ -92,7 +92,7 @@ class FakeChannex {
   }
   /** Airbnb's `property_type_category` for the listing. */
   category = 'townhouse'
-  /** The properties Channex was asked to create. */
+  /** The properties created in Channex, including their current settings. */
   properties: Array<Record<string, unknown>> = []
   /** The room types Channex was asked to create. */
   roomTypes: Array<Record<string, unknown>> = []
@@ -122,9 +122,16 @@ class FakeChannex {
     if (method === 'POST' && path === '/groups') return json({ data: { id: 'grp-1', type: 'group', attributes: {} } })
     if (method === 'POST' && path === '/properties') {
       if (body!.property.title === 'KrabiClaw connection setup') return json({ data: { id: 'setup-1', type: 'property', attributes: {} } })
-      this.properties.push(body!.property as Record<string, unknown>)
       const id = `prop-${++this.ids}`
-      return json({ data: { id, type: 'property', attributes: {} } })
+      const property = { ...body!.property, id }
+      this.properties.push(property)
+      return json({ data: { id, type: 'property', attributes: property } })
+    }
+    if ((method === 'GET' || method === 'PUT') && /^\/properties\/[^/]+$/.test(path)) {
+      const property = this.properties.find(property => property.id === path.split('/').pop())
+      if (!property) return new Response('Property not found', { status: 404 })
+      if (method === 'PUT') Object.assign(property, body!.property, { settings: { ...property.settings as Record<string, unknown>, ...body!.property.settings } })
+      return json({ data: { id: property.id, type: 'property', attributes: property } })
     }
     if (method === 'POST' && path === '/meta/airbnb/connection_link') {
       this.token = body!.connection_link.token
@@ -460,7 +467,21 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.equal(channex.seen.filter(request => request.method !== 'GET').length, sent)
     // Activate syncs it again, through the same stages.
     assert.deepEqual(await connection.activate(productId), { product_id: productId, stage: 'mapping', waiting: false })
+    const property = channex.properties.find(property => property.id === mapping!.property_id)!
+    const settings = property.settings as Record<string, unknown>
+    delete settings.min_stay_type
+    await assert.rejects(connection.advance(productId), { status: 502, data: { code: 'INVALID_PROVIDER_RESPONSE' } })
+    settings.min_stay_type = 'unknown'
+    await assert.rejects(connection.advance(productId), { status: 502, data: { code: 'INVALID_PROVIDER_RESPONSE' } })
+    // A property created under the old arrival-only mode is repaired before its full calendar is sent.
+    settings.min_stay_type = 'arrival'
+    for (const rule of Object.values(channex.restrictions)) delete rule.min_stay_through
     await advanceTo(connection, db, channex, productId, 'complete')
+    assert.deepEqual(property.settings, { ...settings, min_stay_type: 'both' })
+    assert.equal(property.title, 'Cliff Cabin')
+    assert.deepEqual(Object.keys(channex.restrictions).sort(), Array.from({ length: 500 }, (_, offset) => addDays(today(), offset)))
+    assert.equal(Object.values(channex.restrictions).every(rule => rule.min_stay_arrival === 2 && rule.min_stay_through === 2), true)
+    assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
     assert.deepEqual([channex.channel.ratePlans.length, channex.messagesProperty, (await readStayHome(db, manager, productId)).live], [1, mapping!.property_id, true])
   } finally {
     globalThis.fetch = realFetch

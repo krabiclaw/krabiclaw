@@ -2,9 +2,10 @@
 
 Authority: [PMS certification tests](https://docs.channex.io/api-v.1-documentation/pms-certification-tests.md).
 Channex issues production credentials only after the 14 tests, the form and a
-live screenshare review pass. Every test is run from the staging dashboard
-(`https://staging.krabiclaw.com`), never from a script: Channex rejects
-scripts, Postman collections and certification-only screens.
+live screenshare review pass. Run the tests from the staging dashboard
+(`https://staging.krabiclaw.com`) or the iOS app connected to staging, never
+from a script: Channex rejects scripts, Postman collections and
+certification-only screens.
 
 ## How KrabiClaw maps onto Channex
 
@@ -42,24 +43,28 @@ The write path Channex will ask to see:
 | Mapping | `product_channel_mappings` (property, room type, rate plan per home) |
 | Task IDs | `channel_sync_log.task_id` on every ARI call |
 | Bookings | webhook `POST /api/integrations/channex/webhook` → `applyBookingRevision` (`booking-revisions.ts`) → `GET /booking_revisions/:id` is the booking, landed as a stay, then `POST /booking_revisions/:id/ack`; `channex-revision-feed` reads unacknowledged revisions every 10 minutes. Nothing reads `GET /bookings/:id`: Channex counts that as `booking_received_via_booking_find` and refuses it |
-| Full sync again | **Listing status → Turn off**, then **Turn on** in the iOS app (`POST …/integrations/airbnb/sync` with `stop`, then `sync`). Stopping forgets what Channex confirmed; turning on sends the 500 nights ahead at the `mapping` stage, one call of each kind, before Channex maps the listing again |
+| Full sync again | In iOS **Menu → Channels → Airbnb → Choose listings to sync**, stop the selected home and sync it again (steps below). Stopping forgets what Channex confirmed; syncing again sends the 500 nights ahead at the `mapping` stage, one call of each kind, before Channex maps the listing again |
 
 ## Before the run
 
 1. On Channex staging, connect two Airbnb test listings to one staging
    organization with **Connect Airbnb** in the dashboard. The import creates
    each home's property, room type and rate plan and sends its full sync.
-   A property created before 2026-10-26 has `min_stay_type: arrival`; set it
-   to `both` once with the Update Property API before its full sync is redone:
+   Before each full sync, KrabiClaw reads the property's minimum-stay mode.
+   An existing property using only arrival or through stay is changed to
+   `both`, verified, and its confirmed calendar forgotten before delivery:
+   Channex discards the unused minimum under a single-type mode, even when
+   KrabiClaw sent it. Missing or unknown modes fail the sync visibly.
 
-   ```sh
-   curl -X PUT "$CHANNEX_BASE_URL/properties/<property id>" -H "user-api-key: $CHANNEX_API_KEY" \
-     -H 'content-type: application/json' -d '{"property":{"settings":{"min_stay_type":"both"}}}'
-   ```
-
-   Then redo test 1 for that home (**Turn off**, **Turn on**) before any of
-   tests 2 to 10: the full sync records what Channex holds for every night,
-   so each later save sends only the field the test changes.
+   Redo test 1 for an existing home from iOS **Menu → Channels → Airbnb →
+   Choose listings to sync**. Uncheck only the certification home, choose
+   **Stop syncing 1 listing**, and confirm with that same button in the
+   confirmation sheet. Wait for the stop to finish. Return to **Choose
+   listings to sync**, check the same home, choose **Sync 1 listing**, and
+   confirm with that same button. Do this before tests 2 to 10: the full sync
+   records what Channex holds for every night, so each later save sends only
+   the field the test changes. Website **Listing status** only controls
+   whether the home is listed or unlisted; it does not stop Airbnb syncing.
 2. Register the webhook for the staging account, then check it again without
    `--apply`; it must report `unchanged`:
 
@@ -78,6 +83,14 @@ The write path Channex will ask to see:
    ORDER BY created_at DESC LIMIT 20;
    ```
 
+   Open those exact tasks in the property's Channex **Logs**. For test 1,
+   inspect every restriction object: each must contain `min_stay_arrival`
+   and `min_stay_through`, and the date ranges must cover all 500 nights.
+   Check the availability task covers the same dates. For test 5, verify
+   both minimum-stay fields carry the requested value on the exact test
+   date. A `pushed` row and `sent_json` alone do not prove Channex retained
+   the fields.
+
 Home A stands in for Twin Room, home B for Double Room. Dates are in 2026
 unless stated. Every action is in **Calendar** for that home: **Select nights**,
 choose the start and end night, **Edit selected nights**.
@@ -86,7 +99,7 @@ choose the start and end night, **Edit selected nights**.
 
 | # | Test | Action in KrabiClaw | Calls |
 | --- | --- | --- | --- |
-| 1 | Full sync, 500 days | **Connect Airbnb** imports the home and sends its 500 nights (import stage `inventory`); for a home already imported, **Listing status → Turn off**, then **Turn on** in the iOS app. Every night carries rate, both minimum-stay fields, max stay, closed to arrival, closed to departure and stop sell. Set varied prices and rules on Airbnb first: Channex refuses uniform data. | 1 restrictions, 1 availability per home |
+| 1 | Full sync, 500 days | **Connect Airbnb** imports the home and sends its 500 nights (import stage `inventory`); for an existing home, stop and restart only that home's sync through **Choose listings to sync**, as described above. Every night carries rate, both minimum-stay fields, max stay, closed to arrival, closed to departure and stop sell. Set varied prices and rules on Airbnb first: Channex refuses uniform data. | 1 restrictions, 1 availability per home |
 | 2 | Single date, single rate | Home A, 22 Nov: **Nightly price** 333 | 1 restrictions |
 | 3 | Single date, several rates | Not applicable: one room type and one rate plan per home. Say so on the form | — |
 | 4 | Several dates, several rates | Home A, 1–10 Nov: 241. Home B, 10–16 Nov: 312.66. B&B: not modelled | 1 per home, one date range each |
