@@ -11,7 +11,7 @@
     :data-testid="`offer-${offer.id}`"
     @click="open = true"
   >
-    <img :src="offer.illustration" alt="" class="size-16 shrink-0 object-contain sm:size-20" loading="lazy" decoding="async">
+    <img :src="offer.illustration" alt="" class="size-16 shrink-0 rounded-xl object-cover sm:size-20" loading="lazy" decoding="async">
     <span class="min-w-0 flex-1">
       <span class="block text-lg font-semibold leading-snug text-highlighted">{{ offer.headline }}</span>
       <span class="mt-1 block text-base text-muted">{{ summary }}</span>
@@ -21,7 +21,7 @@
 
   <UModal v-model:open="open" :title="`How ${offer.name} works`" :ui="{ content: 'max-w-lg' }">
     <template #body>
-      <img :src="offer.illustration" alt="" class="size-24 object-contain" decoding="async">
+      <img :src="offer.illustration" alt="" class="size-24 rounded-2xl object-cover" decoding="async">
       <ol class="mt-6 space-y-6">
         <li v-for="step in offer.steps" :key="step.title" class="flex gap-5">
           <span class="flex size-14 shrink-0 items-center justify-center rounded-xl bg-elevated" aria-hidden="true">

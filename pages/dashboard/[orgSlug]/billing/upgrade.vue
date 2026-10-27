@@ -56,7 +56,7 @@ watchEffect(() => {
 // Each addition leads with its offer's illustration, the same picture Menu and Today offered it with.
 const changes: EditorNavigationItem[] = BUSINESS_ADDITIONS.map(row => {
   const illustration = OFFERS.find(item => item.id === row.id.replace('-', '_'))?.illustration
-  return { ...row, ...(illustration ? { lead: { image: illustration, imageFit: 'contain' as const } } : {}) }
+  return { ...row, ...(illustration ? { lead: { image: illustration, imageFit: 'cover' as const } } : {}) }
 })
 
 const planName = (id: string) => plans.value.find(plan => plan.id === id)?.name ?? id
