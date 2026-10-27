@@ -188,6 +188,11 @@ test('an assigned staff member can review a future online consultation from Toda
     await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
     await memberPage.reload()
     await expect(detail.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+    const missingId = crypto.randomUUID()
+    const missingRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/bookings/booking/${missingId}`)
+    await memberPage.goto(`${DASHBOARD}/bookings/booking/${missingId}/change/guests`)
+    await body(await missingRead, 404)
+    await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
   } finally {
     try {
       if (requestId) {
