@@ -1662,8 +1662,10 @@ test.describe('dashboard pane hierarchy', () => {
   test('Back to an auto-opening index opens its first child again', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/integrations`)
-    // Integrations is an index of deterministic rows: it opens the first one.
-    await expect(page).toHaveURL(`${ORG}/integrations/google-maps`)
+    // Connections is an index of deterministic rows: it opens the first one.
+    await expect(page).toHaveURL(`${ORG}/integrations/google-calendar`)
+    await expectPanes(page, ['organization-integrations', 'google-calendar'])
+    await open(page, `${ORG}/integrations/google-maps`)
     await expectPanes(page, ['organization-integrations', 'integration-google-maps'])
 
     // Deeper: one location's connection. Google Maps and that location own the frame.
@@ -1673,13 +1675,13 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}/integrations/google-maps/${locationSlug}`)
     await expectPanes(page, ['integration-google-maps', `integration-google-maps-${locationSlug}`])
 
-    // In-app Back leads to the bare Integrations index, which must not stay
+    // In-app Back leads to the bare Connections index, which must not stay
     // alone at full width: it opens the first row again.
     const back = page.locator('#dashboard-panel-integration-google-maps [data-testid="dashboard-navbar-back"]')
     await expect(back).toHaveAttribute('href', `${ORG}/integrations`)
     await back.click()
-    await expect(page).toHaveURL(`${ORG}/integrations/google-maps`)
-    await expectPanes(page, ['organization-integrations', 'integration-google-maps'])
+    await expect(page).toHaveURL(`${ORG}/integrations/google-calendar`)
+    await expectPanes(page, ['organization-integrations', 'google-calendar'])
 
     // Payments is payouts, reached from the Earnings cog; beside a pane it opens How you get paid.
     await open(page, `${ORG}/payments`)

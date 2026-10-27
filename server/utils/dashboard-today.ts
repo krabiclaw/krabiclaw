@@ -15,6 +15,8 @@ import { readIntegration } from '~/server/utils/organization-integrations'
 import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
 import { getGoogleAdsCustomer, getGoogleAdsPerformanceSummary } from '~/server/utils/google-ads'
 import { getBlogPost } from '~/server/utils/content/publishing'
+import { planOffers } from '~/shared/offers'
+import { getOrganizationEntitlements } from '~/server/utils/billing-access'
 
 export interface TodayFeedQuery {
   range: 'today' | 'upcoming'
@@ -104,6 +106,16 @@ async function performanceCard(db: DbClient, organization: DashboardOrganization
     description: `${Math.abs(change)}% ${change > 0 ? 'more' : 'fewer'} than the previous 7 days. View your website performance.`, imageIcon: 'i-lucide-chart-no-axes-combined' })
 }
 
+// Airbnb's suggestion card: the first thing the plan lacks, offered to someone who can take it, with the same picture Menu offers it with.
+async function offerCard(env: CloudflareEnv, organization: DashboardOrganizationRow): Promise<TodayCard | null> {
+  const [offer] = planOffers(await getOrganizationEntitlements(env, organization.id))
+  if (!offer || !('plan' in offer.unlock)) return null
+  const plan = offer.unlock.plan
+  return card({ id: `offer:${offer.id}`, to: `/dashboard/${encodeURIComponent(organization.slug)}/${offer.path}`, priority: 'opportunity',
+    eyebrow: `Included with ${plan.charAt(0).toUpperCase() + plan.slice(1)}`, headline: offer.headline, description: offer.line,
+    imageUrl: offer.illustration, imageFit: 'cover', imageIcon: 'i-lucide-sparkles' })
+}
+
 // What the connected Google Ads account did in the last 7 complete days, in its own currency as Google reports it.
 async function googleAdsCard(db: DbClient, env: CloudflareEnv, organization: DashboardOrganizationRow, now: Date): Promise<TodayCard | null> {
   const connection = await readIntegration(db, organization.id, 'google_ads')
@@ -189,17 +201,19 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   }
 
   const ownerScope = organizationWide && !input.assignedMemberId && !input.kinds?.length
-  const [threads, failures, performance, ads, opportunities] = await Promise.all([
+  const [threads, failures, performance, ads, opportunities, offer] = await Promise.all([
     organization.vertical !== 'lodging' || organizationWide ? attentionThreads(db, organization, principal, input) : [],
     ownerScope && await roleAllows({ ...organization, permissions: { content: ['publish'] } }) ? publicationCards(db, organization, input.locationId) : [],
     ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { analytics: ['read'] } }) ? performanceCard(db, organization, now) : null,
     ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { analytics: ['read'] } }) ? googleAdsCard(db, env, organization, now) : null,
     ownerScope && await roleAllows({ ...organization, permissions: { content: ['update'] } }) ? contentOpportunities(db, organization, env, input.locationId) : [],
+    ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { billing: ['update'] } }) ? offerCard(env, organization) : null,
   ])
   const attention = threads.map(thread => attentionCard(thread, organization))
   const handledRequests = new Set(threads.map(thread => thread.id))
   const publicationIds = new Set(failures.map(item => item.id.slice('publication:'.length)))
-  const selectedOpportunities = [...(performance ? [performance] : []), ...(ads ? [ads] : []), ...opportunities.filter(item => !publicationIds.has(item.id.slice(item.id.indexOf(':') + 1)))].slice(0, 2)
+  // Two things to do, then the one offer: it never crowds out the day's own work.
+  const selectedOpportunities = [...[...(performance ? [performance] : []), ...(ads ? [ads] : []), ...opportunities.filter(item => !publicationIds.has(item.id.slice(item.id.indexOf(':') + 1)))].slice(0, 2), ...(offer ? [offer] : [])]
   const cards = [...attention, ...failures, ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...selectedOpportunities]
   return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt })
 }

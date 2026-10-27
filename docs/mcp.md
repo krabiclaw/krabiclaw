@@ -56,10 +56,13 @@ checking, and a null account with empty IDs disconnects it. Busy results contain
 intervals, not personal event titles or descriptions. Failed or stale selected
 calendar reads block new availability rather than treating unknown time as free.
 
-The CMS selects the primary personal calendar and offers **Avoid double bookings**.
-The business connection creates or reuses its **KrabiClaw** calendar automatically.
-Neither flow requires a calendar picker. Google event edits do not change bookings.
-See [Google Calendar](integrations/google-calendar.md) for projection and cleanup.
+The CMS selects the primary personal calendar and offers **Google Calendar
+sync** (Business). The business connection creates or reuses its **KrabiClaw**
+calendar automatically. Neither flow requires a calendar picker. An event moved
+in Google moves its booking through the booking-move operation; a deleted event
+is put back and the booking needs attention. See
+[Google Calendar](integrations/google-calendar.md) for projection, inbound sync
+and cleanup.
 
 ## Auth Model
 

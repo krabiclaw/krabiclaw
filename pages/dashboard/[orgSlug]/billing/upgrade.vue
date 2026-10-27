@@ -34,6 +34,7 @@
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, BUSINESS_ADDITIONS, PAID_PLAN_PRICES, STARTER_PLAN_ID, type NewSalePlanId } from '~/shared/billing-model'
+import { OFFERS } from '~/shared/offers'
 import { useOrganizationBilling } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
@@ -52,7 +53,11 @@ watchEffect(() => {
   if (status && (status.plan === BUSINESS_PLAN_ID || status.cancelAtPeriodEnd || status.scheduledPlan)) showError({ statusCode: 404, statusMessage: 'There is no upgrade for this plan' })
 })
 
-const changes: EditorNavigationItem[] = BUSINESS_ADDITIONS.map(row => ({ ...row }))
+// Each addition leads with its offer's illustration, the same picture Menu and Today offered it with.
+const changes: EditorNavigationItem[] = BUSINESS_ADDITIONS.map(row => {
+  const illustration = OFFERS.find(item => item.id === row.id.replace('-', '_'))?.illustration
+  return { ...row, ...(illustration ? { lead: { image: illustration, imageFit: 'cover' as const } } : {}) }
+})
 
 const planName = (id: string) => plans.value.find(plan => plan.id === id)?.name ?? id
 type Choice = { value: NewSalePlanId; label: string; price: string; description?: string }
@@ -63,8 +68,10 @@ const choices = computed<Choice[]>(() => ([GROWTH_PLAN_ID, BUSINESS_PLAN_ID] as 
   // The plan's own tagline, from its Stripe product.
   description: plans.value.find(plan => plan.id === id)?.tagline,
 })))
-// The plan the catalog recommends starts chosen, so Continue is live.
-const chosen = ref<NewSalePlanId>(choices.value.find(choice => plans.value.find(plan => plan.id === choice.value)?.highlighted)?.value ?? GROWTH_PLAN_ID)
+// The plan an offer named starts chosen; otherwise the one the catalog recommends, so Continue is live.
+const route = useRoute()
+const offered = choices.value.find(choice => choice.value === route.query.plan)?.value
+const chosen = ref<NewSalePlanId>(offered ?? choices.value.find(choice => plans.value.find(plan => plan.id === choice.value)?.highlighted)?.value ?? GROWTH_PLAN_ID)
 
 const busy = ref(false)
 const error = ref('')

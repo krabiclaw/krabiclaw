@@ -40,10 +40,7 @@
       </div>
       <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" :label="`Require online payment for paid ${occurrence}s`" />
-        <template v-if="!paymentEntitled">
-          <p class="mt-4 text-sm text-muted">Online payments require Business. Paid {{ occurrence }}s can be booked without online payment when this setting is off.</p>
-          <UButton class="mt-3" :to="`/dashboard/${route.params.orgSlug}/billing/upgrade`" variant="outline">Upgrade to Business</UButton>
-        </template>
+        <OfferCard v-if="!paymentEntitled" class="mt-4" :offer="offer('payments')" :summary="`Paid ${occurrence}s can be booked without online payment while this is off. Online payments come with Business.`" />
       </UFormField>
       <UFormField v-else-if="concern === 'location'" name="held_online">
         <SettingRow v-model="p.form.held_online" :disabled="p.form.scheduling_mode !== 'provider' && !p.form.held_online" label="Held online" />
@@ -57,7 +54,8 @@
 <script setup lang="ts">
 import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { productEditorKey, type BookingConcern } from '~/components/dashboard/ProductEditorPage.vue'
-import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
+import OfferCard from '~/components/dashboard/OfferCard.vue'
+import { offer } from '~/shared/offers'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -78,11 +76,7 @@ const settings = computed(() => ({
   location: { title: 'Meeting format', lead: `Enable online ${legal.value ? 'consultations' : 'booking'} in ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} working hours. Edit physical availability and repeating times at each saved ${legal.value ? 'office' : 'location'}.` },
 }))
 const dashboard = useDashboardOrganization()
-const paymentEntitled = computed(() => {
-  const plan = dashboard.organization.value?.effective_plan
-  if (!plan) throw createError({ statusCode: 500, statusMessage: 'Organization billing status is unavailable', fatal: true })
-  return getPlanEntitlements(plan).payments === true
-})
+const paymentEntitled = computed(() => dashboard.entitlements.value.payments === true)
 const { data: members, error: membersError, status: membersStatus } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
 // The host is who runs it: one member or one team. Whose hours guests book is a separate choice.
 const host = computed({

@@ -44,7 +44,7 @@ were exercised on October 4, 2026 against the built local Worker and the separat
 private verification calendar. Those test events and connections were removed.
 The redesigned CMS subsequently created the business's KrabiClaw calendar through
 real consent, without calendar or export-policy choices. Desktop/mobile hours,
-time-off sheets, profile edits and the personal Avoid double bookings switch were
+time-off sheets, profile edits and the personal Google Calendar sync switch (then "Avoid double bookings") were
 exercised against the built Worker and read back through D1. The empty business
 calendar remains for review; temporary member data was removed. The earlier
 consent flow showed an unverified-app notice because Cloud Console retained an

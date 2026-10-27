@@ -60,6 +60,7 @@ const reservationFieldsSchema = z.object({
 })
 const fieldsSchema = z.discriminatedUnion('kind', [bookingFieldsSchema, reservationFieldsSchema])
 const requestSchema = z.intersection(fieldsSchema, z.object({ expectedUpdatedAt: z.string().min(1) }))
+const moveSchema = z.intersection(fieldsSchema, z.object({ expectedUpdatedAt: z.string().min(1).optional() }))
 const sourceSchema = z.object({
   recordKind: z.enum(['booking', 'reservation']),
   assignedMemberId: z.string().nullable().default(null),
@@ -267,7 +268,7 @@ async function changePresentation(db: DbClient, thread: GuestThreadRow, proposal
   }
 }
 
-async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow, entryId: string, status: 'requested' | 'accepted' | 'declined', proposal: z.infer<typeof proposalSchema>, noun: string) {
+async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow, entryId: string, status: 'requested' | 'accepted' | 'declined' | 'moved', proposal: z.infer<typeof proposalSchema>, noun: string) {
   const summary = await sourceSummary(db, thread)
   if (!summary.guestEmail) throw new HTTPError({ statusCode: 400, message: 'Guest email is required' })
   const guest = await changePresentation(db, thread, proposal)
@@ -295,7 +296,7 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
       organizationName: guest.organizationName,
       organizationLogoUrl: await organizationLogo(db, thread.organization_id),
       heading: subject,
-      intro: guest.labels[`booking.change_${status === 'requested' ? 'pending' : status === 'declined' ? 'unchanged' : 'updated'}`]!,
+      intro: guest.labels[`booking.change_${status === 'requested' ? 'pending' : status === 'declined' ? 'unchanged' : status === 'moved' ? 'moved_detail' : 'updated'}`]!,
       rows: status === 'declined' ? [] : [[guest.copy.locationLabel, guest.locationTitle], [guest.copy.dateLabel, guest.after.whenLabel], [guest.copy.guestsLabel, String(guest.after.partySize)]],
       actionUrl: actionUrl?.href ?? null,
       actionLabel: actionUrl ? guest.labels['booking.change_review']! : null,
@@ -304,6 +305,8 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
     submissionId: thread.id,
   })
   if (sent.status === 'failed') throw new HTTPError({ statusCode: 502, message: sent.error || 'Guest email could not be sent' })
+  // A move is the business's own doing; the guest is told, the owners already know.
+  if (status === 'moved') return
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: guest.fromName,
     threadId: thread.id, submissionType: thread.kind === 'reservation' ? 'reservation' : 'booking', submissionId: thread.id, sourceEntryId: entryId,
@@ -377,6 +380,77 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
     throw new HTTPError({ statusCode: 500, message: 'Booking change decision is invalid' })
   }
   return { changeStatus: 'awaiting_guest_acceptance' as const }
+}
+
+/**
+ * Move a booking or reservation now, without a proposal: the business's own
+ * change, from its dashboard, ChatGPT or an event dragged on its Google
+ * calendar. The destination passes the same checks as a proposal; the guest
+ * is told the new time rather than asked. Refused — a 409 naming why — when
+ * the change needs the guest's consent or the destination cannot take the
+ * party, and then nothing has moved.
+ */
+export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, actor: { userId: string } | { source: 'google_calendar' }, body: unknown, idempotencyKey: string) {
+  const parsed = moveSchema.safeParse(body)
+  if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'Valid change details are required' })
+  const after = fieldsSchema.parse(parsed.data)
+  const before = await loadSource(db, thread)
+  const summary = await sourceSummary(db, thread)
+  if ('userId' in actor) {
+    const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actor.userId })
+    if (!membership) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
+    const locations = new Set([before.locationId, after.kind === 'reservation' ? after.locationId : null].filter((value): value is string => Boolean(value)))
+    for (const locationId of locations) await assertResourceAccess(db, { ...memberAccessPrincipal(membership, { env }), resourceLocationId: locationId })
+  }
+  const dedupeKey = `booking-change-move:${thread.id}:${idempotencyKey}`
+  let entry = await findEntryByDedupeKey(db, dedupeKey)
+  if (entry) {
+    const previous = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
+    if (JSON.stringify(previous.after) !== JSON.stringify(after)) throw new HTTPError({ statusCode: 409, message: 'Request key was reused for different changes' })
+  } else {
+    if (!['pending', 'confirmed'].includes(before.status)) throw new HTTPError({ statusCode: 409, message: 'This reservation or booking can no longer be changed' })
+    if (before.endsAt <= new Date().toISOString()) throw new HTTPError({ statusCode: 409, message: 'This visit has ended and cannot be rescheduled' })
+    if (parsed.data.expectedUpdatedAt !== undefined && before.updatedAt !== parsed.data.expectedUpdatedAt) throw new HTTPError({ statusCode: 409, message: 'The reservation changed. Reload before moving it.' })
+    if (before.productId) await refreshProductBusy(db, env, thread.organization_id, before.productId)
+    const destination = await validateDestination(db, thread, before, after, dedupeKey)
+    if (!destination.claim) throw new Error('A move destination always claims its slot')
+    if (destination.label === localLabel(before.startsAt, before.timezone) && after.partySize === before.partySize && destination.locationId === before.locationId) {
+      throw new HTTPError({ statusCode: 400, message: 'Choose at least one change' })
+    }
+    const original = before.locationId
+      ? await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [before.locationId, thread.organization_id])
+      : null
+    if (!summary.guestEmail || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) throw new HTTPError({ statusCode: 503, message: 'Guest email delivery is not configured' })
+    const id = crypto.randomUUID()
+    const now = new Date().toISOString()
+    const payload = proposalSchema.parse({ before: sourceSchema.parse(before), after, updatedAt: before.updatedAt,
+      locationTitle: destination.title, originalLocationTitle: original?.title ?? '', afterLabel: destination.label,
+      afterDate: destination.date, afterTime: destination.time, afterStartsAt: destination.startsAt, afterTimezone: destination.timezone, afterLocationId: destination.locationId })
+    // The move and its record land together: a destination that cannot take
+    // the party changes no row, so the entry is not written either.
+    const queries: BatchQuery[] = [await destination.claim(before.recordId, now), {
+      query: `INSERT INTO activity_entries
+        (id, request_id, kind, scope_kind, actor_kind, actor_user_id, event_name, body, payload_json, dedupe_key, sequence, occurred_at, created_at)
+        SELECT ?, ?, 'operation', 'request', ?, ?, 'booking_change.moved', ?, ?, ?,
+          (SELECT COALESCE(MAX(sequence), 0) + 1 FROM activity_entries WHERE request_id = ?), ?, ?
+        FROM requests source WHERE source.id = ? AND source.organization_id = ? AND source.updated_at = ? AND changes() = 1`,
+      params: [id, thread.id, 'userId' in actor ? 'member' : 'system', 'userId' in actor ? actor.userId : null,
+        `Moved to ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}${'source' in actor ? ' from Google Calendar' : ''}.`,
+        JSON.stringify(payload), dedupeKey, thread.id, now, now, thread.id, thread.organization_id, before.updatedAt],
+    }, {
+      query: `UPDATE requests SET updated_at = ?, payload_json = json_set(payload_json, '$.party_size_is_minimum', json('false'))
+               WHERE id = ? AND organization_id = ? AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)`,
+      params: [now, thread.id, thread.organization_id, id],
+    }]
+    if (before.recordKind === 'booking' && destination.sessionId) queries.push(sessionAssignmentQuery(destination.sessionId, thread.organization_id, before.recordId))
+    await executeBatch(db, queries, { operation: 'move booking' })
+    entry = await findEntryByDedupeKey(db, dedupeKey)
+    if (!entry) throw new HTTPError({ statusCode: 409, message: before.recordKind === 'booking' ? 'That session filled up or the booking changed; it has not moved' : 'This reservation changed or that time is no longer available' })
+  }
+  const noun = await bookingNoun(db, thread)
+  await deliverEmail(db, env, thread, entry.id, 'moved', proposalSchema.parse(JSON.parse(entry.payload_json || '{}')), noun)
+  await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'resolved' })
+  return { changeStatus: 'moved' as const }
 }
 
 /** GET only reads the immutable proposal. POST records one idempotent guest decision. */

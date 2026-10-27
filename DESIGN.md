@@ -94,7 +94,7 @@ theme:
 | Menu | `O/menu` | a launcher |
 
 **Menu is a launcher, not a parent.** It lists the Earnings and Insights cards,
-then Website, Locations, Team, Integrations, Plan and billing (owners and
+then Website, Locations, Team, Connections, Plan and billing (owners and
 admins), Platform accounts (Better Auth admins, inside KrabiClaw's own
 organization only), Account settings,
 Switch to Personal and Log out. Each row opens a destination of its own; none
@@ -113,7 +113,7 @@ The destinations are files under `O`, and their URLs are their files:
 | Posts | `O/website/posts` — short posts to the site and its connected social accounts |
 | Locations | `O/locations`, a location `O/locations/:locationSlug`, `O/locations/new` |
 | Team | `O/team` |
-| Integrations | `O/integrations` |
+| Connections | `O/integrations` |
 | Earnings | `O/earnings` |
 | Payments | `O/payments` — the organization's own Stripe account and payouts |
 | Plan and billing | `O/billing` — the plan as one card with its one change (Upgrade to Business, Choose a plan), the locations it bills, the services sold beside it, and Stripe's portal for the card, invoices and cancelling |
@@ -283,7 +283,7 @@ Three separate questions, three separate answers. None is derived from another.
   `menu`. The layout reads the matched root's `tab` and nothing else. A screen
   that declares none lights no tab; nothing is inferred from its URL or exit.
 - **A root's exit** is `meta.back` on a standalone destination root only.
-  `menu` names the shell's Menu: Website, Locations, Team, Integrations,
+  `menu` names the shell's Menu: Website, Locations, Team, Connections,
   Insights, Notifications, Earnings, Plan and billing, Platform accounts,
   Account settings and Past activity exit there. A named route is a specific exit: Payments to
   Earnings. Catalog, Today, Calendar, Messages and Menu are primary
@@ -590,7 +590,7 @@ the available frame.
 of a desktop window is never the fourth.** Content that scales — a grid, a
 table, a calendar, a chart, cards — takes the frame: Today, Calendar, Catalog,
 Insights, Photos, Transactions name no column. A settings index pairs with its
-first row where there is a pane, as Account settings, Integrations,
+first row where there is a pane, as Account settings, Connections,
 Plan and billing and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
 Only a list of records with nothing of its own to open — Notifications, Past
 activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
@@ -793,7 +793,7 @@ independent of whether the level contains records, fields, settings, media, or
 another index.
 
 Destination roots stand alone: Today, Calendar, Catalog, Messages, Menu, and
-each Menu destination — Website, Locations, Team, Integrations, Earnings,
+each Menu destination — Website, Locations, Team, Connections, Earnings,
 Payments, Plan and billing, Insights, Notifications — as Airbnb's `/hosting/listings` grid does.
 A root that is a grid or a chart uses the frame; a root that is settings opens
 its first row beside it (Leaf width, above). Within a destination, levels pair
@@ -806,7 +806,7 @@ parent pane.
 
 | The index's own children | `autoOpen` | Examples |
 | --- | --- | --- |
-| deterministic leaves or settings sections | its first available child | page editor, product, post, Q&A, Brand, Website, Integrations, location settings, Account settings, booking Change |
+| deterministic leaves or settings sections | its first available child | page editor, product, post, Q&A, Brand, Website, Connections, location settings, Account settings, booking Change |
 | arbitrary records | none | Catalog, Pages, Blog posts, Posts, Locations, menu sections, items in a section, Services, Experiences, Q&A, Team, Google Maps locations |
 
 Which record a tenant meant to open is not something the screen can guess, and
