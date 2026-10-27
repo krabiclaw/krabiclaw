@@ -475,10 +475,13 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     await assert.rejects(connection.advance(productId), { status: 502, data: { code: 'INVALID_PROVIDER_RESPONSE' } })
     // A property created under the old arrival-only mode is repaired before its full calendar is sent.
     settings.min_stay_type = 'arrival'
+    for (const rule of Object.values(channex.restrictions)) delete rule.min_stay_through
     await advanceTo(connection, db, channex, productId, 'complete')
     assert.deepEqual(property.settings, { ...settings, min_stay_type: 'both' })
     assert.equal(property.title, 'Cliff Cabin')
+    assert.deepEqual(Object.keys(channex.restrictions).sort(), Array.from({ length: 500 }, (_, offset) => addDays(today(), offset)))
     assert.equal(Object.values(channex.restrictions).every(rule => rule.min_stay_arrival === 2 && rule.min_stay_through === 2), true)
+    assert.deepEqual(await db.prepare('SELECT operation_id, pending_step FROM channex_connections').first(), { operation_id: null, pending_step: null })
     assert.deepEqual([channex.channel.ratePlans.length, channex.messagesProperty, (await readStayHome(db, manager, productId)).live], [1, mapping!.property_id, true])
   } finally {
     globalThis.fetch = realFetch
