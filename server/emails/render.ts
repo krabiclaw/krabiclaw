@@ -7,7 +7,7 @@ import EmailFactGrid from './blocks/EmailFactGrid'
 import EmailSection from './blocks/EmailSection'
 import EmailActions from './blocks/EmailActions'
 import { light, layout, type } from './tokens'
-import type { NotificationMessage } from '~/server/notifications/messages'
+import type { NotificationEmailPurpose, NotificationMessage } from '~/server/notifications/messages'
 
 const heading: CSSProperties = { color: light.text, fontWeight: '700', margin: '28px 0 0' }
 const text: CSSProperties = { color: light.text, fontSize: '16px', lineHeight: '1.6', margin: '16px 0 0' }
@@ -51,16 +51,17 @@ export const NotificationEmail = defineComponent({
       return h(EmailFrame, {
         locale: message.locale,
         preheader: message.preheader,
+        emailReason: message.emailReason,
         organizationName: message.organizationName ?? null,
         organizationLogoUrl: message.organizationLogoUrl ?? null,
         preferencesUrl: props.preferencesUrl,
-        unsubscribeUrl: props.unsubscribeUrl,
+        unsubscribeUrl: message.emailPurpose === 'transactional' ? null : props.unsubscribeUrl,
         platformDomain: props.platformDomain,
       }, () => [
         hero ? h(EmailHero, { src: hero.imageUrl, alt: hero.alt }) : null,
 
         h(ESection, { class: 'email-gutter', style: `padding:28px ${layout.gutter} 0` }, () => [
-          // The subject is the headline. Nothing below restates it.
+          // The event keeps its headline even when SMTP retains the conversation's subject.
           h('h1', { class: 'email-title', style: `margin:0;${type.title};font-family:var(--x,inherit);color:${light.text}` }, message.title),
           message.intro
             ? h(EText, { style: `margin:12px 0 0;${type.body};color:${light.textMuted};white-space:pre-line` }, () => message.intro)
@@ -99,11 +100,19 @@ export interface RenderOptions {
   unsubscribeUrl?: string | null
 }
 
-export async function renderNotificationEmail(message: NotificationMessage, options: RenderOptions): Promise<RenderedEmail> {
-  return renderEmail(NotificationEmail, {
+export interface RenderedNotificationEmail extends RenderedEmail {
+  emailPurpose: NotificationEmailPurpose
+}
+
+export async function renderNotificationEmail(message: NotificationMessage, options: RenderOptions): Promise<RenderedNotificationEmail> {
+  if (!message.emailReason?.trim()) throw new Error('Notification email requires its reason for sending')
+  if (!['transactional', 'subscribed', 'promotional'].includes(message.emailPurpose)) throw new Error('Notification email requires a valid purpose')
+  if (message.emailPurpose !== 'transactional' && !options.unsubscribeUrl?.trim()) throw new Error('Subscribed and promotional email require an unsubscribe link')
+  const rendered = await renderEmail(NotificationEmail, {
     message,
     platformDomain: options.platformDomain,
     preferencesUrl: options.preferencesUrl ?? null,
     unsubscribeUrl: options.unsubscribeUrl ?? null,
   })
+  return { ...rendered, emailPurpose: message.emailPurpose }
 }

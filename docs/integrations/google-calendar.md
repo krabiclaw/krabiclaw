@@ -1,16 +1,29 @@
-# Outbound Google Calendar
+# Google Calendar sync
 
-KrabiClaw owns scheduling and capacity. Connect Google Calendar to create or reuse
-one **KrabiClaw** calendar for the business. All upcoming pending and confirmed
-Bookings and Reservations are included automatically. Calendar-group allocation
-rules govern booking availability, not which bookings appear in Google.
-Cancelled records and payment holds are excluded. Changes to Google events do
-not change the canonical booking.
+Google Calendar sync is a Business plan feature (`calendar_sync` in
+`server/utils/billing-entitlements.ts`). KrabiClaw owns scheduling and capacity.
+Connect Google Calendar to create or reuse one **KrabiClaw** calendar for the
+business. All upcoming pending and confirmed Bookings and Reservations are
+included automatically. Calendar-group allocation rules govern booking
+availability, not which bookings appear in Google. Cancelled records and
+payment holds are excluded.
+
+The sync runs both ways. An event KrabiClaw created that is moved in Google
+moves its booking through the one booking-move operation
+(`moveBooking` in `server/domain/guest-threads/booking-changes.ts`), the same
+operation the dashboard and ChatGPT use with `apply`, so the move passes the
+same availability checks and sends the guest the same email. An event deleted
+in Google never cancels or refunds a booking: the event is written back, the
+booking's conversation needs attention on Today and the owners are emailed.
+See [Inbound sync](#inbound-sync).
 
 Personal conflict checking is separate: each member connects their own Google
-account and turns **Avoid double bookings** on to check their primary calendar.
-Turning it off retains the linked account and releases personal busy exclusions.
-The CMS shows no calendar picker, group picker, or reservation opt-in.
+account and turns **Check my calendar for conflicts** on under **Google
+Calendar sync** in My account to check their primary calendar. Turning it on
+needs the Business plan; turning it off never does, and retains the linked
+account. A selection kept after the plan lapses fails closed and says so in
+booking details rather than treating unknown time as free. The CMS shows no
+calendar picker, group picker, or reservation opt-in.
 
 ## Committed lifecycle contract
 
@@ -43,6 +56,56 @@ managed identity; if compensation fails, the persisted intent is retried. A
 process killed between the provider write and local receipt is also reconciled
 from the same durable mapping. Cross-provider atomicity is impossible: a late
 in-flight event can be briefly visible until compensation/retry completes.
+
+## Inbound sync
+
+Modelled on the Channex booking feed: a change arrives, its current state is
+read, it is applied through the canonical domain operation, and every outcome
+is recorded in `channel_sync_log` (`provider='google_calendar'`,
+`kind='calendar_event'`, `external_id` = the Google event id).
+
+- **Feed.** Google's change list (`events.list` with `syncToken`,
+  `showDeleted=true`) is the feed. `google_calendar_sync` holds one row per
+  connection revision: the push channel and the position in the list. The
+  position is read on every push notification and on the five-minute
+  `google-calendar-sync` task alike, so a notification that never arrived
+  loses nothing. A `410 Gone` position reads the whole calendar again and
+  keeps the new position.
+- **Push.** `events.watch` on the KrabiClaw calendar, under the already
+  verified `calendar.app.created` scope (Google's reference lists it for both
+  `events.watch` and `events.list`), delivers to
+  `/api/integrations/google-calendar/webhook`. A notification carries no event
+  data; it names its channel and echoes the random token stored with it, which
+  the route checks before reading the feed. Channels are renewed by the task
+  within a day of expiry; the replaced channel is stopped. Google delivers only
+  to HTTPS, so a local Worker runs on the task alone.
+- **Only managed events.** An item is matched to `google_calendar_event_links`
+  by calendar and event id; anything else on the calendar is the business's
+  own and is never read. An item is compared with the canonical booking's
+  instants; an unchanged one does nothing.
+- **Moves.** With **Reschedules** on (the default), a moved event's new start
+  names the same product's session that starts then (sessions are
+  materialized for provider-held consultations, so every bookable time is
+  one), or a reservation's new date and time in its own timezone. The booking
+  moves through `moveBooking` with the actor `google_calendar`: the session
+  claim, provider busy refresh, paid-booking rules and the guest's "your
+  booking was moved" email are the operation's own. A move the booking cannot
+  follow — no session starts then, the session is full, the time is outside
+  working hours, a paid reservation outside its policy — is refused: the
+  event is written back by the outbound pass, the conversation gets a
+  `calendar_sync.move_refused` entry and needs attention, and the owners are
+  emailed the reason. With Reschedules off, the event is written back and the
+  row is logged `applied`.
+- **Deletions.** A cancelled event is never a cancellation. The event is
+  written back (`calendarEvent` states `status: 'confirmed'`), the
+  conversation gets a `calendar_sync.event_deleted` entry and needs attention,
+  and the owners are emailed that the booking is still booked and how to
+  cancel it properly. One Google change raises one entry and one email: the
+  dedupe key is the event id and Google's `updated` stamp.
+- **Writing back.** Inbound never writes to Google. Marking the link
+  `pending` with no `synced_revision` asks the outbound pass to recreate (a
+  `409` on an existing id is tolerated) and rewrite the event from the
+  booking, exactly as a booking change would.
 
 ## Settings and cleanup
 
@@ -144,10 +207,10 @@ are sent. Provider mutations use `sendUpdates=none`.
    its consent screen/verification for `calendar.calendarlist.readonly` and
    `calendar.app.created`. Personal checking additionally requests
    `calendar.events.freebusy`; Better Auth owns these incremental grants.
-4. Connect Google Calendar in Calendar → Settings → Availability. The business
-   calendar is created automatically; no export policy is chosen. In My account
-   → Profile & availability, connect Google and use Avoid double bookings for personal
-   conflicts.
+4. Connect Google Calendar under Menu → Connections → Google Calendar sync. The
+   business calendar is created automatically; no export policy is chosen. In
+   My account → Profile & availability → Google Calendar sync, connect Google
+   and turn on Check my calendar for conflicts.
 5. Perform real consent/provider verification only against a separately
    authorized disposable Google calendar. Implementation tests intercept Google
    provider requests; they do not grant scopes or mutate real Google events.

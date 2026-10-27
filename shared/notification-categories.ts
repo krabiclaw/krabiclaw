@@ -41,6 +41,9 @@ export function isNotificationCategory(value: unknown): value is NotificationCat
  * email verification locks a person out of their own account, and an
  * organization invitation that silently never arrives looks like a broken
  * product rather than an honoured preference.
+ *
+ * This governs channel delivery only. An email's transactional, subscribed or
+ * promotional purpose is declared by its message, independently of this list.
  */
 export const MANDATORY_EMAIL_CATEGORIES = ['account_security'] as const satisfies readonly NotificationCategory[]
 

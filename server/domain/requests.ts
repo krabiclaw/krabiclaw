@@ -396,12 +396,13 @@ export async function cancelBookingRequest(db: DbClient, input: {
   const [consumed, released] = await executeBatch(db, [
     {
       query: `UPDATE requests SET
-          payload_json = json_set(payload_json, '$.cancellation.used_at', ?), updated_at = ?
+          payload_json = json_set(payload_json, '$.cancellation.used_at', ?),
+          conversation_state = 'resolved', resolved_at = ?, updated_at = ?
         WHERE id = ? AND organization_id = ? AND kind = ?
           AND ${input.buyerUserId ? 'user_id = ?' : "json_extract(payload_json, '$.cancellation.token_hash') = ? AND json_extract(payload_json, '$.cancellation.expires_at') > ?"}
           AND json_extract(payload_json, '$.cancellation.used_at') IS NULL AND (${refund.guard?.query ?? '1=1'})
           AND EXISTS (SELECT 1 FROM ${table} WHERE id = ? AND organization_id = ? AND request_id = ? AND status = ?${input.buyerUserId ? ' AND user_id = ?' : ''}) RETURNING *`,
-      params: [input.now, input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, input.id, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
+      params: [input.now, input.now, input.now, input.id, input.organizationId, input.kind, ...(input.buyerUserId ? [input.buyerUserId] : [input.tokenHash, input.now]), ...(refund.guard?.params ?? []), record.id, input.organizationId, input.id, record.status, ...(input.buyerUserId ? [input.buyerUserId] : [])],
     },
     {
       query: `UPDATE ${table} SET status = 'cancelled', cancelled_at = ?, cancellation_reason = 'guest_cancelled', updated_at = ?

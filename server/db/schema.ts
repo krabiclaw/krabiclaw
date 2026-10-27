@@ -200,6 +200,9 @@ export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	purpose: text().notNull(),
 	status: text().default("pending").notNull(),
 	provider_message_id: text(),
+	// The request is frozen before dispatch; the RFC ID is assigned by Resend.
+	email_json: text(),
+	email_message_id: text(),
 	error: text(),
 	// Only a classified attempt can establish that retrying cannot duplicate delivery.
 	non_delivery_confirmed: integer(),
@@ -259,6 +262,55 @@ export const jwks = sqliteTable("jwks", {
 	createdAt: integer({ mode: "timestamp" }).notNull(),
 	expiresAt: integer({ mode: "timestamp" }),
 });
+
+// Authored organization intent. These are not generated tasks or assertions
+// that a business result occurred. Archiving retains intent and its audit trail.
+export const organization_goals = sqliteTable('organization_goals', {
+  id: text().primaryKey(),
+  organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  intent: text().notNull(),
+  constraints: text(),
+  target_at: text(),
+  status: text({ enum: ['active', 'archived'] }).notNull(),
+  created_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
+  updated_by_user_id: text().references(() => user.id, { onDelete: 'set null' }),
+  created_at: text().notNull(),
+  updated_at: text().notNull(),
+}, table => [
+  unique('organization_goals_scope_unique').on(table.organization_id, table.id),
+  index('organization_goals_status_idx').on(table.organization_id, table.status, table.updated_at),
+  check('organization_goals_text_check', sql`length(trim(intent)) BETWEEN 1 AND 2000 AND (constraints IS NULL OR length(trim(constraints)) BETWEEN 1 AND 2000)`),
+  check('organization_goals_status_check', sql`status IN ('active', 'archived')`),
+  check('organization_goals_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (target_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', target_at, '+0 days') IS target_at)`),
+]);
+
+// A person's reaction to an explicit operation at a particular evidence revision.
+// A new source revision is a new context, not a permanent dismissal of a subject.
+// Optional goal scope ties feedback only to the goal the person actually named.
+export const recommendation_feedback = sqliteTable('recommendation_feedback', {
+  id: text().primaryKey(),
+  organization_id: text().notNull().references(() => organization.id, { onDelete: 'cascade' }),
+  user_id: text().notNull().references(() => user.id, { onDelete: 'cascade' }),
+  operation: text({ enum: ['article.update', 'article.publish', 'guest_thread.reply'] }).notNull(),
+  subject_id: text().notNull(),
+  evidence_revision: text().notNull(),
+  goal_id: text(),
+  goal_revision: text(),
+  decision: text({ enum: ['accept', 'dismiss', 'defer', 'correct'] }).notNull(),
+  note: text(),
+  defer_until: text(),
+  created_at: text().notNull(),
+  updated_at: text().notNull(),
+}, table => [
+  foreignKey({ columns: [table.organization_id, table.goal_id], foreignColumns: [organization_goals.organization_id, organization_goals.id], name: 'recommendation_feedback_goal_scope_fk' }).onDelete('cascade'),
+  uniqueIndex('recommendation_feedback_reference_unique').on(table.organization_id, table.user_id, table.operation, table.subject_id, table.evidence_revision).where(sql`${table.goal_id} IS NULL`),
+  uniqueIndex('recommendation_feedback_goal_reference_unique').on(table.organization_id, table.user_id, table.operation, table.subject_id, table.evidence_revision, table.goal_id, table.goal_revision).where(sql`${table.goal_id} IS NOT NULL`),
+  index('recommendation_feedback_actor_idx').on(table.organization_id, table.user_id, table.updated_at),
+  check('recommendation_feedback_operation_check', sql`operation IN ('article.update', 'article.publish', 'guest_thread.reply') AND length(trim(subject_id)) > 0`),
+  check('recommendation_feedback_revision_check', sql`length(evidence_revision) = 64 AND evidence_revision NOT GLOB '*[^a-f0-9]*' AND ((goal_id IS NULL AND goal_revision IS NULL) OR (goal_id IS NOT NULL AND length(trim(goal_id)) > 0 AND goal_revision IS NOT NULL))`),
+  check('recommendation_feedback_decision_check', sql`decision IN ('accept', 'dismiss', 'defer', 'correct') AND ((decision = 'defer' AND defer_until IS NOT NULL) OR (decision <> 'defer' AND defer_until IS NULL)) AND (decision <> 'correct' OR note IS NOT NULL) AND (note IS NULL OR length(trim(note)) BETWEEN 1 AND 2000)`),
+  check('recommendation_feedback_instants_check', sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (goal_revision IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', goal_revision, '+0 days') IS goal_revision) AND (defer_until IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', defer_until, '+0 days') IS defer_until)`),
+]);
 
 export const media_assets = sqliteTable("media_assets", {
 	id: text().primaryKey(),
@@ -1678,9 +1730,9 @@ export const channel_sync_log = sqliteTable("channel_sync_log", {
 	id: text().primaryKey(),
 	organization_id: text().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text(),
-	provider: text().$type<'channex'>().notNull(),
+	provider: text().$type<'channex' | 'google_calendar'>().notNull(),
 	direction: text().$type<'inbound' | 'outbound'>().notNull(),
-	kind: text().$type<'booking_revision' | 'availability' | 'restrictions'>().notNull(),
+	kind: text().$type<'booking_revision' | 'availability' | 'restrictions' | 'calendar_event'>().notNull(),
 	external_id: text().notNull(),
 	status: text().$type<'applied' | 'acknowledged' | 'ignored_disconnected' | 'failed' | 'needs_review' | 'pushed'>().notNull(),
 	detail: text(),
@@ -1692,9 +1744,9 @@ export const channel_sync_log = sqliteTable("channel_sync_log", {
 	index("channel_sync_log_external_idx").on(table.provider, table.kind, table.external_id),
 	index("channel_sync_log_product_idx").on(table.product_id, table.created_at),
 	index("channel_sync_log_org_idx").on(table.organization_id, table.created_at),
-	check("channel_sync_log_provider_check", sql`provider = 'channex'`),
+	check("channel_sync_log_provider_check", sql`provider IN ('channex', 'google_calendar')`),
 	check("channel_sync_log_direction_check", sql`direction IN ('inbound', 'outbound')`),
-	check("channel_sync_log_kind_check", sql`kind IN ('booking_revision', 'availability', 'restrictions')`),
+	check("channel_sync_log_kind_check", sql`kind IN ('booking_revision', 'availability', 'restrictions', 'calendar_event')`),
 	check("channel_sync_log_status_check", sql`status IN ('applied', 'acknowledged', 'ignored_disconnected', 'failed', 'needs_review', 'pushed')`),
 	check("channel_sync_log_failed_check", sql`status NOT IN ('failed', 'needs_review') OR detail IS NOT NULL`),
 	check("channel_sync_log_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
@@ -3445,3 +3497,25 @@ export const google_calendar_setup = sqliteTable("google_calendar_setup", {
  account_id: text().notNull(),
  started_at: text().notNull(),
 });
+
+// The inbound side of the business calendar: Google's push channel on it and
+// the position in its change list. One row per connection revision; Google's
+// `syncToken` is the replay feed, the channel only says "look now".
+export const google_calendar_sync = sqliteTable("google_calendar_sync", {
+ organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
+ integration_revision: text().notNull(),
+ channel_id: text().notNull(),
+ // Sent back by Google on every notification; a notification without it is not Google's.
+ channel_token: text().notNull(),
+ resource_id: text(),
+ channel_expires_at: text(),
+ sync_token: text(),
+ // Whether an event moved in Google moves its booking. Deletions are never applied.
+ reschedules: integer({ mode: "boolean" }).default(true).notNull(),
+ last_pulled_at: text(),
+ last_error: text(),
+ created_at: text().notNull(),
+ updated_at: text().notNull(),
+}, table => [
+ uniqueIndex("google_calendar_sync_channel_unique").on(table.channel_id),
+]);

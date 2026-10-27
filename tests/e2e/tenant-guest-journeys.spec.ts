@@ -7,6 +7,8 @@ import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Product, PublicProduct } from '../../server/types/products'
+import type { GuestThreadDetailViewModel } from '../../server/domain/guest-threads/types'
+import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 type NotificationRow = { template: string }
 type DeliveryRow = { channel: 'email' | 'whatsapp'; purpose: string; status: string }
@@ -309,6 +311,13 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
     expect((await persisted.json()).booking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
+    const threadURL = `${baseURL}/api/dashboard/organizations/${E2E_POTTERY_ORGANIZATION_ID}/guest-threads/${body.booking_id}`
+    const pendingThread = await request.get(threadURL)
+    expect(pendingThread.status(), await pendingThread.text()).toBe(200)
+    expect((await pendingThread.json() as { thread: GuestThreadDetailViewModel }).thread).toMatchObject({ id: body.booking_id, conversationState: 'needs_attention', resolvedAt: null })
+    const attentionBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: E2E_POTTERY_ORGANIZATION_ID } })
+    expect(attentionBefore.status(), await attentionBefore.text()).toBe(200)
+    expect((await attentionBefore.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`attention:${body.booking_id}`)
     const cancelURL = `${baseURL}/api/public/booking-requests/${body.booking_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
     const receiptURL = cancelURL.replace(/\/cancel$/, '')
@@ -323,6 +332,15 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const replay = await request.post(cancelURL, { headers: authHeaders })
     expect(replay.status()).toBe(200)
     expect(await replay.json()).toEqual({ success: true, kind: 'booking' })
+    const cancelledThread = await request.get(threadURL)
+    expect(cancelledThread.status(), await cancelledThread.text()).toBe(200)
+    const thread = (await cancelledThread.json() as { thread: GuestThreadDetailViewModel }).thread
+    expect(thread).toMatchObject({ id: body.booking_id, conversationState: 'resolved', source: { operationalStatus: 'cancelled' } })
+    expect(thread.resolvedAt).toEqual(expect.any(String))
+    expect(thread.entries.filter(entry => entry.eventName === 'booking.cancel')).toHaveLength(1)
+    const attentionAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: E2E_POTTERY_ORGANIZATION_ID } })
+    expect(attentionAfter.status(), await attentionAfter.text()).toBe(200)
+    expect((await attentionAfter.json() as TodayFeedPayload).cards.some(card => card.id === `attention:${body.booking_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)

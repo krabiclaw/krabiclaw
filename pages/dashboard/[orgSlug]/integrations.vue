@@ -1,18 +1,21 @@
 <template>
   <!--
-    What the business is connected to. Each row is one product with its own
-    connection; the two Google products may use the same linked Google
-    account, which is not a row.
+    What the business is connected to: the syncs that keep two sides in step
+    on their own, then the accounts linked once and used from here. Each row
+    is one product with its own connection; the two Google products may use
+    the same linked Google account, which is not a row. A row the plan lacks
+    says which plan includes it; its leaf makes the offer.
   -->
-  <DashboardIndexPanel id="organization-integrations" title="Integrations" :auto-open="items[0]?.to ?? null">
-    <UAlert v-if="error" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="error.message" />
-    <EditorNavigationList v-else :groups="groups" :active-item="level.child.value" />
+  <DashboardIndexPanel id="organization-integrations" title="Connections" :auto-open="items[0]?.to ?? null">
+    <!-- A summary that could not be read says so; the rows stay, each with what it knows, so a connection can still be opened and repaired. -->
+    <UAlert v-if="error" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="error.message" />
+    <p v-else class="mb-6 text-base text-muted">Connect the accounts you already use. A sync keeps both sides in step for you.</p>
+    <UTabs v-model="plan" :items="planTabs" :content="false" color="neutral" variant="pill" size="sm" class="mb-6" />
+    <EditorNavigationList :groups="groups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
-
 <script lang="ts">
 import type { InjectionKey, Ref } from 'vue'
-
 /** A connected Page, account, property, site or channel, as the settings payload names it. */
 export interface ConnectedIntegration {
   account_id: string
@@ -26,7 +29,6 @@ export interface ConnectedIntegration {
   /** Whose linked account the connection acts through. */
   connected_through: { email: string | null; name: string | null } | null
 }
-
 export interface IntegrationsSummary {
   google_maps: Array<{
     id: string
@@ -50,7 +52,6 @@ export interface IntegrationsSummary {
   discord: ConnectedIntegration | null
   airbnb: { status: string; connected_at: string | null } | null
 }
-
 /** The summary the list shows, and what a leaf refreshes after it changes a connection. */
 export const integrationsKey = Symbol('integrations') as InjectionKey<{
   organizationId: string
@@ -60,29 +61,26 @@ export const integrationsKey = Symbol('integrations') as InjectionKey<{
   refresh: () => Promise<void>
 }>
 </script>
-
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { INTEGRATIONS, type IntegrationKey } from '~/shared/integrations'
-
+import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, STARTER_PLAN_ID } from '~/shared/billing-model'
+import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
-useSeoMeta({ title: 'Integrations | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
-
+useSeoMeta({ title: 'Connections | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 const route = useRoute()
 const level = useRouteLevel()
+const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi()
 const organizationId = await useDashboardOrganizationId()
 const base = computed(() => `/dashboard/${String(route.params.orgSlug)}/integrations`)
-
 const isSummaryResponse = (value: unknown): value is { settings: { integrations: IntegrationsSummary } } =>
   isRecord(value) && isRecord(value.settings) && isRecord(value.settings.integrations)
   && Array.isArray(value.settings.integrations.google_maps)
-
 const { data: summary, error, refresh } = await useAsyncData(
   () => `dashboard-integrations:${String(route.params.orgSlug)}`,
   async () => (await dashboardApi('/api/dashboard/settings', { validate: isSummaryResponse })).settings.integrations,
 )
-
 // A row says what the connection is and how it is: the target it names, a dot
 // for working or failing, and the plan it waits on when the plan lacks it.
 const connection = (value: ConnectedIntegration | null, name = value?.target_name): Pick<EditorNavigationItem, 'summary' | 'status'> => {
@@ -90,7 +88,6 @@ const connection = (value: ConnectedIntegration | null, name = value?.target_nam
   if (value.status === 'error') return { summary: `${name} · Needs attention`, status: 'error' }
   return { summary: name, status: 'success' }
 }
-
 const rows = computed<Record<IntegrationKey, Pick<EditorNavigationItem, 'summary' | 'status'>>>(() => {
   const s = summary.value
   const maps = s?.google_maps ?? []
@@ -119,17 +116,34 @@ const rows = computed<Record<IntegrationKey, Pick<EditorNavigationItem, 'summary
   }
 })
 
-const items = computed<EditorNavigationItem[]>(() => INTEGRATIONS.map(definition => ({
-  id: definition.key, label: definition.name, lead: { icon: definition.logo }, to: `${base.value}/${definition.key}`,
-  ...rows.value[definition.key],
-})))
+// The plan each connection first appears on, from the one entitlement policy.
+const PLANS = [STARTER_PLAN_ID, GROWTH_PLAN_ID, BUSINESS_PLAN_ID] as const
+const planName = (plan: string) => plan === STARTER_PLAN_ID ? 'Free' : plan.charAt(0).toUpperCase() + plan.slice(1)
+const includedFrom = (entitlement?: string) => PLANS.find(plan => !entitlement || getPlanEntitlements(plan)[entitlement] === true) ?? BUSINESS_PLAN_ID
+const plan = ref<'all' | typeof PLANS[number]>('all')
+const planTabs = [{ label: 'All', value: 'all' }, ...PLANS.map(value => ({ label: planName(value), value }))]
 
-const groups = computed(() => [{ id: 'integrations', items: items.value }])
+const items = computed<EditorNavigationItem[]>(() => INTEGRATIONS
+  .filter(definition => plan.value === 'all' || includedFrom(definition.entitlement) === plan.value)
+  .map((definition) => {
+    const lacking = definition.entitlement && dashboard.entitlements.value[definition.entitlement] !== true
+    const row = rows.value[definition.key]
+    return {
+      id: definition.key, label: definition.name, lead: { icon: definition.logo }, to: `${base.value}/${definition.key}`,
+      ...row,
+      ...(lacking ? { summary: `Included with ${planName(includedFrom(definition.entitlement))}`, status: undefined } : {}),
+    }
+  }))
+
+const groups = computed(() => [
+  { id: 'sync', label: 'Sync', items: items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === 'sync') },
+  { id: 'connections', label: 'Connections', items: items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === 'connection') },
+].filter(group => group.items.length))
 
 provide(integrationsKey, {
   organizationId,
   summary,
-  failure: computed(() => error.value ? getErrorMessage(error.value, 'Could not load integrations.') : ''),
+  failure: computed(() => error.value ? getErrorMessage(error.value, 'Could not load connections.') : ''),
   refresh: async () => { await refresh() },
 })
 </script>

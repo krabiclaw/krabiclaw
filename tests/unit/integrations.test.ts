@@ -18,7 +18,9 @@ test('all registered integrations have unique keys and customer-facing identitie
 test('integrationDefinition resolves airbnb correctly', () => {
   const airbnb = integrationDefinition('airbnb')
   assert.equal(airbnb.key, 'airbnb')
-  assert.equal(airbnb.name, 'Airbnb')
+  assert.equal(airbnb.name, 'Airbnb sync')
+  assert.equal(airbnb.group, 'sync')
+  assert.equal(airbnb.entitlement, 'channel_sync')
   assert.equal(airbnb.logo, 'i-simple-icons-airbnb')
 })
 

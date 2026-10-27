@@ -28,14 +28,15 @@
           -->
           <span
             v-if="item.lead"
-            class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-elevated"
+            class="flex size-12 shrink-0 items-center justify-center"
+            :class="{ 'overflow-hidden rounded-xl': !item.lead.image || item.lead.imageFit !== 'contain', 'bg-elevated': !item.lead.image }"
           >
             <img
               v-if="item.lead.image"
               :src="item.lead.image"
               alt=""
               class="size-full"
-              :class="[item.lead.imageFit === 'contain' ? 'object-contain p-2' : 'object-cover', item.lead.darkImage ? 'dark:hidden' : '']"
+              :class="[item.lead.imageFit === 'contain' ? 'object-contain' : 'object-cover', item.lead.darkImage ? 'dark:hidden' : '']"
               loading="lazy"
               decoding="async"
             >
@@ -44,7 +45,7 @@
               :src="item.lead.darkImage"
               alt=""
               class="hidden size-full dark:block"
-              :class="item.lead.imageFit === 'contain' ? 'object-contain p-2' : 'object-cover'"
+              :class="item.lead.imageFit === 'contain' ? 'object-contain' : 'object-cover'"
               loading="lazy"
               decoding="async"
             >

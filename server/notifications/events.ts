@@ -56,6 +56,8 @@ export function reservationCreatedMessage(input: ReservationEventInput): Notific
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive reservation notifications for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }
@@ -82,6 +84,8 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a reservation with ${input.organizationName} was cancelled and you receive its reservation notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -122,6 +126,8 @@ export function stayBookedMessage(input: StayEventInput): NotificationMessage {
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive stay booking notifications for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }
@@ -145,6 +151,8 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a stay with ${input.organizationName} was cancelled and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -171,6 +179,8 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive ${input.presentation.noun} notifications for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }
@@ -193,6 +203,8 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a ${input.presentation.noun} with ${input.organizationName} was cancelled and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -226,6 +238,8 @@ export function contactReceivedMessage(input: ContactEventInput): NotificationMe
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
     category: 'guest_messages',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because someone contacted ${input.organizationName} and you receive its website messages.`,
     organizationName: input.organizationName,
   }
 }
@@ -255,6 +269,10 @@ export function guestReplyMessage(input: GuestReplyEventInput): NotificationMess
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open thread in dashboard' } : undefined,
     category: 'guest_messages',
+    emailPurpose: 'transactional',
+    emailReason: input.organizationName
+      ? `You received this email because a guest replied to a conversation with ${input.organizationName} and you receive its guest messages.`
+      : 'You received this email because a guest replied to a conversation you receive notifications about.',
     organizationName: input.organizationName,
   }
 }
@@ -282,6 +300,8 @@ export function reviewReceivedMessage(input: ReviewEventInput): NotificationMess
     ),
     primaryAction: input.reviewsUrl ? { url: input.reviewsUrl, label: 'View review' } : undefined,
     category: 'reviews',
+    emailPurpose: 'subscribed',
+    emailReason: `You receive this email under your review notification preferences for ${input.organizationName}.`,
     organizationName: input.organizationName,
   }
 }
@@ -314,6 +334,8 @@ export function bookingReassignedMessage(input: BookingReassignedEventInput): No
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because a booking assignment changed at ${input.organizationName} and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -356,6 +378,44 @@ export function bookingChangeMessage(input: BookingChangeEventInput): Notificati
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'View in dashboard' } : undefined,
     category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because changes were proposed or answered for a ${input.recordKind} with ${input.organizationName} and you receive its booking notifications.`,
+    organizationName: input.organizationName,
+  }
+}
+
+export interface CalendarSyncEventInput {
+  kind: 'event_deleted' | 'move_refused'
+  recordKind: string
+  guestName: string
+  whenLabel: string
+  /** Why the move could not be applied; absent for a deletion. */
+  reason: string | null
+  replyUrl: string | null
+  organizationName: string
+}
+
+/** Something changed on the business's Google calendar that the booking did not follow. */
+export function calendarSyncMessage(input: CalendarSyncEventInput): NotificationMessage {
+  const deleted = input.kind === 'event_deleted'
+  const summary = deleted
+    ? `${input.guestName}'s ${input.recordKind} is still booked for ${input.whenLabel}. Deleting its event in Google Calendar never cancels it or refunds anyone, and the event has been put back. Cancel the ${input.recordKind} in KrabiClaw if you meant to.`
+    : `${input.guestName}'s ${input.recordKind} stays at ${input.whenLabel}${input.reason ? `: ${input.reason}` : '.'} The event has been moved back in Google Calendar. Change the ${input.recordKind} in KrabiClaw to pick a time that works.`
+  return {
+    title: deleted ? `${input.guestName}'s ${input.recordKind} was deleted in Google Calendar` : `${input.guestName}'s ${input.recordKind} could not be moved`,
+    preheader: summary,
+    hero: null,
+    intro: summary,
+    facts: facts(
+      fact('recordKind', 'Type', input.recordKind, true),
+      fact('guestName', 'Guest', input.guestName, true),
+      fact('when', 'Still booked for', input.whenLabel, true),
+      fact('reason', 'Reason', input.reason),
+    ),
+    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
+    category: 'reservations_bookings',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because ${input.guestName}'s ${input.recordKind} with ${input.organizationName} changed on the business's Google Calendar and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
 }
@@ -381,6 +441,8 @@ export function domainUpdateMessage(input: DomainEventInput): NotificationMessag
     ),
     primaryAction: { url: input.dashboardUrl, label: 'Open domain settings' },
     category: 'organization_and_billing',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because you receive status updates for ${input.domain}.`,
   }
 }
 
@@ -418,6 +480,8 @@ export function contentReportedMessage(input: ContentReportedInput): Notificatio
     ),
     primaryAction: { url: input.reviewUrl, label: 'Review report' },
     category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: 'You received this email because you handle content reports for KrabiClaw.',
   }
 }
 
@@ -434,5 +498,7 @@ export function onboardingCompletedMessage(input: OnboardingCompletedInput): Not
     primaryAction: { url: input.viewCustomerUrl, label: 'View customer' },
     secondaryAction: { url: input.siteUrl, label: 'Open site' },
     category: 'organization_and_billing',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because ${input.organizationName} completed setup and you receive KrabiClaw business onboarding alerts.`,
   }
 }

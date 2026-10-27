@@ -4,6 +4,7 @@ import PostalMime from 'postal-mime'
 import { guestReplyText, InboundEmailRejection, receiveGuestEmail } from '~/server/domain/guest-threads/inbound-email'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { parseReplyToAddress } from '~/server/utils/submission-messages'
+import { isEmailMessageId } from '~/server/utils/email-delivery'
 
 // Checks what receiving a reply reads: the D1 binding and the secret that signs
 // reply addresses. Without the secret every signature would fail to verify and
@@ -55,9 +56,10 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown): Pro
   if (!reply) throw new InboundEmailRejection('This address does not accept email.')
 
   const rawEmail = await readEmailBytes(message.raw)
-  const messageId = message.headers.get('Message-ID')?.trim()
-    || `content-sha256:${await sha256Hex(rawEmail)}`
   const parsed = await PostalMime.parse(rawEmail, { attachmentEncoding: 'arraybuffer' })
+  const rfcMessageId = parsed.messageId?.trim() ?? null
+  if (rfcMessageId !== null && !isEmailMessageId(rfcMessageId)) throw new InboundEmailRejection('This email has an invalid Message-ID.')
+  const messageId = rfcMessageId ?? `content-sha256:${await sha256Hex(rawEmail)}`
 
   await receiveGuestEmail(env, {
     submissionType: reply.submissionType,
@@ -69,6 +71,13 @@ async function processEmail(message: ForwardableEmailMessage, env: unknown): Pro
       return { bytes: new Uint8Array(attachment.content), filename: attachment.filename || 'attachment' }
     }),
     messageId,
+    headers: {
+      from: message.from.trim().toLowerCase(),
+      subject: parsed.subject ?? null,
+      messageId: rfcMessageId,
+      inReplyTo: parsed.inReplyTo ?? null,
+      references: parsed.references ?? null,
+    },
   })
 }
 

@@ -7,7 +7,7 @@ import { threadPayloadForGuest, requestInsertQueries, getGuestRequest } from '..
 import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import test, { mock } from 'node:test'
 import { Miniflare } from 'miniflare'
-import { createDeliveryReceipt, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
+import { createDeliveryReceipt, deliverReceiptEmail, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
@@ -169,7 +169,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
 
     const reply = (body: string, idempotencyKey: string) => executeGuestThreadOperation(db, {
       threadId: 'contact-proof', action: 'reply', actorUserId: 'user-proof', body, idempotencyKey, env })
-    const deliveryRow = (id: string) => db.prepare('SELECT status, provider_message_id FROM guest_thread_deliveries WHERE id = ?').bind(id).first<{ status: string; provider_message_id: string | null }>()
+    const deliveryRow = (id: string) => db.prepare('SELECT status, provider_message_id, email_json, email_message_id FROM guest_thread_deliveries WHERE id = ?').bind(id).first<{ status: string; provider_message_id: string | null; email_json: string | null; email_message_id: string | null }>()
 
     // A reply is sent, and its receipt carries the provider's message id.
     const operationKey = 'reply-proof'
@@ -179,11 +179,20 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const sent = await deliveryRow(deliveryId)
     assert.equal(sent?.status, 'sent')
     assert.match(sent?.provider_message_id ?? '', /^log-only:email:/)
+    assert.equal(sent?.email_message_id, null, 'log-only delivery has no actual RFC Message-ID')
+    assert(sent?.email_json)
+    const recordedReply = JSON.parse(sent.email_json)
+    assert.equal(recordedReply.message.to, 'guest@proof.example')
+    assert.equal(recordedReply.message.inReplyTo, undefined, 'messages without genuine RFC ancestry do not invent a parent')
+    assert.equal(recordedReply.message.references, undefined)
+    assert.ok(recordedReply.message.html.includes('A reply'))
+    assert.ok(recordedReply.message.text.includes('A reply'))
     assert.equal((await db.prepare('SELECT conversation_state FROM requests WHERE id = ?').bind('contact-proof').first<{ conversation_state: string }>())?.conversation_state, 'waiting_on_guest')
 
     // Replaying the same reply sends nothing: the receipt keeps its message id.
     assert.equal((await reply('A reply', operationKey)).ok, true)
     assert.equal((await deliveryRow(deliveryId))?.provider_message_id, sent?.provider_message_id)
+    assert.equal((await deliveryRow(deliveryId))?.email_json, sent.email_json, 'replaying a staff reply preserves its frozen email request')
     const replyEntry = await db.prepare('SELECT id FROM activity_entries WHERE dedupe_key=?').bind(operationDedupeKey).first<{ id: string }>()
     assert.equal((await buyerAlerts()).filter(alert => alert.id === `buyer-thread:${replyEntry!.id}`).length, 1)
     assert((await buyerAlerts()).every(alert => alert.destination === '/dashboard/account/messages/contact-proof'))
@@ -279,9 +288,13 @@ test('a replayed status email sends its recorded content and refuses a supersede
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
     env: { DB: { type: 'd1' } },
   } }] })
-  const requests: { subject: string; text: string; html: string }[] = []
+  const requests: { to: string[]; subject: string; text: string; html: string; headers?: Record<string, string> }[] = []
   let reject = true
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    if (url === 'https://api.resend.com/emails/status-proof' && init.method === 'GET') {
+      const sent = requests.at(-1)!
+      return Response.json({ id: 'status-proof', message_id: '<status-proof@provider-proof.com>', to: sent.to, subject: sent.subject, html: sent.html, text: sent.text })
+    }
     assert.equal(url, 'https://api.resend.com/emails')
     requests.push(JSON.parse(String(init.body)))
     return reject ? new Response('Provider rejected', { status: 503 }) : Response.json({ id: 'status-proof' })
@@ -305,7 +318,7 @@ test('a replayed status email sends its recorded content and refuses a supersede
 
     const input = {
       threadId: 'booking-status', actorUserId: 'user-status',
-      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example' },
+      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' },
     }
     const cancel = { ...input, action: 'cancel', idempotencyKey: 'cancel-status' }
     assert.deepEqual(await executeGuestThreadOperation(db, cancel), {
@@ -323,16 +336,25 @@ test('a replayed status email sends its recorded content and refuses a supersede
     assert.equal(requests.length, 1)
     const deliveryId = 'guest-thread-email:booking-status:cancel-status'
     assert.equal((await getDeliveryById(db, deliveryId))!.status, 'failed')
+    const frozenRequest = (await getDeliveryById(db, deliveryId))!.email_json
+    assert(frozenRequest)
     const original = requests[0]!
     const guestBody = 'Proof · Oct 1, 2098, 6:00 PM GMT+7 · 2 guests'
     assert.equal(original.subject, 'Reservation Cancelled — Proof')
     assert.ok(original.text.includes(guestBody), original.text)
     assert.ok(original.html.includes(guestBody), original.html)
+    const emailReason = 'You received this email because there is an update to your request with Proof.'
+    assert.ok(original.html.includes(emailReason), original.html)
+    assert.ok(original.text.replace(/\s+/g, ' ').includes(emailReason), original.text)
+    assert.doesNotMatch(original.html, /unsubscribe|\/signup/i)
+    assert.doesNotMatch(original.text, /unsubscribe|\/signup/i)
+    assert.equal(original.headers, undefined, 'a cancellation is transactional and has no mailing-list headers')
     // A later display edit cannot change the copy already recorded for this
     // cancellation. Retrying sends the exact first email again.
     await db.prepare("UPDATE organization SET name='Changed after cancellation' WHERE id='org-status'").run()
     assert.equal((await executeGuestThreadOperation(db, cancel)).status, 502)
     assert.deepEqual(requests[1], original)
+    assert.equal((await getDeliveryById(db, deliveryId))!.email_json, frozenRequest)
 
     // Moving the reservation is what makes the pending send stale — the thread
     // carries no copy of the time to move.
@@ -365,9 +387,15 @@ test('a failed stay cancellation email retries its recorded content after displa
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
     env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-cancellation-delivery-proof', exportName: 'Hub' } },
   } }] })
-  const requests: Array<{ body: { subject: string; text: string; html: string }; idempotencyKey: string | null }> = []
+  const requests: Array<{ body: { to: string[]; subject: string; text: string; html: string }; idempotencyKey: string | null }> = []
+  const providerReadbacks: string[] = []
   let reject = true
   t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    if (url === 'https://api.resend.com/emails/stay-cancellation-delivered' && init.method === 'GET') {
+      providerReadbacks.push(url)
+      const sent = requests.at(-1)!.body
+      return Response.json({ id: 'stay-cancellation-delivered', message_id: '<stay-cancellation-delivered@provider-proof.com>', to: sent.to, subject: sent.subject, html: sent.html, text: sent.text })
+    }
     assert.equal(url, 'https://api.resend.com/emails')
     requests.push({ body: JSON.parse(String(init.body)), idempotencyKey: new Headers(init.headers).get('idempotency-key') })
     return reject
@@ -441,8 +469,15 @@ test('a failed stay cancellation email retries its recorded content after displa
     assert.deepEqual(requests, [original, original])
     const settled = await getDeliveryById(db, deliveryId)
     assert.deepEqual({ status: settled!.status, error: settled!.error, providerMessageId: settled!.provider_message_id }, { status: 'sent', error: null, providerMessageId: 'stay-cancellation-delivered' })
+    assert.equal(settled!.email_message_id, '<stay-cancellation-delivered@provider-proof.com>')
+    assert(settled!.email_json)
+    const frozenEmail = JSON.parse(settled!.email_json)
+    assert.deepEqual({ to: frozenEmail.message.to, subject: frozenEmail.message.subject, html: frozenEmail.message.html, text: frozenEmail.message.text }, {
+      to: original.body.to[0], subject: original.body.subject, html: original.body.html, text: original.body.text,
+    })
     await notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0)
     assert.equal(requests.length, 2)
+    assert.equal(providerReadbacks.length, 1, 'a settled replay neither sends nor repeats native metadata readback')
     assert.deepEqual(await db.prepare('SELECT * FROM activity_entries WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first(), entry)
     assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE request_id = ? AND event_name = 'stay.host_cancelled'").bind(stay.request_id).first('count'), 1)
     assert.equal(await db.prepare('SELECT count(*) AS count FROM guest_thread_deliveries WHERE entry_id = ?').bind(entry.id).first('count'), 1)
@@ -575,11 +610,16 @@ test('a review request reads the visit from the record that holds it', async () 
     // headline fragment leaking into a value, which is what this guards — the
     // message carries no such phrase at all now, so the check is that the real
     // visit is what the facts show.
-    const { html } = await renderNotificationEmail(reviewRequestMessage({
+    const reviewMessage = reviewRequestMessage({
       guestName: 'Sivan', organizationName: 'Kikuzuki', locationName: 'Main Room',
       visitAt: formatTimestamp(context.visit_starts_at, 'en', context.visit_timezone), partySize: '6 guests',
       reviewUrl: 'https://review.example/r',
-    }), { platformDomain: 'proof.example' })
+    })
+    await assert.rejects(renderNotificationEmail(reviewMessage, { platformDomain: 'proof.example' }), /Subscribed and promotional email require an unsubscribe link/)
+    const { html, emailPurpose } = await renderNotificationEmail(reviewMessage, {
+      platformDomain: 'proof.example', unsubscribeUrl: 'https://proof.example/unsubscribe?user=guest-review&category=review_requests&token=preview',
+    })
+    assert.equal(emailPurpose, 'promotional')
     assert.match(html, /Sep 11, 2026, 8:00\s?PM/, 'the visit renders in the reservation timezone')
     assert.match(html, /6 guests/)
     assert.doesNotMatch(html, />\s*your reservation\s*</, 'the headline phrase is never rendered as a detail value')
@@ -740,6 +780,7 @@ test('native Resend test transport persists one delivered financial email throug
       native = await resendData('native financial test email readback', () => client.emails.get(String(receipt.provider_message_id)))
     }
     assert.equal(native.id, receipt.provider_message_id)
+    assert.equal(receipt.email_message_id, native.message_id, 'the stored RFC identity is the actual provider-assigned Message-ID')
     assert.deepEqual(native.to, ['delivered@resend.dev'])
     assert.equal(native.subject, input.guest.message.title)
     assert.equal(native.last_event, 'delivered')
@@ -751,9 +792,46 @@ test('native Resend test transport persists one delivered financial email throug
     const replayReadback = await resendData('native financial test email replay readback', () => client.emails.get(String(receipt.provider_message_id)))
     assert.equal(replayReadback.id, native.id)
     assert.equal(replayReadback.last_event, 'delivered')
+    assert.match(native.message_id, /^<[^<>\s]+@[^<>\s]+>$/u)
+    const replyIdempotencyKey = `native-threading:${crypto.randomUUID()}`
+    const reply = {
+      to: 'delivered@resend.dev',
+      subject: `Re: ${native.subject}`,
+      html: '<p>Native Resend threading qualification.</p>',
+      text: 'Native Resend threading qualification.',
+      emailPurpose: 'transactional' as const,
+      inReplyTo: native.message_id,
+      references: [native.message_id],
+    }
+    const replyEntryId = await createCanonicalNotification(db, {
+      scope: 'global', template: 'native_threading_reply', targetUserId: 'native-recipient', idempotencyKey: replyIdempotencyKey,
+      title: reply.subject, message: reply.text, deepLink: '/dashboard/account/activity',
+    })
+    const replyReceipt = await createDeliveryReceipt(db, { entryId: replyEntryId, channel: 'email', provider: 'resend', purpose: 'status_update', idempotencyKey: replyIdempotencyKey })
+    const threaded = await deliverReceiptEmail(db, { env, delivery: replyReceipt, threadId: null, email: reply })
+    assert.equal(threaded.status, 'sent')
+    assert.equal(threaded.error, null)
+    const savedReply = await db.prepare('SELECT * FROM guest_thread_deliveries WHERE id=?').bind(replyReceipt.id).first()
+    assert.deepEqual(savedReply, threaded, 'the reply dispatcher result matches the independently read ledger')
+    const recordedReply = JSON.parse(String(savedReply!.email_json)) as { message: typeof reply }
+    assert.deepEqual(recordedReply.message, reply)
+    const threadedReadback = await resendData('native threading test email readback', () => client.emails.get(String(savedReply!.provider_message_id)))
+    assert.deepEqual(threadedReadback.to, ['delivered@resend.dev'])
+    assert.equal(threadedReadback.subject, reply.subject)
+    assert.equal(threadedReadback.id, savedReply!.provider_message_id)
+    assert.equal(threadedReadback.message_id, savedReply!.email_message_id)
+    assert.match(threadedReadback.message_id, /^<[^<>\s]+@[^<>\s]+>$/u)
+    assert.notEqual(threadedReadback.message_id, native.message_id)
+    const threadedReplay = await deliverReceiptEmail(db, { env, delivery: replyReceipt, threadId: null, email: reply })
+    assert.equal(threadedReplay.provider_message_id, threaded.provider_message_id, 'a native replay retains the reply provider identity')
+    assert.deepEqual(await db.prepare('SELECT * FROM guest_thread_deliveries WHERE id=?').bind(replyReceipt.id).first(), savedReply)
+    assert.equal(await db.prepare('SELECT count(*) n FROM guest_thread_deliveries').first('n'), 2)
+    assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE kind='notification'").first('n'), 2)
     t.diagnostic(JSON.stringify({ evidence: 'native Resend test transport', checked_at: new Date().toISOString(), recipient: 'delivered@resend.dev',
       email_id: native.id, last_event: native.last_event, receipt_id_length: String(receipt.id).length,
-      persisted_notifications: 1, persisted_deliveries: 1, replay_provider_id_unchanged: true,
+      original_message_id: native.message_id, threaded_email_id: threadedReadback.id,
+      threaded_message_id: threadedReadback.message_id, threaded_replay_provider_id_unchanged: threadedReplay.provider_message_id === threaded.provider_message_id,
+      persisted_notifications: 2, persisted_deliveries: 2, replay_provider_id_unchanged: true,
       actual_financial_trigger_qualified: false, actual_owner_inbox_qualified: false }))
   } finally { await runtime.dispose() }
 })

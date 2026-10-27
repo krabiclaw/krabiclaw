@@ -86,7 +86,7 @@ export function useOrganizationSettingsNavigation(
       { id: 'website', icon: 'i-lucide-panels-top-left', label: 'Website', to: `${base.value}/website` },
       { id: 'locations', icon: 'i-lucide-map-pin', label: dashboard.organization.value?.vertical === 'service' ? 'Offices' : 'Locations', to: `${base.value}/locations` },
       ...(permissions.value?.team ? [{ id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` }] : []),
-      { id: 'integrations', icon: 'i-lucide-plug', label: 'Integrations', to: `${base.value}/integrations` },
+      { id: 'integrations', icon: 'i-lucide-plug', label: 'Connections', to: `${base.value}/integrations` },
       // What the organization pays KrabiClaw. Owners change it and admins read it; members have no row.
       ...(permissions.value?.billing ? [{ id: 'billing', icon: 'i-lucide-receipt', label: 'Plan and billing', to: `${base.value}/billing` }] : []),
       // "Team" is this organization's members; this is every account there is.

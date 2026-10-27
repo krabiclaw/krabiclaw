@@ -5,6 +5,7 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { blawbyTestExtraHeaders } from './test-env'
 import type { Product } from '../../server/types/products'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
 const ORGANIZATION = 'org-ncls-blawby'
 const SLUG = 'north-carolina-legal-services'
@@ -52,6 +53,7 @@ test('an assigned staff member can review a future online consultation from Toda
       details: { preparation: 'Bring your consultation questions.', cancellation_policy: 'Contact us before the appointment to cancel.' },
       variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }],
     } }), 201)).product
+    expect(product.image, 'The authored consultation has no Product photo').toBeNull()
     await body(await page.request.put(`${EDITOR}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1,
       confirmation_mode: 'review', online_payment_required: false, scheduling_mode: 'provider', assigned_member_id: actor.id, held_online: true } }), 200)
     await body(await page.request.put(`${EDITOR}/products/${product.id}/publication`, { data: { published: true } }), 200)
@@ -69,13 +71,18 @@ test('an assigned staff member can review a future online consultation from Toda
     requestId = booked.request_id
     expect(booked.status).toBe('pending')
     const bookingPath = `${DASHBOARD}/bookings/booking/${requestId}`
-    const read = await body<{ booking: { status: string; assignedMemberId: string; locationTitle: string } }>(
+    const read = await body<{ booking: DashboardBookingDetails }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
-    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online' })
+    expect(read.booking).toMatchObject({ status: 'pending', assignedMemberId: actor.id, locationTitle: 'Online', canReassignProvider: true })
     await body(await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId: ORGANIZATION, memberId: actor.id, role: 'member' },
     }), 200)
     roleChanged = true
+    const assignedRead = await body<{ booking: DashboardBookingDetails }>(
+      await memberContext.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
+    expect(assignedRead.booking).toMatchObject({ id: requestId, assignedMemberId: actor.id, canReassignProvider: false })
+    const providerPath = `/api/dashboard/bookings/booking/${assignedRead.booking.operationalBookingId}/provider`
+    await body(await memberContext.request.get(providerPath, { params: { org: SLUG } }), 404)
 
     const today = await body<TodayFeedPayload>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect(today.cards.find(card => card.id === `attention:${requestId}`)).toMatchObject({ priority: 'attention', to: bookingPath, assignedMemberId: actor.id, occurrenceAt: session.starts_at, bookingKind: 'booking' })
@@ -105,6 +112,7 @@ test('an assigned staff member can review a future online consultation from Toda
     expect((await savedDescription).status()).toBe(200)
     const descriptionReadback = await body<{ product: Product }>(await page.request.get(`${EDITOR}/products/${product.id}`), 200)
     expect(descriptionReadback.product).toMatchObject({ id: product.id, name: product.name, description, booking: { assigned_member_id: actor.id, held_online: true } })
+    expect(descriptionReadback.product.image, 'The independently read Product still has no authored photo').toBeNull()
     await expect(legalCards.getByTestId('editor-card-description')).toContainText(description)
     const forbiddenPreview = await memberContext.request.get(new URL(`${EDITOR}/context`, baseURL!).toString())
     expect(forbiddenPreview.status(), await forbiddenPreview.text()).toBe(404)
@@ -134,14 +142,75 @@ test('an assigned staff member can review a future online consultation from Toda
     await expect(attention).toHaveAttribute('href', bookingPath)
     await attention.click()
     await expect(memberPage).toHaveURL(new URL(bookingPath, baseURL!).toString())
+    const detail = memberPage.locator('#dashboard-panel-booking-details')
+    const todayPanel = memberPage.locator('#dashboard-panel-org-today')
+    await expect(detail.getByRole('heading', { name: 'Awaiting review', exact: true })).toBeVisible()
+    const identity = detail.getByRole('heading', { name: guestFirstName, level: 2, exact: true })
+    await expect(identity).toBeVisible()
+    await expect(identity.locator('..').locator(':scope > div > [data-slot="root"]')).toHaveText(guestFirstName.slice(0, 1))
+    await expect(detail.getByRole('heading', { name: 'Clients', exact: true })).toBeVisible()
+    await expect(todayPanel).toBeHidden()
+    await memberPage.setViewportSize({ width: 1440, height: 900 })
+    await expect(todayPanel).toBeVisible()
+    await expect(attention).toBeVisible()
+    await expect(detail).toBeVisible()
+    const todayBounds = await todayPanel.boundingBox()
+    const detailBounds = await detail.boundingBox()
+    expect(todayBounds).not.toBeNull()
+    expect(detailBounds).not.toBeNull()
+    expect(todayBounds!.x + todayBounds!.width).toBeLessThanOrEqual(detailBounds!.x + 1)
+    await expect(identity).toBeVisible()
+    await memberPage.setViewportSize({ width: 390, height: 844 })
+    await expect(todayPanel).toBeHidden()
+    await expect(detail).toBeVisible()
+    await expect(detail.getByText('Attorney or legal team', { exact: true })).toBeVisible()
+    await expect(detail.getByRole('link').filter({ hasText: 'Attorney or legal team' })).toHaveCount(0)
+    await dismissPreviewToolbar(page)
+    await page.setViewportSize({ width: 390, height: 844 })
+    expect((await page.goto(new URL(bookingPath, baseURL!).toString()))?.status()).toBe(200)
+    const ownerDetail = page.locator('#dashboard-panel-booking-details')
+    const providerRead = page.waitForResponse(response => new URL(response.url()).pathname === providerPath)
+    await ownerDetail.getByRole('link').filter({ hasText: 'Attorney or legal team' }).click()
+    const providers = await body<{ members: Array<{ id: string; current: boolean }> }>(await providerRead, 200)
+    expect(providers.members.find(member => member.id === actor.id)?.current).toBe(true)
+    const assignment = page.locator('#dashboard-panel-booking-team-member')
+    await expect(assignment.getByRole('heading', { name: 'Attorney or legal team', exact: true })).toBeVisible()
+    await expect(assignment).toContainText('Your client and both attorneys are told.')
+    await expect(assignment.getByRole('radio', { checked: true })).toHaveAccessibleName('Assigned attorney Current')
+    await assignment.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(new URL(bookingPath, baseURL!).toString())
+    await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
+    await memberPage.getByRole('dialog', { name: 'Manage consultation', exact: true }).getByRole('link', { name: 'Change consultation', exact: true }).click()
+    const change = memberPage.locator('#dashboard-panel-booking-change')
+    await expect(change.getByRole('link', { name: 'Change clients', exact: true })).toContainText('1 client')
+    await change.getByRole('link', { name: 'Change clients', exact: true }).click()
+    const clients = memberPage.locator('#dashboard-panel-booking-change-field')
+    await expect(clients.getByRole('heading', { name: 'Change clients', exact: true })).toBeVisible()
+    await expect(clients).toContainText('Your client sees every change at once when you send the request.')
+    await expect(clients.getByRole('spinbutton', { name: 'Clients', exact: true })).toHaveValue('1')
+    await clients.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await change.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(memberPage).toHaveURL(new URL(bookingPath, baseURL!).toString())
     const confirmed = memberPage.waitForResponse(response => new URL(response.url()).pathname.endsWith(`/guest-threads/${requestId}/operations/confirm`))
-    await memberPage.getByRole('button', { name: 'Confirm consultation', exact: true }).click()
+    await detail.getByRole('button', { name: 'Manage consultation', exact: true }).click()
+    await memberPage.getByRole('dialog', { name: 'Manage consultation', exact: true }).getByRole('button', { name: 'Confirm consultation', exact: true }).click()
     expect((await confirmed).status()).toBe(200)
     const persisted = await body<{ booking: { status: string; assignedMemberId: string } }>(
       await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
     expect(persisted.booking).toMatchObject({ status: 'confirmed', assignedMemberId: actor.id })
     const completed = await body<TodayFeedPayload>(await memberContext.request.get('/api/dashboard/today', { params: { org: SLUG } }), 200)
     expect(completed.cards.some(card => card.id === `attention:${requestId}`)).toBe(false)
+    await memberPage.clock.setFixedTime(new Date(`${day}T13:00:00.000Z`))
+    await memberPage.reload()
+    await expect(detail.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+    expect((await memberPage.goto(new URL(`${bookingPath}/team-member`, baseURL!).toString()))?.status()).toBe(200)
+    await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
+    await expect(memberPage.locator('#dashboard-panel-booking-team-member')).toHaveCount(0)
+    const missingId = crypto.randomUUID()
+    const missingRead = memberPage.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/bookings/booking/${missingId}`)
+    await memberPage.goto(`${DASHBOARD}/bookings/booking/${missingId}/change/guests`)
+    await body(await missingRead, 404)
+    await expect(memberPage.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
   } finally {
     try {
       if (requestId) {

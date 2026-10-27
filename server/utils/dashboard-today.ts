@@ -15,6 +15,8 @@ import { readIntegration } from '~/server/utils/organization-integrations'
 import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
 import { getGoogleAdsCustomer, getGoogleAdsPerformanceSummary } from '~/server/utils/google-ads'
 import { getBlogPost } from '~/server/utils/content/publishing'
+import { planOffers } from '~/shared/offers'
+import { getOrganizationEntitlements } from '~/server/utils/billing-access'
 
 export interface TodayFeedQuery {
   range: 'today' | 'upcoming'
@@ -46,14 +48,15 @@ function attentionCard(thread: GuestThreadListItemViewModel, organization: Dashb
   const conversation = thread.guestName === null
   const bookingKind = thread.submissionType === 'contact' || conversation && thread.operationalStatus === null ? null : thread.submissionType
   const pending = bookingKind === 'booking' && thread.operationalStatus === 'pending'
-  const reply = conversation || thread.submissionType === 'contact' || thread.latestMessageFromGuest
+  const cancelled = (bookingKind === 'booking' || bookingKind === 'reservation') && thread.operationalStatus === 'cancelled'
+  const reply = conversation || thread.submissionType === 'contact' || thread.latestMessageFromGuest || cancelled
   const noun = bookingKind === 'stay' ? 'stay' : bookingKind ? resolveBookingPresentation(bookingKind, organization.vertical).noun : null
   return card({
     id: `attention:${thread.id}`, priority: 'attention',
     to: bookingKind !== null && bookingKind !== 'stay' && (pending || !reply) ? bookingEditorPath(organization.slug, bookingKind, thread.id) : guestConversationPath(organization.slug, thread.id),
     eyebrow: pending ? 'Awaiting your decision' : 'Needs attention',
-    headline: conversation ? `Review conversation: ${thread.participantLabel}` : pending ? `Review ${thread.guestName}’s ${noun}` : reply
-      ? `Reply to ${thread.guestName}` : `Review ${thread.guestName}’s ${noun}`,
+    headline: conversation && !cancelled ? `Review conversation: ${thread.participantLabel}` : pending ? `Review ${thread.guestName}’s ${noun}` : reply
+      ? `Reply to ${thread.guestName ?? thread.participantLabel}` : `Review ${thread.guestName}’s ${noun}`,
     description: [thread.locationLabel, thread.whenLabel, reply ? thread.preview?.text : null].filter(Boolean).join(' · '),
     imageUrl: thread.imageUrl, imageFit: thread.imageFit, imageIcon: bookingKind ? 'i-lucide-calendar-clock' : 'i-lucide-message-circle',
     locationId: thread.locationId, productId: thread.productId, stayChannel: thread.stayChannel, assignedMemberId: thread.assignedMemberId, bookingKind,
@@ -68,7 +71,7 @@ async function attentionThreads(db: DbClient, organization: DashboardOrganizatio
       organizationId: organization.id, principal, userId: organization.userId, conversationState: 'needs_attention',
       locationId: input.locationId, assignedMemberId: input.assignedMemberId, limit: 200, offset,
     })
-    threads.push(...page.filter(thread => !thread.manuallyArchived && (thread.mailbox === 'current' || thread.latestMessageFromGuest)
+    threads.push(...page.filter(thread => !thread.manuallyArchived && (thread.mailbox === 'current' || thread.latestMessageFromGuest || thread.submissionType !== 'stay' && thread.operationalStatus === 'cancelled')
       && (!input.kinds?.length || thread.submissionType !== 'contact' && input.kinds.includes(thread.submissionType))))
     if (page.length < 200) return threads
   }
@@ -101,6 +104,16 @@ async function performanceCard(db: DbClient, organization: DashboardOrganization
   return card({ id: `performance:${startDate}:${endDate}`, to: insightsPath(organization.slug, { startDate, endDate }), priority: 'opportunity',
     eyebrow: 'Your last 7 complete days', headline: `${report.metrics.pageViews.toLocaleString('en')} page views`,
     description: `${Math.abs(change)}% ${change > 0 ? 'more' : 'fewer'} than the previous 7 days. View your website performance.`, imageIcon: 'i-lucide-chart-no-axes-combined' })
+}
+
+// Airbnb's suggestion card: the first thing the plan lacks, offered to someone who can take it, with the same picture Menu offers it with.
+async function offerCard(env: CloudflareEnv, organization: DashboardOrganizationRow): Promise<TodayCard | null> {
+  const [offer] = planOffers(await getOrganizationEntitlements(env, organization.id))
+  if (!offer || !('plan' in offer.unlock)) return null
+  const plan = offer.unlock.plan
+  return card({ id: `offer:${offer.id}`, to: `/dashboard/${encodeURIComponent(organization.slug)}/${offer.path}`, priority: 'opportunity',
+    eyebrow: `Included with ${plan.charAt(0).toUpperCase() + plan.slice(1)}`, headline: offer.headline, description: offer.line,
+    imageUrl: offer.illustration, imageFit: 'contain', imageIcon: 'i-lucide-sparkles' })
 }
 
 // What the connected Google Ads account did in the last 7 complete days, in its own currency as Google reports it.
@@ -188,17 +201,19 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   }
 
   const ownerScope = organizationWide && !input.assignedMemberId && !input.kinds?.length
-  const [threads, failures, performance, ads, opportunities] = await Promise.all([
+  const [threads, failures, performance, ads, opportunities, offer] = await Promise.all([
     organization.vertical !== 'lodging' || organizationWide ? attentionThreads(db, organization, principal, input) : [],
     ownerScope && await roleAllows({ ...organization, permissions: { content: ['publish'] } }) ? publicationCards(db, organization, input.locationId) : [],
     ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { analytics: ['read'] } }) ? performanceCard(db, organization, now) : null,
     ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { analytics: ['read'] } }) ? googleAdsCard(db, env, organization, now) : null,
     ownerScope && await roleAllows({ ...organization, permissions: { content: ['update'] } }) ? contentOpportunities(db, organization, env, input.locationId) : [],
+    ownerScope && !input.locationId && await roleAllows({ ...organization, permissions: { billing: ['update'] } }) ? offerCard(env, organization) : null,
   ])
   const attention = threads.map(thread => attentionCard(thread, organization))
   const handledRequests = new Set(threads.map(thread => thread.id))
   const publicationIds = new Set(failures.map(item => item.id.slice('publication:'.length)))
-  const selectedOpportunities = [...(performance ? [performance] : []), ...(ads ? [ads] : []), ...opportunities.filter(item => !publicationIds.has(item.id.slice(item.id.indexOf(':') + 1)))].slice(0, 2)
+  // Two things to do, then the one offer: it never crowds out the day's own work.
+  const selectedOpportunities = [...[...(performance ? [performance] : []), ...(ads ? [ads] : []), ...opportunities.filter(item => !publicationIds.has(item.id.slice(item.id.indexOf(':') + 1)))].slice(0, 2), ...(offer ? [offer] : [])]
   const cards = [...attention, ...failures, ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...selectedOpportunities]
   return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt })
 }

@@ -63,6 +63,7 @@ test.afterEach(async () => {
 })
 
 test('a new owner builds a draft and creates a site through the routed flow', async ({ page, request, baseURL, browser, playwright }) => {
+  test.setTimeout(60_000)
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL!, 'user-e2e-kikuzuki-owner')
   const held = await owner.post(`/api/editor/organizations/${otherTenantId}/collections`, { data: { name: 'Small plates' } })
@@ -100,6 +101,9 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 
   // A single-choice step is answered by the press itself: no Next to confirm it.
   await expect(step('type')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Exit', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Save & exit', exact: true })).toHaveCount(0)
+  await expect(page.getByText('Your answers have not been saved yet.', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Restaurant, café or bar' }).click()
   await expect(step('language')).toBeVisible()
   await page.getByRole('button', { name: 'English', exact: true }).click()
@@ -141,7 +145,9 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // The draft holds the typed name as a manual business, with no Google place.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  expect((await saved.json() as { draft: unknown }).draft).toMatchObject({ sourceType: 'manual', placeId: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
+  const initialDraft = (await saved.json() as { draft: { draftId: string; organizationId: string; updatedAt: string } }).draft
+  expect(initialDraft).toMatchObject({ sourceType: 'manual', placeId: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
+  await expect(page.getByText('Your answers have not been saved yet.', { exact: true })).toHaveCount(0)
 
   const previewFrame = page.locator('iframe[title="Site preview"]')
   await expect(previewFrame).toHaveAttribute('src', /preview_token=/)
@@ -187,6 +193,55 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(phone).toHaveAttribute('placeholder', '081 234 5678')
   await phone.fill('0812345678')
   await expect(phone).toHaveValue('081 234 5678')
+
+  // Another editor saves the same draft. Exit must report the stale revision,
+  // keep the owner's edit on screen and leave the newer persisted answer intact.
+  const competingSave = await page.request.post('/api/dashboard/onboarding/drafts/active', {
+    data: { draftId: initialDraft.draftId, expectedUpdatedAt: initialDraft.updatedAt, details: { phone: '+66821234567' } },
+  })
+  expect(competingSave.status(), await competingSave.text()).toBe(200)
+  const competingRevision = (await competingSave.json() as { updatedAt: string }).updatedAt
+  const failedExitResponse = page.waitForResponse(response => response.request().method() === 'POST'
+    && new URL(response.url()).pathname === '/api/dashboard/onboarding/drafts/active')
+  await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+  const failedExit = await failedExitResponse
+  expect(failedExit.status(), await failedExit.text()).toBe(409)
+  await expect(page.getByText('Website draft changed; read it before saving', { exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/\/dashboard\/onboarding\/contact$/)
+  await expect(phone).toHaveValue('081 234 5678')
+  const newerDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(newerDraft.status(), await newerDraft.text()).toBe(200)
+  expect((await newerDraft.json() as { draft: unknown }).draft).toMatchObject({
+    draftId: initialDraft.draftId, organizationId: initialDraft.organizationId, updatedAt: competingRevision,
+    details: { name, phone: '+66821234567', currency: 'THB', timezone: 'Asia/Bangkok' },
+  })
+
+  await page.reload()
+  await expect(step('contact')).toBeVisible()
+  await expect(phone).toHaveValue('082 123 4567')
+  await phone.fill('0812345678')
+  await page.getByRole('button', { name: 'Save & exit', exact: true }).click()
+  await expect(page).not.toHaveURL(/\/dashboard\/onboarding/)
+  const exitedDraft = await page.request.get('/api/dashboard/onboarding/drafts/active')
+  expect(exitedDraft.status(), await exitedDraft.text()).toBe(200)
+  expect((await exitedDraft.json() as { draft: unknown }).draft).toMatchObject({
+    draftId: initialDraft.draftId, organizationId: initialDraft.organizationId,
+    details: { name, phone: '+66812345678', currency: 'THB', timezone: 'Asia/Bangkok' },
+  })
+
+  // A cold entry restores the saved draft. Required answers are complete, so
+  // resume opens review; Back still reaches the saved optional contact answer.
+  await page.goto('/dashboard/onboarding')
+  await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
+  await page.getByRole('button', { name: 'Pick up where you left off', exact: true }).click()
+  await expect(step('review')).toBeVisible()
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
+  await expect(step('look')).toBeVisible()
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
+  await expect(step('products')).toBeVisible()
+  await page.getByRole('button', { name: 'Back', exact: true }).click()
+  await expect(step('contact')).toBeVisible()
+  await expect(phone).toHaveValue('081 234 5678')
   await advance('Next', 'products')
 
   // The menu is optional, but a dish the owner names lands in the section they
@@ -208,6 +263,40 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await step('look').getByRole('combobox').click({ timeout: 30_000 })
   await page.getByRole('option', { name: 'Lora', exact: true }).click({ timeout: 30_000 })
   await headline.fill('Fresh from the Andaman, every morning')
+  await expect(next).toBeEnabled()
+
+  // Hold the actual upload in flight so navigation cannot race its revision.
+  // Releasing it reaches the local endpoint and its real Images refusal.
+  const uploadPath = `/api/dashboard/onboarding/drafts/${initialDraft.draftId}/media/upload`
+  const uploadRoute = `**${uploadPath}`
+  const uploadStarted = Promise.withResolvers<undefined>()
+  const uploadRelease = Promise.withResolvers<undefined>()
+  await page.route(uploadRoute, async route => {
+    uploadStarted.resolve(undefined)
+    await uploadRelease.promise
+    await route.continue()
+  })
+  const uploadResponse = page.waitForResponse(response => new URL(response.url()).pathname === uploadPath
+    && response.request().method() === 'POST')
+  try {
+    await step('look').locator('input[type="file"]').first().setInputFiles({
+      name: 'onboarding-logo.png', mimeType: 'image/png',
+      buffer: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=', 'base64'),
+    })
+    await uploadStarted.promise
+    await expect(page.getByRole('button', { name: 'Save & exit', exact: true })).toBeDisabled()
+    await expect(next).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeDisabled()
+  } finally {
+    uploadRelease.resolve(undefined)
+    await uploadResponse
+    await page.unroute(uploadRoute)
+  }
+  const refusedUpload = await uploadResponse
+  expect(refusedUpload.status(), await refusedUpload.text()).toBe(503)
+  await expect(step('look').getByText(/Cloudflare Images is not configured in this environment, by design/)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Save & exit', exact: true })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Back', exact: true })).toBeEnabled()
   await expect(next).toBeEnabled()
   await advance('Next', 'review')
 

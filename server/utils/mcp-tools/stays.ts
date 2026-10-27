@@ -36,8 +36,8 @@ const channelPush = { ...CHANNEL_PUSH_SCHEMA, description: "What the home's conn
 const onlinePayment = { type: ['object', 'null'], description: 'The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.',
   properties: { payment_id: text, state: { type: 'string', enum: ['pending', 'captured', 'failed', 'recovery', 'refunded'] }, currency: text, amount_minor: { type: 'integer' }, captured_minor: { type: 'integer' }, refunded_minor: { type: 'integer' }, receipt_url: nullableText, created_at: text },
   required: ['payment_id', 'state', 'currency', 'amount_minor', 'captured_minor', 'refunded_minor', 'receipt_url', 'created_at'] }
-export const stayDetail = { type: 'object', properties: { ...stayProperties, payments: { type: 'array', items: payment }, online_payment: onlinePayment, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] }, channel_push: channelPush },
-  required: [...Object.keys(stayProperties), 'payments', 'online_payment', 'paid_minor', 'payment_status'] }
+export const stayDetail = { type: 'object', properties: { ...stayProperties, guest_image_url: { ...nullableText, description: 'The linked Better Auth account’s current portrait. Null for guests without an account portrait.' }, payments: { type: 'array', items: payment }, online_payment: onlinePayment, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] }, channel_push: channelPush },
+  required: [...Object.keys(stayProperties), 'guest_image_url', 'payments', 'online_payment', 'paid_minor', 'payment_status'] }
 const nullableCode = (vocabulary: Record<string, unknown>, description: string) => ({ type: ['string', 'null'], enum: [...Object.keys(vocabulary), null], description })
 /** What a home is and offers: public product stay settings. */
 export const STAY_LISTING_SCHEMA = {

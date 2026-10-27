@@ -19,9 +19,9 @@ export default defineHandler(async (event) => {
   }
 
   try {
-    const { db } = await requireBlogAccess(event, organizationId);
+    const { db, session } = await requireBlogAccess(event, organizationId);
     const input = parseBlogLifecycleInput(await readBody(event) as unknown);
-    const lifecycle = await updateBlogLifecycle(db, postId, input, organizationId);
+    const lifecycle = await updateBlogLifecycle(db, postId, input, organizationId, session.user.id);
 
     return jsonResponse(finalizeRequestMetrics(event, "editor-blog-publish", { success: true, lifecycle }));
   } catch (error) {

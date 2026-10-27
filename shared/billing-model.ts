@@ -71,6 +71,8 @@ export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volum
 export const BUSINESS_ADDITIONS = Object.freeze([
   { id: 'payments', label: 'Online payments and direct stay booking', summary: PAYMENTS_FEE },
   { id: 'google-ads', label: 'Google Ads campaigns', summary: 'List and inspect campaigns; create Search campaigns and update status or budgets' },
+  { id: 'calendar-sync', label: 'Google Calendar sync', summary: 'Busy on your calendar? Booked out on your website. New bookings show up on your calendar' },
+  { id: 'airbnb-sync', label: 'Airbnb sync', summary: 'Reservations, nightly rates and open dates stay in step with Airbnb' },
 ] as const)
 
 /**

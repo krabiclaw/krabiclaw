@@ -111,6 +111,15 @@ export interface PlatformBlogLifecycleState {
   changed: boolean
 }
 
+/** The same stored-state prerequisites apply to publication previews and writes. */
+export function blogPublicationReadiness(article: { status: string; categoryId: string | null }): { available: boolean; reasons: string[] } {
+  if (article.status !== 'draft' && article.status !== 'published') throw new Error('Article has an invalid publication status')
+  const reasons: string[] = []
+  if (article.status === 'published') reasons.push('already_published')
+  if (article.categoryId === null) reasons.push('category_required')
+  return { available: reasons.length === 0, reasons }
+}
+
 export function parseBlogLifecycleInput(body: unknown): PlatformBlogLifecycleInput {
   if (!body || typeof body !== 'object' || Array.isArray(body)) badRequest('Request body must be a valid object')
   const record = body as Record<string, unknown>
@@ -697,7 +706,7 @@ export async function createBlogPost(
       ...(article.category_id === undefined ? [] : [await articleCategoryMembershipQuery(db, { organizationId, articleId: id, collection, categoryId: article.category_id })]),
       ...await contentBlockPlacementQueries(db, canonicalBlocks, placementScope, now),
       organizationEventQuery({ organizationId, actorId: authorId, eventType: 'article.created', entityType: 'article', entityId: id,
-        metadata: { request_hash: requestHash }, dedupeKey }),
+        metadata: { request_hash: requestHash, evidence_basis: 'persisted_change', public_visibility: 'unverified' }, dedupeKey }),
     ]
   } catch (error) {
     if (HTTPError.isError(error)) throw new HTTPError({ cause: error, body: error.body,
@@ -758,7 +767,9 @@ export async function updateBlogLifecycle(
   postIdOrSlug: string,
   input: PlatformBlogLifecycleInput,
   organizationId: string,
+  actorId: string | null,
 ): Promise<PlatformBlogLifecycleState> {
+  if (actorId !== null && (typeof actorId !== 'string' || !actorId.trim())) badRequest('actorId must identify the authenticated actor or explicitly be null')
   if (!input.expected_updated_at?.trim()) badRequest('expected_updated_at is required')
   const sourceId = await resolvePlatformContentId(db, 'article', postIdOrSlug, 'Post not found', organizationId)
   const source = await queryFirst<{ id: string; status: string; published_at: string | null; updated_at: string }>(db,
@@ -770,12 +781,16 @@ export async function updateBlogLifecycle(
   }
   // A published article is always in a category: its index, sidebar and breadcrumb are built from them.
   const categorized = await queryFirst<{ category_id: string }>(db, 'SELECT category_id FROM article_category_articles WHERE article_id = ?', [source.id])
-  if (!categorized) badRequest('Choose a category before publishing (category_id)')
+  if (!blogPublicationReadiness({ status: source.status, categoryId: categorized?.category_id ?? null }).available) badRequest('Choose a category before publishing (category_id)')
   const committedAt = new Date(Math.max(Date.now(), Date.parse(source.updated_at) + 1)).toISOString()
   const [result] = await executeBatch(db, [{ query: `UPDATE content_documents SET
     published_at = COALESCE(published_at, ?), first_published_at = COALESCE(first_published_at, ?),
-    status = 'published', updated_at = ? WHERE id = ? AND kind = 'article' AND row_role = 'root' AND updated_at = ? AND status = 'draft'`,
-  params: [committedAt, committedAt, committedAt, source.id, input.expected_updated_at] },
+    status = 'published', updated_at = ?, updated_by = ? WHERE id = ? AND kind = 'article' AND row_role = 'root' AND updated_at = ? AND status = 'draft'`,
+  params: [committedAt, committedAt, committedAt, actorId, source.id, input.expected_updated_at] },
+  organizationEventQuery({ organizationId, actorId, eventType: 'article.published', entityType: 'article', entityId: source.id,
+    beforeState: { status: source.status, updated_at: source.updated_at },
+    afterState: { status: 'published', published_at: source.published_at ?? committedAt, updated_at: committedAt },
+    metadata: { evidence_basis: 'persisted_change', public_visibility: 'unverified' }, onlyIfPreviousChangedOneRow: true }),
   publicResourceCacheInvalidationQuery(organizationId, 'article-publication')])
   if (Number(result?.meta.changes ?? 0) !== 1) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Article was updated by another writer' })
@@ -785,17 +800,24 @@ export async function updateBlogLifecycle(
 
 export async function updateBlogPost(
   db: D1Database, postIdOrSlug: string, input: PlatformBlogUpdateInput,
-  organizationId: string, env?: CloudflareEnv,
+  organizationId: string, actorId: string | null, env?: CloudflareEnv,
 ) {
+  if (actorId !== null && (typeof actorId !== 'string' || !actorId.trim())) badRequest('actorId must identify the authenticated actor or explicitly be null')
   if (!BLOG_UPDATE_MUTATION_FIELDS.some(field => input[field] !== undefined)) badRequest('At least one blog mutation field is required')
   const postId = await resolvePlatformContentId(db, 'article', postIdOrSlug, 'Post not found', organizationId)
   validateBlogCommon(input, 'update')
-  const current = await queryFirst<{ organization_id: string; collection: string | null; slug: string; updated_at: string }>(db, `
-    SELECT organization_id, metadata_json ->> '$.collection' AS collection, slug, updated_at
+  const current = await queryFirst<{ organization_id: string; collection: string | null; slug: string; updated_at: string;
+    title: string | null; summary: string | null; seo_keywords: string | null; visibility: string; category_id: string | null }>(db, `
+    SELECT organization_id, metadata_json ->> '$.collection' AS collection, slug, updated_at,
+      title, summary, seo_keywords, visibility,
+      (SELECT category_id FROM article_category_articles WHERE article_id = content_documents.id) AS category_id
     FROM content_documents WHERE id = ? AND kind = 'article' AND row_role = 'root'`, [postId])
   if (!current) notFound('Post not found')
   if (input.slug !== undefined && input.slug !== current.slug) badRequest('An article keeps its saved slug')
   if (input.content_blocks !== undefined && !input.expected_updated_at) badRequest('expected_updated_at is required with content_blocks')
+  if (input.expected_updated_at !== undefined && input.expected_updated_at !== current.updated_at) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Content document was updated by another writer' })
+  }
   const effectiveCollection = articleCollectionOf(input.collection === undefined ? current.collection : input.collection)
   // Its category belongs to its collection, so moving an article to the other
   // collection names the category it goes into there.
@@ -805,31 +827,56 @@ export async function updateBlogPost(
   const categoryMembership = input.category_id === undefined ? [] : [await articleCategoryMembershipQuery(db, { organizationId, articleId: postId, collection: effectiveCollection, categoryId: input.category_id })]
   const placementScope = { organizationId }
   const normalizedBlocks = input.content_blocks === undefined ? undefined : await normalizeEditorContentBlocks(db, input.content_blocks, placementScope)
+  const now = new Date().toISOString()
+  const placementQueries = normalizedBlocks === undefined ? [] : await contentBlockPlacementQueries(db, normalizedBlocks, placementScope, now)
+  let blocksChanged = false
+  if (normalizedBlocks !== undefined) {
+    const existingBlocks = await listBlocksForDocument(db, postId)
+    const [existingHash, requestedHash] = await Promise.all([
+      creationRequestHash(existingBlocks.map(block => ({ id: block.id, source_block_id: block.source_block_id,
+        parent_block_id: block.parent_block_id, type: block.type, level: block.level, data: JSON.parse(block.data_json) }))),
+      creationRequestHash(normalizedBlocks.map(block => ({ id: block.id, source_block_id: block.source_block_id ?? null,
+        parent_block_id: block.parent_block_id ?? null, type: block.type, level: block.level ?? null, data: block.data }))),
+    ])
+    blocksChanged = existingHash !== requestedHash || placementQueries.length > 0
+  }
   const metadata: Record<string, unknown> = {}
   const changes: ContentDocumentChanges = { metadata }
+  const changedFields: Array<keyof PlatformBlogUpdateInput> = []
   if (input.title !== undefined) {
     if (!input.title.trim()) badRequest('title cannot be blank')
-    changes.title = input.title
+    if (input.title !== current.title) { changes.title = input.title; changedFields.push('title') }
   }
   for (const field of ['seo_keywords', 'visibility'] as const) {
-    if (input[field] !== undefined) changes[field] = input[field]
+    if (input[field] !== undefined && input[field] !== current[field]) { changes[field] = input[field]; changedFields.push(field) }
   }
-  if (input.excerpt !== undefined) changes.summary = input.excerpt
-  if (input.collection !== undefined) metadata.collection = effectiveCollection
-  const now = new Date().toISOString()
+  if (input.excerpt !== undefined && input.excerpt !== current.summary) { changes.summary = input.excerpt; changedFields.push('excerpt') }
+  if (effectiveCollection !== articleCollectionOf(current.collection)) { metadata.collection = effectiveCollection; changedFields.push('collection') }
+  if (input.category_id !== undefined && input.category_id !== current.category_id) changedFields.push('category_id')
+  if (blocksChanged) changedFields.push('content_blocks')
+  const changed = changedFields.length > 0
   try {
-    await updateContentDocument(db, postId, {
-      expected_updated_at: input.expected_updated_at ?? current.updated_at, blocks: normalizedBlocks, changes,
-      additionalQueriesAfter: [...(normalizedBlocks ? await contentBlockPlacementQueries(db, normalizedBlocks, placementScope, now) : []),
-        ...categoryMembership,
-        ...(input.visibility === undefined && input.category_id === undefined ? [] : [publicResourceCacheInvalidationQuery(organizationId, 'article-visibility')])],
-    })
+    if (changed) {
+      changes.updated_by = actorId
+      await updateContentDocument(db, postId, {
+        expected_updated_at: input.expected_updated_at ?? current.updated_at, blocks: blocksChanged ? normalizedBlocks : undefined, changes,
+        additionalQueriesAfter: [...placementQueries,
+          ...(changedFields.includes('category_id') ? categoryMembership : []),
+          organizationEventQuery({ organizationId, actorId, eventType: 'article.updated', entityType: 'article', entityId: postId,
+            beforeState: { updated_at: current.updated_at },
+            metadata: { changed_fields: changedFields, evidence_basis: 'persisted_change', public_visibility: 'unverified' } })],
+      })
+    }
     const post = await getBlogPost(db, postId, organizationId, env)
+    if (!changed && post.updated_at !== current.updated_at) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Content document was updated by another writer' })
+    }
     // Title and excerpt are drawn on the card, and the blocks hold its leading
-    // picture. Slug and visibility are not on it.
+    // picture. An unchanged retry still finishes a card refresh that may have
+    // failed after an earlier edit committed, without another article revision.
     const cardInputChanged = input.title !== undefined || input.excerpt !== undefined || normalizedBlocks !== undefined
-    if (env && cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: postId } })
-    return { success: true, admin_edit_url: post.admin_edit_url, edit_url: post.edit_url,
+    if (env && cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'content_document', owner_id: postId }, actorId })
+    return { success: true, changed, admin_edit_url: post.admin_edit_url, edit_url: post.edit_url,
       public_path: post.public_path, public_url: post.public_url, preview_url: post.preview_url, post }
   } catch (error) {
     if (isUniqueConstraintError(error)) badRequest('Slug already in use')

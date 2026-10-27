@@ -4,22 +4,33 @@
       <!-- The step column. One question at a time, its own header and footer. -->
       <div class="flex min-h-0 flex-col border-r border-default bg-default">
         <div v-if="currentStep" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
-          <UButton to="/dashboard" color="neutral" variant="outline" size="sm" label="Save & exit" />
+          <UButton
+            color="neutral"
+            variant="outline"
+            size="sm"
+            :label="canSave || state.draftId ? 'Save & exit' : 'Exit'"
+            :loading="exiting"
+            :disabled="Boolean(restoreError) || busy || (Boolean(state.draftId) && !canSave)"
+            @click="saveAndExit"
+          />
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto pb-6" :class="dashboardGutterClass">
+        <div class="min-h-0 flex-1 overflow-y-auto pb-6" :class="dashboardGutterClass" :inert="busy">
           <p v-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
-          <NuxtPage v-else @advance="goNext" />
+          <NuxtPage v-else @advance="goNext" @uploading="uploading = $event" />
         </div>
 
         <div v-if="currentStep && !restoreError" class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
+          <p v-if="!canSave" class="mb-3 text-sm text-muted">
+            {{ state.draftId ? 'Finish the required details to save your changes.' : 'Your answers have not been saved yet.' }}
+          </p>
           <p v-if="draft.error.value" class="mb-3 text-sm text-error">{{ draft.error.value }}</p>
           <div class="flex items-center justify-between gap-4">
-            <UButton variant="link" color="neutral" label="Back" @click="goBack" />
+            <UButton variant="link" color="neutral" label="Back" :disabled="busy" @click="goBack" />
             <UButton
               :label="nextLabel"
               :loading="draft.busy.value"
-              :disabled="!canAdvance"
+              :disabled="!canAdvance || busy"
               @click="goNext"
             />
           </div>
@@ -93,7 +104,12 @@ const router = useRouter()
 const config = useRuntimeConfig()
 const state = useOnboardingState()
 const draft = useOnboardingDraft()
-const { indexOf, nextOf, previousOf, resumeStep } = useOnboardingSteps()
+const { steps, indexOf, nextOf, previousOf, resumeStep } = useOnboardingSteps()
+const exiting = ref(false)
+const uploading = ref(false)
+const busy = computed(() => draft.busy.value || exiting.value || uploading.value)
+onBeforeRouteLeave(() => !draft.busy.value && !uploading.value)
+onBeforeRouteUpdate(() => !draft.busy.value && !uploading.value)
 
 const currentStep = computed(() => onboardingStep(String(route.params.step ?? '')))
 const previousStep = computed(() => currentStep.value ? previousOf(currentStep.value.id) : null)
@@ -105,6 +121,7 @@ const canAdvance = computed(() => {
   if (!step) return false
   return step.intro || step.optional || step.complete(state.value)
 })
+const canSave = computed(() => steps.value.every(step => step.intro || step.optional || step.complete(state.value)))
 
 // ─── Entering the flow ────────────────────────────────────────────────────────
 // The answers live in useState, which a page load starts empty, so every entry
@@ -134,13 +151,14 @@ if (!restoreError.value) {
 }
 
 async function goBack() {
+  if (busy.value) return
   const target = previousStep.value
   await router.push(target ? onboardingStepPath(target.id) : '/dashboard/onboarding')
 }
 
 async function goNext() {
   const step = currentStep.value
-  if (!step || !canAdvance.value) return
+  if (!step || !canAdvance.value || busy.value) return
 
   // The first save creates the site, so it waits for the currency and the clock the site cannot exist without.
   if (!['type', 'language', 'business', 'location', 'hours'].includes(step.id) && !await draft.save()) return
@@ -154,6 +172,17 @@ async function goNext() {
 
   const target = nextStep.value
   if (target) await router.push(onboardingStepPath(target.id))
+}
+
+async function saveAndExit() {
+  if (restoreError.value || busy.value || (state.value.draftId && !canSave.value)) return
+  exiting.value = true
+  try {
+    if (canSave.value && !await draft.save()) return
+    await router.push('/dashboard')
+  } finally {
+    exiting.value = false
+  }
 }
 
 // ─── Preview ──────────────────────────────────────────────────────────────────

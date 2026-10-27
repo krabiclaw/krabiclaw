@@ -7,6 +7,65 @@ KrabiClaw has two distinct records:
 
 Do not infer an external send from a dashboard notification, or an unread item from a delivery receipt.
 
+## Email purpose
+
+Every notification message declares its email purpose and a factual reason for
+sending, which appears in both HTML and plain text. Purpose is separate from
+the category's channel preferences: an optional booking alert is still a
+transactional email. Guest confirmations and payment receipts use their actual
+booking, message or billing category and go directly to the transaction's
+contact without consulting owner notification preferences.
+
+Transactional messages omit unsubscribe links and mailing-list headers. Guest
+transactional messages also omit signup prompts. Authentic booking, property
+and location images remain alongside tenant logos, transaction details,
+attachments and relevant actions. A message without a supplied image renders
+no hero image.
+Subscribed review alerts and promotional review requests and product news retain
+unsubscribe controls. Product News continues to use Resend's native Broadcast
+and Topic unsubscribe lifecycle.
+
+`yarn lint:email-previews` verifies all catalog messages through the canonical
+renderer, including the reason in both bodies, purpose-specific footer controls,
+and the exact supplied hero image URL without inventing an absent image. The
+existing `resend-native-d1.test.ts` and
+`guest-delivery-d1.test.ts` integration tests exercise SDK request headers,
+required opt-out configuration, and persisted cancellation/replay behavior.
+These checks do not establish Gmail inbox-tab placement; that requires
+inspection of an actually delivered message.
+
+## Email conversation continuity
+
+Guest confirmations, status updates, scheduled messages and dashboard replies
+share the existing receipt-backed email dispatcher. It records the complete
+outbound request before dispatch in `guest_thread_deliveries.email_json` and
+stores Resend's actual RFC Message-ID in `email_message_id`. The provider API
+UUID remains in `provider_message_id`; the two identities are not interchangeable.
+
+Resend initially returns queued email with no RFC Message-ID. The dispatcher
+waits for assignment through the official SDK. If readback fails, the saved API
+UUID resumes that readback without another send. Verified Resend webhooks also
+record the actual RFC ID. A send with an unknown provider outcome cannot be
+retried beyond Resend's documented 24-hour idempotency window without review.
+
+Native inbound email records its parsed subject, Message-ID and reply references
+on the immutable guest entry. The content hash used to deduplicate email without
+a Message-ID is never used as an RFC identity. Malformed provided Message-IDs
+are rejected at ingress. Replies select ancestry only within the same request
+and recipient; owner copies and another recipient's messages are excluded.
+SMTP replies retain the subject with one `Re:` prefix and send `In-Reply-To`
+and `References`. Event-specific headings, tenant images and attachments stay
+in the body. Retrying a delivery reuses its frozen sender, recipient, subject,
+body and references even if another message or a brand edit arrives meanwhile.
+
+The existing Resend integration tests verify exact SDK headers and the full
+confirmation/guest/staff sequence against real local D1. The native MIME ingress
+journey verifies routing, stored metadata, duplicate protection and staff replies
+through the built Worker. The opt-in native transport test uses only Resend's
+`delivered@resend.dev` simulation address and independently reads the actual
+provider IDs and subjects. It does not inspect a real Gmail or Outlook inbox.
+The configured Resend API key must permit both sending and retrieving sent email.
+
 ## Local verification
 
 Local development and preview use log-only delivery modes. A log-only send must still write a terminal `guest_thread_deliveries` receipt with a `log-only:` provider message ID when the send belongs to a guest thread.

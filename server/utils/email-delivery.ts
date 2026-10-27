@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { getResendClient } from '~/server/utils/resend'
+import type { NotificationEmailPurpose } from '~/server/notifications/messages'
 
 export type EmailDeliveryMode = 'provider' | 'log_only'
 
@@ -11,7 +12,7 @@ type EmailDeliveryEnv = {
 }
 
 export type EmailSendResult =
-  | { status: 'sent'; messageId: string | null }
+  | { status: 'sent'; messageId: string }
   /** `code` is machine-readable; `error` leads with it, so a persisted delivery error carries it too. */
   | { status: 'failed'; code: string; error: string }
 
@@ -98,12 +99,19 @@ export function emailSender(env: Pick<EmailDeliveryEnv, 'EMAIL_FROM'>, fromName?
     : `${fromName} <${configuredFrom}>`
 }
 
+/** A genuine RFC Message-ID, never a provider API UUID or a deduplication hash. */
+export function isEmailMessageId(value: unknown): value is string {
+  return typeof value === 'string' && /^<[^<>\s]+@[^<>\s]+>$/u.test(value)
+    && Array.from(value).every(character => character.codePointAt(0)! >= 32 && character.codePointAt(0) !== 127)
+}
+
 export async function sendEmail(
   env: EmailDeliveryEnv,
   input: {
     to: string
     subject: string
     text: string
+    emailPurpose: NotificationEmailPurpose
     /**
      * Required. Every outbound message renders through server/emails — a send
      * that can omit the HTML body is how inbox replies ended up as bare text
@@ -113,16 +121,24 @@ export async function sendEmail(
     replyTo?: string | null
     fromName?: string
     idempotencyKey?: string
+    inReplyTo?: string
+    references?: string[]
     /**
      * The RFC 8058 one-click endpoint for this message's category, so a mail
      * client can unsubscribe without opening the message. It must be a route
      * that accepts POST — the header's own POST body is fixed by the RFC, so
-     * the signed target travels in the URL. Omitted for account-security mail,
-     * which cannot be switched off.
+     * the signed target travels in the URL. Transactional mail never carries
+     * mailing-list headers, even when a caller supplies this URL.
      */
     unsubscribeOneClickUrl?: string | null
   },
 ): Promise<EmailSendResult> {
+  if (!['transactional', 'subscribed', 'promotional'].includes(input.emailPurpose)) return failed('EMAIL_PURPOSE_REQUIRED', 'a valid email purpose is required')
+  if (input.emailPurpose !== 'transactional' && !input.unsubscribeOneClickUrl) return failed('EMAIL_UNSUBSCRIBE_REQUIRED', 'subscribed and promotional email require one-click unsubscribe')
+  if ((input.inReplyTo !== undefined && !isEmailMessageId(input.inReplyTo))
+    || (input.references !== undefined && (!Array.isArray(input.references) || !input.references.every(isEmailMessageId)))) {
+    return failed('EMAIL_THREAD_HEADERS_INVALID', 'email reply references must be genuine RFC Message-IDs')
+  }
   if (!shouldSendRealEmail(env)) {
     return { status: 'sent', messageId: logOnlyEmailProviderId('email') }
   }
@@ -134,6 +150,14 @@ export async function sendEmail(
 
   const from = emailSender(env, input.fromName)
   const resend = getResendClient(env)
+  const headers: Record<string, string> = {
+    ...(input.inReplyTo ? { 'In-Reply-To': input.inReplyTo } : {}),
+    ...(input.references?.length ? { References: input.references.join(' ') } : {}),
+    ...(input.emailPurpose !== 'transactional' && input.unsubscribeOneClickUrl ? {
+      'List-Unsubscribe': `<${input.unsubscribeOneClickUrl}>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    } : {}),
+  }
   const response = await resend.emails.send({
     from,
     to: [input.to],
@@ -141,15 +165,13 @@ export async function sendEmail(
     subject: input.subject,
     html: input.html,
     text: input.text,
-    ...(input.unsubscribeOneClickUrl
-      ? {
-          headers: {
-            'List-Unsubscribe': `<${input.unsubscribeOneClickUrl}>`,
-            'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-          },
-        }
-      : {}),
+    ...(Object.keys(headers).length ? { headers } : {}),
   }, input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined)
-  if (!response.error) return { status: 'sent', messageId: response.data.id }
+  if (!response.error) {
+    if (!response.data.id?.trim()) return failed('RESEND_INVALID_RESPONSE', 'Resend did not return the email identity')
+    return { status: 'sent', messageId: response.data.id }
+  }
   return failed('RESEND_REJECTED', `${response.error.statusCode ?? 'no response'} ${response.error.name}: ${response.error.message}`)
 }
+
+export type EmailInput = Parameters<typeof sendEmail>[1]

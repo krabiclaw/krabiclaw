@@ -16,7 +16,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(JSON.stringify(document), 'complete canonical pricing document').toContain('billing_features')
   const comparison = page.locator('[data-parity-section="comparison"]')
   await expect(comparison).toBeVisible()
-  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(36)
+  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(37)
   await expect(comparison.locator('tr[data-feature-id="locations.included"]')).toHaveCount(0)
   // Homes are billed by count: 2 included, then $9 each on a paid plan.
   const homes = comparison.locator('tr[data-feature-id="homes.included"]')
@@ -37,9 +37,14 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   await expect(languages.locator('td .sr-only')).toHaveText(['Not included', 'Included', 'Included'])
   const payments = comparison.locator('tr[data-feature-id="payments.acceptance"]')
   await expect(payments.locator('td .sr-only')).toHaveText(['Not included', 'Not included', 'Included'])
-  for (const id of ['stays.listings', 'stays.calendar', 'stays.airbnb', 'stays.guest-messaging', 'app.ios']) {
+  for (const id of ['stays.listings', 'stays.calendar', 'stays.guest-messaging', 'app.ios']) {
     await expect(comparison.locator(`tr[data-feature-id="${id}"] td .sr-only`)).toHaveText(['Included', 'Included', 'Included'])
   }
+  // The two syncs are Business: Airbnb keeps a home's calendar in step, Google Calendar the team's.
+  for (const id of ['stays.airbnb', 'bookings.calendar-sync']) {
+    await expect(comparison.locator(`tr[data-feature-id="${id}"] td .sr-only`)).toHaveText(['Not included', 'Not included', 'Included'])
+  }
+  await expect(comparison.locator('tr[data-feature-id="bookings.calendar-sync"]')).toContainText('Google Calendar sync')
   await expect(comparison.locator('tr[data-feature-id="stays.guest-messaging"]')).toContainText('Arrival guides and guest messages')
   const directBooking = comparison.locator('tr[data-feature-id="stays.direct-booking"]')
   await expect(directBooking).toContainText('Direct stay booking with online payment')

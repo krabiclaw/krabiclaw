@@ -539,14 +539,22 @@ test('native online review uses canonical Products, holds capacity, and releases
     const recordedHandoff = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events' && response.request().postDataJSON()?.event_name === 'product_order_external_click')
     const externalTab = page.waitForEvent('popup')
     await page.locator(`a[href="${externalUrl}"]:visible`).click()
-    expect((await recordedHandoff).status()).toBe(201)
+    const recordedHandoffResponse = await recordedHandoff
+    expect(recordedHandoffResponse.status()).toBe(201)
+    const recordedEventId = (await recordedHandoffResponse.json() as { id: string }).id
     const destination = await externalTab
     await expect(destination).toHaveURL(externalUrl)
     await destination.close()
     const events = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: { organization_id: org, mode: 'events', filters: { event_name: 'product_order_external_click', entity_id: products[0]!.id } } })
     const recordedEvents = mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows
     expect(recordedEvents).toHaveLength(1)
-    expect(recordedEvents[0]).toMatchObject({ location_id: null, subject: { type: 'product', id: products[0]!.id }, metadata: { destination_hostname: 'example.com' } })
+    expect(recordedEvents[0]).toMatchObject({
+      event_id: recordedEventId, kind: 'interaction', event_name: 'product_order_external_click', stage: 'external_handoff', surface: 'website',
+      location_id: null, subject: { type: 'product', id: products[0]!.id },
+    })
+    expect(recordedEvents[0]).not.toHaveProperty('actor')
+    expect(recordedEvents[0]).not.toHaveProperty('properties')
+    expect(recordedEvents[0]).not.toHaveProperty('metadata')
     const restoreCalendar = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { held_online: nativeConfigBeforeHandoff.held_online } })
     expect(restoreCalendar.status(), await restoreCalendar.text()).toBe(200)
     const restoreNative = await page.request.patch(`${editor}/products/${products[0]!.id}`, { data: { order_url: null } })

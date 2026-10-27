@@ -108,6 +108,9 @@ function paymentMessage(event: PaymentNotificationEvent, audience: 'owner' | 'gu
 
   facts.unshift({ key: 'amount', label: amountLabel, value: amount, lead: true })
   if (event.productTitle?.trim()) facts.splice(1, 0, { key: 'productTitle', label: 'Item', value: event.productTitle.trim(), lead: true })
+  const activity = event.kind.startsWith('refund_') ? 'refund'
+    : event.kind.startsWith('dispute_') ? 'dispute'
+      : event.kind.startsWith('payout_') ? 'payout' : 'payment'
   return {
     title,
     preheader: organizationName ? `${amount} · ${organizationName}` : amount,
@@ -115,7 +118,11 @@ function paymentMessage(event: PaymentNotificationEvent, audience: 'owner' | 'gu
     intro,
     facts,
     primaryAction: event.action ?? undefined,
-    category: guest ? 'account_security' : 'organization_and_billing',
+    category: 'organization_and_billing',
+    emailPurpose: 'transactional',
+    emailReason: guest
+      ? `You received this email because it updates your ${activity}${organizationName ? ` with ${organizationName}` : ''}.`
+      : `You received this email because you receive ${activity} notifications for ${organizationName}.`,
     organizationName,
     organizationLogoUrl: event.organizationLogoUrl,
   }

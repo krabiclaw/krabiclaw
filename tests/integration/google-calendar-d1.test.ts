@@ -231,6 +231,8 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
     await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope,accessToken) VALUES('linked','google-subject','google','actor',?,?)").bind(INTEGRATION_SCOPES['google-calendar'].join(','), accessToken).run()
     for (const org of ['a-broken', 'b-failed', 'c-healthy']) {
       await db.prepare(`INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES(?,?,?, 'USD', 'UTC')`).bind(org, org, org).run()
+      // Google Calendar sync is Business; the task reads only entitled organizations.
+      await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,periodEnd) VALUES(?,'business',?,'active',4070908800)").bind(`sub-${org}`, org).run()
       await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service',?,?,?,'consultation','actor','actor')").bind(org, org, org).run()
     // Held online by a provider whose hours cover the sessions.
       await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
@@ -249,6 +251,9 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
       assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer calendar-task-token')
       if (url.pathname.includes('b-failed')) return Response.json({ error: { message: 'Calendar access refused' } }, { status: 403 })
       if (url.pathname.includes('/calendarList/')) return Response.json({ accessRole: 'writer' })
+      // The inbound side: the channel opens and the change list is empty.
+      if (url.pathname.endsWith('/events/watch')) return Response.json({ resourceId: 'resource', expiration: String(Date.now() + 86_400_000 * 7) })
+      if (!init?.method || init.method === 'GET') return Response.json({ items: [], nextSyncToken: 'position' })
       const payload = JSON.parse(String(init?.body))
       events.set(url.pathname, payload)
       return Response.json(payload)
@@ -256,8 +261,10 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
     await assert.rejects(calendarSyncTask.run({ name: 'google-calendar-sync', payload: {}, context: { cloudflare: { env } } }), error => {
       assert.match(String(error), /a-broken:.*projection write rejected/s)
       assert.match(String(error), /b-failed: 1 Google Calendar event\(s\) failed/)
+      assert.match(String(error), /b-failed: calendar changes could not be read/)
       return true
     })
+    assert.equal(await db.prepare("SELECT sync_token FROM google_calendar_sync WHERE organization_id='c-healthy'").first('sync_token'), 'position', 'the healthy organization took its change-list position')
     assert.equal((await readCalendarIntegration(db, 'b-failed'))?.status, 'error')
     assert.equal((await readCalendarIntegration(db, 'b-failed'))!.last_error, 'Google Calendar returned 403. Check the account grant and calendar writer access.')
     assert.equal(await db.prepare("SELECT state FROM google_calendar_event_links WHERE organization_id='c-healthy'").first('state'), 'synced')

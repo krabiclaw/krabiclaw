@@ -60,7 +60,6 @@ export const PLAN_DEFINITIONS = Object.freeze([
       'Update supported content, menus and photos through ChatGPT',
       'Bookings, consultation requests and ticketed experiences',
       'Home listings, nightly rates, stay calendars and arrival guides',
-      'Connect Airbnb to import listings and sync stays and availability',
       'Saved guest replies and scheduled check-in and checkout messages',
       'iPhone companion app — no extra subscription',
       'WhatsApp booking and reservation notifications — setup required',
@@ -70,7 +69,7 @@ export const PLAN_DEFINITIONS = Object.freeze([
   },
   {
     name: 'Business',
-    description: 'Everything in Growth, plus online payments, direct stay booking and Google Ads campaigns run from your dashboard and ChatGPT.',
+    description: 'Everything in Growth, plus online payments, direct stay booking, Google Calendar sync, Airbnb sync and Google Ads campaigns run from your dashboard and ChatGPT.',
     planId: 'business',
     amountCents: PAID_PLAN_PRICES.business.monthly,
     highlighted: false,
@@ -84,6 +83,8 @@ export const PLAN_DEFINITIONS = Object.freeze([
       'List, view and create Google Ads Search campaigns; set status and daily budgets',
       'Ad spend, clicks, impressions and conversions in your analytics',
       '10% of monthly ad spend for campaigns we manage.',
+      'Google Calendar sync: busy times are booked out; bookings reach your calendar',
+      'Airbnb sync: listings, stays, rates and availability stay in step with Airbnb',
     ],
   },
   // What a plan subscription bills by its Stripe meter, each a product of its own family.

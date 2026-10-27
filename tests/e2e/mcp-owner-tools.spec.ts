@@ -1398,7 +1398,8 @@ test.describe('stateless MCP server', () => {
         expect(await call('get_member_public_profile', { member_id: hostMemberId })).toEqual({ profile: null })
         const unsavedNative = await request.get(memberEndpoint)
         expect(unsavedNative.status(), await unsavedNative.text()).toBe(200)
-        expect(await unsavedNative.json()).toEqual({ scheduling: null })
+        // The native read also answers whether the plan includes Google Calendar sync; this organization is on Business.
+        expect(await unsavedNative.json()).toEqual({ scheduling: null, calendar_sync: true })
         const wrongIdentity = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
         expect(wrongIdentity.status(), await wrongIdentity.text()).toBe(200)
         const wrongIdentityResult = (await wrongIdentity.json()).result
@@ -1417,7 +1418,7 @@ test.describe('stateless MCP server', () => {
           expect(result.content[0].text).toContain(`Invalid arguments for tool ${toolName}`)
           const unchanged = await request.get(memberEndpoint)
           expect(unchanged.status(), await unchanged.text()).toBe(200)
-          expect(await unchanged.json()).toEqual({ scheduling: null })
+          expect(await unchanged.json()).toEqual({ scheduling: null, calendar_sync: true })
         }
         for (const public_name of [null, '', '   ']) {
           const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: null, public_name, public_approved: true } })
@@ -1427,7 +1428,7 @@ test.describe('stateless MCP server', () => {
           expect(JSON.parse(result.content[0].text)).toEqual({ status: 400, message: 'Set a nonblank public name before publishing the member profile' })
           const unchanged = await request.get(memberEndpoint)
           expect(unchanged.status(), await unchanged.text()).toBe(200)
-          expect(await unchanged.json()).toEqual({ scheduling: null })
+          expect(await unchanged.json()).toEqual({ scheduling: null, calendar_sync: true })
         }
         // A published profile does not claim working hours. Physical sessions
         // remain bookable from the Product's own explicitly authored times.

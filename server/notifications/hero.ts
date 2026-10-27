@@ -8,6 +8,8 @@ import { mediaStillUrl, resolveOwnerPicture, type MediaPlacementOwnerType } from
  * the placements it needs. An experience booking leads with the experience and
  * a table reservation with its location, because that is what the guest is
  * looking at.
+ * Record photos set organizationFallback to false so the organization's
+ * sharing image cannot stand in for the Product or location itself.
  *
  * Null is a first-class answer: nothing is substituted, and no stock or
  * placeholder image is invented — tenant surfaces render the tenant's own
@@ -23,14 +25,15 @@ export async function loadOwnerPictures(
   organizationId: string,
   ownerType: MediaPlacementOwnerType,
   ownerIds: readonly string[],
+  options: { organizationFallback?: boolean } = {},
 ): Promise<Map<string, HeroImage | null>> {
   const ids = [...new Set(ownerIds)]
   if (!ids.length) return new Map()
   const [ownerPlacements, organizationPlacements] = await Promise.all([
     readMediaPlacements(db, { organizationId, ownerType, ownerIds: ids }),
-    readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] }),
+    options.organizationFallback === false ? null : readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] }),
   ])
-  const organizationMedia = organizationPlacements.get(organizationId) ?? []
+  const organizationMedia = organizationPlacements?.get(organizationId) ?? []
   return new Map(ids.map((id) => {
     const picture = resolveOwnerPicture(ownerType, ownerPlacements.get(id) ?? [], organizationMedia)
     const imageUrl = mediaStillUrl(picture)

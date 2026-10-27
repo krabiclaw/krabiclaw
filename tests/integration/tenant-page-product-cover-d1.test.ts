@@ -6,6 +6,7 @@ import * as schema from '../../server/db/schema.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { createProduct, setProductLocation, setProductPublication } from '../../server/utils/product-management.ts'
 import { getPublicTenantPageForPath } from '../../server/utils/public-tenant-pages.ts'
+import { loadOwnerPictures } from '../../server/notifications/hero.ts'
 import type { CloudflareEnv } from '../../server/types/cloudflare.ts'
 
 const ORG = 'org'
@@ -38,6 +39,7 @@ async function boot() {
 
 async function placeAsset(db: D1Database, input: {
   assetId: string
+  ownerType: 'organization' | 'business_location' | 'product'
   ownerId: string
   slot: string
   kind: 'image' | 'video'
@@ -49,8 +51,8 @@ async function placeAsset(db: D1Database, input: {
     VALUES (?, ?, ?, 'cloudflare_images', 'uploaded', ?, ?, ?, 'active', ?, ?)`)
     .bind(input.assetId, ORG, input.kind, input.publicUrl, input.thumbnailUrl, input.mimeType, NOW, NOW).run()
   await db.prepare(`INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at)
-    VALUES (?, ?, 'product', ?, ?, ?, 0, 'active', ?, ?)`)
-    .bind(`placement-${input.assetId}`, ORG, input.ownerId, input.slot, input.assetId, NOW, NOW).run()
+    VALUES (?, ?, ?, ?, ?, ?, 0, 'active', ?, ?)`)
+    .bind(`placement-${input.assetId}`, ORG, input.ownerType, input.ownerId, input.slot, input.assetId, NOW, NOW).run()
 }
 
 /**
@@ -70,9 +72,18 @@ test('a product grid item carries the product cover, not whichever placement sor
     } })
     await setProductPublication(db, { organizationId: ORG, productId: product.id, published: true, actor: ACTOR })
     await setProductLocation(db, { organizationId: ORG, productId: product.id, locationId: LOC, published: true, actor: ACTOR })
+    const share = 'https://imagedelivery.net/acct/organization-share/public'
+    await placeAsset(db, { assetId: 'asset-share', ownerType: 'organization', ownerId: ORG, slot: 'social_share', kind: 'image', publicUrl: share, thumbnailUrl: `${share}/thumbnail`, mimeType: 'image/png' })
     // Slot order is alphabetical in the placement read: gallery, then image.
-    await placeAsset(db, { assetId: 'asset-reel', ownerId: product.id, slot: 'gallery', kind: 'video', publicUrl: REEL, thumbnailUrl: REEL_POSTER, mimeType: 'video/mp4' })
-    await placeAsset(db, { assetId: 'asset-cover', ownerId: product.id, slot: 'image', kind: 'image', publicUrl: COVER, thumbnailUrl: `${COVER}/thumbnail`, mimeType: 'image/png' })
+    await placeAsset(db, { assetId: 'asset-reel', ownerType: 'product', ownerId: product.id, slot: 'gallery', kind: 'video', publicUrl: REEL, thumbnailUrl: REEL_POSTER, mimeType: 'video/mp4' })
+    assert.equal((await loadOwnerPictures(db, ORG, 'product', [product.id])).get(product.id)?.imageUrl, share, 'notifications retain the organization share-image fallback')
+    assert.equal((await loadOwnerPictures(db, ORG, 'product', [product.id], { organizationFallback: false })).get(product.id), null, 'a record without its own cover has no contextual photo')
+    assert.equal((await loadOwnerPictures(db, ORG, 'business_location', [LOC], { organizationFallback: false })).get(LOC), null, 'organization branding is not a location photo')
+    await placeAsset(db, { assetId: 'asset-cover', ownerType: 'product', ownerId: product.id, slot: 'image', kind: 'image', publicUrl: COVER, thumbnailUrl: `${COVER}/thumbnail`, mimeType: 'image/png' })
+    const locationPhoto = 'https://imagedelivery.net/acct/location-photo/public'
+    await placeAsset(db, { assetId: 'asset-location', ownerType: 'business_location', ownerId: LOC, slot: 'hero', kind: 'image', publicUrl: locationPhoto, thumbnailUrl: `${locationPhoto}/thumbnail`, mimeType: 'image/png' })
+    assert.equal((await loadOwnerPictures(db, ORG, 'product', [product.id], { organizationFallback: false })).get(product.id)?.imageUrl, COVER, 'the authored Product cover remains the record photo')
+    assert.equal((await loadOwnerPictures(db, ORG, 'business_location', [LOC], { organizationFallback: false })).get(LOC)?.imageUrl, locationPhoto, 'the authored location hero remains the reservation photo')
 
     await createContentDocumentWithBlocks(db, {
       id: 'home', organizationId: ORG, kind: 'page', rowRole: 'root', locale: 'en',

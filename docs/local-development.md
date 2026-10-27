@@ -155,12 +155,16 @@ each one at a test-mode equivalent at the price Better Auth knows its plan by: a
 offered plan's current price, a retired plan's own contract price.
 
 Local setup copies production through `db:pull:local`.
-One SQL read captures the tables and rows from the same database revision.
-D1 exports block concurrent application queries, so setup does not use that
-operation. Changed schema, incomplete results, oversized copies, or failed
-integrity checks on the copy stop setup before it writes the target. Existing
-bookings retain their
-original dates; setup does not manufacture current activity. For date-sensitive
+Cloudflare's native D1 export captures one consistent database revision and
+streams the SQL file instead of returning the whole database in one query.
+Creating that export temporarily blocks other requests to its source database;
+downloading the finished export does not. Obtain the operator's approval for
+that availability impact before initiating a production export. Use
+`--source-file` for an existing local copy when an export is not authorized.
+The transfer validates the schema, rows and integrity of the copy before writing
+the target, and ordinary refreshes retain the destination's signing keys.
+Existing bookings retain their original dates; setup does not manufacture
+current activity. For date-sensitive
 Today or Calendar checks, create bookings through the guest flow in the local
 environment.
 

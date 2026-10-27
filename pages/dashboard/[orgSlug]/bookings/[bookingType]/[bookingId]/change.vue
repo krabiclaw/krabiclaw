@@ -19,7 +19,7 @@
         <p class="min-w-0 flex-1 text-base font-medium text-highlighted">{{ b.changeLocation.value?.title }}</p>
         <UButton
           v-if="locationRow"
-          :to="`${level.path.value}/location`"
+          :to="{ path: `${level.path.value}/location`, query: route.query }"
           icon="i-lucide-pencil"
           aria-label="Change location"
           color="neutral"
@@ -34,7 +34,7 @@
         <NuxtLink
           v-for="field in b.changeFields.value"
           :key="field.key"
-          :to="`${level.path.value}/${field.key}`"
+          :to="{ path: `${level.path.value}/${field.key}`, query: route.query }"
           class="flex items-center gap-4 border-b border-default py-4"
           :aria-label="`Change ${field.label.toLowerCase()}`"
         >
@@ -65,6 +65,7 @@ import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
 definePageMeta({ layout: 'dashboard' })
 
 const level = useRouteLevel()
+const route = useRoute()
 const b = inject(bookingEditorKey)!
 
 // A reservation's Location row sits above the other fields, so it is the first row.
@@ -75,7 +76,7 @@ const locationRow = computed(() => b.bookingType === 'reservation')
 const firstField = computed(() => {
   if (!b.booking.value) return null
   const key = locationRow.value ? 'location' : b.changeFields.value[0]?.key
-  return key ? `${level.path.value}/${key}` : null
+  return key ? { path: `${level.path.value}/${key}`, query: route.query } : null
 })
 
 // Entering the request afresh: the tenant should not inherit edits they abandoned last time.

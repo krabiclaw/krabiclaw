@@ -7,7 +7,7 @@ import { drainPublicResourceCacheInvalidations, purgePublicResourceCacheNow, typ
 import { buildOrganizationDocuments, expandDocumentsForSurfaces, indexItemPayload, organizationKeySegment, syncOrganizationSearchIndex } from '../../server/utils/public-search.ts'
 import { createContentDocumentWithBlocks } from '../../server/utils/content/documents.ts'
 import { articleCategoryMembershipQuery, createArticleCategory } from '../../server/utils/content/article-categories.ts'
-import { updateBlogLifecycle } from '../../server/utils/content/publishing.ts'
+import { updateBlogLifecycle, updateBlogPost } from '../../server/utils/content/publishing.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 const searchEnv: OrganizationChangeDrainEnv = {
@@ -79,6 +79,64 @@ async function insertInvalidation(
   `).bind(input.id, input.status, input.attemptCount, input.claimedAt ?? null, input.processedAt ?? null, input.createdAt).run()
 }
 
+test('article evidence attributes meaningful persisted changes and excludes unchanged or rejected writes', async (t) => {
+  const { db } = await migratedCacheD1(t)
+  await db.prepare("INSERT INTO user (id, name, email) VALUES ('author', 'Author', 'author@example.test'), ('editor', 'Editor', 'editor@example.test')").run()
+  await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('platform-en', 'platform', 'en', 1, 'published')").run()
+  const env = { DB: db, BETTER_AUTH_SECRET: 'article-evidence-proof-secret-long-enough', BETTER_AUTH_URL: 'https://proof.example',
+    STRIPE_SECRET_KEY: 'sk_test_no_provider_requests', PREVIEW_SECRET: 'article-preview-proof-secret',
+    NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' } as CloudflareEnv
+  const category = await createArticleCategory(db, { organizationId: 'platform', collection: 'blog', name: 'News', actorId: 'author' })
+  const { document } = await createContentDocumentWithBlocks(db, {
+    id: 'evidence-article', organizationId: 'platform', kind: 'article', rowRole: 'root', locale: 'en',
+    title: 'Original', slug: 'evidence-article', status: 'draft', visibility: 'listed', authorId: 'author', metadata: { collection: 'blog' },
+  }, [{ id: 'evidence-body', type: 'markdown', data: { markdown: 'Useful copy', editor_mode: 'rich' } }], {
+    additionalQueriesAfter: [await articleCategoryMembershipQuery(db, { organizationId: 'platform', collection: 'blog', articleId: 'evidence-article', categoryId: category.id })],
+  })
+  const originalBlockRevision = await db.prepare("SELECT updated_at FROM content_blocks WHERE id = 'evidence-body'").first('updated_at')
+  const unchanged = await updateBlogPost(db, document.id, { expected_updated_at: document.updated_at, title: 'Original',
+    excerpt: null, visibility: 'listed', seo_keywords: null, collection: 'blog', category_id: category.id,
+    content_blocks: [{ id: 'evidence-body', type: 'markdown', data: { editor_mode: 'rich', markdown: 'Useful copy' } }],
+  }, 'platform', 'editor', env)
+  assert.equal(unchanged.changed, false)
+  assert.equal(await db.prepare('SELECT updated_at FROM content_documents WHERE id = ?').bind(document.id).first('updated_at'), document.updated_at)
+  assert.equal(await db.prepare("SELECT updated_at FROM content_blocks WHERE id = 'evidence-body'").first('updated_at'), originalBlockRevision)
+  assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE event_name = 'article.updated'").first('count(*)'), 0)
+
+  const edited = await updateBlogPost(db, document.id, { title: 'Revised', expected_updated_at: document.updated_at }, 'platform', 'editor', env)
+  assert.equal(edited.changed, true)
+  const stored = await db.prepare('SELECT title, updated_at, updated_by, author_id FROM content_documents WHERE id = ?').bind(document.id).first<{ title: string; updated_at: string; updated_by: string; author_id: string }>()
+  assert.equal(stored?.title, 'Revised')
+  assert.equal(stored?.updated_by, 'editor')
+  assert.equal(stored?.author_id, 'author')
+  assert.notEqual(stored?.updated_at, document.updated_at)
+  const edits = (await db.prepare("SELECT id, actor_user_id, payload_json FROM activity_entries WHERE event_name = 'article.updated'").all<{ id: string; actor_user_id: string; payload_json: string }>()).results
+  assert.equal(edits.length, 1)
+  assert.equal(edits[0]?.actor_user_id, 'editor')
+  assert.deepEqual(JSON.parse(edits[0]!.payload_json).metadata, {
+    changed_fields: ['title'], evidence_basis: 'persisted_change', public_visibility: 'unverified',
+  })
+  await assert.rejects(updateBlogPost(db, document.id, { title: 'Revised', expected_updated_at: document.updated_at }, 'platform', 'editor', env), { statusCode: 409 })
+  const repeated = await updateBlogPost(db, document.id, { title: 'Revised', expected_updated_at: stored!.updated_at }, 'platform', 'editor', env)
+  assert.equal(repeated.changed, false)
+  assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE event_name = 'article.updated'").first('count(*)'), 1)
+
+  await db.prepare("CREATE TRIGGER reject_article_evidence BEFORE INSERT ON activity_entries WHEN NEW.event_name = 'article.updated' BEGIN SELECT RAISE(ABORT, 'reject evidence'); END").run()
+  await assert.rejects(updateBlogPost(db, document.id, { title: 'Must roll back', expected_updated_at: stored!.updated_at }, 'platform', 'editor', env), /reject evidence/)
+  assert.equal(await db.prepare('SELECT title FROM content_documents WHERE id = ?').bind(document.id).first('title'), 'Revised')
+
+  const publication = await updateBlogLifecycle(db, document.id, { expected_updated_at: stored!.updated_at }, 'platform', 'editor')
+  assert.equal(publication.changed, true)
+  assert.equal((await updateBlogLifecycle(db, document.id, { expected_updated_at: stored!.updated_at }, 'platform', 'author')).changed, false)
+  const published = (await db.prepare("SELECT id, actor_user_id, payload_json FROM activity_entries WHERE event_name = 'article.published'").all<{ id: string; actor_user_id: string; payload_json: string }>()).results
+  assert.equal(published.length, 1)
+  assert.equal(published[0]?.actor_user_id, 'editor')
+  assert.deepEqual(JSON.parse(published[0]!.payload_json).afterState, {
+    status: 'published', published_at: publication.published_at, updated_at: publication.updated_at,
+  })
+  assert.equal(await db.prepare('SELECT status FROM content_documents WHERE id = ?').bind(document.id).first('status'), 'published')
+})
+
 test('a sync reports an accepted, unindexed item as pending instead of waiting on it', async (t) => {
   const { db } = await migratedCacheD1(t)
   await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('location', 'org', 'location', 'Location', 'UTC')").run()
@@ -124,7 +182,7 @@ test('publishing a platform guide indexes its public pages and preserves another
   }, [{ id: 'calendar-body', type: 'markdown', data: { markdown: 'See your bookings in Google Calendar.', editor_mode: 'rich' } }], {
     additionalQueriesAfter: [await articleCategoryMembershipQuery(db, { organizationId: 'platform', collection: 'docs', articleId: 'calendar-guide', categoryId: category.id })],
   })
-  await updateBlogLifecycle(db, document.id, { expected_updated_at: document.updated_at }, 'platform')
+  await updateBlogLifecycle(db, document.id, { expected_updated_at: document.updated_at }, 'platform', 'author')
   const otherKey = `dashboard/${organizationKeySegment('org')}/route/other.md`
   const items = new Map<string, { id: string; key: string; status: string; metadata: Record<string, string>; content?: string }>([
     [otherKey, { id: 'other', key: otherKey, status: 'completed', metadata: {} }],

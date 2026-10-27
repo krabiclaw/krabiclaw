@@ -6,6 +6,12 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { presentationForProduct } from '~/utils/product-presentation'
 
+const platformRedirects: Record<string, string> = {
+  '/mcp': '/plugin',
+  '/solutions/legal': '/legal',
+  '/solutions/review-seo': '/blog/how-to-turn-google-reviews-into-website-faqs-social-posts-and-seo-pages',
+}
+
 const redirects: Record<string, string> = {
   // Every site's policies are its page documents under /policies.
   '/privacy': '/policies/privacy',
@@ -158,7 +164,9 @@ export default defineHandler(async (event) => {
   }
 
   const target = redirects[normalizedPathname]
-    ?? (event.context.tenantType === TENANT_TYPES.PLATFORM ? articlePathWithoutCategory(normalizedPathname) : null)
+    ?? (event.context.tenantType === TENANT_TYPES.PLATFORM
+      ? platformRedirects[normalizedPathname] ?? articlePathWithoutCategory(normalizedPathname)
+      : null)
   if (target) {
     const targetWithParams = `${target}${url.search}${url.hash}`
     // Permanent redirect for SEO

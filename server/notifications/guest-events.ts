@@ -6,9 +6,9 @@ import { formatPhone } from '~/utils/phone'
  * Guest-facing and account mail. Email only: a guest has no account, no
  * preference and no WhatsApp number we are allowed to message unprompted.
  *
- * These carry `category: 'account_security'` where they are transactional and
- * must arrive — a booking confirmation or a password reset is not something a
- * preference switches off.
+ * Purpose describes the email independently of the category used for a
+ * signed-in person's preferences. Guest confirmations go directly to the
+ * contact who made the request, without consulting an account's preferences.
  */
 
 // A fact the message has is stated as it is; one it genuinely lacks is null and
@@ -30,6 +30,8 @@ export function verifyEmailMessage(input: { verificationUrl: string }): Notifica
     facts: [],
     primaryAction: { url: input.verificationUrl, label: 'Verify email' },
     finePrint: 'If you did not create this account, you can ignore this email.',
+    emailPurpose: 'transactional',
+    emailReason: 'You received this email because this address was used to create a KrabiClaw account.',
     category: 'account_security',
   }
 }
@@ -43,6 +45,8 @@ export function resetPasswordMessage(input: { resetUrl: string }): NotificationM
     facts: [],
     primaryAction: { url: input.resetUrl, label: 'Choose a new password' },
     finePrint: 'If you did not request this, you can ignore this email — your password stays as it is.',
+    emailPurpose: 'transactional',
+    emailReason: 'You received this email because a password reset was requested for your KrabiClaw account.',
     category: 'account_security',
   }
 }
@@ -64,6 +68,8 @@ export function organizationInviteMessage(input: {
     ),
     primaryAction: { url: input.inviteUrl, label: 'Accept invitation' },
     finePrint: 'Not expecting this? You can ignore it — the invitation simply expires.',
+    emailPurpose: 'transactional',
+    emailReason: `You received this email because ${input.inviterName} invited you to join ${input.organizationName} on KrabiClaw.`,
     category: 'account_security',
   }
 }
@@ -85,9 +91,8 @@ export interface GuestBookingInput {
   receiptUrl?: string | null
   /** What the guest paid on the site, formatted; absent when nothing was paid online. */
   paid?: string | null
+  /** The booked offering or location's authentic image, when available. */
   heroImageUrl?: string | null
-  /** The platform sign-up the guest's email joins this booking to. */
-  accountUrl?: string | null
 }
 
 function guestLocale(input: { locale?: string }) {
@@ -95,8 +100,6 @@ function guestLocale(input: { locale?: string }) {
   if (!locale) throw new Error('Guest email language is not supported')
   return locale
 }
-
-const accountAction = (url: string | null | undefined, locale?: string) => url ? { url, label: guestLocale({ locale }).messages['guest_account.create']! } : undefined
 
 function guestVisitFacts(input: GuestBookingInput): NotificationFact[] {
   const labels = guestLocale(input).messages
@@ -127,9 +130,10 @@ export function guestReservationReceivedMessage(input: GuestBookingInput): Notif
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.organizationName } : null,
     facts: guestVisitFacts(input),
     primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : undefined,
-    secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: contactSection(input),
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: locale.messages['email.reason.reservation']!.replace('{organization}', input.organizationName),
+    category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -144,7 +148,9 @@ export function guestReservationCancelledMessage(input: GuestBookingInput & { wa
     hero: null,
     facts: guestVisitFacts(input),
     sections: contactSection(input),
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: locale.messages['email.reason.reservation_cancelled']!.replace('{organization}', input.organizationName),
+    category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -156,13 +162,14 @@ export function guestBookingReceivedMessage(input: GuestBookingInput & { product
     locale: locale.locale,
     title: locale.messages[input.status === 'pending' ? 'booking.request_received' : 'booking.confirmed']!,
     preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
-    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle ?? '' } : null,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle } : null,
     intro: input.status === 'pending' ? locale.messages['booking.pending_message']! : undefined,
     facts: guestVisitFacts(input),
     primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : undefined,
-    secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: contactSection(input),
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: locale.messages['email.reason.booking']!.replace('{organization}', input.organizationName),
+    category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -183,7 +190,6 @@ export interface GuestStayInput {
   contactPhone: string | null
   contactEmail: string | null
   heroImageUrl: string | null
-  accountUrl: string | null
   /** The stay on the business's site. */
   receiptUrl: string | null
 }
@@ -206,12 +212,13 @@ export function guestStayConfirmedMessage(input: GuestStayInput): NotificationMe
       fact('total', labels['payment.paid']!, input.total),
     ),
     primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: labels['stay.arrival_guide']! } : undefined,
-    secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: [
       ...(input.checkInInstructions ? [{ title: labels['stay.check_in_instructions']!, body: input.checkInInstructions }] : []),
       ...contactSection({ ...input, date: input.checkIn, time: '', partySize: input.guests }),
     ],
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: labels['email.reason.stay']!.replace('{organization}', input.organizationName),
+    category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -226,7 +233,9 @@ export function guestBookingCancelledMessage(input: GuestBookingInput & { produc
     hero: null,
     facts: guestVisitFacts(input),
     sections: contactSection(input),
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: locale.messages['email.reason.booking_cancelled']!.replace('{organization}', input.organizationName),
+    category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -241,7 +250,6 @@ export function guestContactReceivedMessage(input: {
   productTitle: string | null
   message: string
   consentAcknowledged: boolean
-  accountUrl?: string | null
 }): NotificationMessage {
   const locale = guestLocale(input)
   const labels = locale.messages
@@ -255,22 +263,26 @@ export function guestContactReceivedMessage(input: {
       fact('productTitle', labels['booking.service']!, input.productTitle),
       input.consentAcknowledged ? fact('consent', labels['legal.privacy']!, '✓') : null,
     ),
-    primaryAction: accountAction(input.accountUrl, locale.locale),
     sections: [{ title: labels['site.contact_page.your_message']!, body: input.message }],
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: labels['email.reason.contact']!.replace('{organization}', input.organizationName),
+    category: 'guest_messages',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
 }
 
 export function guestThreadReplyMessage(input: {
+  locale?: string
   organizationName: string
   organizationLogoUrl: string | null
   body: string
   photos?: Array<{ imageUrl: string; alt: string }>
 }): NotificationMessage {
+  const locale = guestLocale(input)
   const photos = input.photos ?? []
   return {
+    locale: locale.locale,
     title: `Reply from ${input.organizationName}`,
     preheader: input.body ? input.body.slice(0, 120) : `${input.organizationName} sent ${photos.length === 1 ? 'a photo' : `${photos.length} photos`}`,
     hero: null,
@@ -278,7 +290,9 @@ export function guestThreadReplyMessage(input: {
     sections: input.body ? [{ title: '', body: input.body }] : [],
     photos,
     finePrint: 'Reply to this email and your message goes straight back to the same conversation.',
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: locale.messages['email.reason.reply']!.replace('{organization}', input.organizationName),
+    category: 'guest_messages',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -293,15 +307,18 @@ export function guestThreadStatusMessage(input: {
   actionUrl?: string | null
   actionLabel?: string | null
 }): NotificationMessage {
+  const locale = guestLocale(input)
   return {
-    locale: input.locale,
+    locale: locale.locale,
     title: input.heading,
     preheader: input.body.slice(0, 120),
     hero: null,
     intro: input.body,
     facts: [],
     primaryAction: input.actionUrl && input.actionLabel ? { url: input.actionUrl, label: input.actionLabel } : undefined,
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: locale.messages['email.reason.booking_update']!.replace('{organization}', input.organizationName),
+    category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -318,15 +335,18 @@ export function bookingChangeProposalMessage(input: {
   actionUrl?: string | null
   actionLabel?: string | null
 }): NotificationMessage {
+  const locale = guestLocale(input)
   return {
-    locale: input.locale,
+    locale: locale.locale,
     title: input.heading,
     preheader: input.intro.slice(0, 120),
     hero: null,
     intro: input.intro,
     facts: input.rows.map(([label, value], index) => ({ key: `row-${index}`, label, value })),
     primaryAction: input.actionUrl && input.actionLabel ? { url: input.actionUrl, label: input.actionLabel } : undefined,
-    category: 'account_security',
+    emailPurpose: 'transactional',
+    emailReason: locale.messages['email.reason.booking_change']!.replace('{organization}', input.organizationName),
+    category: 'reservations_bookings',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
   }
@@ -353,6 +373,8 @@ export function reviewRequestMessage(input: {
       fact('location', 'Location', input.locationName),
     ),
     primaryAction: { url: input.reviewUrl, label: 'Leave a review' },
+    emailPurpose: 'promotional',
+    emailReason: `You received this review request after your visit to ${input.organizationName}. You can unsubscribe from future review requests below.`,
     category: 'review_requests',
     organizationName: input.organizationName,
   }
@@ -373,6 +395,8 @@ export function articleAnnouncementMessage(input: {
     body: input.bodyMarkdown,
     facts: [],
     primaryAction: { url: input.articleUrl, label: 'Read the article' },
+    emailPurpose: 'promotional',
+    emailReason: 'You receive KrabiClaw news under your email notification preferences.',
     category: 'product_news',
   }
 }
