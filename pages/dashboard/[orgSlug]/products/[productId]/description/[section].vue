@@ -21,7 +21,6 @@
         variant="none"
         :rows="1"
         :maxlength="PRODUCT_LIMITS.description"
-        autoresize
         :disabled="p.saving.value"
         :ui="{ base: 'resize-none' }"
         autofocus
@@ -35,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { useResizeObserver } from '@vueuse/core'
+import { useTextareaAutosize } from '@vueuse/core'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { productDetailFields, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
 import { PRODUCT_LIMITS } from '~/shared/product-limits'
@@ -60,7 +59,7 @@ const value = computed({
     else if (definition.value) p.setDetail(definition.value, text)
   },
 })
-useResizeObserver(() => descriptionTextarea.value?.textareaRef, () => descriptionTextarea.value?.autoResize())
+useTextareaAutosize({ element: computed(() => descriptionTextarea.value?.textareaRef), input: value })
 
 watchEffect(() => {
   if (p.product.value && !p.loadError.value && !validSection.value) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))

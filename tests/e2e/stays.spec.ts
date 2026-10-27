@@ -143,7 +143,9 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   await expect(page).toHaveURL(new RegExp(`/bookings/stay/${createdReceipt.stay.id}$`))
   const stay = await call<{ stay: StayDetail }>('get_stay', { stay_id: createdReceipt.stay.id })
   expect(stay.error).toBeNull()
-  expect(stay.data!.stay).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana', guest_surname: 'Silva', guest_email: `ana-${slug}@playwright.example`, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
+  expect(stay.data!.stay).toMatchObject({ product_id: productId, status: 'confirmed', check_in_date: checkIn, check_out_date: checkOut, guest_name: 'Ana', guest_surname: 'Silva', guest_email: `ana-${slug}@playwright.example`, guest_image_url: null, adults: 2, children: 0, infants: 0, total_minor: 300_00, paid_minor: 0, payments: [] })
+  await expect(page.locator('#dashboard-panel-stay-details').getByText('A', { exact: true })).toHaveCount(2)
+  await expect(page.locator('#dashboard-panel-stay-details img[alt="Ana Silva"]')).toHaveCount(0)
   const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
   expect(overlap.error).toContain('Another stay or a linked calendar already holds one of these nights')
 
@@ -233,6 +235,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   if (!signingSecret) throw new Error('The local receipt signing secret is not configured')
   const signed = await createReplayableReservationCancelToken(signingSecret, activityId!)
   const guest = await browser.newContext()
+  let originalGuestImage: string | null | undefined
   const personalOrganizationReads: string[] = []
   guest.on('request', request => {
     const path = new URL(request.url()).pathname
@@ -240,9 +243,37 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   })
   try {
     await loginAs(guest.request, baseURL!, 'user-e2e-buyer')
+    const guestSession = await guest.request.get(`${baseURL}/api/auth/get-session`, { params: { disableCookieCache: 'true' } })
+    await expectStatus(guestSession, 200)
+    const guestUser = (await guestSession.json() as { user: { id: string; image: string | null } }).user
+    expect(guestUser.id).toBe('user-e2e-buyer')
+    expect(guestUser.image === null || typeof guestUser.image === 'string').toBe(true)
+    originalGuestImage = guestUser.image
     const claimed = await guest.request.post(`${baseURL}/api/guest-invites/${inviteToken}/claim`, { headers, data: {} })
     await expectStatus(claimed, 200)
     expect(await claimed.json()).toEqual({ thread_id: activityId, path: `/dashboard/account/messages/${activityId}` })
+    // Better Auth owns the portrait. Both host avatars read the linked account,
+    // and a later profile edit changes the stay without copying identity data.
+    const portraitUrl = new URL('/platform/apple-touch-icon.png', baseURL!).href
+    const portraitSaved = await guest.request.post(`${baseURL}/api/auth/update-user`, { headers, data: { image: portraitUrl } })
+    await expectStatus(portraitSaved, 200)
+    const portraitRead = await guest.request.get(`${baseURL}/api/auth/get-session`, { params: { disableCookieCache: 'true' } })
+    await expectStatus(portraitRead, 200)
+    expect((await portraitRead.json()).user).toMatchObject({ id: 'user-e2e-buyer', image: portraitUrl })
+    const hostRead = await request.get(api(`stays/${stay.data!.stay.id}`))
+    await expectStatus(hostRead, 200)
+    expect((await hostRead.json()).stay).toMatchObject({ user_id: 'user-e2e-buyer', guest_image_url: portraitUrl })
+    const hostToolRead = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+    expect(hostToolRead.error).toBeNull()
+    expect(hostToolRead.data!.stay.guest_image_url).toBe(portraitUrl)
+    await page.goto(`/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
+    const hostPortraits = page.locator('#dashboard-panel-stay-details img[alt="Ana Silva"]')
+    for (const width of [390, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      await expect(hostPortraits).toHaveCount(2)
+      for (const portrait of await hostPortraits.all()) await expect(portrait).toHaveAttribute('src', portraitUrl)
+      await expect.poll(() => hostPortraits.evaluateAll(images => images.every(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0))).toBe(true)
+    }
     // A returning buyer enters Personal without being sent to business onboarding.
     await loginAs(guest.request, baseURL!, 'user-e2e-buyer')
     const returnToAccount = await guest.request.get(`${baseURL}/api/post-login`, { maxRedirects: 0 })
@@ -257,7 +288,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     await expectStatus(accountRead, 200)
     const mapUrl = 'https://maps.google.com/maps?q=8.0326%2C98.822'
     const exactLocation = { address: exactAddress, ...mapPin, maps_url: mapUrl }
-    expect(await accountRead.json()).toMatchObject({ organization_id: organizationId, stay: { id: stay.data!.stay.id, status: 'confirmed', user_id: 'user-e2e-buyer' }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
+    expect(await accountRead.json()).toMatchObject({ organization_id: organizationId, stay: { id: stay.data!.stay.id, status: 'confirmed', user_id: 'user-e2e-buyer', guest_image_url: portraitUrl }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
     const receiptRead = await guest.request.get(receiptApi, { headers: receiptHeaders })
     await expectStatus(receiptRead, 200)
     expect(await receiptRead.json()).toMatchObject({ stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
@@ -285,6 +316,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     await accountPage.locator(`[data-testid=today-card][href="/dashboard/account/bookings/stay/${activityId}"]`).click()
     await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/bookings/stay/${activityId}`)
     await expect(accountPage.locator('#dashboard-panel-stay-details')).toBeVisible()
+    await expect(accountPage.locator('#dashboard-panel-stay-details img[alt="Ana Silva"]')).toHaveAttribute('src', portraitUrl)
     await accountPage.setViewportSize({ width: 1440, height: 900 })
     await expect(accountPage.locator('#dashboard-panel-account-today')).toBeVisible()
     await accountPage.setViewportSize({ width: 390, height: 844 })
@@ -389,7 +421,17 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
       await expect(guestPage.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveCount(0)
     }
   } finally {
-    await guest.close()
+    try {
+      if (originalGuestImage !== undefined) {
+        const restored = await guest.request.post(`${baseURL}/api/auth/update-user`, { headers, data: { image: originalGuestImage } })
+        await expectStatus(restored, 200)
+        const restoredRead = await guest.request.get(`${baseURL}/api/auth/get-session`, { params: { disableCookieCache: 'true' } })
+        await expectStatus(restoredRead, 200)
+        expect((await restoredRead.json()).user).toMatchObject({ id: 'user-e2e-buyer', image: originalGuestImage })
+      }
+    } finally {
+      await guest.close()
+    }
   }
   expect(personalOrganizationReads, 'A Personal account without an organization must not request organization roles or permissions').toEqual([])
 

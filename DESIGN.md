@@ -607,9 +607,10 @@ outlined fields and embedded labels; Listing description uses a plain textarea
 (desktop and phone, October 24, 2026). Do not infer a blanket rule against
 field borders. Structured names, dates, times and addresses may retain visible
 boundaries. Narrative prose uses the installed textarea's `none` variant,
-without redundant labels or inner padding, and its native autoresize API.
-Fields fill their pane. Width changes invoke that same sizing API where needed;
-do not add a second textarea-sizing implementation. Rich Markdown and article
+without redundant labels or inner padding. Fields fill their pane. Prose that
+grows with its content and pane width uses the installed `useTextareaAutosize`
+helper as its sole sizing owner; do not also enable the textarea's `autoresize`
+or observe its own height. Rich Markdown and article
 canvases retain their own native editing controls.
 
 **Preview belongs to customer-facing saved content.** Product, Page, Post,

@@ -1475,6 +1475,8 @@ test.describe('dashboard pane hierarchy', () => {
   test('mobile scroll confines a growing Experience description to its drawer body and pins its controls', async ({ page, baseURL }) => {
     const organizationId = 'org-user-pottery-house'
     const productId = 'exp-ph-wheel'
+    const pageErrors: string[] = []
+    page.on('pageerror', error => pageErrors.push(error.message))
     await page.context().clearCookies()
     await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
     const productRead = await page.request.get(`/api/editor/organizations/${organizationId}/products/${productId}`)
@@ -1496,6 +1498,13 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(textarea).toHaveValue(product.description)
     await expect.poll(() => textarea.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
     expect(await textarea.evaluate(element => element.clientHeight), 'The same description grows when its column becomes narrower').toBeGreaterThan(desktopHeight)
+    const phoneHeight = await textarea.evaluate(element => element.clientHeight)
+    await textarea.fill('A pottery class.')
+    await expect.poll(() => textarea.evaluate(element => element.clientHeight)).toBeLessThan(phoneHeight)
+    await expect.poll(() => textarea.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
+    await textarea.fill(product.description)
+    await expect.poll(() => textarea.evaluate(element => element.clientHeight)).toBe(phoneHeight)
+    await expect.poll(() => textarea.evaluate(element => element.scrollHeight - element.clientHeight)).toBeLessThanOrEqual(1)
     const body = panel.locator(':scope > [data-slot="body"]')
     const parentBody = page.locator('#dashboard-panel-product > [data-slot="body"]')
     const header = panel.locator(':scope > :has(h1)')
@@ -1533,6 +1542,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect(await body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
     await panel.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page).toHaveURL(productPath)
+    expect(pageErrors).toEqual([])
   })
 
   test('mobile scroll ends Today after its real final card and one panel padding', async ({ page }) => {

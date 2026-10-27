@@ -1,6 +1,6 @@
 <template>
   <!-- One field of the staged request. Done keeps the edit in the draft; nothing is sent from here. -->
-  <DashboardLeafPanel v-if="field" id="booking-change-field" :title="`Change ${field === 'session' ? 'date and time' : field}`" lead="Nothing is sent yet. Your guest sees every change at once when you send the request." save-label="Done" @cancel="b.cancelChangeField(field)" @save="navigateTo(level.to.value ?? '/dashboard')">
+  <DashboardLeafPanel v-if="field" id="booking-change-field" :title="`Change ${field === 'session' ? 'date and time' : field === 'guests' ? copy?.guestsLabelPlural : field}`" :lead="`Nothing is sent yet. Your ${copy?.guestLabel} sees every change at once when you send the request.`" save-label="Done" @cancel="b.cancelChangeField(field)" @save="navigateTo(level.to.value ?? '/dashboard')">
     <div v-if="b.booking.value">
       <UFormField v-if="field === 'date'" label="Date">
         <UInput v-model="b.changeDraft.value.bookingDate" type="date" autofocus class="w-full" />
@@ -8,7 +8,7 @@
       <UFormField v-else-if="field === 'time'" label="Time">
         <UInput v-model="b.changeDraft.value.bookingTime" type="time" autofocus class="w-full" />
       </UFormField>
-      <UFormField v-else-if="field === 'guests'" label="Guests">
+      <UFormField v-else-if="field === 'guests'" :label="b.changeFields.value.find(item => item.key === field)?.label">
         <UInputNumber v-model="b.changeDraft.value.partySize" :min="1" :max="99" class="w-full" />
       </UFormField>
       <UFormField v-else-if="field === 'location'" label="Location">
@@ -26,6 +26,7 @@
 <script setup lang="ts">
 import { bookingEditorKey, type BookingChangeField } from '~/components/dashboard/BookingDetails.vue'
 import { formatTimestamp } from '~/utils/timezone'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 
 definePageMeta({ layout: 'dashboard' })
 
@@ -33,6 +34,7 @@ const route = useRoute()
 const level = useRouteLevel()
 const api = useDashboardApi()
 const b = inject(bookingEditorKey)!
+const copy = computed(() => b.booking.value ? getVerticalCopy(b.booking.value.vertical) : null)
 const value = String(route.params.field ?? '')
 const field = (['date', 'time', 'guests', 'location', 'session'].includes(value) ? value : null) as BookingChangeField | null
 // Raised, not thrown: the dashboard renders on the client, where a throw in a nested page's setup leaves a blank screen (DESIGN.md).

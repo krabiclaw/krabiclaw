@@ -372,11 +372,11 @@ const changeFields = computed(() => props.bookingType === 'reservation'
   ? [
       { key: 'date', label: 'Date', summary: changeDraft.value.bookingDate ? formatCalendarDate(changeDraft.value.bookingDate, 'en') : 'Choose a date' },
       { key: 'time', label: 'Time', summary: changeDraft.value.bookingTime ? formatTime(changeDraft.value.bookingTime, 'en') : 'Choose a time' },
-      { key: 'guests', label: 'Guests', summary: `${changeDraft.value.partySize} ${changeDraft.value.partySize === 1 ? 'guest' : 'guests'}` },
+      { key: 'guests', label: guestHeading.value, summary: `${changeDraft.value.partySize} ${changeDraft.value.partySize === 1 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}` },
     ]
   : [
       { key: 'session', label: 'Date and time', summary: changeDraft.value.sessionLabel || (booking.value?.bookingDate ? `${formatCalendarDate(booking.value.bookingDate, 'en')}${booking.value.bookingTime ? ` · ${formatTime(booking.value.bookingTime, 'en')}` : ''}` : 'Choose a time') },
-      { key: 'guests', label: 'Guests', summary: `${changeDraft.value.partySize} ${changeDraft.value.partySize === 1 ? 'guest' : 'guests'}` },
+      { key: 'guests', label: guestHeading.value, summary: `${changeDraft.value.partySize} ${changeDraft.value.partySize === 1 ? recordCopy.value?.guestLabel : recordCopy.value?.guestsLabelPlural}` },
     ])
 const changeValid = computed(() => props.bookingType === 'reservation'
   ? Boolean(changeDraft.value.bookingDate && changeDraft.value.bookingTime && changeDraft.value.locationId && Number.isInteger(changeDraft.value.partySize) && changeDraft.value.partySize > 0)
