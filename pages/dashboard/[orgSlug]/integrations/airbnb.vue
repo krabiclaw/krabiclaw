@@ -310,8 +310,9 @@ async function retryFailed() {
   applying.value = true
   try {
     for (const job of batch.sync) {
-      const listing = listings.value.find(candidate => candidate.id === job.listing_id)!
-      if (listing.import.status !== 'not_imported') continue
+      // Listings may have been read again while an earlier dialog was open.
+      const listing = listings.value.find(candidate => candidate.id === job.listing_id)
+      if (!listing || listing.import.status !== 'not_imported') continue
       // A detail the server refused is corrected in the same dialog; details still held are otherwise sent as they are.
       if (entered.value[listing.id] && job.error?.code !== 'INVALID_DETAIL') continue
       try {
@@ -324,11 +325,14 @@ async function retryFailed() {
       // Closing the dialog, with or without earlier values held, means the host is not resubmitting.
       if (!await addDetails(listing.id)) return
     }
+    // What is sent is the batch as it stands now, after the dialogs: a listing or home gone meanwhile is left out.
+    const current = retryBatch.value
+    if (!current.sync.length && !current.stop.length) return
     await dashboardApi(`${api}/sync`, {
       method: 'POST',
       body: {
-        sync: batch.sync.map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
-        stop: batch.stop.map(job => job.product_id),
+        sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
+        stop: current.stop.map(job => job.product_id),
       },
       validate: isChanges,
     })
