@@ -8,7 +8,7 @@
       <!-- Brand contact layout — shows for all tenant shapes -->
       <div>
         <!-- Page header -->
-        <header v-if="contactHeroEyebrow || contactHeroTitle || contactHeroSummary" class="mx-auto max-w-7xl px-4 pt-16 pb-12 sm:px-6 lg:px-8">
+        <header v-if="contactHeroEyebrow || contactHeroTitle || contactHeroSummary" class="tenant-container pt-16 pb-12">
           <p v-if="contactHeroEyebrow" class="tenant-kicker mb-6">{{ contactHeroEyebrow }}</p>
           <h1 v-if="contactHeroTitle" class="tenant-display-md text-default">
             {{ contactHeroTitle }}
@@ -20,7 +20,7 @@
 
         <!-- Top grid: form (wide) + dark aside -->
         <div
-          class="mx-auto grid max-w-7xl gap-6 px-4 pb-6 sm:px-6 lg:px-8"
+          class="tenant-container grid gap-6 pb-6"
           :class="hasAnyBrandContact ? 'lg:grid-cols-[1.6fr_1fr]' : 'lg:grid-cols-1'"
         >
 
@@ -120,7 +120,7 @@
 
         <!-- Per-location stack -->
         <section class="mt-24 bg-elevated">
-          <div class="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8">
+          <div class="tenant-container py-24">
             <div class="mb-12 max-w-2xl">
               <p class="tenant-kicker mb-6">{{ t('site.contact_page.by_location') }}</p>
               <h2 class="tenant-display-md text-default">

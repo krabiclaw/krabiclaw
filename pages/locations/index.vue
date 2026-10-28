@@ -2,7 +2,7 @@
   <div class="min-h-screen bg-default text-default">
 
     <!-- Page header -->
-    <header class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8">
+    <header class="tenant-container py-16">
       <p class="tenant-kicker mb-6">{{ locationsCopy.findUsKicker }}</p>
       <h1 class="tenant-display-md text-default">
         {{ locationsCopy.locationGroupLine(locations.length) }}
@@ -10,7 +10,7 @@
     </header>
 
     <!-- Loading -->
-    <div v-if="pending" class="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8">
+    <div v-if="pending" class="tenant-container pb-24">
       <div :class="['grid gap-8', 'md:grid-cols-2']">
         <div v-for="i in 2" :key="i" class="overflow-hidden border border-default">
           <div class="aspect-16/10 animate-pulse bg-muted" />
@@ -25,7 +25,7 @@
     </div>
 
     <!-- Locations grid -->
-    <div v-else class="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8">
+    <div v-else class="tenant-container pb-24">
       <div
         v-if="locations.length"
         :class="['grid gap-8', locations.length === 1 ? '' : 'md:grid-cols-2']"

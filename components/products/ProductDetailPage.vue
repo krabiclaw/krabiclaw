@@ -25,7 +25,7 @@
       </TenantButton>
     </div>
 
-    <article :class="booking || isStay ? 'mx-auto max-w-7xl px-4 pb-28 sm:px-6 lg:px-8 lg:pb-20' : 'mx-auto max-w-7xl px-4 pb-20 sm:px-6 lg:px-8'">
+    <article :class="booking || isStay ? 'tenant-container pb-28 lg:pb-20' : 'tenant-container pb-20'">
       <!-- A bookable product is read the way it is sold: the gallery and the
            prose on the left, and the price, the facts and the booking control
            travelling with the reader on the right. A product that takes no

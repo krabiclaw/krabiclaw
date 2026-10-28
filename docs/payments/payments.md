@@ -138,8 +138,8 @@ the paid $89 subscription invoice for that operating customer. The subscription
 remains active at $89/month, with no scheduled cancellation. Fee collection and
 the earlier collection/restoration/acceptance test remain unqualified.
 
-Sanitized provider and release observations are recorded in
-[the October 6 proof](release-verification-2026-10-06.json). Historical snapshots
+Sanitized provider and release observations are listed in
+[#1627](https://github.com/krabiclaw/krabiclaw/issues/1627). Historical snapshots
 below remain dated observations; they do not describe the current contract or
 prove a paid usage invoice.
 
@@ -346,8 +346,8 @@ connected account `acct_1ULddoRBlJCkNTaU`, livemode=false, dashboard=express,
 fees_collector=application, losses_collector=stripe, requirements_collector=stripe.
 After owner-completed hosted onboarding, card/payout capabilities are active with
 zero requirements. Native direct capture/refund, hosted hold conversion and
-merchant-approved rejection were verified; exact provider evidence is recorded in
-`sandbox-verification-2026-10-01.md`. No liability fallback or live action occurred.
+merchant-approved rejection were verified; exact provider evidence is listed in
+[#1627](https://github.com/krabiclaw/krabiclaw/issues/1627). No liability fallback or live action occurred.
 
 Primary contracts: [Managed Risk](https://docs.stripe.com/connect/risk-management/managed-risk),
 [Accounts v2 responsibilities](https://docs.stripe.com/connect/accounts-v2/connected-account-configuration),
@@ -591,7 +591,7 @@ meters and metered prices (`yarn stripe:catalog:plan`), and HTTPS platform retur
 merchant-hosted onboarding and Radar before claiming native card readiness.
 No Payments deployment, live webhook change or production activation is part of
 this draft. The existing Sandbox-to-Stripe TEST grant was completed on October 2;
-its dated evidence is in `requirements-verification-2026-10-02.md`.
+its dated evidence is listed in [#1627](https://github.com/krabiclaw/krabiclaw/issues/1627).
 
 Actual fee itemization requires live Stripe data and is unavailable in test mode.
 Reconciliation reports that limitation explicitly. Current enabled acceptance,

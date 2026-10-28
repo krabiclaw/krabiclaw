@@ -26,7 +26,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 // ── Minimal YAML parser for intake files ──────────────────────────────────────
-// Handles the specific subset used in client-intake/*.yml: flat key:value,
+// Handles the specific subset intake files use: flat key:value,
 // list items (  - item), and literal block scalars (key: |).
 
 function parseIntakeYaml(content) {
@@ -106,7 +106,7 @@ const { values: rawArgs } = parseArgs({
     'images-place-id': { type: 'string' },
     'base-url':        { type: 'string' },  // platform origin; required with --remote
     remote:            { type: 'boolean', default: false },
-    from:              { type: 'string' },  // path to client-intake YAML
+    from:              { type: 'string' },  // path to intake YAML
   },
   allowPositionals: false,
 })
@@ -136,7 +136,7 @@ if (!args.vertical) args.vertical = 'restaurant'
 if (!args.slug) {
   console.error('Error: --slug is required (or provide --from <intake.yml>)')
   console.error('Usage: yarn client:onboard --slug <slug> --organization-id <id> --vertical <vertical> [--maps-url <url>] [--images <dir>]')
-  console.error('       yarn client:onboard --from client-intake/<slug>.yml')
+  console.error('       yarn client:onboard --from client-intake/<slug>.yml   (client-intake/ is gitignored)')
   process.exit(1)
 }
 if (!args['organization-id']) {

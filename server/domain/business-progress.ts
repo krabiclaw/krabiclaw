@@ -130,23 +130,7 @@ export async function saveRecommendationFeedback(db: DbClient, principal: Member
   return saved
 }
 
-export async function listBusinessGoals(db: DbClient, principal: MemberAccessPrincipal): Promise<BusinessGoal[]> {
-  await authorize(db, principal)
-  return (await queryAllPages<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId])).map(goalOf)
-}
-
-/** The same personal feedback source serves paged progress and on-demand selection. */
-export async function listRecommendationFeedback(db: DbClient, principal: MemberAccessPrincipal, page?: { limit: number; offset: number }): Promise<RecommendationFeedback[]> {
-  await authorize(db, principal)
-  const sql = 'SELECT * FROM recommendation_feedback WHERE organization_id = ? AND user_id = ? ORDER BY updated_at DESC, id DESC'
-  const params = [principal.organizationId, principal.userId]
-  const rows = page
-    ? await queryAll<FeedbackRow>(db, `${sql} LIMIT ? OFFSET ?`, [...params, page.limit + 1, page.offset])
-    : await queryAllPages<FeedbackRow>(db, sql, params)
-  return rows.map(feedbackOf)
-}
-
-export function recommendationFeedbackApplicability(value: RecommendationFeedback, reference: BusinessProgressReference | null, goals: BusinessGoal[], now: Date): RecommendationFeedbackView['applicability'] {
+function recommendationFeedbackApplicability(value: RecommendationFeedback, reference: BusinessProgressReference | null, goals: BusinessGoal[], now: Date): RecommendationFeedbackView['applicability'] {
   const reasons: RecommendationFeedbackView['applicability']['reasons'] = []
   if (!reference) reasons.push('subject_missing')
   else if (reference.evidenceRevision !== value.evidenceRevision) reasons.push('evidence_changed')
@@ -164,10 +148,15 @@ export async function readBusinessProgress(db: DbClient, principal: MemberAccess
   await authorize(db, principal)
   const outcomes = await listBusinessOutcomes(db, principal, page)
   const { limit, offset } = outcomes.pagination
-  const [goals, feedbackRows] = await Promise.all([listBusinessGoals(db, principal), listRecommendationFeedback(db, principal, { limit, offset })])
+  const [goalRows, feedbackRows] = await Promise.all([
+    queryAllPages<GoalRow>(db, 'SELECT * FROM organization_goals WHERE organization_id = ? ORDER BY updated_at DESC, id DESC', [principal.organizationId]),
+    queryAll<FeedbackRow>(db, 'SELECT * FROM recommendation_feedback WHERE organization_id = ? AND user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?', [principal.organizationId, principal.userId, limit + 1, offset]),
+  ])
+  const goals = goalRows.map(goalOf)
   const references = new Map<string, ReturnType<typeof readBusinessProgressReference>>()
   const now = new Date()
-  const feedback = await Promise.all(feedbackRows.slice(0, limit).map(async (value): Promise<RecommendationFeedbackView> => {
+  const feedback = await Promise.all(feedbackRows.slice(0, limit).map(async (row): Promise<RecommendationFeedbackView> => {
+    const value = feedbackOf(row)
     const key = JSON.stringify([value.operation, value.subjectId])
     if (!references.has(key)) references.set(key, readBusinessProgressReference(db, principal, value))
     let reference: BusinessProgressReference | null = null

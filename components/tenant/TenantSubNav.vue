@@ -1,6 +1,6 @@
 <template>
   <div class="border-b border-default bg-default">
-    <div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div class="tenant-container relative">
       <div class="flex h-14 items-center gap-2 overflow-x-auto scrollbar-none">
         <NuxtLink
           v-for="item in items"

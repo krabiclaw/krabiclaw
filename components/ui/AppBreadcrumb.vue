@@ -1,5 +1,5 @@
 <template>
-  <nav aria-label="Breadcrumb" class="px-4 py-8 sm:px-6 lg:px-8">
+  <nav aria-label="Breadcrumb" class="tenant-container py-8">
     <ol class="flex items-center gap-2 overflow-x-auto whitespace-nowrap no-scrollbar">
       <li v-for="(crumb, i) in crumbs" :key="crumb.to" class="flex items-center gap-2">
         <NuxtLink

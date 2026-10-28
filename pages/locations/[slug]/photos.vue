@@ -10,7 +10,7 @@
       />
 
       <!-- Compact Page header -->
-      <header class="mx-auto max-w-7xl px-4 pt-12 pb-10 sm:px-6 lg:px-8 text-center">
+      <header class="tenant-container pt-12 pb-10 text-center">
         <NuxtLink :to="localePath(`/locations/${slug}`)" class="tenant-kicker mb-8 inline-block text-muted no-underline hover:text-default">
           ← {{ t('site.location.back_to', { title: location?.title }) }}
         </NuxtLink>
@@ -31,7 +31,7 @@
     />
 
       <!-- Gallery -->
-      <div class="mx-auto max-w-7xl px-4 pt-12 pb-24 sm:px-6 lg:px-8">
+      <div class="tenant-container pt-12 pb-24">
         <!-- Empty -->
         <div v-if="sorted.length === 0" class="py-24 text-center">
           <div class="tenant-display tenant-italic text-3xl text-default">{{ t('site.photos.empty_title') }}</div>

@@ -43,7 +43,7 @@
         </div>
         <div class="absolute inset-0" style="background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.3) 100%)" />
         <div class="relative flex min-h-160 items-end">
-          <div class="mx-auto w-full max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+          <div class="tenant-container pb-16">
             <NuxtLink :to="localePath('/locations')" class="tenant-kicker mb-8 inline-block text-white/60 no-underline hover:text-white">
               ← {{ t('site.footer.all_locations') }}
             </NuxtLink>
@@ -101,7 +101,7 @@
 
       <!-- Quick info strip -->
       <section class="border-b border-default">
-        <div class="mx-auto grid max-w-7xl gap-12 px-4 py-14 sm:px-6 sm:grid-cols-2 lg:grid-cols-3 lg:px-8">
+        <div class="tenant-container grid gap-12 py-14 sm:grid-cols-2 lg:grid-cols-3">
           <div>
             <p class="tenant-eyebrow mb-4 text-muted">{{ t('site.location.address') }}</p>
             <p class="text-sm leading-relaxed text-default">{{ formattedAddress }}</p>
@@ -146,7 +146,7 @@
 
       <!-- Parking & additional notes -->
       <section v-if="sanitizedParkingInfo || sanitizedExtraNotes" class="border-b border-default">
-        <div class="mx-auto grid max-w-7xl gap-12 px-4 py-14 sm:px-6 lg:grid-cols-2 lg:px-8">
+        <div class="tenant-container grid gap-12 py-14 lg:grid-cols-2">
           <!-- eslint-disable vue/no-v-html -->
           <div v-if="sanitizedParkingInfo">
             <p class="tenant-eyebrow mb-4 text-muted">{{ t('site.location.parking') }}</p>
@@ -181,7 +181,7 @@
 
       <!-- Reviews preview -->
       <section v-if="reviewsPreview.length">
-        <div class="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8">
+        <div class="tenant-container py-24">
           <div class="mb-16 max-w-2xl">
             <p class="tenant-kicker mb-6">{{ t('site.reviews.subtitle') }}</p>
             <h2 class="tenant-display-md flex items-center gap-3 text-default">
@@ -203,7 +203,7 @@
 
       <!-- Other locations rail (multi-location brands only) -->
       <section v-if="otherLocations.length" class="bg-inverted text-inverted">
-        <div class="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8">
+        <div class="tenant-container py-24">
           <div class="mb-12 flex flex-wrap items-end justify-between gap-8">
             <div>
               <p class="tenant-kicker mb-6">{{ locationIndexCopy.otherLocationsHeading }}</p>
@@ -247,7 +247,7 @@
       </section>
 
       <!-- Plan a visit CTA — map lives on /contact -->
-      <section class="mx-auto max-w-7xl px-4 py-24 sm:px-6 lg:px-8">
+      <section class="tenant-container py-24">
         <div class="flex flex-wrap items-center justify-between gap-8">
           <h2 class="tenant-display-md tenant-italic text-default">{{ t('site.location.see_you_soon') }}</h2>
           <div class="flex flex-wrap gap-3">

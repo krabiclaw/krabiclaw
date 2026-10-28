@@ -111,15 +111,6 @@ export interface PlatformBlogLifecycleState {
   changed: boolean
 }
 
-/** The same stored-state prerequisites apply to publication previews and writes. */
-export function blogPublicationReadiness(article: { status: string; categoryId: string | null }): { available: boolean; reasons: string[] } {
-  if (article.status !== 'draft' && article.status !== 'published') throw new Error('Article has an invalid publication status')
-  const reasons: string[] = []
-  if (article.status === 'published') reasons.push('already_published')
-  if (article.categoryId === null) reasons.push('category_required')
-  return { available: reasons.length === 0, reasons }
-}
-
 export function parseBlogLifecycleInput(body: unknown): PlatformBlogLifecycleInput {
   if (!body || typeof body !== 'object' || Array.isArray(body)) badRequest('Request body must be a valid object')
   const record = body as Record<string, unknown>
@@ -775,13 +766,14 @@ export async function updateBlogLifecycle(
   const source = await queryFirst<{ id: string; status: string; published_at: string | null; updated_at: string }>(db,
     "SELECT id, status, published_at, updated_at FROM content_documents WHERE id = ? AND row_role = 'root' AND kind = 'article'", [sourceId])
   if (!source) notFound('Post not found')
+  if (source.status !== 'draft' && source.status !== 'published') throw new Error('Article has an invalid publication status')
   if (source.status === 'published') return { id: source.id, status: 'published', published_at: source.published_at, updated_at: source.updated_at, changed: false }
   if (source.updated_at !== input.expected_updated_at) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Article was updated by another writer' })
   }
   // A published article is always in a category: its index, sidebar and breadcrumb are built from them.
   const categorized = await queryFirst<{ category_id: string }>(db, 'SELECT category_id FROM article_category_articles WHERE article_id = ?', [source.id])
-  if (!blogPublicationReadiness({ status: source.status, categoryId: categorized?.category_id ?? null }).available) badRequest('Choose a category before publishing (category_id)')
+  if (!categorized) badRequest('Choose a category before publishing (category_id)')
   const committedAt = new Date(Math.max(Date.now(), Date.parse(source.updated_at) + 1)).toISOString()
   const [result] = await executeBatch(db, [{ query: `UPDATE content_documents SET
     published_at = COALESCE(published_at, ?), first_published_at = COALESCE(first_published_at, ?),

@@ -2,7 +2,7 @@
   <div class="min-h-screen bg-default text-default">
 
     <template v-if="pending">
-      <div class="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
+      <div class="tenant-container py-20">
         <div class="h-64 animate-pulse rounded-2xl bg-elevated" />
       </div>
     </template>
@@ -11,7 +11,7 @@
       <TenantSubNav :location-slug="slug" active="contact" />
 
       <!-- Page header -->
-      <header class="mx-auto max-w-7xl px-4 pt-14 pb-10 sm:px-6 lg:px-8">
+      <header class="tenant-container pt-14 pb-10">
         <NuxtLink :to="localePath(`/locations/${slug}`)" class="tenant-kicker mb-8 inline-block text-muted no-underline hover:text-default">
           ← {{ t('site.location.back_to', { title: location.title }) }}
         </NuxtLink>
@@ -22,7 +22,7 @@
       </header>
 
       <!-- Two-column cards: Hours | Address + Map -->
-      <div class="mx-auto grid max-w-7xl gap-6 px-4 pb-6 sm:px-6 lg:grid-cols-2 lg:px-8">
+      <div class="tenant-container grid gap-6 pb-6 lg:grid-cols-2">
 
         <!-- HOURS CARD -->
         <section class="border border-default bg-default p-9">
@@ -124,7 +124,7 @@
 
       <!-- Good to know (parking.info + extra.notes from CMS) -->
       <section v-if="sanitizedParkingInfo || sanitizedExtraNotes" class="mt-16 bg-elevated">
-        <div class="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
+        <div class="tenant-container py-20">
           <div class="mb-12 max-w-2xl">
             <p class="tenant-kicker mb-6">{{ t('site.location.good_to_know') }}</p>
             <h2 class="tenant-display-md text-default">{{ t('site.location.before_you_come') }}</h2>
@@ -145,7 +145,7 @@
       </section>
 
       <!-- CTA strip -->
-      <section class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-8 px-4 py-24 sm:px-6 lg:px-8">
+      <section class="tenant-container flex flex-wrap items-center justify-between gap-8 py-24">
         <h3 class="tenant-display-md tenant-italic text-default">{{ t('site.location.see_you_soon') }}</h3>
         <div class="flex flex-wrap gap-3">
           <TenantButton v-if="locationCopy.ctaRoute" :to="localePath(locationCopy.ctaRoute)" size="lg">{{ locationCopy.reserveCta }}</TenantButton>
