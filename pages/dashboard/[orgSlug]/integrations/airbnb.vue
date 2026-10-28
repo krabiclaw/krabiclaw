@@ -186,7 +186,8 @@ const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) 
 const resolving = ref(new Set<string>())
 /** Where the listings stand, on the checklist's heading: a failed change first, then changes in progress, else how many sync. */
 const itemsStatus = computed<IntegrationLeafItemsStatus | null>(() => {
-  if (!connected.value || listingsPending.value) return null
+  // A sync read that failed is the panel's error; a count the page cannot know is not shown.
+  if (!connected.value || listingsPending.value || changesError.value) return null
   const firstFailed = failed.value[0]
   if (firstFailed) return { text: `Needs attention: ${firstFailed.error!.message}`, tone: 'warning', retryable: true }
   const running = jobs.value.filter(job => job.status === 'queued' || job.status === 'running').length
@@ -286,28 +287,32 @@ async function apply() {
  * read does not return what was sent), so the retry never drops them.
  */
 async function retryFailed() {
-  if (!failed.value.length) return
+  if (!failed.value.length || applying.value) return
   failure.value = ''
-  for (const job of failed.value.filter(job => job.action === 'sync')) {
-    const listing = listings.value.find(candidate => candidate.id === job.listing_id)
-    if (!listing || listing.import.status !== 'not_imported' || entered.value[listing.id]) continue
-    try {
-      details.value[listing.id] ??= await dashboardApi(`${api}/listings/${encodeURIComponent(listing.id)}`, { validate: isDetails })
-    } catch (cause) {
-      failure.value = getErrorMessage(cause, `Could not read ${listing.title} from Airbnb.`)
-      return
-    }
-    if (!needsDetails(listing)) continue
-    await addDetails(listing.id)
-    if (!entered.value[listing.id]) return
-  }
   applying.value = true
   try {
+    for (const job of failed.value.filter(job => job.action === 'sync')) {
+      const listing = listings.value.find(candidate => candidate.id === job.listing_id)
+      if (!listing || listing.import.status !== 'not_imported') continue
+      // A detail the server refused is corrected in the same dialog; details still held are otherwise sent as they are.
+      if (entered.value[listing.id] && job.error?.code !== 'INVALID_DETAIL') continue
+      try {
+        details.value[listing.id] ??= await dashboardApi(`${api}/listings/${encodeURIComponent(listing.id)}`, { validate: isDetails })
+      } catch (cause) {
+        failure.value = getErrorMessage(cause, `Could not read ${listing.title} from Airbnb.`)
+        return
+      }
+      if (!needsDetails(listing) && job.error?.code !== 'INVALID_DETAIL') continue
+      await addDetails(listing.id)
+      if (!entered.value[listing.id]) return
+    }
+    // A stop whose home no longer exists has nothing left to stop; sending it would refuse the whole batch.
+    const imported = new Set(listings.value.flatMap(listing => listing.import.status === 'imported' ? [listing.import.product_id] : []))
     await dashboardApi(`${api}/sync`, {
       method: 'POST',
       body: {
         sync: failed.value.filter(job => job.action === 'sync').map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
-        stop: failed.value.filter(job => job.action === 'stop' && job.product_id).map(job => job.product_id),
+        stop: failed.value.filter(job => job.action === 'stop' && job.product_id && imported.has(job.product_id)).map(job => job.product_id),
       },
       validate: isChanges,
     })

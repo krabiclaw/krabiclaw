@@ -178,7 +178,8 @@ const state = computed<{ label: string; tone?: 'warning' }>(() => {
     case 'active': return { label: 'Active' }
     case 'disabled': return { label: 'Not active yet', tone: 'warning' }
     case 'error': return { label: 'Needs attention', tone: 'warning' }
-    default: return { label: props.connection?.note || 'Connecting…', tone: 'warning' }
+    // A connection that reports no status of its own is established once it has a date; a note says where one still connecting stands.
+    default: return props.connection?.note ? { label: props.connection.note, tone: 'warning' } : { label: 'Active' }
   }
 })
 
