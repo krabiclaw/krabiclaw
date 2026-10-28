@@ -8,7 +8,7 @@
     :footer="Boolean(applyLabel)"
     :save-label="applyLabel"
     :saving="applying"
-    :disabled="pending || resolving.size > 0 || Boolean(syncingProductId)"
+    :disabled="pending || resolving.size > 0"
     @save="apply"
   >
     <!-- The sync is Business. A connection made under a lapsed plan, in whatever state, can still be disconnected. -->
@@ -26,10 +26,9 @@
       :items-error="listingsError ? getErrorMessage(listingsError, 'Could not load your Airbnb listings.') : null"
       items-empty="Airbnb returned no listings for this account. Check that you connected your hosting account."
       :items-status="itemsStatus"
-      :applying="applying || pending || Boolean(syncingProductId)"
-      :inert="Boolean(syncingProductId)"
+      :applying="applying || pending"
       @choose="choose"
-      @act="act"
+      @act="addDetails"
       @retry-failed="retryFailed"
       @disconnect="disconnect"
     >
@@ -40,17 +39,6 @@
         <UButton icon="i-simple-icons-airbnb" size="xl" block :loading="starting" @click="startConnection">Connect Airbnb</UButton>
         <p class="text-center text-xs text-dimmed">You can also connect and sync directly within the KrabiClaw app on iOS.</p>
       </div>
-      <template #connected>
-        <UAlert
-          v-for="(result, productId) in fullSyncResults"
-          :key="productId"
-          :color="result.push.state === 'pushed' ? 'success' : 'warning'"
-          variant="soft"
-          :title="result.push.state === 'pushed' ? `Calendar sent for ${result.title}` : `Full sync is waiting for ${result.title}`"
-          :description="result.push.state === 'pending' ? result.push.detail : 'Availability, prices and stay rules were sent.'"
-          role="status"
-        />
-      </template>
     </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
@@ -62,9 +50,6 @@ import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { integrationDefinition, itemsApplyLabel } from '~/shared/integrations'
 import { IMPORT_STAGES, importStageTitle, isInterruptedStage, type ImportStage } from '~/shared/airbnb-import'
 import { offer } from '~/shared/offers'
-import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
-import { authClient } from '~/lib/auth-client'
-import type { organizationRoles } from '~/utils/organization-access'
 import { getErrorMessage } from '~/utils/errors'
 import { integrationsKey } from '../integrations.vue'
 
@@ -103,12 +88,6 @@ const route = useRoute()
 const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const entitled = computed(() => dashboard.entitlements.value.channel_sync === true)
-const canFullSync = computed(() => {
-  const role = dashboard.organization.value?.role as keyof typeof organizationRoles | undefined
-  return entitled.value && Boolean(role && authClient.organization.checkRolePermission({ role, permissions: { integrations: ['update'] } }))
-})
-const syncingProductId = ref<string | null>(null)
-const fullSyncResults = ref<Record<string, { title: string; push: SuccessfulChannelPush }>>({})
 const api = `/api/organizations/${integrations.organizationId}/integrations/airbnb`
 const detailsDialog = useOverlay().create(AirbnbListingDetailsDialog)
 
@@ -131,9 +110,6 @@ const isDetails = (value: unknown): value is AirbnbListingDetails =>
   && Array.isArray(value.missingFields) && ['checkInTime', 'checkInEndTime', 'checkOutTime'].every(key => value[key] === null || typeof value[key] === 'string')
 const isStart = (value: unknown): value is { authorization_url: string } => isRecord(value) && typeof value.authorization_url === 'string'
 const isDisconnect = (value: unknown): value is { disconnected: boolean } => isRecord(value) && typeof value.disconnected === 'boolean'
-const isFullSync = (value: unknown): value is { product_id: string; channel_push: SuccessfulChannelPush } =>
-  isRecord(value) && typeof value.product_id === 'string' && Boolean(value.product_id)
-  && value.channel_push !== null && isSuccessfulChannelPush(value.channel_push)
 
 const { data: status, error: statusError, refresh: refreshStatus } = await useAsyncData(
   () => `integration-airbnb-status:${integrations.organizationId}`,
@@ -208,9 +184,6 @@ const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) 
   const subtitle = [listing.city, listing.country_code].filter(Boolean).join(', ') || null
   const hint = isBackup(listing) ? 'Looks like a backup listing' : null
   const to = listing.import.status === 'imported' ? `/dashboard/${String(route.params.orgSlug)}/products/${listing.import.product_id}` : undefined
-  if (listing.import.status === 'imported' && syncingProductId.value === listing.import.product_id) {
-    return { id: listing.id, title: listing.title, subtitle, status: 'pending', note: 'Sending your full calendar…', to }
-  }
   if (job && (job.status === 'queued' || job.status === 'running')) {
     const note = job.action === 'stop' ? 'Stopping sync…' : job.status === 'queued' ? 'Waiting to sync' : job.stage ? importStageTitle(job.stage) : 'Preparing your home…'
     return { id: listing.id, title: listing.title, subtitle, status: 'pending', note, to }
@@ -218,9 +191,7 @@ const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) 
   if (job?.status === 'failed') return { id: listing.id, title: listing.title, subtitle, status: 'attention', note: job.error!.message, to }
   if (interrupted(listing)) return { id: listing.id, title: listing.title, subtitle, status: 'attention', note: 'Setup didn’t finish · it finishes when you apply', to }
   if (needsDetails(listing)) return { id: listing.id, title: listing.title, subtitle, status: 'not_syncing', note: hint, action: 'Add details' }
-  const action = canFullSync.value && listing.import.status === 'imported' && listing.import.syncing && listing.import.stage === 'complete'
-    && fullSyncResults.value[listing.import.product_id]?.push.state !== 'pending' ? 'Full sync' : undefined
-  return { id: listing.id, title: listing.title, subtitle, status: syncing(listing) ? 'syncing' : 'not_syncing', note: listing.import.status === 'imported' && listing.import.stage === 'draft' ? 'Draft' : hint, action, to }
+  return { id: listing.id, title: listing.title, subtitle, status: syncing(listing) ? 'syncing' : 'not_syncing', note: listing.import.status === 'imported' && listing.import.stage === 'draft' ? 'Draft' : hint, to }
 }))
 
 /** Listings whose details are still being read or asked for: nothing applies until each is settled. */
@@ -302,35 +273,9 @@ async function addDetails(id: string): Promise<boolean> {
   }
 }
 
-async function act(id: string) {
-  const listing = listings.value.find(candidate => candidate.id === id)
-  if (!listing) return
-  if (listing.import.status === 'imported') await fullSync(listing)
-  else await addDetails(id)
-}
-
-async function fullSync(listing: AirbnbListing) {
-  if (!connected.value || syncingProductId.value || applying.value || pending.value || resolving.value.size || disconnecting.value || !canFullSync.value
-    || listing.import.status !== 'imported' || !listing.import.syncing || listing.import.stage !== 'complete') return
-  const productId = listing.import.product_id
-  if (fullSyncResults.value[productId]?.push.state === 'pending') return
-  syncingProductId.value = productId
-  fullSyncResults.value = Object.fromEntries(Object.entries(fullSyncResults.value).filter(([id]) => id !== productId))
-  failure.value = ''
-  try {
-    const result = await dashboardApi(`${api}/imports/${encodeURIComponent(productId)}/calendar`, { method: 'POST', validate: isFullSync })
-    if (result.product_id !== productId) throw new Error('The full sync returned a different home. Reload before trying again.')
-    fullSyncResults.value[productId] = { title: listing.title, push: result.channel_push }
-  } catch (cause) {
-    failure.value = `${listing.title}: ${getErrorMessage(cause, 'Could not send the full calendar.')}`
-  } finally {
-    syncingProductId.value = null
-  }
-}
-
 /** Hands the change to KrabiClaw, then follows its progress until nothing is waiting. */
 async function apply() {
-  if (!applyLabel.value || syncingProductId.value) return
+  if (!applyLabel.value) return
   applying.value = true
   failure.value = ''
   try {
@@ -360,7 +305,7 @@ async function apply() {
 async function retryFailed() {
   const batch = retryBatch.value
   if (!batch.sync.length && !batch.stop.length) return
-  if (applying.value || syncingProductId.value) return
+  if (applying.value) return
   failure.value = ''
   applying.value = true
   try {
@@ -439,7 +384,6 @@ async function startConnection() {
 }
 
 async function disconnect() {
-  if (syncingProductId.value) return
   disconnecting.value = true
   failure.value = ''
   try {

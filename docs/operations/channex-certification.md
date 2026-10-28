@@ -43,7 +43,7 @@ The write path Channex will ask to see:
 | Mapping | `product_channel_mappings` (property, room type, rate plan per home) |
 | Task IDs | `channel_sync_log.task_id` on every ARI call |
 | Bookings | webhook `POST /api/integrations/channex/webhook` → `applyBookingRevision` (`booking-revisions.ts`) → `GET /booking_revisions/:id` is the booking, landed as a stay, then `POST /booking_revisions/:id/ack`; `channex-revision-feed` reads unacknowledged revisions every 10 minutes. Nothing reads `GET /bookings/:id`: Channex counts that as `booking_received_via_booking_find` and refuses it |
-| Full sync again | **Menu → Connections → Airbnb → Connected listings → Full sync** beside the selected syncing home → `POST /api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar` (no body). The existing outbox resends the home's actual 500 future nights in one restrictions and one availability call, preserving its channel mapping and Messages installation |
+| Full sync again | In the iOS app's Airbnb listing chooser, **Full sync** beside the selected syncing home → `POST /api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar` (empty request). The existing outbox resends the home's actual 500 future nights in one restrictions and one availability call, preserving its channel mapping and Messages installation |
 
 ## Before the run
 
@@ -56,9 +56,9 @@ The write path Channex will ask to see:
    Channex discards the unused minimum under a single-type mode, even when
    KrabiClaw sent it. Missing or unknown modes fail the sync visibly.
 
-   Redo test 1 for an existing syncing home in the dashboard: **Menu →
-   Connections → Airbnb → Connected listings → Full sync** beside that
-   home's name. The action requires an owner or admin with channel sync
+   Redo test 1 for an existing syncing home in the iOS app: open the Airbnb
+   listing chooser and tap **Full sync** beside that home's name. The action
+   requires an owner or admin with channel sync
    access. Wait for its result; if delivery is pending, read the reason and
    let the existing outbox retry rather than clicking again. Do this before
    tests 2 to 10: the full sync records what Channex holds for every night,
@@ -131,17 +131,18 @@ account.
 
 ## Review video
 
-Record the real PMS actions and the same property's Channex staging **Logs**,
-continuously or in clearly separated sections. Show the selected home and its
+Record all three PMS actions in the iOS app, and show the same property's
+Channex staging web **Logs** after each action, continuously or in clearly
+separated sections. Show the selected home and its
 mapped property, room type and rate plan so each request can be tied to the
 action. Choose an available future night with no other inventory claim for
 the booking scenarios; preserve existing stays and rules.
 
 | Scenario | PMS action | Evidence in Channex Logs |
 | --- | --- | --- |
-| Create a booking | Add a one-night stay, then show it on the home's calendar | One availability update for that night, from 1 to 0; no restrictions update or unrelated dates |
-| Move the booking | Edit that same stay to one week later, keeping it one night; show its new dates | One availability batch reopening the old night to 1 and closing the new night to 0; no restrictions update or unrelated dates |
-| Full sync | Choose **Full sync** beside that same home in **Connections → Airbnb** | Exactly one restrictions task and one availability task covering the same 500 future nights, with actual varied calendar values and both minimum-stay fields in every restriction object |
+| Create a booking | In iOS, **Add stay** for one night, then show it on the home's calendar | One availability update for that night, from 1 to 0; no restrictions update or unrelated dates |
+| Move the booking | In iOS, edit that same stay to one week later, keeping it one night; show its new dates | One availability batch reopening the old night to 1 and closing the new night to 0; no restrictions update or unrelated dates |
+| Full sync | In the iOS Airbnb listing chooser, tap **Full sync** beside that same home | Exactly one restrictions task and one availability task covering the same 500 future nights, with actual varied calendar values and both minimum-stay fields in every restriction object |
 
 Open the requests and returned task IDs, not just their success labels. Equal
 consecutive nights may be compressed into date ranges; expand the ranges when
