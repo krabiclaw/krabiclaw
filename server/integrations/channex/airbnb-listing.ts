@@ -1,6 +1,7 @@
 import { HTTPError } from 'nitro'
 import tzLookup from '@photostructure/tz-lookup'
 import { isValidTimezone } from '~/utils/timezone'
+import { DETAIL_FIELDS, type AirbnbPropertyType, type DetailField } from '~/shared/airbnb-import'
 import { channexRequest, type ChannexEnv } from './client'
 import { ChannexDataError, integer, object, received, string, type JsonRecord } from './data'
 
@@ -14,9 +15,6 @@ import { ChannexDataError, integer, object, received, string, type JsonRecord } 
  * host to supply; nothing is filled in for them.
  */
 
-export const DETAIL_FIELDS = ['timezone', 'email', 'phone', 'country', 'state', 'city', 'address', 'zipCode', 'propertyType'] as const
-export type DetailField = typeof DETAIL_FIELDS[number]
-export const PROPERTY_TYPES = ['apartment', 'holiday_home', 'villa', 'chalet', 'lodge'] as const
 /**
  * Airbnb's `property_type_category` (as Channex's `listing_details` returns it;
  * "house" and "townhouse" read live on 2026-10-25) to Channex's `property_type`,
@@ -25,7 +23,7 @@ export const PROPERTY_TYPES = ['apartment', 'holiday_home', 'villa', 'chalet', '
  * Airbnb's apartments group is an apartment; its stand-alone or terraced house
  * is a holiday home. A category not listed here stops the import for review.
  */
-const AIRBNB_PROPERTY_TYPES: Readonly<Record<string, typeof PROPERTY_TYPES[number]>> = {
+const AIRBNB_PROPERTY_TYPES: Readonly<Record<string, AirbnbPropertyType>> = {
   apartment: 'apartment', condominium: 'apartment', serviced_apartment: 'apartment', loft: 'apartment',
   house: 'holiday_home', townhouse: 'holiday_home', villa: 'villa', chalet: 'chalet',
 }
