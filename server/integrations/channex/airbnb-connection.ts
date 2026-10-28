@@ -18,7 +18,9 @@ import { STAY_ARRIVAL_TEXT_LIMITS } from '~/shared/stay-arrival'
 import { isStayAmenity, type StayAmenity, type StayCheckInMethod } from '~/shared/stay-listing'
 import { channexCreate, channexGet, channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object, relationship, resource, string, type JsonRecord, type Resource } from './data'
-import { CALENDAR_NIGHTS, DETAIL_FIELDS, PHOTO_WIDTH, PROPERTY_TYPES, listingCalendar, listingContent, listingDetails, type DescriptionField, type DetailField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
+import { CALENDAR_NIGHTS, PHOTO_WIDTH, listingCalendar, listingContent, listingDetails, type DescriptionField, type ListingDetails, type ListingImage, type OrganizationContact, type ListingNight } from './airbnb-listing'
+import { DETAIL_FIELDS, IMPORT_STAGES, PROPERTY_TYPES, type DetailField, type ImportStage } from '~/shared/airbnb-import'
+export type { ImportStage } from '~/shared/airbnb-import'
 import { installChannexMessages, uninstallChannexMessages } from './messages'
 import { forgetConfirmedNights, type ChannexMapping } from './ari'
 import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
@@ -52,15 +54,6 @@ interface ConnectionRow {
   channel_id: string | null
   connected_at: string | null
 }
-
-/**
- * A listing's import, stage by stage. Through `draft` it builds the home and
- * its Channex property and nothing syncs with Airbnb: a draft is free on every
- * plan. Activate moves a draft to `mapping`, where the plan is checked before
- * Channex maps the listing; from there the home is live.
- */
-export const IMPORT_STAGES = ['property', 'room', 'rate', 'inventory', 'verify_inventory', 'content', 'draft', 'mapping', 'activate', 'reservations', 'messages', 'complete'] as const
-export type ImportStage = typeof IMPORT_STAGES[number]
 
 /** What the content stage could not carry over from Airbnb, for the apps to show the host. */
 export interface ImportContentReport {
