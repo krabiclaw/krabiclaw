@@ -60,7 +60,11 @@ const props = defineProps<{
 */
 const emit = defineEmits<{ close: [values: Record<string, string> | null] }>()
 
-const values = reactive<Record<string, string>>(Object.fromEntries(props.details.missingFields.map(field => [field, props.entered[field] ?? ''])))
+// The overlay keeps one dialog mounted across opens, so the form is rebuilt for each listing it is given.
+const values = ref<Record<string, string>>({})
+watch(() => [props.details, props.entered] as const, ([details, entered]) => {
+  values.value = Object.fromEntries(details.missingFields.map(field => [field, entered[field] ?? '']))
+}, { immediate: true })
 
 const LOCATION_FIELDS: DetailField[] = ['propertyType', 'country', 'state', 'city', 'address', 'zipCode', 'timezone']
 const CONTACT_FIELDS: DetailField[] = ['email', 'phone']
@@ -79,9 +83,9 @@ const stayTimes = computed(() => {
   return `Check-in ${checkInTime}${checkInEndTime ? `–${checkInEndTime}` : ' onwards'} · Checkout ${checkOutTime}`
 })
 
-const complete = computed(() => stayTimes.value !== null && props.details.missingFields.every(field => values[field]?.trim()))
+const complete = computed(() => stayTimes.value !== null && props.details.missingFields.every(field => values.value[field]?.trim()))
 
 function done() {
-  emit('close', Object.fromEntries(props.details.missingFields.map(field => [field, values[field]!.trim()])))
+  emit('close', Object.fromEntries(props.details.missingFields.map(field => [field, values.value[field]!.trim()])))
 }
 </script>
