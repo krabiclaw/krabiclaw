@@ -44,7 +44,13 @@ export default defineAppConfig({
     // the one `xl`. Focus is a 2px ring in the text colour, as Airbnb's is
     // black. Buttons are neutral — navy in light, white in dark — and coral
     // is left for status and selection marks.
-    checkbox: { defaultVariants: { size: 'lg' } },
+    // A choice in a list — which Airbnb listings sync — is the one place a
+    // checkbox appears (DESIGN.md). Checked is the inverted surface, as
+    // Airbnb's host checklists are, never coral; the box keeps the field corner.
+    checkbox: {
+      slots: { base: 'rounded-[4px]', label: 'text-base font-medium text-highlighted', description: 'text-sm text-muted' },
+      defaultVariants: { size: 'lg', color: 'neutral' }
+    },
     inputMenu: field,
     inputNumber: field,
     inputDate: field,

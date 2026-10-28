@@ -2,94 +2,65 @@
   <DashboardLeafPanel
     id="integration-airbnb"
     icon="i-simple-icons-airbnb"
-    title="Airbnb"
+    title="Airbnb sync"
     :lead="integrationDefinition('airbnb').purpose"
     :error="panelError"
-    :footer="false"
+    :footer="Boolean(applyLabel)"
+    :save-label="applyLabel"
+    :saving="applying"
+    :disabled="pending || resolving.size > 0 || Boolean(syncingProductId)"
+    @save="apply"
   >
     <!-- The sync is Business. A connection made under a lapsed plan, in whatever state, can still be disconnected. -->
-    <OfferCard v-if="!entitled && (!statusData || statusData.status === 'not_connected')" :offer="offer('airbnb_sync')" />
+    <OfferCard v-if="!entitled && (!status || status.status === 'not_connected')" :offer="offer('airbnb_sync')" />
     <IntegrationLeaf
       v-else
+      v-model:selected="checked"
       integration="airbnb"
-      :connection="airbnbConnection"
+      :connection="connection"
       :disconnecting="disconnecting"
+      :items="connected ? rows : null"
+      items-title="Choose listings to sync"
+      items-lead="Checked listings keep their calendar, prices and guest messages in sync with Airbnb and take bookings on your site. Uncheck one any time to stop; it stays here as a free draft."
+      :items-loading="listingsPending"
+      :items-error="listingsError ? getErrorMessage(listingsError, 'Could not load your Airbnb listings.') : null"
+      items-empty="Airbnb returned no listings for this account. Check that you connected your hosting account."
+      :items-status="itemsStatus"
+      :applying="applying || pending || Boolean(syncingProductId)"
       :inert="Boolean(syncingProductId)"
+      @choose="choose"
+      @act="act"
+      @retry-failed="retryFailed"
       @disconnect="disconnect"
     >
-      <div v-if="!isConnected" class="space-y-4">
+      <div v-if="!connection" class="space-y-4">
         <p class="text-sm text-muted">
           Connect your Airbnb host account to sync listings, availability, rates, and guest messages directly to your dashboard.
         </p>
-
-        <UButton
-          icon="i-simple-icons-airbnb"
-          size="xl"
-          block
-          :loading="starting"
-          @click="startConnection"
-        >
-          Connect Airbnb
-        </UButton>
-
-        <p class="text-xs text-dimmed text-center">
-          You can also connect and sync directly within the KrabiClaw app on iOS.
-        </p>
+        <UButton icon="i-simple-icons-airbnb" size="xl" block :loading="starting" @click="startConnection">Connect Airbnb</UButton>
+        <p class="text-center text-xs text-dimmed">You can also connect and sync directly within the KrabiClaw app on iOS.</p>
       </div>
-
       <template #connected>
-        <div v-if="isConnected && listings.length" class="mt-6 space-y-3">
-          <h3 class="text-sm font-semibold text-highlighted">Connected listings ({{ listings.length }})</h3>
-          <p class="text-sm text-muted">Send a home's full calendar again to restore its availability, prices and stay rules.</p>
-          <ul class="divide-y divide-default rounded-xl border border-default bg-elevated">
-            <li
-              v-for="listing in listings"
-              :key="listing.id"
-              class="flex items-center justify-between p-3.5 text-sm"
-            >
-              <div class="min-w-0 flex-1">
-                <p class="font-medium text-highlighted truncate">{{ listing.title }}</p>
-                <p class="text-xs text-muted">{{ listing.city }}, {{ listing.country_code }}</p>
-              </div>
-              <div class="ml-3 flex shrink-0 items-center gap-3">
-                <UBadge
-                  :color="listing.import.status === 'imported' ? 'primary' : 'neutral'"
-                  variant="subtle"
-                  size="sm"
-                >
-                  {{ listing.import.status === 'imported' ? 'Imported' : 'Not imported' }}
-                </UBadge>
-                <UButton
-                  v-if="canFullSync && listing.import.status === 'imported' && listing.import.syncing && listing.import.stage === 'complete'"
-                  color="neutral"
-                  variant="outline"
-                  :aria-label="`Full sync for ${listing.title}`"
-                  :loading="syncingProductId === listing.import.product_id"
-                  :disabled="disconnecting || Boolean(syncingProductId) || fullSyncResults[listing.import.product_id]?.push.state === 'pending'"
-                  @click="fullSync(listing)"
-                >Full sync</UButton>
-              </div>
-            </li>
-          </ul>
-          <UAlert
-            v-for="(result, productId) in fullSyncResults"
-            :key="productId"
-            :color="result.push.state === 'pushed' ? 'success' : 'warning'"
-            variant="soft"
-            :title="result.push.state === 'pushed' ? `Calendar sent for ${result.title}` : `Full sync is waiting for ${result.title}`"
-            :description="result.push.state === 'pending' ? result.push.detail : 'Availability, prices and stay rules were sent.'"
-            role="status"
-          />
-        </div>
+        <UAlert
+          v-for="(result, productId) in fullSyncResults"
+          :key="productId"
+          :color="result.push.state === 'pushed' ? 'success' : 'warning'"
+          variant="soft"
+          :title="result.push.state === 'pushed' ? `Calendar sent for ${result.title}` : `Full sync is waiting for ${result.title}`"
+          :description="result.push.state === 'pending' ? result.push.detail : 'Availability, prices and stay rules were sent.'"
+          role="status"
+        />
       </template>
     </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
-import IntegrationLeaf, { type IntegrationLeafConnection } from '~/components/dashboard/IntegrationLeaf.vue'
+import IntegrationLeaf, { type IntegrationLeafConnection, type IntegrationLeafItem, type IntegrationLeafItemsStatus } from '~/components/dashboard/IntegrationLeaf.vue'
+import AirbnbListingDetailsDialog, { type AirbnbListingDetails } from '~/components/dashboard/AirbnbListingDetailsDialog.vue'
 import OfferCard from '~/components/dashboard/OfferCard.vue'
-import { integrationDefinition } from '~/shared/integrations'
+import { integrationDefinition, itemsApplyLabel } from '~/shared/integrations'
+import { IMPORT_STAGES, importStageTitle, isInterruptedStage, type ImportStage } from '~/shared/airbnb-import'
 import { offer } from '~/shared/offers'
 import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { authClient } from '~/lib/auth-client'
@@ -99,22 +70,36 @@ import { integrationsKey } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })
 
-interface AirbnbStatusPayload {
+/*
+  The Airbnb sync checklist, as the iOS app has it: every listing on the
+  connected account, checked when it syncs with KrabiClaw. Checking one brings
+  it over and turns its sync on; unchecking stops the sync and keeps the home
+  as a free draft. The changes apply together from one button, after the plan
+  check, and KrabiClaw runs them in the background (sync.post, then sync.get
+  until nothing is waiting). A listing Airbnb left details out of gets them in
+  its own dialog first.
+*/
+interface AirbnbStatus {
   status: 'not_connected' | 'authorizing' | 'connected' | 'disconnecting' | 'needs_review'
   connected_at: string | null
   listing_count: number
   channel_active: boolean
 }
 
-interface AirbnbListing {
-  id: string
-  title: string
-  city: string
-  country_code: string
-  import: { status: 'not_imported' } | { status: 'imported'; product_id: string; stage: string; syncing: boolean }
+type ListingImport = { status: 'not_imported' } | { status: 'imported'; product_id: string; stage: ImportStage; syncing: boolean }
+interface AirbnbListing { id: string; title: string; city: string; country_code: string; import: ListingImport }
+
+interface SyncChange {
+  listing_id: string
+  product_id: string | null
+  action: 'sync' | 'stop'
+  status: 'queued' | 'running' | 'done' | 'failed'
+  stage: ImportStage | null
+  error: { code: string; message: string } | null
 }
 
 const integrations = inject(integrationsKey)!
+const route = useRoute()
 const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const entitled = computed(() => dashboard.entitlements.value.channel_sync === true)
@@ -122,124 +107,348 @@ const canFullSync = computed(() => {
   const role = dashboard.organization.value?.role as keyof typeof organizationRoles | undefined
   return entitled.value && Boolean(role && authClient.organization.checkRolePermission({ role, permissions: { integrations: ['update'] } }))
 })
-const apiBase = `/api/organizations/${integrations.organizationId}/integrations/airbnb`
-
-const starting = ref(false)
-const disconnecting = ref(false)
-const disconnectError = ref<string | null>(null)
-const error = ref<string | null>(null)
 const syncingProductId = ref<string | null>(null)
 const fullSyncResults = ref<Record<string, { title: string; push: SuccessfulChannelPush }>>({})
+const api = `/api/organizations/${integrations.organizationId}/integrations/airbnb`
+const detailsDialog = useOverlay().create(AirbnbListingDetailsDialog)
 
-const isStatus = (value: unknown): value is AirbnbStatusPayload =>
-  isRecord(value) && typeof value.status === 'string'
-  && ['not_connected', 'authorizing', 'connected', 'disconnecting', 'needs_review'].includes(value.status)
-  && (value.connected_at === null || typeof value.connected_at === 'string')
-  && (value.status !== 'connected' || typeof value.connected_at === 'string')
-  && typeof value.listing_count === 'number'
-  && typeof value.channel_active === 'boolean'
-
-const isListings = (value: unknown): value is { listings: AirbnbListing[] } =>
-  isRecord(value) && Array.isArray(value.listings)
-  && value.listings.every(listing => isRecord(listing) && typeof listing.id === 'string' && Boolean(listing.id)
-    && typeof listing.title === 'string' && typeof listing.city === 'string' && typeof listing.country_code === 'string'
-    && isRecord(listing.import) && (listing.import.status === 'not_imported'
-      || (listing.import.status === 'imported' && typeof listing.import.product_id === 'string' && Boolean(listing.import.product_id)
-        && typeof listing.import.stage === 'string' && typeof listing.import.syncing === 'boolean')))
-
+const isStage = (value: unknown): value is ImportStage => typeof value === 'string' && (IMPORT_STAGES as readonly string[]).includes(value)
+const isStatus = (value: unknown): value is AirbnbStatus =>
+  isRecord(value) && ['not_connected', 'authorizing', 'connected', 'disconnecting', 'needs_review'].includes(String(value.status))
+  && (value.connected_at === null || typeof value.connected_at === 'string') && typeof value.listing_count === 'number'
+const isListing = (value: unknown): value is AirbnbListing =>
+  isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string' && isRecord(value.import)
+  && (value.import.status === 'not_imported' || (value.import.status === 'imported' && typeof value.import.product_id === 'string' && isStage(value.import.stage) && typeof value.import.syncing === 'boolean'))
+const isListings = (value: unknown): value is { listings: AirbnbListing[] } => isRecord(value) && Array.isArray(value.listings) && value.listings.every(isListing)
+const isChange = (value: unknown): value is SyncChange =>
+  isRecord(value) && typeof value.listing_id === 'string' && (value.action === 'sync' || value.action === 'stop')
+  && ['queued', 'running', 'done', 'failed'].includes(String(value.status)) && (value.stage === null || isStage(value.stage))
+  && (value.error === null || (isRecord(value.error) && typeof value.error.message === 'string'))
+  && (value.status !== 'failed' || value.error !== null)
+const isChanges = (value: unknown): value is { listings: SyncChange[] } => isRecord(value) && Array.isArray(value.listings) && value.listings.every(isChange)
+const isDetails = (value: unknown): value is AirbnbListingDetails =>
+  isRecord(value) && typeof value.currency === 'string' && typeof value.maxGuests === 'number' && typeof value.nightlyRate === 'string'
+  && Array.isArray(value.missingFields) && ['checkInTime', 'checkInEndTime', 'checkOutTime'].every(key => value[key] === null || typeof value[key] === 'string')
+const isStart = (value: unknown): value is { authorization_url: string } => isRecord(value) && typeof value.authorization_url === 'string'
+const isDisconnect = (value: unknown): value is { disconnected: boolean } => isRecord(value) && typeof value.disconnected === 'boolean'
 const isFullSync = (value: unknown): value is { product_id: string; channel_push: SuccessfulChannelPush } =>
   isRecord(value) && typeof value.product_id === 'string' && Boolean(value.product_id)
   && value.channel_push !== null && isSuccessfulChannelPush(value.channel_push)
 
-const isStartResponse = (value: unknown): value is { authorization_url: string } =>
-  isRecord(value) && typeof value.authorization_url === 'string'
-
-const isDisconnectResponse = (value: unknown): value is { disconnected: boolean } =>
-  isRecord(value) && typeof value.disconnected === 'boolean'
-
-const panelError = computed(() =>
-  error.value
-  || (statusError.value ? getErrorMessage(statusError.value, 'Could not load Airbnb connection status.') : undefined)
-  || (listingsError.value ? getErrorMessage(listingsError.value, 'Could not load Airbnb listings.') : undefined)
-  || (statusData.value?.status === 'needs_review' ? 'The Airbnb connection needs review.' : undefined)
-  || disconnectError.value
-  || undefined,
-)
-
-const { data: statusData, error: statusError, refresh: refreshStatus } = await useAsyncData<AirbnbStatusPayload>(
+const { data: status, error: statusError, refresh: refreshStatus } = await useAsyncData(
   () => `integration-airbnb-status:${integrations.organizationId}`,
-  () => dashboardApi(`${apiBase}/status`, { validate: isStatus }),
+  () => dashboardApi(`${api}/status`, { validate: isStatus }),
 )
+const connected = computed(() => status.value?.status === 'connected')
 
-const isConnected = computed(() => statusData.value?.status === 'connected')
-
-const { data: listingsData, error: listingsError, refresh: refreshListings } = await useAsyncData<{ listings: AirbnbListing[] }>(
+const { data: listingsData, error: listingsError, pending: listingsPending, refresh: refreshListings } = await useAsyncData(
   () => `integration-airbnb-listings:${integrations.organizationId}`,
-  () => dashboardApi(`${apiBase}/listings`, { validate: isListings }),
-  { immediate: isConnected.value },
+  () => dashboardApi(`${api}/listings`, { validate: isListings }),
+  { immediate: connected.value, watch: [connected] },
 )
+const listings = computed(() => connected.value ? listingsData.value?.listings ?? [] : [])
 
-const listings = computed(() => listingsData.value?.listings ?? [])
-
-const airbnbConnection = computed<IntegrationLeafConnection | null>(() => {
-  const s = statusData.value
-  if (!s || s.status === 'not_connected' || s.connected_at === null) return null
+const { data: changes, error: changesError, refresh: refreshChanges } = await useAsyncData(
+  () => `integration-airbnb-sync:${integrations.organizationId}`,
+  () => dashboardApi(`${api}/sync`, { validate: isChanges }),
+  { immediate: connected.value, watch: [connected] },
+)
+const jobs = computed(() => connected.value ? changes.value?.listings ?? [] : [])
+const jobOf = (listingId: string) => jobs.value.find(job => job.listing_id === listingId)
+const pending = computed(() => jobs.value.some(job => job.status === 'queued' || job.status === 'running'))
+/** Changes that failed and are not yet asked for again. */
+const failed = computed(() => jobs.value.filter(job => job.status === 'failed'))
+/**
+ * The failed changes Retry can ask for again: a sync of a listing still on the
+ * account, a stop of a home that still exists. One that names neither would
+ * refuse the whole batch, so it is left out and, alone, offers no Retry.
+ */
+const retryBatch = computed(() => {
+  const imported = new Set(listings.value.flatMap(listing => listing.import.status === 'imported' ? [listing.import.product_id] : []))
   return {
-    name: 'Airbnb Host Account',
-    connectedAt: s.connected_at,
-    status: s.status === 'connected' ? 'active' : s.status === 'needs_review' ? 'error' : null,
-    lastError: s.status === 'needs_review' ? 'The Airbnb connection needs review.' : null,
+    sync: failed.value.filter(job => job.action === 'sync' && listings.value.some(listing => listing.id === job.listing_id)),
+    stop: failed.value.filter(job => job.action === 'stop' && job.product_id !== null && imported.has(job.product_id)),
   }
 })
 
-async function startConnection() {
-  starting.value = true
-  error.value = null
+const connection = computed<IntegrationLeafConnection | null>(() => {
+  const s = status.value
+  if (!s || s.status === 'not_connected') return null
+  return {
+    name: 'Airbnb host account',
+    connectedAt: s.connected_at,
+    through: null,
+    // Connected but not active yet on Channex's side is the host's wait, said on the account line.
+    status: s.status === 'connected' ? (s.channel_active ? 'active' : 'disabled') : s.status === 'needs_review' ? 'error' : null,
+    lastError: s.status === 'needs_review' ? 'The Airbnb connection needs review. Contact support to finish it.' : null,
+    note: s.status === 'authorizing' ? 'Finishing Airbnb sign-in' : s.status === 'disconnecting' ? 'Disconnecting…' : null,
+  }
+})
+
+// The checklist: what syncs today, plus syncs left part-way, which finish when applied.
+const interrupted = (listing: AirbnbListing) => listing.import.status === 'imported' && isInterruptedStage(listing.import.stage)
+const syncing = (listing: AirbnbListing) => listing.import.status === 'imported' && listing.import.syncing
+const checked = ref<string[]>([])
+watch(listings, value => { checked.value = value.filter(listing => syncing(listing) || interrupted(listing)).map(listing => listing.id) }, { immediate: true })
+
+/** What the host entered for listings Airbnb left details out of, by listing id, and the details each listing reported. */
+const entered = ref<Record<string, Record<string, string>>>({})
+const details = ref<Record<string, AirbnbListingDetails>>({})
+const needsDetails = (listing: AirbnbListing) => {
+  const known = details.value[listing.id]
+  return listing.import.status === 'not_imported' && known !== undefined && !entered.value[listing.id]
+    && (known.missingFields.length > 0 || !known.checkInTime || !known.checkOutTime)
+}
+
+/** "Backup" in the title, or a title already used by an earlier listing on the account. */
+const isBackup = (listing: AirbnbListing) => /backup/i.test(listing.title) || listings.value.find(other => other.title === listing.title)?.id !== listing.id
+
+const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) => {
+  const job = jobOf(listing.id)
+  const subtitle = [listing.city, listing.country_code].filter(Boolean).join(', ') || null
+  const hint = isBackup(listing) ? 'Looks like a backup listing' : null
+  const to = listing.import.status === 'imported' ? `/dashboard/${String(route.params.orgSlug)}/products/${listing.import.product_id}` : undefined
+  if (listing.import.status === 'imported' && syncingProductId.value === listing.import.product_id) {
+    return { id: listing.id, title: listing.title, subtitle, status: 'pending', note: 'Sending your full calendar…', to }
+  }
+  if (job && (job.status === 'queued' || job.status === 'running')) {
+    const note = job.action === 'stop' ? 'Stopping sync…' : job.status === 'queued' ? 'Waiting to sync' : job.stage ? importStageTitle(job.stage) : 'Preparing your home…'
+    return { id: listing.id, title: listing.title, subtitle, status: 'pending', note, to }
+  }
+  if (job?.status === 'failed') return { id: listing.id, title: listing.title, subtitle, status: 'attention', note: job.error!.message, to }
+  if (interrupted(listing)) return { id: listing.id, title: listing.title, subtitle, status: 'attention', note: 'Setup didn’t finish · it finishes when you apply', to }
+  if (needsDetails(listing)) return { id: listing.id, title: listing.title, subtitle, status: 'not_syncing', note: hint, action: 'Add details' }
+  const action = canFullSync.value && listing.import.status === 'imported' && listing.import.syncing && listing.import.stage === 'complete'
+    && fullSyncResults.value[listing.import.product_id]?.push.state !== 'pending' ? 'Full sync' : undefined
+  return { id: listing.id, title: listing.title, subtitle, status: syncing(listing) ? 'syncing' : 'not_syncing', note: listing.import.status === 'imported' && listing.import.stage === 'draft' ? 'Draft' : hint, action, to }
+}))
+
+/** Listings whose details are still being read or asked for: nothing applies until each is settled. */
+const resolving = ref(new Set<string>())
+/** Where the listings stand, on the checklist's heading: a failed change first, then changes in progress, else how many sync. */
+const itemsStatus = computed<IntegrationLeafItemsStatus | null>(() => {
+  // A sync read that failed is the panel's error; a count the page cannot know is not shown.
+  if (!connected.value || listingsPending.value || changesError.value) return null
+  // The failure shown is one Retry can clear when there is one; otherwise the first, without Retry.
+  const retryable = [...retryBatch.value.sync, ...retryBatch.value.stop]
+  const firstFailed = retryable[0] ?? failed.value[0]
+  if (firstFailed) return { text: `Needs attention: ${firstFailed.error!.message}`, tone: 'warning', retryable: retryable.length > 0 }
+  const running = jobs.value.filter(job => job.status === 'queued' || job.status === 'running').length
+  if (running) return { text: `Updating ${running} ${running === 1 ? 'listing' : 'listings'}…`, tone: 'warning' }
+  return { text: `${listings.value.filter(syncing).length} of ${listings.value.length} syncing` }
+})
+
+/** Checked listings that are not syncing yet, or whose sync setup stopped part-way, and have every detail the import asks for. */
+const toSync = computed(() => listings.value.filter(listing => checked.value.includes(listing.id) && (!syncing(listing) || interrupted(listing)) && !needsDetails(listing)))
+/** Syncing listings the host unchecked. */
+const toStop = computed(() => listings.value.filter(listing => !checked.value.includes(listing.id) && syncing(listing)))
+const applyLabel = computed(() => connected.value && !pending.value ? itemsApplyLabel(integrationDefinition('airbnb').items!, toSync.value.length, toStop.value.length) : null)
+
+const starting = ref(false), applying = ref(false), disconnecting = ref(false)
+const failure = ref('')
+const panelError = computed(() => failure.value
+  || (statusError.value ? getErrorMessage(statusError.value, 'Could not load the Airbnb connection.') : '')
+  || (changesError.value ? getErrorMessage(changesError.value, 'Could not read the sync’s progress.') : '')
+  || integrations.failure.value)
+
+/**
+ * A listing Airbnb left details out of has them added before it stays
+ * checked: its details are read the first time it is chosen, and the dialog
+ * opens when any are missing. Closing the dialog unchecks it again.
+ */
+async function choose(id: string, chosen: boolean) {
+  const listing = listings.value.find(candidate => candidate.id === id)
+  if (!chosen || !listing || listing.import.status !== 'not_imported') return
+  failure.value = ''
+  resolving.value = new Set([...resolving.value, id])
   try {
-    const res = await dashboardApi<{ authorization_url: string }>(`${apiBase}/start`, { method: 'POST', validate: isStartResponse })
-    if (res?.authorization_url) {
-      window.location.href = res.authorization_url
-    }
+    details.value[id] ??= await dashboardApi(`${api}/listings/${encodeURIComponent(id)}`, { validate: isDetails })
+    // Unchecked while Airbnb was answering: the host's last word stands.
+    if (!checked.value.includes(id)) return
+    if (needsDetails(listing)) await addDetails(id)
   } catch (cause) {
-    error.value = getErrorMessage(cause, 'Could not start Airbnb connection.')
+    checked.value = checked.value.filter(value => value !== id)
+    failure.value = getErrorMessage(cause, `Could not read ${listing.title} from Airbnb.`)
   } finally {
-    starting.value = false
+    resolving.value = new Set([...resolving.value].filter(value => value !== id))
   }
 }
 
+let dialogQueue: Promise<unknown> = Promise.resolve()
+/** Opens the listing's details dialog; true when the host finished it, false when they closed it. */
+async function addDetails(id: string): Promise<boolean> {
+  const listing = listings.value.find(candidate => candidate.id === id)
+  const known = details.value[id]
+  if (!listing || !known) return false
+  resolving.value = new Set([...resolving.value, id])
+  try {
+    // One overlay, one dialog at a time: Select all asks for several listings' details in turn.
+    const turn = dialogQueue.then(() => detailsDialog.open({
+      listing: { title: listing.title, subtitle: [listing.city, listing.country_code].filter(Boolean).join(', ') || null },
+      details: known,
+      entered: entered.value[id] ?? {},
+    }))
+    dialogQueue = turn.then(() => undefined, () => undefined)
+    const values = await turn
+    if (values) {
+      entered.value[id] = values
+      if (!checked.value.includes(id)) checked.value = [...checked.value, id]
+    } else {
+      checked.value = checked.value.filter(value => value !== id)
+    }
+    return values !== null
+  } finally {
+    resolving.value = new Set([...resolving.value].filter(value => value !== id))
+  }
+}
+
+async function act(id: string) {
+  const listing = listings.value.find(candidate => candidate.id === id)
+  if (!listing) return
+  if (listing.import.status === 'imported') await fullSync(listing)
+  else await addDetails(id)
+}
+
 async function fullSync(listing: AirbnbListing) {
-  if (syncingProductId.value || disconnecting.value || !canFullSync.value || listing.import.status !== 'imported' || !listing.import.syncing || listing.import.stage !== 'complete') return
+  if (!connected.value || syncingProductId.value || applying.value || pending.value || resolving.value.size || disconnecting.value || !canFullSync.value
+    || listing.import.status !== 'imported' || !listing.import.syncing || listing.import.stage !== 'complete') return
   const productId = listing.import.product_id
   if (fullSyncResults.value[productId]?.push.state === 'pending') return
   syncingProductId.value = productId
   fullSyncResults.value = Object.fromEntries(Object.entries(fullSyncResults.value).filter(([id]) => id !== productId))
-  error.value = null
+  failure.value = ''
   try {
-    const result = await dashboardApi(`${apiBase}/imports/${encodeURIComponent(productId)}/calendar`, { method: 'POST', validate: isFullSync })
+    const result = await dashboardApi(`${api}/imports/${encodeURIComponent(productId)}/calendar`, { method: 'POST', validate: isFullSync })
     if (result.product_id !== productId) throw new Error('The full sync returned a different home. Reload before trying again.')
     fullSyncResults.value[productId] = { title: listing.title, push: result.channel_push }
   } catch (cause) {
-    error.value = `${listing.title}: ${getErrorMessage(cause, 'Could not send the full calendar.')}`
+    failure.value = `${listing.title}: ${getErrorMessage(cause, 'Could not send the full calendar.')}`
   } finally {
     syncingProductId.value = null
+  }
+}
+
+/** Hands the change to KrabiClaw, then follows its progress until nothing is waiting. */
+async function apply() {
+  if (!applyLabel.value || syncingProductId.value) return
+  applying.value = true
+  failure.value = ''
+  try {
+    await dashboardApi(`${api}/sync`, {
+      method: 'POST',
+      body: {
+        sync: toSync.value.map(listing => ({ listing_id: listing.id, ...(entered.value[listing.id] ? { details: entered.value[listing.id] } : {}) })),
+        stop: toStop.value.map(listing => (listing.import as { product_id: string }).product_id),
+      },
+      validate: isChanges,
+    })
+    await refreshChanges()
+    follow()
+  } catch (cause) {
+    failure.value = getErrorMessage(cause, 'The change could not be started.')
+  } finally {
+    applying.value = false
+  }
+}
+
+/**
+ * Asks again for every change that failed, as it was asked: the same listings
+ * to sync, the same homes to stop. A listing Airbnb left details out of has
+ * them asked for again first when the page no longer holds them (the status
+ * read does not return what was sent), so the retry never drops them.
+ */
+async function retryFailed() {
+  const batch = retryBatch.value
+  if (!batch.sync.length && !batch.stop.length) return
+  if (applying.value || syncingProductId.value) return
+  failure.value = ''
+  applying.value = true
+  try {
+    for (const job of batch.sync) {
+      // Listings may have been read again while an earlier dialog was open.
+      const listing = listings.value.find(candidate => candidate.id === job.listing_id)
+      if (!listing || listing.import.status !== 'not_imported') continue
+      // A detail the server refused is corrected in the same dialog; details still held are otherwise sent as they are.
+      if (entered.value[listing.id] && job.error?.code !== 'INVALID_DETAIL') continue
+      try {
+        details.value[listing.id] ??= await dashboardApi(`${api}/listings/${encodeURIComponent(listing.id)}`, { validate: isDetails })
+      } catch (cause) {
+        failure.value = getErrorMessage(cause, `Could not read ${listing.title} from Airbnb.`)
+        return
+      }
+      if (!needsDetails(listing) && job.error?.code !== 'INVALID_DETAIL') continue
+      // Closing the dialog, with or without earlier values held, means the host is not resubmitting.
+      if (!await addDetails(listing.id)) return
+    }
+    // What is sent is the batch the host saw, as it stands now: a listing or home gone meanwhile is left out,
+    // and a change that failed meanwhile waits for its own Retry, since its details were not asked for.
+    const asked = { sync: new Set(batch.sync.map(job => job.listing_id)), stop: new Set(batch.stop.map(job => job.product_id)) }
+    const current = { sync: retryBatch.value.sync.filter(job => asked.sync.has(job.listing_id)), stop: retryBatch.value.stop.filter(job => asked.stop.has(job.product_id)) }
+    if (!current.sync.length && !current.stop.length) return
+    await dashboardApi(`${api}/sync`, {
+      method: 'POST',
+      body: {
+        sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
+        stop: current.stop.map(job => job.product_id),
+      },
+      validate: isChanges,
+    })
+    await refreshChanges()
+    follow()
+  } catch (cause) {
+    failure.value = getErrorMessage(cause, 'The change could not be started again.')
+  } finally {
+    applying.value = false
+  }
+}
+
+// The work continues on the server whether or not this page is open; while it runs, the checklist reads what syncs now every few seconds.
+let timer: ReturnType<typeof setTimeout> | null = null
+function follow() {
+  if (timer) clearTimeout(timer)
+  if (!pending.value) return
+  timer = setTimeout(async () => {
+    timer = null
+    try {
+      await refreshChanges()
+      if (changesError.value) throw changesError.value
+    } catch (cause) {
+      failure.value = getErrorMessage(cause, 'Could not read the sync’s progress.')
+      return
+    }
+    if (pending.value) return follow()
+    // The first listing to sync activates the channel, which the account line reads from status.
+    await Promise.all([refreshStatus(), refreshListings(), integrations.refresh()])
+    // What a listing now syncing was given is spent; a listing still waiting keeps what the host typed.
+    entered.value = Object.fromEntries(Object.entries(entered.value).filter(([id]) => !listings.value.some(listing => listing.id === id && syncing(listing))))
+  }, 3000)
+}
+onMounted(follow)
+onBeforeUnmount(() => { if (timer) clearTimeout(timer) })
+
+async function startConnection() {
+  starting.value = true
+  failure.value = ''
+  try {
+    const started = await dashboardApi(`${api}/start`, { method: 'POST', validate: isStart })
+    window.location.href = started.authorization_url
+  } catch (cause) {
+    failure.value = getErrorMessage(cause, 'Could not start the Airbnb connection.')
+    starting.value = false
   }
 }
 
 async function disconnect() {
   if (syncingProductId.value) return
   disconnecting.value = true
-  disconnectError.value = null
+  failure.value = ''
   try {
-    let done = false
-    while (!done) {
-      const res = await dashboardApi<{ disconnected: boolean }>(`${apiBase}/disconnect`, { method: 'POST', validate: isDisconnectResponse })
-      done = Boolean(res?.disconnected)
-    }
-    await refreshStatus()
-    await refreshListings()
-    await integrations.refresh()
+    // Disconnecting goes step by step; each answer says whether another step remains.
+    let finished = false
+    while (!finished) finished = (await dashboardApi(`${api}/disconnect`, { method: 'POST', validate: isDisconnect })).disconnected
+    await Promise.all([refreshStatus(), integrations.refresh()])
   } catch (cause) {
-    disconnectError.value = getErrorMessage(cause, 'Could not disconnect Airbnb.')
+    failure.value = getErrorMessage(cause, 'Could not disconnect Airbnb.')
   } finally {
     disconnecting.value = false
   }
