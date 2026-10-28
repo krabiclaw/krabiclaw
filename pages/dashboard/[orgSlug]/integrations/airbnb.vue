@@ -219,17 +219,21 @@ async function choose(id: string, chosen: boolean) {
   }
 }
 
+let dialogQueue: Promise<unknown> = Promise.resolve()
 async function addDetails(id: string) {
   const listing = listings.value.find(candidate => candidate.id === id)
   const known = details.value[id]
   if (!listing || !known) return
   resolving.value = new Set([...resolving.value, id])
   try {
-    const values = await detailsDialog.open({
+    // One overlay, one dialog at a time: Select all asks for several listings' details in turn.
+    const turn = dialogQueue.then(() => detailsDialog.open({
       listing: { title: listing.title, subtitle: [listing.city, listing.country_code].filter(Boolean).join(', ') || null },
       details: known,
       entered: entered.value[id] ?? {},
-    })
+    }))
+    dialogQueue = turn.then(() => undefined, () => undefined)
+    const values = await turn
     if (values) {
       entered.value[id] = values
       if (!checked.value.includes(id)) checked.value = [...checked.value, id]
