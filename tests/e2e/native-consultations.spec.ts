@@ -232,7 +232,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     const bookingPath = `/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`
     const bookingPanel = page.locator('#dashboard-panel-product-booking')
     await expect(bookingPanel.getByRole('link', { name: 'Client limit One client per consultation', exact: true })).toBeVisible()
-    await expect(bookingPanel.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: `Attorney or legal team ${self.name}`, exact: true })).toBeVisible()
     await expect(bookingPanel.getByRole('link', { name: 'Meeting format Online consultations available', exact: true })).toBeVisible()
     // Online, the times are the provider's own hours; the offering has no weekly list of its own.
     await expect(bookingPanel.getByRole('link', { name: "Bookable times The attorney's working hours", exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
@@ -741,7 +741,10 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect((await cancelledBrowserDetails.json()).booking.status).toBe('cancelled')
     await page.goto(`/dashboard/north-carolina-legal-services/bookings/booking/${browserBooking.request_id}`)
     await expect(page.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true })).toHaveCount(0)
-    await expect(page.getByRole('link', { name: 'Change consultation', exact: true })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Manage consultation', exact: true }).click()
+    const cancelledActions = page.getByRole('dialog', { name: 'Manage consultation', exact: true })
+    await expect(cancelledActions.getByRole('link', { name: 'Change consultation', exact: true })).toHaveCount(0)
+    await cancelledActions.getByRole('button', { name: 'Close Manage consultation', exact: true }).click()
     await page.getByRole('link', { name: 'Message client', exact: true }).click()
     await expect(page).toHaveURL(`/dashboard/north-carolina-legal-services/messages/${browserBooking.request_id}`)
     await expect(page.getByRole('heading', { name: 'Browser review guest', exact: true })).toBeVisible()
