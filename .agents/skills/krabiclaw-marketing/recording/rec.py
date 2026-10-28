@@ -203,8 +203,15 @@ def stop():
     global _recorder
     if _recorder is None:
         raise RuntimeError("Start and stop the recording in the same Python process.")
-    _recorder.send_signal(signal.SIGINT)
-    status = _recorder.wait()
-    _recorder = None
+    try:
+        _recorder.send_signal(signal.SIGINT)
+        try:
+            status = _recorder.wait(timeout=15)
+        except subprocess.TimeoutExpired as failure:
+            _recorder.kill()
+            _recorder.wait()
+            raise RuntimeError("winrec did not finalize within 15 seconds; the recording is incomplete and must not be used.") from failure
+    finally:
+        _recorder = None
     if status != 0:
         raise RuntimeError(f"winrec exited with status {status}")

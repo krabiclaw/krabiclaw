@@ -40,6 +40,8 @@ missing or ambiguous matches; another Chrome window is never substituted.
    Run `start()` and `stop()` in the same Python process. For interactive driving,
    keep that process open until capture ends. It owns the recorder, waits for it
    to finish, and reports a failed exit; a later process cannot verify that exit.
+   If finalization exceeds 15 seconds, it kills and reaps the recorder, reports
+   the recording as incomplete, and clears the recorder so a new take can start.
 
    `click` moves the real cursor to the element, then clicks by script; pass
    `real=True` where the page ignores script clicks (Google sign-in,
