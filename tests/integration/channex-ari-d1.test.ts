@@ -148,6 +148,8 @@ test('an ARI request keeps its delivery lease alive beyond its original expiry a
     ])
     assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: savedDate, to: untilDate })).nights.map(night => [night.date, night.price_minor, night.channel?.state]),
       [[savedDate, 185_00, 'pushed'], [queuedDate, 195_00, 'pushed']])
+    const confirmed = await db.prepare("SELECT date, state, json_extract(sent_json, '$.rate') AS rate FROM channel_night_pushes WHERE product_id = ? AND provider = 'channex' AND date IN (?, ?) ORDER BY date").bind(connected, savedDate, queuedDate).all()
+    assert.deepEqual(confirmed.results, [{ date: savedDate, state: 'pushed', rate: '185.00' }, { date: queuedDate, state: 'pushed', rate: '195.00' }])
     assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
     context.mock.timers.tick(60_000)
     assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
