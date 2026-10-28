@@ -181,8 +181,6 @@ def start(name):
         subprocess.run(["swiftc", "-O", source, "-o", binary], check=True)
     log = open(f"{S}/clips/{name}.log", "w")
     _recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov", title, *map(str, (LEFT, TOP, WIDTH, HEIGHT))], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    with open(f"{S}/rec.pid", "w") as f:
-        f.write(str(_recorder.pid))  # stop() may run in a later process
     try:
         end = time.time() + 6
         while time.time() < end:
@@ -203,22 +201,10 @@ def start(name):
 
 def stop():
     global _recorder
-    pid = int(open(f"{S}/rec.pid").read())
-    status = None
-    if _recorder is not None:
-        if _recorder.pid != pid:
-            raise RuntimeError("The recording changed before it could be stopped.")
-        _recorder.send_signal(signal.SIGINT)
-        status = _recorder.wait()
-        _recorder = None
-    else:
-        os.kill(pid, signal.SIGINT)
-        while True:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.3)
-    os.remove(f"{S}/rec.pid")
-    if status is not None and status != 0:
+    if _recorder is None:
+        raise RuntimeError("Start and stop the recording in the same Python process.")
+    _recorder.send_signal(signal.SIGINT)
+    status = _recorder.wait()
+    _recorder = None
+    if status != 0:
         raise RuntimeError(f"winrec exited with status {status}")

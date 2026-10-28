@@ -37,6 +37,10 @@ missing or ambiguous matches; another Chrome window is never substituted.
    rec.stop()
    ```
 
+   Run `start()` and `stop()` in the same Python process. For interactive driving,
+   keep that process open until capture ends. It owns the recorder, waits for it
+   to finish, and reports a failed exit; a later process cannot verify that exit.
+
    `click` moves the real cursor to the element, then clicks by script; pass
    `real=True` where the page ignores script clicks (Google sign-in,
    ads.google.com). Material menus in Google products need `press_at(x, y)`
