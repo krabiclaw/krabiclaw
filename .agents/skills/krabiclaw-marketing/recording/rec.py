@@ -14,6 +14,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 S = os.path.abspath(os.environ.get("REC_DIR", "recording-run"))
 os.makedirs(f"{S}/clips", exist_ok=True)
 W = os.environ.get("CHROME_WINDOW_ID", "")
+_recorder = None
 # The recording window: 1728x972 points at the top-left, exactly 16:9 below the menu bar.
 LEFT, TOP, WIDTH, HEIGHT = 0, 38, 1728, 972
 
@@ -162,6 +163,9 @@ def shot(name):
 
 def start(name):
     """Record the window to clips/<name>.mov with winrec (built next to this file)."""
+    global _recorder
+    if _recorder is not None:
+        raise RuntimeError("Finish stopping the current recording before starting another.")
     window_id = str(W)
     if not window_id.isdigit() or int(window_id) <= 0:
         raise RuntimeError("Set the recording window with open_window() or CHROME_WINDOW_ID before start().")
@@ -173,26 +177,38 @@ def start(name):
     if not os.path.exists(binary) or os.path.getmtime(source) > os.path.getmtime(binary):
         subprocess.run(["swiftc", "-O", source, "-o", binary], check=True)
     log = open(f"{S}/clips/{name}.log", "w")
-    recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov", title], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    _recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov", title], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     with open(f"{S}/rec.pid", "w") as f:
-        f.write(str(recorder.pid))  # stop() may run in a later process
+        f.write(str(_recorder.pid))  # stop() may run in a later process
     end = time.time() + 6
     while time.time() < end:
         out = open(f"{S}/clips/{name}.log").read()
         if "recording" in out.splitlines():
             time.sleep(0.5); return
-        if recorder.poll() is not None:
+        if _recorder.poll() is not None:
             raise RuntimeError(out)
         time.sleep(0.2)
     raise RuntimeError("winrec did not start")
 
 
 def stop():
+    global _recorder
     pid = int(open(f"{S}/rec.pid").read())
-    os.kill(pid, signal.SIGINT)
-    while True:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            return
-        time.sleep(0.3)
+    status = None
+    if _recorder is not None:
+        if _recorder.pid != pid:
+            raise RuntimeError("The recording changed before it could be stopped.")
+        _recorder.send_signal(signal.SIGINT)
+        status = _recorder.wait()
+        _recorder = None
+    else:
+        os.kill(pid, signal.SIGINT)
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.3)
+    os.remove(f"{S}/rec.pid")
+    if status is not None and status != 0:
+        raise RuntimeError(f"winrec exited with status {status}")

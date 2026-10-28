@@ -723,6 +723,80 @@ test('a connection renewal failure during full sync prevents its second ARI call
   }
 })
 
+test('a renewal failure after the minimum-stay journal is saved cancels the unsent intent without calling Channex or holding the connection for review', { timeout: 120_000 }, async (context) => {
+  const { runtime, db, env } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const connection = await connected(db, env, channex)
+    const { product_id: productId } = await connection.prepare(LISTING, form)
+    await importAll(connection, db, channex, productId)
+    const from = today()
+    context.mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.parse(`${from}T18:00:00.000Z`) })
+    assert.equal(today(), from)
+    channex.properties[0]!.settings = { min_stay_type: 'arrival' }
+    await db.prepare(`CREATE TRIGGER refuse_pending_connection_renewal BEFORE UPDATE OF updated_at ON channex_connections
+      WHEN OLD.pending_step = 'update_min_stay_type' AND NEW.pending_step IS OLD.pending_step AND NEW.operation_id IS OLD.operation_id
+      BEGIN SELECT RAISE(ABORT, 'Connection renewal refused while minimum-stay intent is pending'); END`).run()
+    let heldJournal = false
+    const prepare = db.prepare.bind(db)
+    const faultDb = new Proxy(db, { get(target, key) {
+      if (key === 'prepare') return (query: string) => {
+        const statement = prepare(query)
+        return new Proxy(statement, { get(target, key) {
+          if (key === 'bind') return (...values: unknown[]) => {
+            const bound = target.bind(...values)
+            if (heldJournal || !values.includes('update_min_stay_type')) return bound
+            heldJournal = true
+            return new Proxy(bound, { get(target, key) {
+              if (key === 'run') return context.mock.fn(async () => {
+                const written = await target.run()
+                const journal = await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections WHERE organization_id = ?').bind(ORG).first<{ status: string; operation_id: string; pending_step: string }>()
+                assert.equal(journal!.status, 'connected')
+                assert.ok(journal!.operation_id)
+                assert.equal(journal!.pending_step, 'update_min_stay_type')
+                for (let minute = 0; minute < 5; minute++) {
+                  context.mock.timers.tick(60_000)
+                  await context.waitFor(async () => {
+                    const until = await db.prepare('SELECT delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<string>('delivery_lease_until')
+                    assert(Date.parse(until!) > Date.now())
+                  }, { timeout: 10_000 })
+                }
+                return written
+              })
+              const value = Reflect.get(target, key, target)
+              return typeof value === 'function' ? value.bind(target) : value
+            } })
+          }
+          const value = Reflect.get(target, key, target)
+          return typeof value === 'function' ? value.bind(target) : value
+        } })
+      }
+      const value = Reflect.get(target, key, target)
+      return typeof value === 'function' ? value.bind(target) : value
+    } })
+    const before = channex.seen.length
+    await assert.rejects(new AirbnbConnection(faultDb, env, ORG, OWNER).syncFullCalendar(productId), (error: unknown) => {
+      assert(error instanceof HTTPError)
+      assert.equal(error.status, 503)
+      assert.equal(error.data?.code, 'CONNECTION_RENEWAL_FAILED')
+      assert(errorChainForTelemetry(error).some(cause => cause.message.includes('Connection renewal refused while minimum-stay intent is pending')))
+      return true
+    })
+    assert.equal(heldJournal, true)
+    assert.deepEqual(channex.seen.slice(before).filter(request => request.method !== 'GET'), [])
+    assert.deepEqual(channex.properties[0]!.settings, { min_stay_type: 'arrival' })
+    assert.deepEqual(await db.prepare('SELECT operation_id, pending_step, status FROM channex_connections WHERE organization_id = ?').bind(ORG).first(), { operation_id: null, pending_step: null, status: 'connected' })
+    assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until, enabled, import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first(), { delivery_lease: null, delivery_lease_until: null, enabled: 1, import_stage: 'complete' })
+  } finally {
+    context.mock.restoreAll()
+    context.mock.timers.reset()
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
 test('a listing priced in another currency stops before anything is created', { timeout: 120_000 }, async () => {
   const { runtime, db, env } = await boot()
   const channex = new FakeChannex()

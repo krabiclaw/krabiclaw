@@ -1332,6 +1332,10 @@ test.describe('stateless MCP server', () => {
         try {
           if (original.collections.length) await call('reorder_collections', { location_id: locationId, collection_ids: original.collections.map(collection => collection.id) }, cleanupRequest)
         } catch (error) { failures.push(error) }
+        try {
+          const restored = await call<{ collections: Array<{ id: string }> }>('list_collections', { location_id: locationId }, cleanupRequest)
+          expect(restored.collections.map(collection => collection.id)).toEqual(original.collections.map(collection => collection.id))
+        } catch (error) { failures.push(error) }
         if (hostMemberId) {
           try {
             expect((await call<{ member: { id: string } }>('remove_organization_member', { member_id: hostMemberId }, cleanupRequest)).member.id).toBe(hostMemberId)

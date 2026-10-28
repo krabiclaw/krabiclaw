@@ -203,8 +203,9 @@ export class AirbnbConnection {
   }
 
   /** Writes fields while this call still holds the lock it took. */
-  private async save(row: ConnectionRow, values: Partial<ConnectionRow>): Promise<void> {
+  private async save(row: ConnectionRow, values: Partial<ConnectionRow>, additionalHealthCheck?: () => Promise<void>): Promise<void> {
     await this.operationCheck?.()
+    await additionalHealthCheck?.()
     const entries = Object.entries(values)
     const result = await execute(this.db, `
       UPDATE channex_connections SET ${entries.map(([key]) => `${key} = ?`).join(', ')}, updated_at = ?
@@ -212,6 +213,14 @@ export class AirbnbConnection {
     [...entries.map(([, value]) => value ?? null), now(), this.organizationId, row.operation_id])
     if (!result.meta.changes) fail(409, 'CONNECTION_CHANGED', 'The Airbnb connection changed. Refresh and try again.')
     Object.assign(row, values)
+    try {
+      await this.operationCheck?.()
+      await additionalHealthCheck?.()
+    } catch (error) {
+      // A new intent has not reached its provider call; locked() drains and clears it with the operation token.
+      if (values.pending_step !== undefined && values.pending_step !== null) row.pending_step = null
+      throw error
+    }
   }
 
   private async locked<T>(action: (row: ConnectionRow, check: () => Promise<void>) => Promise<T>): Promise<T> {
@@ -1073,8 +1082,7 @@ export class AirbnbConnection {
     // An explicit recovery resends every value; a single-type property also discarded a field we may have recorded sending.
     if (lease || minimum !== 'both') await forgetConfirmedNights(this.db, mapping.product_id, lease)
     if (minimum !== 'both') {
-      await lease?.check()
-      await this.save(row, { pending_step: 'update_min_stay_type' })
+      await this.save(row, { pending_step: 'update_min_stay_type' }, lease?.check)
       const updated = await channexRequest(this.env, path, 'PUT', { property: { settings: { min_stay_type: 'both' } } })
       const settings = provided(() => object(resource(updated.data, 'property').attributes.settings, 'property.settings'))
       if (settings.min_stay_type !== 'both') fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex did not enable both minimum-stay restrictions. The calendar was not sent.')

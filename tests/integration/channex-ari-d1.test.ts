@@ -138,12 +138,16 @@ test('an ARI request keeps its delivery lease alive beyond its original expiry a
       assert(Date.now() > Date.parse(original!.delivery_lease_until))
       const queued = await setStayNights(db, env, manager, { product_id: connected, from: queuedDate, to: untilDate, price_minor: 195_00 })
       assert.equal(queued.channel_push?.state, 'pending')
+      assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: queuedDate, to: untilDate })).nights.map(night => [night.date, night.price_minor, night.channel?.state]),
+        [[queuedDate, 195_00, 'pending']])
       assert.deepEqual(channex.sent.map(request => request.path), ['/restrictions', '/availability'])
     }
     assert.deepEqual((await setStayNights(db, env, manager, { product_id: connected, from: savedDate, to: queuedDate, price_minor: 185_00 })).channel_push, { state: 'pushed', detail: null })
     assert.deepEqual(channex.sent.map(request => [request.path, [...byNight(request.values).keys()]]), [
       ['/restrictions', [savedDate]], ['/availability', [savedDate]], ['/restrictions', [queuedDate]], ['/availability', [queuedDate]],
     ])
+    assert.deepEqual((await readStayCalendar(db, manager, { productId: connected, from: savedDate, to: untilDate })).nights.map(night => [night.date, night.price_minor, night.channel?.state]),
+      [[savedDate, 185_00, 'pushed'], [queuedDate, 195_00, 'pushed']])
     assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
     context.mock.timers.tick(60_000)
     assert.deepEqual(await db.prepare('SELECT delivery_lease, delivery_lease_until FROM product_channel_mappings WHERE product_id = ?').bind(connected).first(), { delivery_lease: null, delivery_lease_until: null })
