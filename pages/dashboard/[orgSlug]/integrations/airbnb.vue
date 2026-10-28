@@ -8,7 +8,7 @@
     :footer="Boolean(applyLabel)"
     :save-label="applyLabel"
     :saving="applying"
-    :disabled="pending"
+    :disabled="pending || resolving.size > 0"
     @save="apply"
   >
     <!-- The sync is Business. A connection made under a lapsed plan, in whatever state, can still be disconnected. -->
@@ -181,8 +181,10 @@ const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) 
   return { id: listing.id, title: listing.title, subtitle, status: syncing(listing) ? 'syncing' : 'not_syncing', note: listing.import.status === 'imported' && listing.import.stage === 'draft' ? 'Draft' : hint, to }
 }))
 
-/** Checked listings that are not syncing yet, or whose sync setup stopped part-way. */
-const toSync = computed(() => listings.value.filter(listing => checked.value.includes(listing.id) && (!syncing(listing) || interrupted(listing))))
+/** Listings whose details are still being read or asked for: nothing applies until each is settled. */
+const resolving = ref(new Set<string>())
+/** Checked listings that are not syncing yet, or whose sync setup stopped part-way, and have every detail the import asks for. */
+const toSync = computed(() => listings.value.filter(listing => checked.value.includes(listing.id) && (!syncing(listing) || interrupted(listing)) && !needsDetails(listing)))
 /** Syncing listings the host unchecked. */
 const toStop = computed(() => listings.value.filter(listing => !checked.value.includes(listing.id) && syncing(listing)))
 const applyLabel = computed(() => connected.value && !pending.value ? itemsApplyLabel(integrationDefinition('airbnb').items!, toSync.value.length, toStop.value.length) : null)
@@ -203,30 +205,39 @@ async function choose(id: string, chosen: boolean) {
   const listing = listings.value.find(candidate => candidate.id === id)
   if (!chosen || !listing || listing.import.status !== 'not_imported') return
   failure.value = ''
+  resolving.value = new Set([...resolving.value, id])
   try {
     details.value[id] ??= await dashboardApi(`${api}/listings/${encodeURIComponent(id)}`, { validate: isDetails })
+    // Unchecked while Airbnb was answering: the host's last word stands.
+    if (!checked.value.includes(id)) return
+    if (needsDetails(listing)) await addDetails(id)
   } catch (cause) {
     checked.value = checked.value.filter(value => value !== id)
     failure.value = getErrorMessage(cause, `Could not read ${listing.title} from Airbnb.`)
-    return
+  } finally {
+    resolving.value = new Set([...resolving.value].filter(value => value !== id))
   }
-  if (needsDetails(listing)) await addDetails(id)
 }
 
 async function addDetails(id: string) {
   const listing = listings.value.find(candidate => candidate.id === id)
   const known = details.value[id]
   if (!listing || !known) return
-  const values = await detailsDialog.open({
-    listing: { title: listing.title, subtitle: [listing.city, listing.country_code].filter(Boolean).join(', ') || null },
-    details: known,
-    entered: entered.value[id] ?? {},
-  })
-  if (values) {
-    entered.value[id] = values
-    if (!checked.value.includes(id)) checked.value = [...checked.value, id]
-  } else {
-    checked.value = checked.value.filter(value => value !== id)
+  resolving.value = new Set([...resolving.value, id])
+  try {
+    const values = await detailsDialog.open({
+      listing: { title: listing.title, subtitle: [listing.city, listing.country_code].filter(Boolean).join(', ') || null },
+      details: known,
+      entered: entered.value[id] ?? {},
+    })
+    if (values) {
+      entered.value[id] = values
+      if (!checked.value.includes(id)) checked.value = [...checked.value, id]
+    } else {
+      checked.value = checked.value.filter(value => value !== id)
+    }
+  } finally {
+    resolving.value = new Set([...resolving.value].filter(value => value !== id))
   }
 }
 
