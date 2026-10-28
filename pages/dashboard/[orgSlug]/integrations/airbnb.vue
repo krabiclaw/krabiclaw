@@ -132,8 +132,20 @@ const { data: changes, error: changesError, refresh: refreshChanges } = await us
 const jobs = computed(() => connected.value ? changes.value?.listings ?? [] : [])
 const jobOf = (listingId: string) => jobs.value.find(job => job.listing_id === listingId)
 const pending = computed(() => jobs.value.some(job => job.status === 'queued' || job.status === 'running'))
-/** Changes that failed and are not yet asked for again; Retry re-queues exactly these. */
+/** Changes that failed and are not yet asked for again. */
 const failed = computed(() => jobs.value.filter(job => job.status === 'failed'))
+/**
+ * The failed changes Retry can ask for again: a sync of a listing still on the
+ * account, a stop of a home that still exists. One that names neither would
+ * refuse the whole batch, so it is left out and, alone, offers no Retry.
+ */
+const retryBatch = computed(() => {
+  const imported = new Set(listings.value.flatMap(listing => listing.import.status === 'imported' ? [listing.import.product_id] : []))
+  return {
+    sync: failed.value.filter(job => job.action === 'sync' && listings.value.some(listing => listing.id === job.listing_id)),
+    stop: failed.value.filter(job => job.action === 'stop' && job.product_id !== null && imported.has(job.product_id)),
+  }
+})
 
 const connection = computed<IntegrationLeafConnection | null>(() => {
   const s = status.value
@@ -189,7 +201,7 @@ const itemsStatus = computed<IntegrationLeafItemsStatus | null>(() => {
   // A sync read that failed is the panel's error; a count the page cannot know is not shown.
   if (!connected.value || listingsPending.value || changesError.value) return null
   const firstFailed = failed.value[0]
-  if (firstFailed) return { text: `Needs attention: ${firstFailed.error!.message}`, tone: 'warning', retryable: true }
+  if (firstFailed) return { text: `Needs attention: ${firstFailed.error!.message}`, tone: 'warning', retryable: retryBatch.value.sync.length + retryBatch.value.stop.length > 0 }
   const running = jobs.value.filter(job => job.status === 'queued' || job.status === 'running').length
   if (running) return { text: `Updating ${running} ${running === 1 ? 'listing' : 'listings'}…`, tone: 'warning' }
   return { text: `${listings.value.filter(syncing).length} of ${listings.value.length} syncing` }
@@ -289,13 +301,15 @@ async function apply() {
  * read does not return what was sent), so the retry never drops them.
  */
 async function retryFailed() {
-  if (!failed.value.length || applying.value) return
+  const batch = retryBatch.value
+  if (!batch.sync.length && !batch.stop.length) return
+  if (applying.value) return
   failure.value = ''
   applying.value = true
   try {
-    for (const job of failed.value.filter(job => job.action === 'sync')) {
-      const listing = listings.value.find(candidate => candidate.id === job.listing_id)
-      if (!listing || listing.import.status !== 'not_imported') continue
+    for (const job of batch.sync) {
+      const listing = listings.value.find(candidate => candidate.id === job.listing_id)!
+      if (listing.import.status !== 'not_imported') continue
       // A detail the server refused is corrected in the same dialog; details still held are otherwise sent as they are.
       if (entered.value[listing.id] && job.error?.code !== 'INVALID_DETAIL') continue
       try {
@@ -308,13 +322,11 @@ async function retryFailed() {
       // Closing the dialog, with or without earlier values held, means the host is not resubmitting.
       if (!await addDetails(listing.id)) return
     }
-    // A stop whose home no longer exists has nothing left to stop; sending it would refuse the whole batch.
-    const imported = new Set(listings.value.flatMap(listing => listing.import.status === 'imported' ? [listing.import.product_id] : []))
     await dashboardApi(`${api}/sync`, {
       method: 'POST',
       body: {
-        sync: failed.value.filter(job => job.action === 'sync').map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
-        stop: failed.value.filter(job => job.action === 'stop' && job.product_id && imported.has(job.product_id)).map(job => job.product_id),
+        sync: batch.sync.map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
+        stop: batch.stop.map(job => job.product_id),
       },
       validate: isChanges,
     })
