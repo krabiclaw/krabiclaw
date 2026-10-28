@@ -232,10 +232,11 @@ async function choose(id: string, chosen: boolean) {
 }
 
 let dialogQueue: Promise<unknown> = Promise.resolve()
-async function addDetails(id: string) {
+/** Opens the listing's details dialog; true when the host finished it, false when they closed it. */
+async function addDetails(id: string): Promise<boolean> {
   const listing = listings.value.find(candidate => candidate.id === id)
   const known = details.value[id]
-  if (!listing || !known) return
+  if (!listing || !known) return false
   resolving.value = new Set([...resolving.value, id])
   try {
     // One overlay, one dialog at a time: Select all asks for several listings' details in turn.
@@ -252,6 +253,7 @@ async function addDetails(id: string) {
     } else {
       checked.value = checked.value.filter(value => value !== id)
     }
+    return values !== null
   } finally {
     resolving.value = new Set([...resolving.value].filter(value => value !== id))
   }
@@ -303,8 +305,8 @@ async function retryFailed() {
         return
       }
       if (!needsDetails(listing) && job.error?.code !== 'INVALID_DETAIL') continue
-      await addDetails(listing.id)
-      if (!entered.value[listing.id]) return
+      // Closing the dialog, with or without earlier values held, means the host is not resubmitting.
+      if (!await addDetails(listing.id)) return
     }
     // A stop whose home no longer exists has nothing left to stop; sending it would refuse the whole batch.
     const imported = new Set(listings.value.flatMap(listing => listing.import.status === 'imported' ? [listing.import.product_id] : []))
