@@ -279,11 +279,29 @@ async function apply() {
   }
 }
 
-/** Asks again for every change that failed, as it was asked: the same listings to sync, the same homes to stop. */
+/**
+ * Asks again for every change that failed, as it was asked: the same listings
+ * to sync, the same homes to stop. A listing Airbnb left details out of has
+ * them asked for again first when the page no longer holds them (the status
+ * read does not return what was sent), so the retry never drops them.
+ */
 async function retryFailed() {
   if (!failed.value.length) return
-  applying.value = true
   failure.value = ''
+  for (const job of failed.value.filter(job => job.action === 'sync')) {
+    const listing = listings.value.find(candidate => candidate.id === job.listing_id)
+    if (!listing || listing.import.status !== 'not_imported' || entered.value[listing.id]) continue
+    try {
+      details.value[listing.id] ??= await dashboardApi(`${api}/listings/${encodeURIComponent(listing.id)}`, { validate: isDetails })
+    } catch (cause) {
+      failure.value = getErrorMessage(cause, `Could not read ${listing.title} from Airbnb.`)
+      return
+    }
+    if (!needsDetails(listing)) continue
+    await addDetails(listing.id)
+    if (!entered.value[listing.id]) return
+  }
+  applying.value = true
   try {
     await dashboardApi(`${api}/sync`, {
       method: 'POST',
