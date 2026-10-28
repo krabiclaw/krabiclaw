@@ -25,9 +25,11 @@
       :items-loading="listingsPending"
       :items-error="listingsError ? getErrorMessage(listingsError, 'Could not load your Airbnb listings.') : null"
       items-empty="Airbnb returned no listings for this account. Check that you connected your hosting account."
+      :items-status="itemsStatus"
       :applying="applying || pending"
       @choose="choose"
       @act="addDetails"
+      @retry-failed="retryFailed"
       @disconnect="disconnect"
     >
       <div v-if="!connection" class="space-y-4">
@@ -37,15 +39,12 @@
         <UButton icon="i-simple-icons-airbnb" size="xl" block :loading="starting" @click="startConnection">Connect Airbnb</UButton>
         <p class="text-center text-xs text-dimmed">You can also connect and sync directly within the KrabiClaw app on iOS.</p>
       </div>
-      <template #connected>
-        <p v-if="pending" class="text-sm text-muted">{{ done }} of {{ jobs.length }} done. This keeps going if you close the page.</p>
-      </template>
     </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
-import IntegrationLeaf, { type IntegrationLeafConnection, type IntegrationLeafItem } from '~/components/dashboard/IntegrationLeaf.vue'
+import IntegrationLeaf, { type IntegrationLeafConnection, type IntegrationLeafItem, type IntegrationLeafItemsStatus } from '~/components/dashboard/IntegrationLeaf.vue'
 import AirbnbListingDetailsDialog, { type AirbnbListingDetails } from '~/components/dashboard/AirbnbListingDetailsDialog.vue'
 import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { integrationDefinition, itemsApplyLabel } from '~/shared/integrations'
@@ -133,7 +132,20 @@ const { data: changes, error: changesError, refresh: refreshChanges } = await us
 const jobs = computed(() => connected.value ? changes.value?.listings ?? [] : [])
 const jobOf = (listingId: string) => jobs.value.find(job => job.listing_id === listingId)
 const pending = computed(() => jobs.value.some(job => job.status === 'queued' || job.status === 'running'))
-const done = computed(() => jobs.value.filter(job => job.status === 'done').length)
+/** Changes that failed and are not yet asked for again. */
+const failed = computed(() => jobs.value.filter(job => job.status === 'failed'))
+/**
+ * The failed changes Retry can ask for again: a sync of a listing still on the
+ * account, a stop of a home that still exists. One that names neither would
+ * refuse the whole batch, so it is left out and, alone, offers no Retry.
+ */
+const retryBatch = computed(() => {
+  const imported = new Set(listings.value.flatMap(listing => listing.import.status === 'imported' ? [listing.import.product_id] : []))
+  return {
+    sync: failed.value.filter(job => job.action === 'sync' && listings.value.some(listing => listing.id === job.listing_id)),
+    stop: failed.value.filter(job => job.action === 'stop' && job.product_id !== null && imported.has(job.product_id)),
+  }
+})
 
 const connection = computed<IntegrationLeafConnection | null>(() => {
   const s = status.value
@@ -142,7 +154,8 @@ const connection = computed<IntegrationLeafConnection | null>(() => {
     name: 'Airbnb host account',
     connectedAt: s.connected_at,
     through: null,
-    status: s.status === 'connected' ? 'active' : s.status === 'needs_review' ? 'error' : null,
+    // Connected but not active yet on Channex's side is the host's wait, said on the account line.
+    status: s.status === 'connected' ? (s.channel_active ? 'active' : 'disabled') : s.status === 'needs_review' ? 'error' : null,
     lastError: s.status === 'needs_review' ? 'The Airbnb connection needs review. Contact support to finish it.' : null,
     note: s.status === 'authorizing' ? 'Finishing Airbnb sign-in' : s.status === 'disconnecting' ? 'Disconnecting…' : null,
   }
@@ -183,6 +196,19 @@ const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) 
 
 /** Listings whose details are still being read or asked for: nothing applies until each is settled. */
 const resolving = ref(new Set<string>())
+/** Where the listings stand, on the checklist's heading: a failed change first, then changes in progress, else how many sync. */
+const itemsStatus = computed<IntegrationLeafItemsStatus | null>(() => {
+  // A sync read that failed is the panel's error; a count the page cannot know is not shown.
+  if (!connected.value || listingsPending.value || changesError.value) return null
+  // The failure shown is one Retry can clear when there is one; otherwise the first, without Retry.
+  const retryable = [...retryBatch.value.sync, ...retryBatch.value.stop]
+  const firstFailed = retryable[0] ?? failed.value[0]
+  if (firstFailed) return { text: `Needs attention: ${firstFailed.error!.message}`, tone: 'warning', retryable: retryable.length > 0 }
+  const running = jobs.value.filter(job => job.status === 'queued' || job.status === 'running').length
+  if (running) return { text: `Updating ${running} ${running === 1 ? 'listing' : 'listings'}…`, tone: 'warning' }
+  return { text: `${listings.value.filter(syncing).length} of ${listings.value.length} syncing` }
+})
+
 /** Checked listings that are not syncing yet, or whose sync setup stopped part-way, and have every detail the import asks for. */
 const toSync = computed(() => listings.value.filter(listing => checked.value.includes(listing.id) && (!syncing(listing) || interrupted(listing)) && !needsDetails(listing)))
 /** Syncing listings the host unchecked. */
@@ -220,10 +246,11 @@ async function choose(id: string, chosen: boolean) {
 }
 
 let dialogQueue: Promise<unknown> = Promise.resolve()
-async function addDetails(id: string) {
+/** Opens the listing's details dialog; true when the host finished it, false when they closed it. */
+async function addDetails(id: string): Promise<boolean> {
   const listing = listings.value.find(candidate => candidate.id === id)
   const known = details.value[id]
-  if (!listing || !known) return
+  if (!listing || !known) return false
   resolving.value = new Set([...resolving.value, id])
   try {
     // One overlay, one dialog at a time: Select all asks for several listings' details in turn.
@@ -240,6 +267,7 @@ async function addDetails(id: string) {
     } else {
       checked.value = checked.value.filter(value => value !== id)
     }
+    return values !== null
   } finally {
     resolving.value = new Set([...resolving.value].filter(value => value !== id))
   }
@@ -268,6 +296,57 @@ async function apply() {
   }
 }
 
+/**
+ * Asks again for every change that failed, as it was asked: the same listings
+ * to sync, the same homes to stop. A listing Airbnb left details out of has
+ * them asked for again first when the page no longer holds them (the status
+ * read does not return what was sent), so the retry never drops them.
+ */
+async function retryFailed() {
+  const batch = retryBatch.value
+  if (!batch.sync.length && !batch.stop.length) return
+  if (applying.value) return
+  failure.value = ''
+  applying.value = true
+  try {
+    for (const job of batch.sync) {
+      // Listings may have been read again while an earlier dialog was open.
+      const listing = listings.value.find(candidate => candidate.id === job.listing_id)
+      if (!listing || listing.import.status !== 'not_imported') continue
+      // A detail the server refused is corrected in the same dialog; details still held are otherwise sent as they are.
+      if (entered.value[listing.id] && job.error?.code !== 'INVALID_DETAIL') continue
+      try {
+        details.value[listing.id] ??= await dashboardApi(`${api}/listings/${encodeURIComponent(listing.id)}`, { validate: isDetails })
+      } catch (cause) {
+        failure.value = getErrorMessage(cause, `Could not read ${listing.title} from Airbnb.`)
+        return
+      }
+      if (!needsDetails(listing) && job.error?.code !== 'INVALID_DETAIL') continue
+      // Closing the dialog, with or without earlier values held, means the host is not resubmitting.
+      if (!await addDetails(listing.id)) return
+    }
+    // What is sent is the batch the host saw, as it stands now: a listing or home gone meanwhile is left out,
+    // and a change that failed meanwhile waits for its own Retry, since its details were not asked for.
+    const asked = { sync: new Set(batch.sync.map(job => job.listing_id)), stop: new Set(batch.stop.map(job => job.product_id)) }
+    const current = { sync: retryBatch.value.sync.filter(job => asked.sync.has(job.listing_id)), stop: retryBatch.value.stop.filter(job => asked.stop.has(job.product_id)) }
+    if (!current.sync.length && !current.stop.length) return
+    await dashboardApi(`${api}/sync`, {
+      method: 'POST',
+      body: {
+        sync: current.sync.map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
+        stop: current.stop.map(job => job.product_id),
+      },
+      validate: isChanges,
+    })
+    await refreshChanges()
+    follow()
+  } catch (cause) {
+    failure.value = getErrorMessage(cause, 'The change could not be started again.')
+  } finally {
+    applying.value = false
+  }
+}
+
 // The work continues on the server whether or not this page is open; while it runs, the checklist reads what syncs now every few seconds.
 let timer: ReturnType<typeof setTimeout> | null = null
 function follow() {
@@ -283,7 +362,8 @@ function follow() {
       return
     }
     if (pending.value) return follow()
-    await Promise.all([refreshListings(), integrations.refresh()])
+    // The first listing to sync activates the channel, which the account line reads from status.
+    await Promise.all([refreshStatus(), refreshListings(), integrations.refresh()])
     // What a listing now syncing was given is spent; a listing still waiting keeps what the host typed.
     entered.value = Object.fromEntries(Object.entries(entered.value).filter(([id]) => !listings.value.some(listing => listing.id === id && syncing(listing))))
   }, 3000)
