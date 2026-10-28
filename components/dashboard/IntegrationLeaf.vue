@@ -10,31 +10,13 @@
           <UAvatar :src="connection.image ?? undefined" :icon="definition.logo" alt="" size="lg" />
           <div class="min-w-0 flex-1">
             <p class="truncate font-semibold text-highlighted">{{ connection.name }}</p>
+            <!-- One line: who linked it, when, and the state the host would act on. No Health section: each state sits where it is acted on. -->
             <p class="mt-0.5 text-sm text-muted">
-              <template v-if="connection.through">Linked by {{ connection.through.email || connection.through.name }}<template v-if="connection.through.name && connection.through.email"> ({{ connection.through.name }})</template></template>
-              <template v-if="connection.through && connectedOn"> · </template>
-              <template v-if="connectedOn">Connected {{ connectedOn }}</template>
+              <template v-if="connection.through">Linked by {{ connection.through.email || connection.through.name }}<template v-if="connection.through.name && connection.through.email"> ({{ connection.through.name }})</template> · </template>
+              <template v-if="connectedOn">Connected {{ connectedOn }} · </template>
+              <span :class="state.tone === 'warning' ? 'text-warning' : ''">{{ state.label }}</span>
             </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- 2. Health: the connection's own word on how it is, and the one way to try again. -->
-      <section class="space-y-3">
-        <h2 class="text-sm font-semibold text-muted">Health</h2>
-        <div class="-mx-4 divide-y divide-default">
-          <div class="flex min-h-14 items-center gap-4 px-4 py-3">
-            <span class="min-w-0 flex-1">
-              <span class="flex items-center gap-2 text-base text-highlighted">
-                <span class="size-2 shrink-0 rounded-full" :class="healthDot" aria-hidden="true" />{{ healthLabel }}
-              </span>
-              <span v-if="connection.status === 'error'" class="mt-1 block text-sm text-error">{{ connection.lastError || 'The last sync failed.' }}</span>
-            </span>
-            <UButton v-if="connection.status === 'error' && canRetry" color="neutral" variant="outline" class="rounded-full" :loading="retrying" data-testid="integration-retry" @click="emit('retryConnection')">Retry</UButton>
-          </div>
-          <div v-if="connection.lastSyncAt" class="flex min-h-14 items-center gap-4 px-4 py-3">
-            <span class="text-base text-highlighted">Last synced</span>
-            <span class="ms-auto text-sm text-muted">{{ lastSynced }}</span>
+            <p v-if="connection.status === 'error' && connection.lastError" class="mt-1 text-sm text-warning">{{ connection.lastError }}</p>
           </div>
         </div>
       </section>
@@ -44,6 +26,11 @@
         <div>
           <h2 class="text-sm font-semibold text-muted">{{ itemsTitle }}</h2>
           <p v-if="itemsLead" class="mt-1 text-sm text-muted">{{ itemsLead }}</p>
+          <!-- Where the items stand: a failed change, changes in progress, or how many sync. Retry sits with the items it retries. -->
+          <div v-if="itemsStatus" class="mt-2 flex flex-wrap items-center gap-3">
+            <p class="text-sm" :class="itemsStatus.tone === 'warning' ? 'text-warning' : 'text-muted'" data-testid="integration-items-status">{{ itemsStatus.text }}</p>
+            <UButton v-if="itemsStatus.retryable" color="neutral" variant="outline" size="sm" class="rounded-full" :loading="applying" data-testid="integration-retry" @click="emit('retryFailed')">Retry</UButton>
+          </div>
         </div>
 
         <p v-if="itemsLoading" class="text-sm text-muted">Finding your {{ definition.items.noun }}s…</p>
@@ -109,10 +96,11 @@
 import { integrationDefinition, type IntegrationKey } from '~/shared/integrations'
 
 /*
-  The one connection leaf: below the panel's title and lead, the account,
-  then its health, then the provider's items the host maps to ours — a
-  checklist for a `many` integration, a radio list for `one` — and
-  Disconnect. The page owns the data and the apply action (the panel's Save
+  The one connection leaf: below the panel's title and lead, the account
+  with its state on its own line, then the provider's items the host maps to
+  ours — a checklist for a `many` integration, a radio list for `one` — with
+  where they stand on their heading, and Disconnect. There is no Health
+  section: each state sits on the row the host acts from. The page owns the data and the apply action (the panel's Save
   bar, labelled by `itemsApplyLabel`); the leaf owns how it reads.
 */
 export interface IntegrationLeafConnection {
@@ -122,11 +110,19 @@ export interface IntegrationLeafConnection {
   connectedAt: string | null
   /** The KrabiClaw user who linked the account. */
   through?: { email: string | null; name: string | null } | null
+  /** Active, not active yet (disabled), or failing; null while the provider has not finished connecting. */
   status?: 'active' | 'disabled' | 'error' | null
   lastError?: string | null
-  lastSyncAt?: string | null
   /** Where a connection with no status yet stands: "Finishing sign-in". */
   note?: string | null
+}
+
+/** Where the items stand, on the heading the host acts from. */
+export interface IntegrationLeafItemsStatus {
+  text: string
+  tone?: 'warning'
+  /** Offers Retry beside the text; the page retries. */
+  retryable?: boolean
 }
 
 export type IntegrationLeafItemStatus = 'syncing' | 'not_syncing' | 'attention' | 'pending'
@@ -149,10 +145,8 @@ const props = withDefaults(defineProps<{
   integration: IntegrationKey
   connection: IntegrationLeafConnection | null
   disconnecting?: boolean
-  /** Shows Retry beside a failing connection; the page does the retry. */
-  canRetry?: boolean
-  retrying?: boolean
   items?: IntegrationLeafItem[] | null
+  itemsStatus?: IntegrationLeafItemsStatus | null
   itemsTitle?: string
   itemsLead?: string
   itemsLoading?: boolean
@@ -160,15 +154,15 @@ const props = withDefaults(defineProps<{
   itemsEmpty?: string
   /** While a change applies, the list is read-only. */
   applying?: boolean
-}>(), { disconnecting: false, canRetry: false, retrying: false, items: null, itemsTitle: 'Linked items', itemsLead: '', itemsLoading: false, itemsError: null, itemsEmpty: 'Nothing to choose from yet.', applying: false })
+}>(), { disconnecting: false, items: null, itemsStatus: null, itemsTitle: 'Linked items', itemsLead: '', itemsLoading: false, itemsError: null, itemsEmpty: 'Nothing to choose from yet.', applying: false })
 
 /** The ids the host has chosen; the page compares them with what syncs today. */
 const selected = defineModel<string[]>('selected', { default: () => [] })
 
 const emit = defineEmits<{
   disconnect: []
-  /** The page tries the failing connection again. */
-  retryConnection: []
+  /** The page asks for the failed changes again. */
+  retryFailed: []
   /** A row's own step: the host presses its action and the page decides what it opens. */
   act: [id: string]
   /** A row is being checked; the page may need the item's details before it stays checked. */
@@ -179,19 +173,15 @@ const definition = computed(() => integrationDefinition(props.integration))
 const connectedOn = computed(() => props.connection?.connectedAt
   ? new Date(props.connection.connectedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })
   : '')
-const lastSynced = computed(() => props.connection?.lastSyncAt
-  ? new Date(props.connection.lastSyncAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-  : '')
-
-const healthLabel = computed(() => {
+const state = computed<{ label: string; tone?: 'warning' }>(() => {
   switch (props.connection?.status) {
-    case 'active': return definition.value.group === 'sync' ? 'Syncing' : 'Connected'
-    case 'disabled': return 'Paused'
-    case 'error': return 'Needs attention'
-    default: return props.connection?.note || 'Connected'
+    case 'active': return { label: 'Active' }
+    case 'disabled': return { label: 'Not active yet', tone: 'warning' }
+    case 'error': return { label: 'Needs attention', tone: 'warning' }
+    // A connection that reports no status of its own is established once it has a date; a note says where one still connecting stands.
+    default: return props.connection?.note ? { label: props.connection.note, tone: 'warning' } : { label: 'Active' }
   }
 })
-const healthDot = computed(() => ({ active: 'bg-success', disabled: 'bg-(--ui-text-dimmed)', error: 'bg-error' })[props.connection?.status ?? 'disabled'] ?? 'bg-(--ui-text-dimmed)')
 
 const statusLabel = (status: IntegrationLeafItemStatus) => ({ syncing: 'Syncing', not_syncing: 'Not syncing', attention: 'Needs attention', pending: 'Updating…' })[status]
 const statusDot = (status: IntegrationLeafItemStatus) => ({ syncing: 'bg-success', not_syncing: 'bg-(--ui-text-dimmed)', attention: 'bg-error', pending: 'bg-warning' })[status]
