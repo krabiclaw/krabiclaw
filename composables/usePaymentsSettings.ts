@@ -121,10 +121,10 @@ export interface AccountResponse { success: true; account: ConnectedAccount | nu
 const isAccountResponse = (value: unknown): value is AccountResponse =>
   isRecord(value) && value.success === true && (value.account === null || isConnectedAccount(value.account)) && isPayoutMethod(value.payout) && Array.isArray(value.countries) && value.countries.every(country => typeof country === 'string')
 
-export async function useConnectAccount() {
+export function useConnectAccount() {
   const route = useRoute()
   const dashboardApi = useDashboardApi()
-  const { data, error, status, refresh } = await useAsyncData(`dashboard-connect:${String(route.params.orgSlug)}`, () => dashboardApi<AccountResponse>('/api/dashboard/connect', { validate: isAccountResponse }), { server: false, lazy: true })
+  const { data, error, status, refresh } = useAsyncData(`dashboard-connect:${String(route.params.orgSlug)}`, () => dashboardApi<AccountResponse>('/api/dashboard/connect', { validate: isAccountResponse }), { server: false, lazy: true })
   const pending = computed(() => status.value === 'idle' || status.value === 'pending')
   const account = computed(() => data.value?.account ?? null)
   const payout = computed(() => data.value?.payout ?? null)

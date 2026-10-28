@@ -35,9 +35,11 @@ test.describe('stateless MCP server', () => {
     }
   })
 
-  test('separate language operations publish only authored translations and preserve source content', async ({ request, page, baseURL }) => {
+  test('separate language operations publish only authored translations and preserve source content', async ({ request, page, baseURL }, testInfo) => {
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Language writes use local D1 only.')
     test.setTimeout(120_000)
+    const release = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+    try {
     await loginAs(request, baseURL!)
     const localesResponse = await mcpRequest(request, baseURL!, {
       method: 'tools/call', toolName: 'list_organization_locales', args: { organization_id: MCP_ORGANIZATION_ID },
@@ -346,6 +348,7 @@ test.describe('stateless MCP server', () => {
         expect(mcpData<{ locales: Language[] }>(await restored.json()).locales).toEqual(locales)
       }
     }
+    } finally { await release() }
   })
 
   test('a post rejects fields that are not part of the contract', async ({ request, baseURL }) => {

@@ -1,6 +1,6 @@
 // Records one Google Chrome window to a .mov until SIGINT, whatever covers it on screen.
-// The window is the recording window rec.py opens: x = 0, width 1728 points.
-// Build: swiftc -O winrec.swift -o winrec   Usage: winrec <out.mov>
+// The window must match rec.py's selected title and complete recording frame.
+// Build: swiftc -O winrec.swift -o winrec   Usage: winrec <out.mov> <title> <x> <y> <width> <height>
 import Foundation
 import AppKit
 import ScreenCaptureKit
@@ -9,7 +9,15 @@ import AVFoundation
 let app = NSApplication.shared
 app.setActivationPolicy(.prohibited)
 setvbuf(stdout, nil, _IONBF, 0)  // rec.py waits for the "recording" line
+let geometry = CommandLine.arguments.dropFirst(3).compactMap(Double.init)
+guard CommandLine.arguments.count == 7, !CommandLine.arguments[2].isEmpty,
+  geometry.count == 4, geometry[2] > 0, geometry[3] > 0 else {
+  print("usage: winrec <out.mov> <title> <x> <y> <width> <height>")
+  exit(2)
+}
 let out = URL(fileURLWithPath: CommandLine.arguments[1])
+let title = CommandLine.arguments[2]
+let frame = CGRect(x: geometry[0], y: geometry[1], width: geometry[2], height: geometry[3])
 
 final class Delegate: NSObject, SCStreamDelegate, SCRecordingOutputDelegate {
   func recordingOutputDidFinishRecording(_ r: SCRecordingOutput) { print("finished"); exit(0) }
@@ -22,10 +30,18 @@ var stream: SCStream?
 Task { @MainActor in
   do {
     let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-    guard let w = content.windows.first(where: { $0.owningApplication?.applicationName == "Google Chrome" && Int($0.frame.origin.x) == 0 && Int($0.frame.width) == 1728 && $0.frame.height > 900 }) else { print("no window"); exit(2) }
+    let matches = content.windows.filter {
+      $0.owningApplication?.applicationName == "Google Chrome" && $0.title == title
+        && $0.frame == frame
+    }
+    guard matches.count == 1 else {
+      print("expected exactly one Chrome recording window titled \(title), found \(matches.count)")
+      exit(2)
+    }
+    let w = matches[0]
     print("window \(w.windowID) \(w.frame) \(w.title ?? "")")
     let config = SCStreamConfiguration()
-    config.width = 3456; config.height = 1944
+    config.width = Int(frame.width * 2); config.height = Int(frame.height * 2)
     config.minimumFrameInterval = CMTime(value: 1, timescale: 30)
     config.showsCursor = true
     config.scalesToFit = true
@@ -43,6 +59,12 @@ Task { @MainActor in
 
 signal(SIGINT, SIG_IGN)
 let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-interrupt.setEventHandler { Task { try? await stream?.stopCapture(); try? await Task.sleep(nanoseconds: 3_000_000_000); exit(0) } }
+interrupt.setEventHandler {
+  Task {
+    guard let stream else { print("fail recording has not started"); exit(1) }
+    do { try await stream.stopCapture() }
+    catch { print("fail stopping recording: \(error)"); exit(1) }
+  }
+}
 interrupt.resume()
 app.run()

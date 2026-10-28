@@ -25,7 +25,7 @@ definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'Card surcharge | KrabiClaw', robots: 'noindex, nofollow' })
 
 const dashboardApi = useDashboardApi()
-const { account, setAccount, connectPending, connectError } = await useConnectAccount()
+const { account, setAccount, connectPending, connectError } = useConnectAccount()
 /** The rate as a percent in the field; basis points are what the account stores. */
 const percent = ref('')
 watch(account, (value) => { percent.value = value?.surchargeBasisPoints === null || value === null ? '3' : String(value.surchargeBasisPoints / 100) }, { immediate: true })

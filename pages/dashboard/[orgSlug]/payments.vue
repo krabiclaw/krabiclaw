@@ -22,7 +22,7 @@ definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'dashboard-orgSlug-earn
 useSeoMeta({ title: 'Payments | KrabiClaw', robots: 'noindex, nofollow' })
 
 const level = useRouteLevel()
-const { account, payout, connectError, connectPending } = await useConnectAccount()
+const { account, payout, connectError, connectPending } = useConnectAccount()
 const to = (leaf: string) => `${level.path.value}/${leaf}`
 
 const rows = computed<EditorNavigationItem[]>(() => [

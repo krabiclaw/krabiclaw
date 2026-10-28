@@ -16,6 +16,10 @@ Screen Recording permission for the terminal that runs it.
 | `build.py` | Cut list (`cut.json`) → HyperFrames `index.html`: trimmed and sped-up clips, captions, title and closing cards. |
 | `youtube_upload.py` | Puts the MP4 into YouTube Studio's upload field and sets title, description, not-for-kids, Unlisted. |
 
+Recording requires the window ID set by `open_window()` or `CHROME_WINDOW_ID`.
+The recorder matches that window's current title and geometry and refuses
+missing or ambiguous matches; another Chrome window is never substituted.
+
 ## Workflow
 
 1. **Script.** One line per scene: what is shown, the caption, the result
@@ -32,6 +36,12 @@ Screen Recording permission for the terminal that runs it.
    rec.click("Save")
    rec.stop()
    ```
+
+   Run `start()` and `stop()` in the same Python process. For interactive driving,
+   keep that process open until capture ends. It owns the recorder, waits for it
+   to finish, and reports a failed exit; a later process cannot verify that exit.
+   If finalization exceeds 15 seconds, it kills and reaps the recorder, reports
+   the recording as incomplete, and clears the recorder so a new take can start.
 
    `click` moves the real cursor to the element, then clicks by script; pass
    `real=True` where the page ignores script clicks (Google sign-in,
