@@ -71,7 +71,9 @@ test.describe('stateless MCP server', () => {
     } finally { await release() }
   })
 
-  test('owner can use site content and settings tools', async ({ request, baseURL }) => {
+  test('owner can use site content and settings tools', async ({ request, baseURL }, testInfo) => {
+    const release = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+    try {
     await loginAs(request, baseURL!)
     const organizationId = MCP_ORGANIZATION_ID
 
@@ -251,7 +253,7 @@ test.describe('stateless MCP server', () => {
     expect(readBack.palette.light.action).toBe('#0F4C5C')
     expect(readBack.palette_source).toBe('custom')
     expect(paletteReceipt.saved_fields).toEqual({ palette: readBack.palette })
-
+    } finally { await release() }
   })
 
   test('owner can use submission inquiry tools', async ({ request, baseURL }, testInfo) => {
@@ -567,10 +569,11 @@ test.describe('stateless MCP server', () => {
     }
   })
 
-  test('owner can use location, reviews, and QA lifecycle tools', async ({ request, baseURL }) => {
+  test('owner can use location, reviews, and QA lifecycle tools', async ({ request, baseURL }, testInfo) => {
     await loginAs(request, baseURL!)
     const organizationId = MCP_ORGANIZATION_ID
-
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
     const locationId = 'loc-demo'
 
     const locationRead = await mcpRequest(request, baseURL!, {
@@ -664,6 +667,7 @@ test.describe('stateless MCP server', () => {
     })
     expect(qaList.status()).toBe(200)
     expect(mcpData<{ items: unknown[] }>(await qaList.json()).items).toEqual(expect.any(Array))
+    } finally { await release() }
   })
 
   test('authored Q&A shares scoped CMS and MCP writers while reviews remain read-only', async ({ page, browser, request, baseURL }, testInfo) => {
@@ -877,6 +881,7 @@ test.describe('stateless MCP server', () => {
     // The large-batch spec asserts the demo tenant's whole catalogue under this
     // lock, so every test that adds a Product to it takes the same lock.
     let releaseTenantMutationLock: (() => Promise<void>) | undefined
+    let experienceCleanup: (() => Promise<void>) | null = null
     let bookedSessionRestore: {
       cleanupRequest: APIRequestContext
       page: Page
@@ -893,7 +898,12 @@ test.describe('stateless MCP server', () => {
       releaseTenantMutationLock = undefined
       const restore = bookedSessionRestore
       bookedSessionRestore = null
+      const cleanupExperience = experienceCleanup
+      experienceCleanup = null
       const failures: unknown[] = []
+      try {
+        await cleanupExperience?.()
+      } catch (error) { failures.push(error) }
       if (restore) {
         try {
           if (testInfo.status !== 'passed' && !restore.page.isClosed()) await restore.page.close()
@@ -940,7 +950,7 @@ test.describe('stateless MCP server', () => {
       try {
         await release?.()
       } catch (error) { failures.push(error) }
-      if (failures.length) throw new AggregateError(failures, 'Booked-session authority cleanup failed')
+      if (failures.length) throw new AggregateError(failures, 'Owner-management cleanup failed')
     })
 
     test('HTTP and MCP share booking defaults, weekly replacement and authored Q&A', async ({ request, baseURL }) => {
@@ -1302,394 +1312,419 @@ test.describe('stateless MCP server', () => {
       let hostRequest: APIRequestContext | null = null
       let originalHost: { memberId: string; scheduling: Scheduling } | null = null
       const cleanupRequest = await playwrightRequest.newContext({ baseURL, storageState: await request.storageState() })
-      try {
-        menu = await call<Menu>('update_menu', args)
-        for (const section of menu.sections) {
-          expect(Object.keys(section.collection).sort()).toEqual(['id', 'organization_id', 'location_id', 'name', 'slug', 'description', 'image', 'sort_order'].sort())
-          for (const product of section.products) {
-            expect(product.kind).toBe('dish')
-            expect(Object.keys(product).sort()).toEqual(['id', 'kind', 'name', 'slug', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'options', 'variants', 'details', 'publications', 'locations', 'collections', 'updated_at'].sort())
-            for (const variant of product.variants) for (const price of variant.prices) {
-              for (const field of ['organization_id', 'product_variant_id', 'created_by', 'updated_by', 'created_at', 'updated_at', 'source']) expect(price).not.toHaveProperty(field)
-            }
-          }
-        }
-        const written = menu.sections.filter(section => section.collection.name.endsWith(stamp))
-        expect(written.map(section => section.collection.name)).toEqual(args.sections.map(section => section.name))
-        expect(written.map(section => section.products.map(product => product.name))).toEqual(args.sections.map(section => section.items.map(product => product.name)))
-        const replay = await call<Menu>('update_menu', args)
-        expect(replay.replayed).toBe(true)
-        expect(replay.sections).toEqual(menu.sections)
-        await page.setExtraHTTPHeaders(tenantTestExtraHeaders())
-        expect((await page.goto(`${baseURL}/menu`))?.status()).toBe(200)
-        for (const section of args.sections) {
-          await expect(page.getByRole('heading', { name: section.name, exact: true })).toBeVisible()
-          for (const product of section.items) await expect(page.getByText(product.name, { exact: true }).first()).toBeVisible()
-        }
-        // Moving a supplied dish changes its section; omitted dishes remain.
-        const starter = written[0]!
-        const dessert = written[1]!
-        const movedDish = starter.products[0]!
-        const dishEndpoint = `${baseURL}/api/editor/organizations/${organizationId}/products/${movedDish.id}`
-        const beforeInvalidRead = await request.get(dishEndpoint)
-        expect(beforeInvalidRead.status(), await beforeInvalidRead.text()).toBe(200)
-        const beforeInvalid = await beforeInvalidRead.json()
-        const invalidMenu = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_menu', args: {
-          organization_id: organizationId, location_id: locationId, idempotency_key: `${stamp}-invalid`,
-          sections: [{ collection_id: starter.collection.id, name: starter.collection.name, items: [{ product_id: movedDish.id, name: movedDish.name, details: { house_rules: 'This home-only field cannot edit a dish.' } }] }],
-        } })
-        expect(invalidMenu.status(), await invalidMenu.text()).toBe(200)
-        const invalidMenuResult = (await invalidMenu.json()).result
-        expect(invalidMenuResult.isError).toBe(true)
-        expect(invalidMenuResult.structuredContent).toBeUndefined()
-        expect(invalidMenuResult.content[0].text).toContain('Invalid arguments for tool update_menu')
-        const afterInvalidRead = await request.get(dishEndpoint)
-        expect(afterInvalidRead.status(), await afterInvalidRead.text()).toBe(200)
-        expect(await afterInvalidRead.json()).toEqual(beforeInvalid)
-        await call<Menu>('update_menu', { location_id: locationId, idempotency_key: crypto.randomUUID(), sections: [
-          { collection_id: dessert.collection.id, name: dessert.collection.name, items: [{ product_id: movedDish.id, name: movedDish.name }] },
-        ] })
-        for (const [product, collectionId, sortOrder] of [
-          [starter.products[1]!, starter.collection.id, 1],
-          [dessert.products[0]!, dessert.collection.id, 0],
-          [movedDish, dessert.collection.id, 1],
-        ] as const) {
-          const membership = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
-          expect(membership.status(), await membership.text()).toBe(200)
-          expect((await membership.json()).product.collections).toEqual([{ collection_id: collectionId, sort_order: sortOrder }])
-        }
-        await page.reload()
-        await expect(page.getByText(movedDish.name, { exact: true })).toHaveCount(1)
-        const { location } = await call<{ location: { timezone: string; opening_hours: OpeningHours; special_hours: SpecialHours } }>('get_location', { location_id: locationId })
-        let seating: { date: string; time: string } | undefined
-        const today = localDateAt(new Date(), location.timezone)
-        for (let offset = 28; offset < 35 && !seating; offset++) {
-          const date = addLocalDays(today, offset)
-          const time = generateReservationTimes(location.opening_hours, date, { lastSeatingBufferMinutes: 60, specialHours: location.special_hours })[0]
-          if (time) seating = { date, time }
-        }
-        expect(seating, 'the existing location has an open one-hour seating within the chosen week').toBeTruthy()
-        const start = localDateTimeToInstant(seating!.date, seating!.time, location.timezone)
-        const name = `Omakase ${stamp}`
-        // This host joins only for this Experience. Its own business and Hours
-        // remain untouched when this membership and its authored Hours leave.
-        const actor = findE2eAuthFixture('user-e2e-pottery-location-owner')
-        hostRequest = await playwrightRequest.newContext({ baseURL })
-        await loginAs(hostRequest, baseURL!, actor.id)
-        const originalMembers = await hostRequest.get(`${baseURL}/api/organizations/${E2E_POTTERY_ORGANIZATION_ID}/members/scheduling`)
-        expect(originalMembers.status(), await originalMembers.text()).toBe(200)
-        const originalMember = (await originalMembers.json() as { members: Array<{ id: string; self: boolean; scheduling: Scheduling }> }).members.find(member => member.self)
-        expect(originalMember).toBeDefined()
-        originalHost = { memberId: originalMember!.id, scheduling: originalMember!.scheduling }
-        const beforeInvitation = await call<{ members: Array<{ userId: string }> }>('list_organization_members')
-        expect(beforeInvitation.members.some(member => member.userId === actor.id)).toBe(false)
-        const invited = await call<{ invitation: { id: string; status: string; delivery: { status: string } } }>('invite_organization_member', { email: actor.email, role: 'member' })
-        invitationId = invited.invitation.id
-        expect(invited.invitation).toMatchObject({ status: 'pending', delivery: { status: 'sent' } })
-        const accepted = await hostRequest.post(`${baseURL}/api/auth/organization/accept-invitation`, { headers: authRequestHeaders(baseURL!), data: { invitationId } })
-        expect(accepted.status(), await accepted.text()).toBe(200)
-        hostMemberId = (await accepted.json() as { member: { id: string } }).member.id
-        invitationId = null
-        const joinedMembers = await hostRequest.get(`${baseURL}/api/organizations/${organizationId}/members/scheduling`)
-        expect(joinedMembers.status(), await joinedMembers.text()).toBe(200)
-        expect((await joinedMembers.json()).members).toEqual([expect.objectContaining({ id: hostMemberId, self: true, scheduling: null })])
-        const memberEndpoint = `${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`
-        expect(await call('get_member_scheduling', { member_id: hostMemberId })).toEqual({ scheduling: null })
-        expect(await call('get_member_public_profile', { member_id: hostMemberId })).toEqual({ profile: null })
-        const unsavedNative = await request.get(memberEndpoint)
-        expect(unsavedNative.status(), await unsavedNative.text()).toBe(200)
-        // The native read also answers whether the plan includes Google Calendar sync; this organization is on Business.
-        expect(await unsavedNative.json()).toEqual({ scheduling: null, calendar_sync: true })
-        const wrongIdentity = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
-        expect(wrongIdentity.status(), await wrongIdentity.text()).toBe(200)
-        const wrongIdentityResult = (await wrongIdentity.json()).result
-        expect(wrongIdentityResult.isError).toBe(true)
-        expect(JSON.parse(wrongIdentityResult.content[0].text)).toEqual({ status: 404, message: 'Member not found' })
-        for (const [toolName, fields] of [
-          ['set_member_scheduling', { public_name: 'Profile is not scheduling' }],
-          ['update_member_public_profile', { timezone: location.timezone, weekly: [], time_off: [] }],
-          ['update_member_public_profile', {}],
-        ] as const) {
-          const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: null, ...fields } })
-          expect(refused.status(), await refused.text()).toBe(200)
-          const result = (await refused.json()).result
-          expect(result.isError).toBe(true)
-          expect(result.structuredContent).toBeUndefined()
-          expect(result.content[0].text).toContain(`Invalid arguments for tool ${toolName}`)
-          const unchanged = await request.get(memberEndpoint)
-          expect(unchanged.status(), await unchanged.text()).toBe(200)
-          expect(await unchanged.json()).toEqual({ scheduling: null, calendar_sync: true })
-        }
-        for (const public_name of [null, '', '   ']) {
-          const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: null, public_name, public_approved: true } })
-          expect(refused.status(), await refused.text()).toBe(200)
-          const result = (await refused.json()).result
-          expect(result.isError).toBe(true)
-          expect(JSON.parse(result.content[0].text)).toEqual({ status: 400, message: 'Set a nonblank public name before publishing the member profile' })
-          const unchanged = await request.get(memberEndpoint)
-          expect(unchanged.status(), await unchanged.text()).toBe(200)
-          expect(await unchanged.json()).toEqual({ scheduling: null, calendar_sync: true })
-        }
-        // A published profile does not claim working hours. Physical sessions
-        // remain bookable from the Product's own explicitly authored times.
-        let profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: null, public_name: 'Omakase host' }, hostRequest)
-        const draftRead = await request.get(memberEndpoint)
-        expect(draftRead.status(), await draftRead.text()).toBe(200)
-        const draftNative = (await draftRead.json()).scheduling
-        expect(profile.profile).toEqual({ member_id: hostMemberId, updated_at: draftNative.updated_at, public_name: 'Omakase host', public_photo_url: null, public_bio: null, public_approved: 0 })
-        expect(await call('get_member_public_profile', { member_id: hostMemberId })).toEqual(profile)
-        const selfApproval = await mcpRequest(hostRequest, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true } })
-        expect(selfApproval.status(), await selfApproval.text()).toBe(200)
-        const selfApprovalResult = (await selfApproval.json()).result
-        expect(selfApprovalResult.isError).toBe(true)
-        expect(JSON.parse(selfApprovalResult.content[0].text).status).toBe(403)
-        const selfUnchanged = await request.get(memberEndpoint)
-        expect(selfUnchanged.status(), await selfUnchanged.text()).toBe(200)
-        expect((await selfUnchanged.json()).scheduling).toEqual(draftNative)
-        profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true })
-        const profileRead = await request.get(memberEndpoint)
-        expect(profileRead.status(), await profileRead.text()).toBe(200)
-        const profileNative = (await profileRead.json()).scheduling
-        expect(profileNative).toMatchObject(profile.profile)
-        expect(profileNative).toMatchObject({ public_name: 'Omakase host', public_approved: 1, timezone: null, weekly: null, time_off: null })
-        expect(profile.profile).toEqual({ member_id: hostMemberId, updated_at: profileNative.updated_at, public_name: 'Omakase host', public_photo_url: null, public_bio: null, public_approved: 1 })
-        const profileOnlyScheduling = await call<{ scheduling: Record<string, unknown> }>('get_member_scheduling', { member_id: hostMemberId })
-        expect(profileOnlyScheduling.scheduling).toMatchObject({ member_id: hostMemberId, updated_at: profile.profile.updated_at, timezone: null, weekly: null, time_off: null })
-        for (const field of ['public_name', 'public_photo_url', 'public_bio', 'public_approved']) expect(profileOnlyScheduling.scheduling).not.toHaveProperty(field)
-        const creation = { kind: 'experience', name, idempotency_key: crypto.randomUUID(), variants: [{ name: 'Per person', prices: [{ unit_amount: 13000, currency: settings.settings.default_currency }] }],
-          booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false, assigned_member_id: hostMemberId,
-            sessions: [{ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3600000).toISOString(), capacity: 6 }] } }
-        const { product } = await call<{ product: { id: string; slug: string; public_url: string; booking_readiness: { ready: boolean; missing: string[] } } }>('create_product', creation)
-        experienceId = product.id
-        expect(product.booking_readiness).toEqual({ ready: true, missing: [] })
-        expect((await call<{product:{id:string}}>('create_product', creation)).product.id).toBe(product.id)
-        // A member's content edit withholds their profile; it does not invent
-        // hours, and publication must refuse until an admin approves it again.
-        profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_bio: 'Omakase prepared and hosted by this team member.' }, hostRequest)
-        expect(profile.profile.public_approved).toBe(0)
-        const editedNative = await request.get(memberEndpoint)
-        expect(editedNative.status(), await editedNative.text()).toBe(200)
-        expect((await editedNative.json()).scheduling).toMatchObject({ ...profile.profile, timezone: null, weekly: null, time_off: null })
-        await call('set_product_publication', { product_id: product.id, published: false })
-        const refusedPublication = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'set_product_publication', args: { organization_id: organizationId, product_id: product.id, published: true } })
-        expect(refusedPublication.status(), await refusedPublication.text()).toBe(200)
-        const publicationResult = (await refusedPublication.json()).result
-        expect(publicationResult.isError).toBe(true)
-        expect(JSON.parse(publicationResult.content[0].text)).toEqual({ status: 409, code: 'HOST_REQUIRED', message: 'Choose a host with a published profile before publishing. Guests see who hosts it.' })
-        const withheld = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
-        expect(withheld.status(), await withheld.text()).toBe(200)
-        expect((await withheld.json()).product.publications.find((publication: { organization_id: string }) => publication.organization_id === organizationId)).toMatchObject({ published: false })
-        profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true })
-        await call('set_product_publication', { product_id: product.id, published: true })
-        const readback = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
-        expect(readback.status()).toBe(200)
-        expect((await readback.json()).product).toMatchObject({ kind: 'experience', booking: { duration_minutes: 60, confirmation_mode: 'review', assigned_member_id: hostMemberId }, locations: [{ location_id: locationId, active: true, published: true }] })
-        await page.reload()
-        await expect(page.getByText(name, {exact:true})).toHaveCount(0)
-        expect((await page.goto(`${baseURL}/experiences`))?.status()).toBe(200)
-        await expect(page.getByText(name,{exact:true}).first()).toBeVisible()
-        expect((await page.goto(`${baseURL}${new URL(product.public_url).pathname}`))?.status()).toBe(200)
-        await expect(page.getByRole('heading',{name,exact:true}).first()).toBeVisible()
-        await expect(page.locator('section[aria-label="Meet your host"]').getByText('Omakase host', { exact: true })).toBeVisible()
-        await expect(page.locator('section[aria-label="Meet your host"]').getByText(profile.profile.public_bio!, { exact: true })).toBeVisible()
-        const sessions = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, {headers: tenantTestExtraHeaders()})
-        expect(sessions.status(),await sessions.text()).toBe(200)
-        expect((await sessions.json()).sessions).toEqual([expect.objectContaining({starts_at:start.toISOString(),remaining:6,is_full:false})])
-        let additionalSeating: { date: string; time: string } | undefined
-        for (let offset = 1; offset <= 7 && !additionalSeating; offset++) {
-          const date = addLocalDays(seating!.date, offset)
-          const time = generateReservationTimes(location.opening_hours, date, { lastSeatingBufferMinutes: 60, specialHours: location.special_hours })[0]
-          if (time) additionalSeating = { date, time }
-        }
-        expect(additionalSeating, 'the existing location has another open one-hour time on a later date').toBeDefined()
-        const additionalStart = localDateTimeToInstant(additionalSeating!.date, additionalSeating!.time, location.timezone)
-        const additionalEnd = new Date(additionalStart.getTime() + 60 * 60_000)
-        const additionalEndLocal = localNow(location.timezone, additionalEnd)
-        await loginAs(page.request, baseURL!)
-        await page.setExtraHTTPHeaders({})
-        const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
-        const calendarPath = '/dashboard/ember-slice-demo/calendar'
-        const sessionEndpoint = `/api/editor/organizations/${organizationId}/products/${product.id}/sessions`
-        expect((await page.goto(`${calendarPath}/sessions/new?product_id=${product.id}&locationId=${locationId}&month=${additionalSeating!.date.slice(0, 7)}&date=${additionalSeating!.date}`))?.status()).toBe(200)
-        await waitForNuxtHydration(page)
-        const availability = page.locator('#dashboard-panel-product-session')
-        await expect(availability.getByLabel('Date', { exact: true })).toHaveValue(additionalSeating!.date)
-        await expect(availability.getByLabel('Starts', { exact: true })).toHaveValue('')
-        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('6')
-        await availability.getByLabel('Starts', { exact: true }).fill(additionalSeating!.time)
-        await expect(availability.getByLabel('Ends', { exact: true })).toHaveValue(`${additionalEndLocal.date}T${additionalEndLocal.time}`)
-        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('4')
-        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
-        let creations = 0
-        const countCreation = (request: import('@playwright/test').Request) => {
-          if (new URL(request.url()).pathname === sessionEndpoint && request.method() === 'POST') creations++
-        }
-        page.on('request', countCreation)
-        const sessionFailure = 'The newly saved availability could not be loaded for this verification.'
-        const interceptSavedSession = (url: URL) => url.pathname.startsWith(`${sessionEndpoint}/`)
-        await page.route(interceptSavedSession, async route => {
-          if (route.request().method() !== 'GET') return route.continue()
-          // The failed read completes after the saved editor is visible, so
-          // a save handler left on a discarded /new instance cannot pass.
-          await expect(availability.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
-          await route.fulfill({ status: 503, json: { error: sessionFailure } })
-        })
-        const added = page.waitForResponse(response => new URL(response.url()).pathname === sessionEndpoint && response.request().method() === 'POST')
-        const refusedSession = page.waitForResponse(response => interceptSavedSession(new URL(response.url())) && response.request().method() === 'GET')
-        await availability.getByRole('button', { name: 'Add to calendar', exact: true }).click()
-        const addedResponse = await added
-        expect(addedResponse.status(), await addedResponse.text()).toBe(201)
-        const addedSessions = (await addedResponse.json() as { sessions: SessionAvailability[] }).sessions
-        expect(addedSessions).toHaveLength(1)
-        const addedId = addedSessions[0]!.id
-        expect((await refusedSession).status()).toBe(503)
-        await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/sessions/${addedId}`)
-        await expect(availability.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
-        await expect(availability.getByText(sessionFailure, { exact: true })).toBeVisible()
-        await expect(availability.getByLabel('Starts', { exact: true })).toHaveValue(`${additionalSeating!.date}T${additionalSeating!.time}`)
-        await expect(availability.getByLabel('Ends', { exact: true })).toHaveValue(`${additionalEndLocal.date}T${additionalEndLocal.time}`)
-        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('4')
-        const beforeRetry = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
-          product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
-        })
-        expect(beforeRetry.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 4, remaining: 4 })])
-        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
-        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
-        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('9')
-        await page.unroute(interceptSavedSession)
-        const recoveredSession = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'GET')
-        await availability.getByRole('button', { name: 'Use saved values', exact: true }).click()
-        expect((await recoveredSession).status()).toBe(200)
-        await expect(availability.getByText(sessionFailure, { exact: true })).not.toBeVisible()
-        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('4')
-        const calendarFailure = 'The newly saved calendar could not be read for this verification.'
-        const interceptCalendar = (url: URL) => url.pathname === sessionEndpoint
-        await page.route(interceptCalendar, async route => {
-          if (route.request().method() !== 'GET') return route.continue()
-          await route.fulfill({ status: 503, json: { error: calendarFailure } })
-        })
-        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('5')
-        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
-        const updated = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'PATCH')
-        const refusedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
-        await availability.getByRole('button', { name: 'Save', exact: true }).click()
-        const updatedResponse = await updated
-        expect(updatedResponse.status(), await updatedResponse.text()).toBe(200)
-        expect((await refusedCalendar).status()).toBe(503)
-        await expect(availability.getByText(calendarFailure, { exact: true })).toBeVisible()
-        await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('5')
-        const afterUpdate = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
-          product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
-        })
-        expect(afterUpdate.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 5, remaining: 5 })])
-        await page.unroute(interceptCalendar)
-        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('6')
-        await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
-        const retried = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'PATCH')
-        const savedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
-        await availability.getByRole('button', { name: 'Save', exact: true }).click()
-        const retriedResponse = await retried
-        expect(retriedResponse.status(), await retriedResponse.text()).toBe(200)
-        expect((await savedCalendar).status()).toBe(200)
-        page.off('request', countCreation)
-        expect(creations).toBe(1)
-        await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('locationId') === locationId)
-        expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: product.id, locationId, month: additionalSeating!.date.slice(0, 7), date: additionalSeating!.date })
-        await expect(page.locator(`#dashboard-panel-org-calendar [data-session-id="${addedId}"]:visible`)).toBeVisible()
-        const persisted = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
-          product_id: product.id,
-          from: localDateTimeToInstant(additionalSeating!.date, '00:00', location.timezone).toISOString(),
-          to: localDateTimeToInstant(addLocalDays(additionalSeating!.date, 1), '00:00', location.timezone).toISOString(),
-        })
-        expect(persisted.sessions).toEqual([expect.objectContaining({
-          id: addedId, organization_id: organizationId, product_id: product.id, location_id: locationId, timezone: location.timezone,
-          starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), capacity: 6, status: 'scheduled', claimed: 0, remaining: 6, is_full: false,
-        })])
-        const publicReadback = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, { headers: tenantTestExtraHeaders(), params: { location_id: locationId } })
-        expect(publicReadback.status(), await publicReadback.text()).toBe(200)
-        const publicSessions = (await publicReadback.json() as { sessions: Array<Pick<SessionAvailability, 'id' | 'starts_at' | 'ends_at' | 'location_id' | 'timezone' | 'remaining' | 'is_full'>> }).sessions
-        expect(publicSessions).toHaveLength(2)
-        expect(publicSessions.find(session => session.id === addedId)).toMatchObject({
-          id: addedId, location_id: locationId, timezone: location.timezone, starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), remaining: 6, is_full: false,
-        })
-        // Online is a public booking scope, not a physical Product location.
-        // Removing it from its own focused editor returns to the same Product
-        // and rereads saved state without following an invalid online address.
-        await call('set_product_publication', { product_id: product.id, published: false })
-        const authoredHours = { timezone: location.timezone, weekly: [{ weekday: new Date(`${seating!.date}T12:00:00Z`).getUTCDay(), start: '09:00', end: '10:00' }], time_off: [] }
-        const hours = await call<{ scheduling: Pick<NonNullable<Scheduling>, 'member_id' | 'updated_at' | 'timezone' | 'weekly' | 'time_off'> }>('set_member_scheduling', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, ...authoredHours })
-        const hoursRead = await request.get(`${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`)
-        expect(hoursRead.status(), await hoursRead.text()).toBe(200)
-        const hoursNative = (await hoursRead.json()).scheduling
-        expect(hoursNative).toMatchObject(hours.scheduling)
-        expect(hoursNative).toMatchObject({ ...authoredHours, public_name: 'Omakase host', public_approved: 1 })
-        expect(hours.scheduling).toEqual({ member_id: hostMemberId, updated_at: hoursNative.updated_at, ...authoredHours })
-        const staleProfile = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_bio: 'An edit based on the old shared revision' } })
-        expect(staleProfile.status(), await staleProfile.text()).toBe(200)
-        const staleProfileResult = (await staleProfile.json()).result
-        expect(staleProfileResult.isError).toBe(true)
-        expect(JSON.parse(staleProfileResult.content[0].text)).toEqual({ status: 409, message: 'Member settings changed; reload before saving' })
-        const unchangedHours = await request.get(memberEndpoint)
-        expect(unchangedHours.status(), await unchangedHours.text()).toBe(200)
-        expect((await unchangedHours.json()).scheduling).toEqual(hoursNative)
-        const profileAfterHours = await call<{ profile: PublicProfile }>('get_member_public_profile', { member_id: hostMemberId })
-        expect(profileAfterHours.profile).toEqual({ ...profile.profile, updated_at: hoursNative.updated_at })
-        const editedAfterHours = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profileAfterHours.profile.updated_at, public_approved: false })
-        const retainedHours = await request.get(memberEndpoint)
-        expect(retainedHours.status(), await retainedHours.text()).toBe(200)
-        expect((await retainedHours.json()).scheduling).toEqual({ ...hoursNative, public_approved: 0, updated_at: editedAfterHours.profile.updated_at })
-        profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: editedAfterHours.profile.updated_at, public_approved: true })
-        await call('set_product_booking_config', { product_id: product.id, held_online: true, scheduling_mode: 'provider' })
-        await page.goto(`${bookingPath}/location?location_id=online`)
-        const format = page.locator('#dashboard-panel-booking-location')
-        await expect(format.getByRole('switch', { name: 'Held online', exact: true })).toHaveAttribute('aria-checked', 'true')
-        await format.getByRole('switch', { name: 'Held online', exact: true }).click()
-        await format.getByRole('button', { name: 'Save', exact: true }).click()
-        await expect(page).toHaveURL(`${bookingPath}/duration`)
-        const offline = await call<{ product: Product }>('get_product', { product_id: product.id })
-        expect(offline.product.booking).toMatchObject({ held_online: false, scheduling_mode: 'provider', assigned_member_id: hostMemberId })
-        expect(offline.product.locations).toEqual([{ location_id: locationId, active: true, published: true }])
-        await call('set_product_booking_config', { product_id: product.id, held_online: true })
-        await page.goto(`${bookingPath}/enabled?location_id=online`)
-        const calendar = page.locator('#dashboard-panel-booking-enabled')
-        await calendar.getByRole('switch', { name: 'Use a booking calendar', exact: true }).click()
-        await calendar.getByRole('button', { name: 'Save', exact: true }).click()
-        await expect(page).toHaveURL(`${bookingPath}/enabled`)
-        expect((await call<{ product: Product }>('get_product', { product_id: product.id })).product.booking).toBeNull()
-      } finally {
-        try {
+      experienceCleanup = async () => {
+        const failures: unknown[] = []
         if (experienceId) {
-          expect((await call<{deleted:boolean}>('delete_product',{product_id:experienceId},cleanupRequest)).deleted).toBe(true)
-          const deleted = await cleanupRequest.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${experienceId}`)
-          expect(deleted.status(), await deleted.text()).toBe(404)
+          try {
+            expect((await call<{ deleted: boolean }>('delete_product', { product_id: experienceId }, cleanupRequest)).deleted).toBe(true)
+          } catch (error) { failures.push(error) }
+          try {
+            const deleted = await cleanupRequest.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${experienceId}`)
+            expect(deleted.status(), await deleted.text()).toBe(404)
+          } catch (error) { failures.push(error) }
         }
         for (const section of menu?.sections.filter(section => section.collection.name.endsWith(stamp)) ?? []) {
-          for (const product of section.products) expect((await call<{deleted:boolean}>('delete_product',{product_id:product.id},cleanupRequest)).deleted).toBe(true)
-          expect((await call<{deleted:boolean}>('delete_collection',{collection_id:section.collection.id},cleanupRequest)).deleted).toBe(true)
-        }
-        if (original.collections.length) await call('reorder_collections',{location_id:locationId,collection_ids:original.collections.map(collection=>collection.id)},cleanupRequest)
-        } finally {
+          for (const product of section.products) {
+            try {
+              expect((await call<{ deleted: boolean }>('delete_product', { product_id: product.id }, cleanupRequest)).deleted).toBe(true)
+            } catch (error) { failures.push(error) }
+          }
           try {
-            if (hostMemberId) {
-              expect((await call<{ member: { id: string } }>('remove_organization_member', { member_id: hostMemberId }, cleanupRequest)).member.id).toBe(hostMemberId)
-              const remaining = await call<{ members: Array<{ id: string }> }>('list_organization_members', {}, cleanupRequest)
-              expect(remaining.members.some(member => member.id === hostMemberId)).toBe(false)
-              const removed = await cleanupRequest.get(`${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`)
-              expect(removed.status(), await removed.text()).toBe(404)
-            } else if (invitationId) {
-              expect((await call<{ invitation: { status: string } }>('cancel_organization_invitation', { invitation_id: invitationId }, cleanupRequest)).invitation.status).toBe('canceled')
-            }
-            if (hostRequest && originalHost) {
-              const retained = await hostRequest.get(`${baseURL}/api/organizations/${E2E_POTTERY_ORGANIZATION_ID}/members/scheduling`)
-              expect(retained.status(), await retained.text()).toBe(200)
-              expect((await retained.json()).members.find((member: { self: boolean }) => member.self)).toMatchObject({ id: originalHost.memberId, scheduling: originalHost.scheduling })
-            }
-          } finally {
-            try { await hostRequest?.dispose() }
-            finally { await cleanupRequest.dispose() }
+            expect((await call<{ deleted: boolean }>('delete_collection', { collection_id: section.collection.id }, cleanupRequest)).deleted).toBe(true)
+          } catch (error) { failures.push(error) }
+        }
+        try {
+          if (original.collections.length) await call('reorder_collections', { location_id: locationId, collection_ids: original.collections.map(collection => collection.id) }, cleanupRequest)
+        } catch (error) { failures.push(error) }
+        try {
+          const restored = await call<{ collections: Array<{ id: string }> }>('list_collections', { location_id: locationId }, cleanupRequest)
+          expect(restored.collections.map(collection => collection.id)).toEqual(original.collections.map(collection => collection.id))
+        } catch (error) { failures.push(error) }
+        if (hostMemberId) {
+          try {
+            expect((await call<{ member: { id: string } }>('remove_organization_member', { member_id: hostMemberId }, cleanupRequest)).member.id).toBe(hostMemberId)
+          } catch (error) { failures.push(error) }
+          try {
+            const remaining = await call<{ members: Array<{ id: string }> }>('list_organization_members', {}, cleanupRequest)
+            expect(remaining.members.some(member => member.id === hostMemberId)).toBe(false)
+          } catch (error) { failures.push(error) }
+          try {
+            const removed = await cleanupRequest.get(`${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`)
+            expect(removed.status(), await removed.text()).toBe(404)
+          } catch (error) { failures.push(error) }
+        } else if (invitationId) {
+          try {
+            expect((await call<{ invitation: { status: string } }>('cancel_organization_invitation', { invitation_id: invitationId }, cleanupRequest)).invitation.status).toBe('canceled')
+          } catch (error) { failures.push(error) }
+        }
+        if (hostRequest && originalHost) {
+          try {
+            const retained = await hostRequest.get(`${baseURL}/api/organizations/${E2E_POTTERY_ORGANIZATION_ID}/members/scheduling`)
+            expect(retained.status(), await retained.text()).toBe(200)
+            expect((await retained.json()).members.find((member: { self: boolean }) => member.self)).toMatchObject({ id: originalHost.memberId, scheduling: originalHost.scheduling })
+          } catch (error) { failures.push(error) }
+        }
+        try {
+          await hostRequest?.dispose()
+        } catch (error) { failures.push(error) }
+        try {
+          await cleanupRequest.dispose()
+        } catch (error) { failures.push(error) }
+        if (failures.length) throw new AggregateError(failures, 'MCP experience cleanup failed')
+      }
+      menu = await call<Menu>('update_menu', args)
+      for (const section of menu.sections) {
+        expect(Object.keys(section.collection).sort()).toEqual(['id', 'organization_id', 'location_id', 'name', 'slug', 'description', 'image', 'sort_order'].sort())
+        for (const product of section.products) {
+          expect(product.kind).toBe('dish')
+          expect(Object.keys(product).sort()).toEqual(['id', 'kind', 'name', 'slug', 'description', 'active', 'order_url', 'unit_label', 'marketing_features', 'metadata', 'tax_code', 'options', 'variants', 'details', 'publications', 'locations', 'collections', 'updated_at'].sort())
+          for (const variant of product.variants) for (const price of variant.prices) {
+            for (const field of ['organization_id', 'product_variant_id', 'created_by', 'updated_by', 'created_at', 'updated_at', 'source']) expect(price).not.toHaveProperty(field)
           }
         }
       }
+      const written = menu.sections.filter(section => section.collection.name.endsWith(stamp))
+      expect(written.map(section => section.collection.name)).toEqual(args.sections.map(section => section.name))
+      expect(written.map(section => section.products.map(product => product.name))).toEqual(args.sections.map(section => section.items.map(product => product.name)))
+      const replay = await call<Menu>('update_menu', args)
+      expect(replay.replayed).toBe(true)
+      expect(replay.sections).toEqual(menu.sections)
+      await page.setExtraHTTPHeaders(tenantTestExtraHeaders())
+      expect((await page.goto(`${baseURL}/menu`))?.status()).toBe(200)
+      for (const section of args.sections) {
+        await expect(page.getByRole('heading', { name: section.name, exact: true })).toBeVisible()
+        for (const product of section.items) await expect(page.getByText(product.name, { exact: true }).first()).toBeVisible()
+      }
+      // Moving a supplied dish changes its section; omitted dishes remain.
+      const starter = written[0]!
+      const dessert = written[1]!
+      const movedDish = starter.products[0]!
+      const dishEndpoint = `${baseURL}/api/editor/organizations/${organizationId}/products/${movedDish.id}`
+      const beforeInvalidRead = await request.get(dishEndpoint)
+      expect(beforeInvalidRead.status(), await beforeInvalidRead.text()).toBe(200)
+      const beforeInvalid = await beforeInvalidRead.json()
+      const invalidMenu = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_menu', args: {
+        organization_id: organizationId, location_id: locationId, idempotency_key: `${stamp}-invalid`,
+        sections: [{ collection_id: starter.collection.id, name: starter.collection.name, items: [{ product_id: movedDish.id, name: movedDish.name, details: { house_rules: 'This home-only field cannot edit a dish.' } }] }],
+      } })
+      expect(invalidMenu.status(), await invalidMenu.text()).toBe(200)
+      const invalidMenuResult = (await invalidMenu.json()).result
+      expect(invalidMenuResult.isError).toBe(true)
+      expect(invalidMenuResult.structuredContent).toBeUndefined()
+      expect(invalidMenuResult.content[0].text).toContain('Invalid arguments for tool update_menu')
+      const afterInvalidRead = await request.get(dishEndpoint)
+      expect(afterInvalidRead.status(), await afterInvalidRead.text()).toBe(200)
+      expect(await afterInvalidRead.json()).toEqual(beforeInvalid)
+      await call<Menu>('update_menu', { location_id: locationId, idempotency_key: crypto.randomUUID(), sections: [
+        { collection_id: dessert.collection.id, name: dessert.collection.name, items: [{ product_id: movedDish.id, name: movedDish.name }] },
+      ] })
+      for (const [product, collectionId, sortOrder] of [
+        [starter.products[1]!, starter.collection.id, 1],
+        [dessert.products[0]!, dessert.collection.id, 0],
+        [movedDish, dessert.collection.id, 1],
+      ] as const) {
+        const membership = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
+        expect(membership.status(), await membership.text()).toBe(200)
+        expect((await membership.json()).product.collections).toEqual([{ collection_id: collectionId, sort_order: sortOrder }])
+      }
+      await page.reload()
+      await expect(page.getByText(movedDish.name, { exact: true })).toHaveCount(1)
+      const { location } = await call<{ location: { timezone: string; opening_hours: OpeningHours; special_hours: SpecialHours } }>('get_location', { location_id: locationId })
+      let seating: { date: string; time: string } | undefined
+      const today = localDateAt(new Date(), location.timezone)
+      for (let offset = 28; offset < 35 && !seating; offset++) {
+        const date = addLocalDays(today, offset)
+        const time = generateReservationTimes(location.opening_hours, date, { lastSeatingBufferMinutes: 60, specialHours: location.special_hours })[0]
+        if (time) seating = { date, time }
+      }
+      expect(seating, 'the existing location has an open one-hour seating within the chosen week').toBeTruthy()
+      const start = localDateTimeToInstant(seating!.date, seating!.time, location.timezone)
+      const name = `Omakase ${stamp}`
+      // This host joins only for this Experience. Its own business and Hours
+      // remain untouched when this membership and its authored Hours leave.
+      const actor = findE2eAuthFixture('user-e2e-pottery-location-owner')
+      hostRequest = await playwrightRequest.newContext({ baseURL })
+      await loginAs(hostRequest, baseURL!, actor.id)
+      const originalMembers = await hostRequest.get(`${baseURL}/api/organizations/${E2E_POTTERY_ORGANIZATION_ID}/members/scheduling`)
+      expect(originalMembers.status(), await originalMembers.text()).toBe(200)
+      const originalMember = (await originalMembers.json() as { members: Array<{ id: string; self: boolean; scheduling: Scheduling }> }).members.find(member => member.self)
+      expect(originalMember).toBeDefined()
+      originalHost = { memberId: originalMember!.id, scheduling: originalMember!.scheduling }
+      const beforeInvitation = await call<{ members: Array<{ userId: string }> }>('list_organization_members')
+      expect(beforeInvitation.members.some(member => member.userId === actor.id)).toBe(false)
+      const invited = await call<{ invitation: { id: string; status: string; delivery: { status: string } } }>('invite_organization_member', { email: actor.email, role: 'member' })
+      invitationId = invited.invitation.id
+      expect(invited.invitation).toMatchObject({ status: 'pending', delivery: { status: 'sent' } })
+      const accepted = await hostRequest.post(`${baseURL}/api/auth/organization/accept-invitation`, { headers: authRequestHeaders(baseURL!), data: { invitationId } })
+      expect(accepted.status(), await accepted.text()).toBe(200)
+      hostMemberId = (await accepted.json() as { member: { id: string } }).member.id
+      invitationId = null
+      const joinedMembers = await hostRequest.get(`${baseURL}/api/organizations/${organizationId}/members/scheduling`)
+      expect(joinedMembers.status(), await joinedMembers.text()).toBe(200)
+      expect((await joinedMembers.json()).members).toEqual([expect.objectContaining({ id: hostMemberId, self: true, scheduling: null })])
+      const memberEndpoint = `${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`
+      expect(await call('get_member_scheduling', { member_id: hostMemberId })).toEqual({ scheduling: null })
+      expect(await call('get_member_public_profile', { member_id: hostMemberId })).toEqual({ profile: null })
+      const unsavedNative = await request.get(memberEndpoint)
+      expect(unsavedNative.status(), await unsavedNative.text()).toBe(200)
+      // The native read also answers whether the plan includes Google Calendar sync; this organization is on Business.
+      expect(await unsavedNative.json()).toEqual({ scheduling: null, calendar_sync: true })
+      const wrongIdentity = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: organizationId, member_id: actor.id } })
+      expect(wrongIdentity.status(), await wrongIdentity.text()).toBe(200)
+      const wrongIdentityResult = (await wrongIdentity.json()).result
+      expect(wrongIdentityResult.isError).toBe(true)
+      expect(JSON.parse(wrongIdentityResult.content[0].text)).toEqual({ status: 404, message: 'Member not found' })
+      for (const [toolName, fields] of [
+        ['set_member_scheduling', { public_name: 'Profile is not scheduling' }],
+        ['update_member_public_profile', { timezone: location.timezone, weekly: [], time_off: [] }],
+        ['update_member_public_profile', {}],
+      ] as const) {
+        const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: null, ...fields } })
+        expect(refused.status(), await refused.text()).toBe(200)
+        const result = (await refused.json()).result
+        expect(result.isError).toBe(true)
+        expect(result.structuredContent).toBeUndefined()
+        expect(result.content[0].text).toContain(`Invalid arguments for tool ${toolName}`)
+        const unchanged = await request.get(memberEndpoint)
+        expect(unchanged.status(), await unchanged.text()).toBe(200)
+        expect(await unchanged.json()).toEqual({ scheduling: null, calendar_sync: true })
+      }
+      for (const public_name of [null, '', '   ']) {
+        const refused = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: null, public_name, public_approved: true } })
+        expect(refused.status(), await refused.text()).toBe(200)
+        const result = (await refused.json()).result
+        expect(result.isError).toBe(true)
+        expect(JSON.parse(result.content[0].text)).toEqual({ status: 400, message: 'Set a nonblank public name before publishing the member profile' })
+        const unchanged = await request.get(memberEndpoint)
+        expect(unchanged.status(), await unchanged.text()).toBe(200)
+        expect(await unchanged.json()).toEqual({ scheduling: null, calendar_sync: true })
+      }
+      // A published profile does not claim working hours. Physical sessions
+      // remain bookable from the Product's own explicitly authored times.
+      let profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: null, public_name: 'Omakase host' }, hostRequest)
+      const draftRead = await request.get(memberEndpoint)
+      expect(draftRead.status(), await draftRead.text()).toBe(200)
+      const draftNative = (await draftRead.json()).scheduling
+      expect(profile.profile).toEqual({ member_id: hostMemberId, updated_at: draftNative.updated_at, public_name: 'Omakase host', public_photo_url: null, public_bio: null, public_approved: 0 })
+      expect(await call('get_member_public_profile', { member_id: hostMemberId })).toEqual(profile)
+      const selfApproval = await mcpRequest(hostRequest, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true } })
+      expect(selfApproval.status(), await selfApproval.text()).toBe(200)
+      const selfApprovalResult = (await selfApproval.json()).result
+      expect(selfApprovalResult.isError).toBe(true)
+      expect(JSON.parse(selfApprovalResult.content[0].text).status).toBe(403)
+      const selfUnchanged = await request.get(memberEndpoint)
+      expect(selfUnchanged.status(), await selfUnchanged.text()).toBe(200)
+      expect((await selfUnchanged.json()).scheduling).toEqual(draftNative)
+      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true })
+      const profileRead = await request.get(memberEndpoint)
+      expect(profileRead.status(), await profileRead.text()).toBe(200)
+      const profileNative = (await profileRead.json()).scheduling
+      expect(profileNative).toMatchObject(profile.profile)
+      expect(profileNative).toMatchObject({ public_name: 'Omakase host', public_approved: 1, timezone: null, weekly: null, time_off: null })
+      expect(profile.profile).toEqual({ member_id: hostMemberId, updated_at: profileNative.updated_at, public_name: 'Omakase host', public_photo_url: null, public_bio: null, public_approved: 1 })
+      const profileOnlyScheduling = await call<{ scheduling: Record<string, unknown> }>('get_member_scheduling', { member_id: hostMemberId })
+      expect(profileOnlyScheduling.scheduling).toMatchObject({ member_id: hostMemberId, updated_at: profile.profile.updated_at, timezone: null, weekly: null, time_off: null })
+      for (const field of ['public_name', 'public_photo_url', 'public_bio', 'public_approved']) expect(profileOnlyScheduling.scheduling).not.toHaveProperty(field)
+      const creation = { kind: 'experience', name, idempotency_key: crypto.randomUUID(), variants: [{ name: 'Per person', prices: [{ unit_amount: 13000, currency: settings.settings.default_currency }] }],
+        booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false, assigned_member_id: hostMemberId,
+          sessions: [{ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3600000).toISOString(), capacity: 6 }] } }
+      const { product } = await call<{ product: { id: string; slug: string; public_url: string; booking_readiness: { ready: boolean; missing: string[] } } }>('create_product', creation)
+      experienceId = product.id
+      expect(product.booking_readiness).toEqual({ ready: true, missing: [] })
+      expect((await call<{product:{id:string}}>('create_product', creation)).product.id).toBe(product.id)
+      // A member's content edit withholds their profile; it does not invent
+      // hours, and publication must refuse until an admin approves it again.
+      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_bio: 'Omakase prepared and hosted by this team member.' }, hostRequest)
+      expect(profile.profile.public_approved).toBe(0)
+      const editedNative = await request.get(memberEndpoint)
+      expect(editedNative.status(), await editedNative.text()).toBe(200)
+      expect((await editedNative.json()).scheduling).toMatchObject({ ...profile.profile, timezone: null, weekly: null, time_off: null })
+      await call('set_product_publication', { product_id: product.id, published: false })
+      const refusedPublication = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'set_product_publication', args: { organization_id: organizationId, product_id: product.id, published: true } })
+      expect(refusedPublication.status(), await refusedPublication.text()).toBe(200)
+      const publicationResult = (await refusedPublication.json()).result
+      expect(publicationResult.isError).toBe(true)
+      expect(JSON.parse(publicationResult.content[0].text)).toEqual({ status: 409, code: 'HOST_REQUIRED', message: 'Choose a host with a published profile before publishing. Guests see who hosts it.' })
+      const withheld = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
+      expect(withheld.status(), await withheld.text()).toBe(200)
+      expect((await withheld.json()).product.publications.find((publication: { organization_id: string }) => publication.organization_id === organizationId)).toMatchObject({ published: false })
+      profile = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_approved: true })
+      await call('set_product_publication', { product_id: product.id, published: true })
+      const readback = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
+      expect(readback.status()).toBe(200)
+      expect((await readback.json()).product).toMatchObject({ kind: 'experience', booking: { duration_minutes: 60, confirmation_mode: 'review', assigned_member_id: hostMemberId }, locations: [{ location_id: locationId, active: true, published: true }] })
+      await page.reload()
+      await expect(page.getByText(name, {exact:true})).toHaveCount(0)
+      expect((await page.goto(`${baseURL}/experiences`))?.status()).toBe(200)
+      await expect(page.getByText(name,{exact:true}).first()).toBeVisible()
+      expect((await page.goto(`${baseURL}${new URL(product.public_url).pathname}`))?.status()).toBe(200)
+      await expect(page.getByRole('heading',{name,exact:true}).first()).toBeVisible()
+      await expect(page.locator('section[aria-label="Meet your host"]').getByText('Omakase host', { exact: true })).toBeVisible()
+      await expect(page.locator('section[aria-label="Meet your host"]').getByText(profile.profile.public_bio!, { exact: true })).toBeVisible()
+      const sessions = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, {headers: tenantTestExtraHeaders()})
+      expect(sessions.status(),await sessions.text()).toBe(200)
+      expect((await sessions.json()).sessions).toEqual([expect.objectContaining({starts_at:start.toISOString(),remaining:6,is_full:false})])
+      let additionalSeating: { date: string; time: string } | undefined
+      for (let offset = 1; offset <= 7 && !additionalSeating; offset++) {
+        const date = addLocalDays(seating!.date, offset)
+        const time = generateReservationTimes(location.opening_hours, date, { lastSeatingBufferMinutes: 60, specialHours: location.special_hours })[0]
+        if (time) additionalSeating = { date, time }
+      }
+      expect(additionalSeating, 'the existing location has another open one-hour time on a later date').toBeDefined()
+      const additionalStart = localDateTimeToInstant(additionalSeating!.date, additionalSeating!.time, location.timezone)
+      const additionalEnd = new Date(additionalStart.getTime() + 60 * 60_000)
+      const additionalEndLocal = localNow(location.timezone, additionalEnd)
+      await loginAs(page.request, baseURL!)
+      await page.setExtraHTTPHeaders({})
+      const bookingPath = `/dashboard/ember-slice-demo/products/${product.id}/booking`
+      const calendarPath = '/dashboard/ember-slice-demo/calendar'
+      const sessionEndpoint = `/api/editor/organizations/${organizationId}/products/${product.id}/sessions`
+      expect((await page.goto(`${calendarPath}/sessions/new?product_id=${product.id}&locationId=${locationId}&month=${additionalSeating!.date.slice(0, 7)}&date=${additionalSeating!.date}`))?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const availability = page.locator('#dashboard-panel-product-session')
+      await expect(availability.getByLabel('Date', { exact: true })).toHaveValue(additionalSeating!.date)
+      await expect(availability.getByLabel('Starts', { exact: true })).toHaveValue('')
+      await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('6')
+      await availability.getByLabel('Starts', { exact: true }).fill(additionalSeating!.time)
+      await expect(availability.getByLabel('Ends', { exact: true })).toHaveValue(`${additionalEndLocal.date}T${additionalEndLocal.time}`)
+      await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('4')
+      await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+      let creations = 0
+      const countCreation = (request: import('@playwright/test').Request) => {
+        if (new URL(request.url()).pathname === sessionEndpoint && request.method() === 'POST') creations++
+      }
+      page.on('request', countCreation)
+      const sessionFailure = 'The newly saved availability could not be loaded for this verification.'
+      const interceptSavedSession = (url: URL) => url.pathname.startsWith(`${sessionEndpoint}/`)
+      await page.route(interceptSavedSession, async route => {
+        if (route.request().method() !== 'GET') return route.continue()
+        // The failed read completes after the saved editor is visible, so
+        // a save handler left on a discarded /new instance cannot pass.
+        await expect(availability.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
+        await route.fulfill({ status: 503, json: { error: sessionFailure } })
+      })
+      const added = page.waitForResponse(response => new URL(response.url()).pathname === sessionEndpoint && response.request().method() === 'POST')
+      const refusedSession = page.waitForResponse(response => interceptSavedSession(new URL(response.url())) && response.request().method() === 'GET')
+      await availability.getByRole('button', { name: 'Add to calendar', exact: true }).click()
+      const addedResponse = await added
+      expect(addedResponse.status(), await addedResponse.text()).toBe(201)
+      const addedSessions = (await addedResponse.json() as { sessions: SessionAvailability[] }).sessions
+      expect(addedSessions).toHaveLength(1)
+      const addedId = addedSessions[0]!.id
+      expect((await refusedSession).status()).toBe(503)
+      await expect(page).toHaveURL(url => url.pathname === `${calendarPath}/sessions/${addedId}`)
+      await expect(availability.getByRole('heading', { name: 'Edit availability', exact: true })).toBeVisible()
+      await expect(availability.getByText(sessionFailure, { exact: true })).toBeVisible()
+      await expect(availability.getByLabel('Starts', { exact: true })).toHaveValue(`${additionalSeating!.date}T${additionalSeating!.time}`)
+      await expect(availability.getByLabel('Ends', { exact: true })).toHaveValue(`${additionalEndLocal.date}T${additionalEndLocal.time}`)
+      await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('4')
+      const beforeRetry = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+        product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
+      })
+      expect(beforeRetry.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 4, remaining: 4 })])
+      await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
+      await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+      await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('9')
+      await page.unroute(interceptSavedSession)
+      const recoveredSession = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'GET')
+      await availability.getByRole('button', { name: 'Use saved values', exact: true }).click()
+      expect((await recoveredSession).status()).toBe(200)
+      await expect(availability.getByText(sessionFailure, { exact: true })).not.toBeVisible()
+      await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('4')
+      const calendarFailure = 'The newly saved calendar could not be read for this verification.'
+      const interceptCalendar = (url: URL) => url.pathname === sessionEndpoint
+      await page.route(interceptCalendar, async route => {
+        if (route.request().method() !== 'GET') return route.continue()
+        await route.fulfill({ status: 503, json: { error: calendarFailure } })
+      })
+      await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('5')
+      await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+      const updated = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'PATCH')
+      const refusedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
+      await availability.getByRole('button', { name: 'Save', exact: true }).click()
+      const updatedResponse = await updated
+      expect(updatedResponse.status(), await updatedResponse.text()).toBe(200)
+      expect((await refusedCalendar).status()).toBe(503)
+      await expect(availability.getByText(calendarFailure, { exact: true })).toBeVisible()
+      await expect(availability.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('5')
+      const afterUpdate = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+        product_id: product.id, from: additionalStart.toISOString(), to: additionalEnd.toISOString(),
+      })
+      expect(afterUpdate.sessions).toEqual([expect.objectContaining({ id: addedId, capacity: 5, remaining: 5 })])
+      await page.unroute(interceptCalendar)
+      await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('6')
+      await availability.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+      const retried = page.waitForResponse(response => new URL(response.url()).pathname === `${sessionEndpoint}/${addedId}` && response.request().method() === 'PATCH')
+      const savedCalendar = page.waitForResponse(response => interceptCalendar(new URL(response.url())) && response.request().method() === 'GET')
+      await availability.getByRole('button', { name: 'Save', exact: true }).click()
+      const retriedResponse = await retried
+      expect(retriedResponse.status(), await retriedResponse.text()).toBe(200)
+      expect((await savedCalendar).status()).toBe(200)
+      page.off('request', countCreation)
+      expect(creations).toBe(1)
+      await expect(page).toHaveURL(url => url.pathname === calendarPath && url.searchParams.get('date') === additionalSeating!.date && url.searchParams.get('locationId') === locationId)
+      expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual({ product_id: product.id, locationId, month: additionalSeating!.date.slice(0, 7), date: additionalSeating!.date })
+      await expect(page.locator(`#dashboard-panel-org-calendar [data-session-id="${addedId}"]:visible`)).toBeVisible()
+      const persisted = await call<{ sessions: SessionAvailability[] }>('list_product_booking_sessions', {
+        product_id: product.id,
+        from: localDateTimeToInstant(additionalSeating!.date, '00:00', location.timezone).toISOString(),
+        to: localDateTimeToInstant(addLocalDays(additionalSeating!.date, 1), '00:00', location.timezone).toISOString(),
+      })
+      expect(persisted.sessions).toEqual([expect.objectContaining({
+        id: addedId, organization_id: organizationId, product_id: product.id, location_id: locationId, timezone: location.timezone,
+        starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), capacity: 6, status: 'scheduled', claimed: 0, remaining: 6, is_full: false,
+      })])
+      const publicReadback = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, { headers: tenantTestExtraHeaders(), params: { location_id: locationId } })
+      expect(publicReadback.status(), await publicReadback.text()).toBe(200)
+      const publicSessions = (await publicReadback.json() as { sessions: Array<Pick<SessionAvailability, 'id' | 'starts_at' | 'ends_at' | 'location_id' | 'timezone' | 'remaining' | 'is_full'>> }).sessions
+      expect(publicSessions).toHaveLength(2)
+      expect(publicSessions.find(session => session.id === addedId)).toMatchObject({
+        id: addedId, location_id: locationId, timezone: location.timezone, starts_at: additionalStart.toISOString(), ends_at: additionalEnd.toISOString(), remaining: 6, is_full: false,
+      })
+      // Online is a public booking scope, not a physical Product location.
+      // Removing it from its own focused editor returns to the same Product
+      // and rereads saved state without following an invalid online address.
+      await call('set_product_publication', { product_id: product.id, published: false })
+      const authoredHours = { timezone: location.timezone, weekly: [{ weekday: new Date(`${seating!.date}T12:00:00Z`).getUTCDay(), start: '09:00', end: '10:00' }], time_off: [] }
+      const hours = await call<{ scheduling: Pick<NonNullable<Scheduling>, 'member_id' | 'updated_at' | 'timezone' | 'weekly' | 'time_off'> }>('set_member_scheduling', { member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, ...authoredHours })
+      const hoursRead = await request.get(`${baseURL}/api/organizations/${organizationId}/members/${hostMemberId}/scheduling`)
+      expect(hoursRead.status(), await hoursRead.text()).toBe(200)
+      const hoursNative = (await hoursRead.json()).scheduling
+      expect(hoursNative).toMatchObject(hours.scheduling)
+      expect(hoursNative).toMatchObject({ ...authoredHours, public_name: 'Omakase host', public_approved: 1 })
+      expect(hours.scheduling).toEqual({ member_id: hostMemberId, updated_at: hoursNative.updated_at, ...authoredHours })
+      const staleProfile = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_member_public_profile', args: { organization_id: organizationId, member_id: hostMemberId, expected_updated_at: profile.profile.updated_at, public_bio: 'An edit based on the old shared revision' } })
+      expect(staleProfile.status(), await staleProfile.text()).toBe(200)
+      const staleProfileResult = (await staleProfile.json()).result
+      expect(staleProfileResult.isError).toBe(true)
+      expect(JSON.parse(staleProfileResult.content[0].text)).toEqual({ status: 409, message: 'Member settings changed; reload before saving' })
+      const unchangedHours = await request.get(memberEndpoint)
+      expect(unchangedHours.status(), await unchangedHours.text()).toBe(200)
+      expect((await unchangedHours.json()).scheduling).toEqual(hoursNative)
+      const profileAfterHours = await call<{ profile: PublicProfile }>('get_member_public_profile', { member_id: hostMemberId })
+      expect(profileAfterHours.profile).toEqual({ ...profile.profile, updated_at: hoursNative.updated_at })
+      const editedAfterHours = await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: profileAfterHours.profile.updated_at, public_approved: false })
+      const retainedHours = await request.get(memberEndpoint)
+      expect(retainedHours.status(), await retainedHours.text()).toBe(200)
+      expect((await retainedHours.json()).scheduling).toEqual({ ...hoursNative, public_approved: 0, updated_at: editedAfterHours.profile.updated_at })
+      await call<{ profile: PublicProfile }>('update_member_public_profile', { member_id: hostMemberId, expected_updated_at: editedAfterHours.profile.updated_at, public_approved: true })
+      await call('set_product_booking_config', { product_id: product.id, held_online: true, scheduling_mode: 'provider' })
+      await page.goto(`${bookingPath}/location?location_id=online`)
+      const format = page.locator('#dashboard-panel-booking-location')
+      await expect(format.getByRole('switch', { name: 'Held online', exact: true })).toHaveAttribute('aria-checked', 'true')
+      await format.getByRole('switch', { name: 'Held online', exact: true }).click()
+      await format.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(page).toHaveURL(`${bookingPath}/duration`)
+      const offline = await call<{ product: Product }>('get_product', { product_id: product.id })
+      expect(offline.product.booking).toMatchObject({ held_online: false, scheduling_mode: 'provider', assigned_member_id: hostMemberId })
+      expect(offline.product.locations).toEqual([{ location_id: locationId, active: true, published: true }])
+      await call('set_product_booking_config', { product_id: product.id, held_online: true })
+      await page.goto(`${bookingPath}/enabled?location_id=online`)
+      const calendar = page.locator('#dashboard-panel-booking-enabled')
+      await calendar.getByRole('switch', { name: 'Use a booking calendar', exact: true }).click()
+      await calendar.getByRole('button', { name: 'Save', exact: true }).click()
+      await expect(page).toHaveURL(`${bookingPath}/enabled`)
+      expect((await call<{ product: Product }>('get_product', { product_id: product.id })).product.booking).toBeNull()
     })
     test('MCP teams and invitation delivery use the same Better Auth records as the dashboard', async ({request,baseURL}) => {
       await loginAs(request,baseURL!)
