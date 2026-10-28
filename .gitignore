@@ -90,3 +90,6 @@ tsconfig.spot.json
 !/.agents/skills/hyperframes-cli/
 !/.agents/skills/product-launch-video/
 !/.agents/skills/media-use/
+
+# Per-customer onboarding intake files (yarn client:onboard --from) — customer data, never commit
+/client-intake/
