@@ -200,8 +200,10 @@ const resolving = ref(new Set<string>())
 const itemsStatus = computed<IntegrationLeafItemsStatus | null>(() => {
   // A sync read that failed is the panel's error; a count the page cannot know is not shown.
   if (!connected.value || listingsPending.value || changesError.value) return null
-  const firstFailed = failed.value[0]
-  if (firstFailed) return { text: `Needs attention: ${firstFailed.error!.message}`, tone: 'warning', retryable: retryBatch.value.sync.length + retryBatch.value.stop.length > 0 }
+  // The failure shown is one Retry can clear when there is one; otherwise the first, without Retry.
+  const retryable = [...retryBatch.value.sync, ...retryBatch.value.stop]
+  const firstFailed = retryable[0] ?? failed.value[0]
+  if (firstFailed) return { text: `Needs attention: ${firstFailed.error!.message}`, tone: 'warning', retryable: retryable.length > 0 }
   const running = jobs.value.filter(job => job.status === 'queued' || job.status === 'running').length
   if (running) return { text: `Updating ${running} ${running === 1 ? 'listing' : 'listings'}…`, tone: 'warning' }
   return { text: `${listings.value.filter(syncing).length} of ${listings.value.length} syncing` }
@@ -354,7 +356,8 @@ function follow() {
       return
     }
     if (pending.value) return follow()
-    await Promise.all([refreshListings(), integrations.refresh()])
+    // The first listing to sync activates the channel, which the account line reads from status.
+    await Promise.all([refreshStatus(), refreshListings(), integrations.refresh()])
     // What a listing now syncing was given is spent; a listing still waiting keeps what the host typed.
     entered.value = Object.fromEntries(Object.entries(entered.value).filter(([id]) => !listings.value.some(listing => listing.id === id && syncing(listing))))
   }, 3000)
