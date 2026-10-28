@@ -232,7 +232,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     const bookingPath = `/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`
     const bookingPanel = page.locator('#dashboard-panel-product-booking')
     await expect(bookingPanel.getByRole('link', { name: 'Client limit One client per consultation', exact: true })).toBeVisible()
-    await expect(bookingPanel.getByRole('link', { name: `Attorney or legal team ${self.name}`, exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true })).toBeVisible()
     await expect(bookingPanel.getByRole('link', { name: 'Meeting format Online consultations available', exact: true })).toBeVisible()
     // Online, the times are the provider's own hours; the offering has no weekly list of its own.
     await expect(bookingPanel.getByRole('link', { name: "Bookable times The attorney's working hours", exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
