@@ -1,6 +1,6 @@
 <template>
   <section :class="['w-full', bgClass, paddings[padding]]">
-    <div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+    <div class="tenant-container">
       <slot />
     </div>
   </section>

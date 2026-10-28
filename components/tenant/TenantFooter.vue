@@ -1,7 +1,7 @@
 <template>
   <footer class="border-t border-default bg-elevated text-default" aria-labelledby="tenant-footer-heading">
     <h2 id="tenant-footer-heading" class="sr-only">{{ t('site.footer.label') }}</h2>
-    <div class="mx-auto max-w-7xl px-4 pb-8 pt-12 sm:px-6 sm:pt-16 lg:px-8 lg:pt-20">
+    <div class="tenant-container pb-8 pt-12 sm:pt-16 lg:pt-20">
       <div class="grid gap-10 border-b border-default pb-10 sm:pb-14 lg:grid-cols-[1fr_1.4fr] lg:gap-16">
         <div class="space-y-6">
           <NuxtLink :to="localePath('/')" class="inline-flex no-underline" :aria-label="`${brandName} home`">

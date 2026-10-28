@@ -51,7 +51,7 @@
   </section>
 
   <!-- Published Articles / Blog Grid -->
-  <div v-else-if="isArticles && posts.length" class="mx-auto my-8 max-w-7xl px-6 lg:px-8" data-parity-section="articles">
+  <div v-else-if="isArticles && posts.length" class="tenant-container my-8" data-parity-section="articles">
     <TenantSectionHeading v-if="heading" :title="heading" centered />
     <div class="mx-auto my-16 grid max-w-2xl gap-6 sm:mt-20 md:grid-cols-2 lg:mx-0 lg:max-w-none lg:grid-cols-3">
       <ArticleCard v-for="post in posts" :key="post.path" :article="post" />

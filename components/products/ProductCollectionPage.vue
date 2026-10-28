@@ -7,7 +7,7 @@
         active="menu"
       />
 
-      <header class="mx-auto max-w-7xl px-4 pb-10 pt-12 text-center sm:px-6 lg:px-8">
+      <header class="tenant-container pb-10 pt-12 text-center">
         <NuxtLink
           v-if="currentLocation"
           :to="localePath(`/locations/${encodeURIComponent(currentLocation.slug)}`)"
@@ -42,7 +42,7 @@
         :location-slug="currentLocation.slug"
         :active="subNavTab"
       />
-      <header v-if="title" class="mx-auto max-w-7xl px-4 pb-10 pt-16 sm:px-6 lg:px-8">
+      <header v-if="title" class="tenant-container pb-10 pt-16">
         <div class="max-w-2xl">
           <p v-if="collectionLabel" class="tenant-kicker mb-4">{{ collectionLabel }}</p>
           <h1 class="tenant-display-md text-default">{{ title }}</h1>
@@ -171,7 +171,7 @@
       </div>
     </div>
 
-    <div v-else class="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8">
+    <div v-else class="tenant-container pb-24">
       <section v-for="group in groups" :key="group.id" class="mb-20">
         <div class="mb-8 border-b border-default pb-6">
           <img v-if="mediaStillUrl(group.image)" :src="mediaStillUrl(group.image)!" :alt="group.image!.alt_text || group.category" class="mb-8 aspect-[16/9] w-full rounded-lg object-cover" loading="lazy" decoding="async">

@@ -1,6 +1,6 @@
 <template>
   <div ref="tabsRef" class="sticky top-0 z-30 border-b border-default bg-default">
-    <div class="mx-auto flex h-11 max-w-7xl items-center justify-center-safe gap-6 overflow-x-auto px-4 sm:px-6 lg:px-8 scrollbar-none">
+    <div class="tenant-container flex h-11 items-center justify-center-safe gap-6 overflow-x-auto scrollbar-none">
       <button
         type="button"
         v-for="tab in tabs"
