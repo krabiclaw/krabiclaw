@@ -71,7 +71,9 @@ test.describe('stateless MCP server', () => {
     } finally { await release() }
   })
 
-  test('owner can use site content and settings tools', async ({ request, baseURL }) => {
+  test('owner can use site content and settings tools', async ({ request, baseURL }, testInfo) => {
+    const release = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+    try {
     await loginAs(request, baseURL!)
     const organizationId = MCP_ORGANIZATION_ID
 
@@ -251,7 +253,7 @@ test.describe('stateless MCP server', () => {
     expect(readBack.palette.light.action).toBe('#0F4C5C')
     expect(readBack.palette_source).toBe('custom')
     expect(paletteReceipt.saved_fields).toEqual({ palette: readBack.palette })
-
+    } finally { await release() }
   })
 
   test('owner can use submission inquiry tools', async ({ request, baseURL }, testInfo) => {
