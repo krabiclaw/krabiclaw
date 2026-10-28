@@ -43,7 +43,7 @@ useSeoMeta({ title: 'How you get paid | KrabiClaw', robots: 'noindex, nofollow' 
 const dashboardApi = useDashboardApi()
 const route = useRoute()
 const router = useRouter()
-const { connect, connectError, connectPending, refreshConnect, account, payout, setAccount } = await useConnectAccount()
+const { connect, connectError, connectPending, refreshConnect, account, payout, setAccount } = useConnectAccount()
 const country = ref<string>()
 const needsCountry = computed(() => !account.value?.stripeAccountId)
 const countries = computed(() => {

@@ -567,10 +567,11 @@ test.describe('stateless MCP server', () => {
     }
   })
 
-  test('owner can use location, reviews, and QA lifecycle tools', async ({ request, baseURL }) => {
+  test('owner can use location, reviews, and QA lifecycle tools', async ({ request, baseURL }, testInfo) => {
     await loginAs(request, baseURL!)
     const organizationId = MCP_ORGANIZATION_ID
-
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
     const locationId = 'loc-demo'
 
     const locationRead = await mcpRequest(request, baseURL!, {
@@ -664,6 +665,7 @@ test.describe('stateless MCP server', () => {
     })
     expect(qaList.status()).toBe(200)
     expect(mcpData<{ items: unknown[] }>(await qaList.json()).items).toEqual(expect.any(Array))
+    } finally { await release() }
   })
 
   test('authored Q&A shares scoped CMS and MCP writers while reviews remain read-only', async ({ page, browser, request, baseURL }, testInfo) => {

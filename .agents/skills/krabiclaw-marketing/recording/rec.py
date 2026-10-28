@@ -172,23 +172,33 @@ def start(name):
     title = osa(f'tell application "Google Chrome" to return name of window id {window_id}')
     if not title:
         raise RuntimeError(f"Recording window {window_id} has no title.")
+    bounds = tuple(int(value.strip()) for value in osa(f'tell application "Google Chrome" to return bounds of window id {window_id}').split(','))
+    if bounds != (LEFT, TOP, LEFT + WIDTH, TOP + HEIGHT):
+        raise RuntimeError("The selected recording window moved or changed size. Restore its recording frame before starting.")
     binary = f"{HERE}/winrec"
     source = f"{HERE}/winrec.swift"
     if not os.path.exists(binary) or os.path.getmtime(source) > os.path.getmtime(binary):
         subprocess.run(["swiftc", "-O", source, "-o", binary], check=True)
     log = open(f"{S}/clips/{name}.log", "w")
-    _recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov", title], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    _recorder = subprocess.Popen([binary, f"{S}/clips/{name}.mov", title, *map(str, (LEFT, TOP, WIDTH, HEIGHT))], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     with open(f"{S}/rec.pid", "w") as f:
         f.write(str(_recorder.pid))  # stop() may run in a later process
-    end = time.time() + 6
-    while time.time() < end:
-        out = open(f"{S}/clips/{name}.log").read()
-        if "recording" in out.splitlines():
-            time.sleep(0.5); return
-        if _recorder.poll() is not None:
-            raise RuntimeError(out)
-        time.sleep(0.2)
-    raise RuntimeError("winrec did not start")
+    try:
+        end = time.time() + 6
+        while time.time() < end:
+            out = open(f"{S}/clips/{name}.log").read()
+            if "recording" in out.splitlines():
+                time.sleep(0.5); return
+            if _recorder.poll() is not None:
+                raise RuntimeError(out)
+            time.sleep(0.2)
+        raise RuntimeError("winrec did not start")
+    except BaseException as failure:
+        try:
+            stop()
+        except Exception as shutdown_failure:
+            raise RuntimeError(f"{failure}; recorder shutdown reported: {shutdown_failure}") from failure
+        raise
 
 
 def stop():
