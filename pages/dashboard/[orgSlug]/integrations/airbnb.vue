@@ -25,9 +25,11 @@
       :items-loading="listingsPending"
       :items-error="listingsError ? getErrorMessage(listingsError, 'Could not load your Airbnb listings.') : null"
       items-empty="Airbnb returned no listings for this account. Check that you connected your hosting account."
+      :items-status="itemsStatus"
       :applying="applying || pending"
       @choose="choose"
       @act="addDetails"
+      @retry-failed="retryFailed"
       @disconnect="disconnect"
     >
       <div v-if="!connection" class="space-y-4">
@@ -37,15 +39,12 @@
         <UButton icon="i-simple-icons-airbnb" size="xl" block :loading="starting" @click="startConnection">Connect Airbnb</UButton>
         <p class="text-center text-xs text-dimmed">You can also connect and sync directly within the KrabiClaw app on iOS.</p>
       </div>
-      <template #connected>
-        <p v-if="pending" class="text-sm text-muted">{{ done }} of {{ jobs.length }} done. This keeps going if you close the page.</p>
-      </template>
     </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
-import IntegrationLeaf, { type IntegrationLeafConnection, type IntegrationLeafItem } from '~/components/dashboard/IntegrationLeaf.vue'
+import IntegrationLeaf, { type IntegrationLeafConnection, type IntegrationLeafItem, type IntegrationLeafItemsStatus } from '~/components/dashboard/IntegrationLeaf.vue'
 import AirbnbListingDetailsDialog, { type AirbnbListingDetails } from '~/components/dashboard/AirbnbListingDetailsDialog.vue'
 import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { integrationDefinition, itemsApplyLabel } from '~/shared/integrations'
@@ -133,7 +132,8 @@ const { data: changes, error: changesError, refresh: refreshChanges } = await us
 const jobs = computed(() => connected.value ? changes.value?.listings ?? [] : [])
 const jobOf = (listingId: string) => jobs.value.find(job => job.listing_id === listingId)
 const pending = computed(() => jobs.value.some(job => job.status === 'queued' || job.status === 'running'))
-const done = computed(() => jobs.value.filter(job => job.status === 'done').length)
+/** Changes that failed and are not yet asked for again; Retry re-queues exactly these. */
+const failed = computed(() => jobs.value.filter(job => job.status === 'failed'))
 
 const connection = computed<IntegrationLeafConnection | null>(() => {
   const s = status.value
@@ -142,7 +142,8 @@ const connection = computed<IntegrationLeafConnection | null>(() => {
     name: 'Airbnb host account',
     connectedAt: s.connected_at,
     through: null,
-    status: s.status === 'connected' ? 'active' : s.status === 'needs_review' ? 'error' : null,
+    // Connected but not active yet on Channex's side is the host's wait, said on the account line.
+    status: s.status === 'connected' ? (s.channel_active ? 'active' : 'disabled') : s.status === 'needs_review' ? 'error' : null,
     lastError: s.status === 'needs_review' ? 'The Airbnb connection needs review. Contact support to finish it.' : null,
     note: s.status === 'authorizing' ? 'Finishing Airbnb sign-in' : s.status === 'disconnecting' ? 'Disconnecting…' : null,
   }
@@ -183,6 +184,16 @@ const rows = computed<IntegrationLeafItem[]>(() => listings.value.map((listing) 
 
 /** Listings whose details are still being read or asked for: nothing applies until each is settled. */
 const resolving = ref(new Set<string>())
+/** Where the listings stand, on the checklist's heading: a failed change first, then changes in progress, else how many sync. */
+const itemsStatus = computed<IntegrationLeafItemsStatus | null>(() => {
+  if (!connected.value || listingsPending.value) return null
+  const firstFailed = failed.value[0]
+  if (firstFailed) return { text: `Needs attention: ${firstFailed.error!.message}`, tone: 'warning', retryable: true }
+  const running = jobs.value.filter(job => job.status === 'queued' || job.status === 'running').length
+  if (running) return { text: `Updating ${running} ${running === 1 ? 'listing' : 'listings'}…`, tone: 'warning' }
+  return { text: `${listings.value.filter(syncing).length} of ${listings.value.length} syncing` }
+})
+
 /** Checked listings that are not syncing yet, or whose sync setup stopped part-way, and have every detail the import asks for. */
 const toSync = computed(() => listings.value.filter(listing => checked.value.includes(listing.id) && (!syncing(listing) || interrupted(listing)) && !needsDetails(listing)))
 /** Syncing listings the host unchecked. */
@@ -263,6 +274,29 @@ async function apply() {
     follow()
   } catch (cause) {
     failure.value = getErrorMessage(cause, 'The change could not be started.')
+  } finally {
+    applying.value = false
+  }
+}
+
+/** Asks again for every change that failed, as it was asked: the same listings to sync, the same homes to stop. */
+async function retryFailed() {
+  if (!failed.value.length) return
+  applying.value = true
+  failure.value = ''
+  try {
+    await dashboardApi(`${api}/sync`, {
+      method: 'POST',
+      body: {
+        sync: failed.value.filter(job => job.action === 'sync').map(job => ({ listing_id: job.listing_id, ...(entered.value[job.listing_id] ? { details: entered.value[job.listing_id] } : {}) })),
+        stop: failed.value.filter(job => job.action === 'stop' && job.product_id).map(job => job.product_id),
+      },
+      validate: isChanges,
+    })
+    await refreshChanges()
+    follow()
+  } catch (cause) {
+    failure.value = getErrorMessage(cause, 'The change could not be started again.')
   } finally {
     applying.value = false
   }
