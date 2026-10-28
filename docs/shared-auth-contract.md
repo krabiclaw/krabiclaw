@@ -1,6 +1,6 @@
 # Native app contract: KrabiClaw identity and lodging for the KrabiClaw iOS app
 
-The KrabiClaw iOS app (bundle id `com.krabiclaw.app`, source in the bookyboo repository) talks to KrabiClaw and nothing else. KrabiClaw owns identity, organizations, membership and every piece of lodging data: homes, stays, nights, Channex/Airbnb, guest and team messaging, scheduled messages, device tokens and home assignments. The separate lodging Worker that held lodging data until #1381 is retired; KrabiClaw makes no call to it and exposes no route for it.
+The KrabiClaw iOS app (bundle id `com.krabiclaw.app`, source in the krabiclaw/krabiclaw-ios-app repository) talks to KrabiClaw and nothing else. KrabiClaw owns identity, organizations, membership and every piece of lodging data: homes, stays, nights, Channex/Airbnb, guest and team messaging, scheduled messages, device tokens and home assignments. The separate lodging Worker that held lodging data until #1381 is retired; KrabiClaw makes no call to it and exposes no route for it.
 
 Decisions D3–D9 were recorded by the owner on 2026-10-14 (krabiclaw#1370); D1, D2 and D10 governed the lodging Worker and ended with it.
 
