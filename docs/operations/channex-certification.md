@@ -43,23 +43,28 @@ The write path Channex will ask to see:
 | Mapping | `product_channel_mappings` (property, room type, rate plan per home) |
 | Task IDs | `channel_sync_log.task_id` on every ARI call |
 | Bookings | webhook `POST /api/integrations/channex/webhook` → `applyBookingRevision` (`booking-revisions.ts`) → `GET /booking_revisions/:id` is the booking, landed as a stay, then `POST /booking_revisions/:id/ack`; `channex-revision-feed` reads unacknowledged revisions every 10 minutes. Nothing reads `GET /bookings/:id`: Channex counts that as `booking_received_via_booking_find` and refuses it |
-| Full sync again | In the iOS app's Airbnb listing chooser, **Full sync** beside the selected syncing home → `POST /api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar` (empty request). The existing outbox resends the home's actual 500 future nights in one restrictions and one availability call, preserving its channel mapping and Messages installation |
+| Full sync again | In the iOS app's Airbnb listing chooser, **Full sync** beside the selected syncing home → `POST /api/organizations/:organizationId/integrations/airbnb/imports/:productId/calendar` (empty request). The existing outbox resends the home's actual 500 future nights in exactly two Channex HTTP requests: one `POST /restrictions` and one `POST /availability`, preserving its channel mapping and Messages installation |
 
 ## Before the run
 
 1. On Channex staging, connect two Airbnb test listings to one staging
    organization with **Connect Airbnb** in the dashboard. The import creates
    each home's property, room type and rate plan and sends its full sync.
-   Before each full sync, KrabiClaw reads the property's minimum-stay mode.
+   During import and reactivation, KrabiClaw reads the property's minimum-stay mode.
    An existing property using only arrival or through stay is changed to
    `both`, verified, and its confirmed calendar forgotten before delivery:
    Channex discards the unused minimum under a single-type mode, even when
-   KrabiClaw sent it. Missing or unknown modes fail the sync visibly.
+   KrabiClaw sent it. Missing or unknown modes fail setup visibly. The import
+   verifies both minimum-stay fields against Channex's inventory before it
+   completes. Property setup and repair are separate from an explicit full
+   sync of a home that has completed setup and is syncing.
 
    Redo test 1 for an existing syncing home in the iOS app: open the Airbnb
    listing chooser and tap **Full sync** beside that home's name. The action
    requires an owner or admin with channel sync
-   access. Wait for its result; if delivery is pending, read the reason and
+   access. It sends only the two calendar requests above; it does not read or
+   change property settings. Verify the property's minimum-stay mode is still
+   `Both` before the run. Wait for its result; if delivery is pending, read the reason and
    let the existing outbox retry rather than clicking again. Do this before
    tests 2 to 10: the full sync records what Channex holds for every night,
    so each later save sends only the field the test changes. The home's
@@ -142,7 +147,7 @@ the booking scenarios; preserve existing stays and rules.
 | --- | --- | --- |
 | Create a booking | In iOS, **Add stay** for one night, then show it on the home's calendar | One availability update for that night, from 1 to 0; no restrictions update or unrelated dates |
 | Move the booking | In iOS, edit that same stay to one week later, keeping it one night; show its new dates | One availability batch reopening the old night to 1 and closing the new night to 0; no restrictions update or unrelated dates |
-| Full sync | In the iOS Airbnb listing chooser, tap **Full sync** beside that same home | Exactly one restrictions task and one availability task covering the same 500 future nights, with actual varied calendar values and both minimum-stay fields in every restriction object |
+| Full sync | In the iOS Airbnb listing chooser, tap **Full sync** beside that same home | Exactly two Channex HTTP requests, producing one restrictions task and one availability task covering the same 500 future nights, with actual varied calendar values and both minimum-stay fields in every restriction object |
 
 Open the requests and returned task IDs, not just their success labels. Equal
 consecutive nights may be compressed into date ranges; expand the ranges when

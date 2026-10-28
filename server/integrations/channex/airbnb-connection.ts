@@ -203,9 +203,8 @@ export class AirbnbConnection {
   }
 
   /** Writes fields while this call still holds the lock it took. */
-  private async save(row: ConnectionRow, values: Partial<ConnectionRow>, additionalHealthCheck?: () => Promise<void>): Promise<void> {
+  private async save(row: ConnectionRow, values: Partial<ConnectionRow>): Promise<void> {
     await this.operationCheck?.()
-    await additionalHealthCheck?.()
     const entries = Object.entries(values)
     const result = await execute(this.db, `
       UPDATE channex_connections SET ${entries.map(([key]) => `${key} = ?`).join(', ')}, updated_at = ?
@@ -215,7 +214,6 @@ export class AirbnbConnection {
     Object.assign(row, values)
     try {
       await this.operationCheck?.()
-      await additionalHealthCheck?.()
     } catch (error) {
       // A new intent has not reached its provider call; locked() drains and clears it with the operation token.
       if (values.pending_step !== undefined && values.pending_step !== null) row.pending_step = null
@@ -1057,38 +1055,43 @@ export class AirbnbConnection {
       const mapping = await queryFirst<MappingRow>(this.db, "SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [this.organizationId, productId])
       if (!mapping || mapping.channel_id !== row.channel_id) fail(404, 'IMPORT_NOT_FOUND', 'Listing import not found')
       if (mapping.import_stage !== 'complete' || mapping.enabled !== 1) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'Finish connecting this home before syncing its full calendar.')
+      for (const field of ['property_id', 'room_type_id', 'rate_plan_id'] as const) string(mapping[field], field)
       // The connection lock protects setup; the delivery lease also excludes normal calendar writes' deliveries.
-      const pushed = await withDeliveryLease(this.db, productId, lease => this.syncCalendar(row, mapping, { token: lease.token, check: async () => {
-        await check()
-        await lease.check()
-      } }))
+      const pushed = await withDeliveryLease(this.db, productId, async (lease) => {
+        const delivery = { token: lease.token, check: async () => {
+          await check()
+          await lease.check()
+        } }
+        await forgetConfirmedNights(this.db, productId, delivery)
+        return this.deliverCalendar(mapping, delivery)
+      })
       if (!pushed) fail(409, 'CHANNEL_DELIVERY_BUSY', 'A calendar update for this home is under way. Try the full sync again after it finishes.')
       return { product_id: productId, channel_push: pushed }
     })
   }
 
-  /**
-   * The home's calendar ahead, delivered to its Channex property through the
-   * outbox. Pending while Channex holds part of it (a rate limit or a pause after
-   * a call it did not confirm): the stage is asked again later. A refusal
-   * fails the import for review with Channex's reason.
-   */
-  private async syncCalendar(row: ConnectionRow, mapping: MappingRow, lease?: DeliveryLease): Promise<SuccessfulChannelPush> {
+  /** Configure the property's minimum-stay mode during import or reactivation before delivering its calendar. */
+  private async syncCalendar(row: ConnectionRow, mapping: MappingRow): Promise<SuccessfulChannelPush> {
     const propertyId = string(mapping.property_id, 'property_id')
     const path = `/properties/${encodeURIComponent(propertyId)}`
     const property = await channexGet(this.env, path, 'property')
     const minimum = provided(() => string(object(property.attributes.settings, 'property.settings').min_stay_type, 'property.settings.min_stay_type'))
     if (minimum !== 'both' && minimum !== 'arrival' && minimum !== 'through') fail(502, 'INVALID_PROVIDER_RESPONSE', `Channex returned an unknown minimum-stay type: ${minimum}`)
-    // An explicit recovery resends every value; a single-type property also discarded a field we may have recorded sending.
-    if (lease || minimum !== 'both') await forgetConfirmedNights(this.db, mapping.product_id, lease)
     if (minimum !== 'both') {
-      await this.save(row, { pending_step: 'update_min_stay_type' }, lease?.check)
+      // A single-type property discarded a field we may have recorded sending.
+      await forgetConfirmedNights(this.db, mapping.product_id)
+      await this.save(row, { pending_step: 'update_min_stay_type' })
       const updated = await channexRequest(this.env, path, 'PUT', { property: { settings: { min_stay_type: 'both' } } })
       const settings = provided(() => object(resource(updated.data, 'property').attributes.settings, 'property.settings'))
       if (settings.min_stay_type !== 'both') fail(502, 'PROVIDER_VERIFICATION_FAILED', 'Channex did not enable both minimum-stay restrictions. The calendar was not sent.')
       await this.save(row, { pending_step: null })
     }
-    const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, { property_id: propertyId, room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') }, lease)
+    return this.deliverCalendar(mapping)
+  }
+
+  /** Send the configured home's calendar through the outbox: one restrictions call and one availability call. */
+  private async deliverCalendar(mapping: MappingRow, lease?: DeliveryLease): Promise<SuccessfulChannelPush> {
+    const pushed = await syncStayCalendar(this.db, this.env, this.manager(), mapping.product_id, { property_id: string(mapping.property_id, 'property_id'), room_type_id: string(mapping.room_type_id, 'room_type_id'), rate_plan_id: string(mapping.rate_plan_id, 'rate_plan_id') }, lease)
     if (pushed.state === 'needs_review') fail(502, 'PROVIDER_VERIFICATION_FAILED', `Channex rejected part of the calendar: ${pushed.detail}`)
     return pushed
   }
