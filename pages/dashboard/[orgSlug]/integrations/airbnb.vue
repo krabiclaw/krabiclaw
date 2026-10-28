@@ -325,8 +325,10 @@ async function retryFailed() {
       // Closing the dialog, with or without earlier values held, means the host is not resubmitting.
       if (!await addDetails(listing.id)) return
     }
-    // What is sent is the batch as it stands now, after the dialogs: a listing or home gone meanwhile is left out.
-    const current = retryBatch.value
+    // What is sent is the batch the host saw, as it stands now: a listing or home gone meanwhile is left out,
+    // and a change that failed meanwhile waits for its own Retry, since its details were not asked for.
+    const asked = { sync: new Set(batch.sync.map(job => job.listing_id)), stop: new Set(batch.stop.map(job => job.product_id)) }
+    const current = { sync: retryBatch.value.sync.filter(job => asked.sync.has(job.listing_id)), stop: retryBatch.value.stop.filter(job => asked.stop.has(job.product_id)) }
     if (!current.sync.length && !current.stop.length) return
     await dashboardApi(`${api}/sync`, {
       method: 'POST',
