@@ -1,6 +1,6 @@
 <template>
   <div class="min-h-screen bg-default text-default">
-    <header class="mx-auto flex max-w-7xl flex-col items-center px-4 pt-16 pb-14 text-center sm:px-6 lg:px-8 lg:pt-20 lg:pb-18">
+    <header class="tenant-container flex flex-col items-center pt-16 pb-14 text-center lg:pt-20 lg:pb-18">
       <p class="tenant-kicker mb-6 inline-flex items-center justify-center rounded-full border border-default/10 bg-default/3 px-5 py-2 text-center">
         {{ resCopy.reservationPageKicker }}
       </p>
@@ -65,7 +65,7 @@
     </section>
 
     <section v-if="activeReservationPolicySummary" class="bg-muted">
-        <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
+        <div class="tenant-container py-16 lg:py-20">
           <div class="mb-10 max-w-xl">
             <p class="tenant-kicker mb-4">{{ resCopy.goodToKnowKicker }}</p>
             <h2 class="tenant-display-sm text-default">{{ activeReservationPolicySummary.heading }}</h2>

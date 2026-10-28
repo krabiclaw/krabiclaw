@@ -1,6 +1,6 @@
 <template>
   <div class="min-h-screen bg-default text-default">
-    <header class="mx-auto max-w-7xl px-4 pt-16 pb-10 text-center sm:px-6 lg:px-8">
+    <header class="tenant-container pt-16 pb-10 text-center">
       <h1 class="tenant-display-md text-default"><em class="tenant-italic">{{ copy('title') }}</em></h1>
     </header>
 

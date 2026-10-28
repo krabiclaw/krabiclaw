@@ -200,9 +200,9 @@ Saya and Blawby are both included on every plan. Documentation and the help form
 exist; Community/Priority support wording does not establish a service promise.
 These discrepancies must be resolved before publishing comparison claims.
 
-A [read-only Stripe catalog snapshot](docs/product/stripe-catalog-verification.json)
-records the verified provider catalog and discrepancies at its stated timestamp.
-It is audit evidence, not a replacement catalog. Paid bullets and prices remain
+A read-only Stripe catalog snapshot, listed in
+[#1627](https://github.com/krabiclaw/krabiclaw/issues/1627), recorded the verified
+provider catalog and discrepancies at its stated timestamp. Paid bullets and prices remain
 provider-owned; this foundation does not edit pricing or synchronize marketing.
 
 ## Implementation context

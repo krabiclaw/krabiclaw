@@ -16,7 +16,7 @@
       />
 
       <!-- Compact Page header -->
-      <header class="mx-auto max-w-7xl px-4 pt-12 pb-10 sm:px-6 lg:px-8 text-center">
+      <header class="tenant-container pt-12 pb-10 text-center">
         <NuxtLink :to="localePath(`/locations/${slug}`)" class="tenant-kicker mb-8 inline-block text-muted no-underline hover:text-default">
           ← {{ t('site.reviews_page.back_to', { title: location?.title }) }}
         </NuxtLink>
@@ -30,7 +30,7 @@
       </header>
       <!-- Aggregate band — only shown when there are actual reviews -->
       <section v-if="reviews.length > 0" class="border-b border-default border-t bg-elevated">
-        <div class="mx-auto grid max-w-7xl items-center gap-20 px-4 py-14 sm:px-6 lg:grid-cols-[1fr_1.4fr] lg:px-8">
+        <div class="tenant-container grid items-center gap-20 py-14 lg:grid-cols-[1fr_1.4fr]">
           <!-- Big score -->
           <div>
             <div class="tenant-display tenant-italic text-default" style="font-size: clamp(72px, 10vw, 96px); line-height: 0.9; letter-spacing: -0.03em">

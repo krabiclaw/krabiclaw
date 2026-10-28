@@ -1,7 +1,7 @@
 <template>
   <section id="consultations" class="scroll-mt-32 pt-10 sm:pt-14" :aria-label="t('booking.choose_consultation')">
     <ProductCollectionPage v-if="consultations.length" :products="consultations" :collections="[]" :locations="[]" :currency="data!.currency" :presentation="presentation" vertical="service" :brand-name="organizationName" />
-    <p v-else role="status" class="mx-auto max-w-7xl px-4 pb-14 text-muted sm:px-6 lg:px-8">{{ t('booking.no_services') }}</p>
+    <p v-else role="status" class="tenant-container pb-14 text-muted">{{ t('booking.no_services') }}</p>
   </section>
 </template>
 <script setup lang="ts">

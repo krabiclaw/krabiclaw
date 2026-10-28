@@ -49,6 +49,18 @@ const tenants: Tenant[] = [
   },
 ]
 
+test('unknown and retired API routes return JSON 404 without rendering a tenant page', async ({ request }) => {
+  for (const [method, path] of [
+    ['GET', '/api/no-such-route'],
+    ['POST', '/api/organizations/org-demo/recommendations/preview'],
+  ] as const) {
+    const response = await request.fetch(path, { method })
+    expect(response.status(), await response.text()).toBe(404)
+    expect(response.headers()['content-type']).toContain('application/json')
+    expect(await response.json()).toMatchObject({ status: 404 })
+  }
+})
+
 test('unknown sites render an unbranded 404 while resolved tenant errors retain their identity', async ({ page }) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local tenant header exercises an unresolved host without changing deployed DNS.')
   const errors: string[] = []
