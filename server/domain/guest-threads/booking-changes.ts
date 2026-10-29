@@ -22,6 +22,7 @@ import { bookingChangeProposalMessage } from '~/server/notifications/guest-event
 import { organizationLogo } from '~/server/notifications/hero'
 import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
 import { bookingChangeStates, type BookingChangeStatus } from './booking-change-state'
+import { isStayChangeRequest, stayChangeView } from './stay-change-requests'
 import { updateThreadProjectionIfLatestEntry } from './repository'
 import { publishAccessInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { getGuestRequest, getThreadOperationalRecord, requestSummary, REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
@@ -363,7 +364,7 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: guest.fromName,
     threadId: thread.id, submissionType: thread.kind === 'reservation' ? 'reservation' : 'booking', submissionId: thread.id, sourceEntryId: entryId,
-    guestName: summary.guestName, guestEmail: summary.guestEmail, status, noun,
+    guestName: summary.guestName, status, noun,
     whenLabel: proposal.afterLabel, whenDate: proposal.afterDate ?? null, whenTime: proposal.afterTime ?? null,
     guests: proposal.after.partySize, locationTitle: proposal.locationTitle,
     locationId: status === 'declined' ? proposal.before.locationId : proposal.afterLocationId !== undefined ? proposal.afterLocationId : proposal.before.locationId,
@@ -454,27 +455,24 @@ export async function requestBookingChange(db: DbClient, env: CloudflareEnv, thr
 
 /**
  * Move a booking or reservation now, without a proposal: the business's own
- * change, from its dashboard, ChatGPT or an event dragged on its Google
- * calendar. The destination passes the same checks as a proposal; the guest
- * is told the new time rather than asked. Refused — a 409 naming why — when
- * the change needs the guest's consent or the destination cannot take the
- * party, and then nothing has moved.
+ * change, from its dashboard or ChatGPT. The destination passes the same
+ * checks as a proposal; the guest is told the new time rather than asked.
+ * Refused — a 409 naming why — when the change needs the guest's consent or
+ * the destination cannot take the party, and then nothing has moved.
  */
-export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, actor: { userId: string } | { source: 'google_calendar'; userId: string }, body: unknown, idempotencyKey: string) {
+export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: GuestThreadRow, actor: { userId: string }, body: unknown, idempotencyKey: string) {
   const parsed = moveSchema.safeParse(body)
   if (!parsed.success) throw new HTTPError({ statusCode: 400, message: 'Valid change details are required' })
   const after = fieldsSchema.parse(parsed.data)
   const before = await loadSource(db, thread)
   if (before.productId && await queryFirst(db, "SELECT 1 FROM products WHERE id=? AND organization_id=? AND kind='service'", [before.productId, thread.organization_id])) {
-    return requestBookingChange(db, env, thread, 'userId' in actor && !('source' in actor) ? actor.userId : actor as { source: 'google_calendar'; userId: string }, { ...after, expectedUpdatedAt: parsed.data.expectedUpdatedAt ?? before.updatedAt }, idempotencyKey)
+    return requestBookingChange(db, env, thread, actor.userId, { ...after, expectedUpdatedAt: parsed.data.expectedUpdatedAt ?? before.updatedAt }, idempotencyKey)
   }
   const summary = await sourceSummary(db, thread)
-  if ('userId' in actor) {
-    const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actor.userId })
-    if (!membership) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
-    const locations = new Set([before.locationId, after.kind === 'reservation' ? after.locationId : null].filter((value): value is string => Boolean(value)))
-    for (const locationId of locations) await assertResourceAccess(db, { ...memberAccessPrincipal(membership, { env }), resourceLocationId: locationId })
-  }
+  const membership = await resolveOrganizationMembership(env, { organizationId: thread.organization_id, userId: actor.userId })
+  if (!membership) throw new HTTPError({ statusCode: 403, message: 'Organization access required' })
+  const locations = new Set([before.locationId, after.kind === 'reservation' ? after.locationId : null].filter((value): value is string => Boolean(value)))
+  for (const locationId of locations) await assertResourceAccess(db, { ...memberAccessPrincipal(membership, { env }), resourceLocationId: locationId })
   const dedupeKey = `booking-change-move:${thread.id}:${idempotencyKey}`
   let entry = await findEntryByDedupeKey(db, dedupeKey)
   if (entry) {
@@ -508,8 +506,8 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
         SELECT ?, ?, 'operation', 'request', ?, ?, 'booking_change.moved', ?, ?, ?,
           (SELECT COALESCE(MAX(sequence), 0) + 1 FROM activity_entries WHERE request_id = ?), ?, ?
         FROM requests source WHERE source.id = ? AND source.organization_id = ? AND source.updated_at = ? AND changes() = 1`,
-      params: [id, thread.id, 'userId' in actor ? 'member' : 'system', 'userId' in actor ? actor.userId : null,
-        `Moved to ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}${'source' in actor ? ' from Google Calendar' : ''}.`,
+      params: [id, thread.id, 'member', actor.userId,
+        `Moved to ${destination.label} for ${after.partySize} guests${destination.title ? ` at ${destination.title}` : ''}.`,
         JSON.stringify(payload), dedupeKey, thread.id, now, now, thread.id, thread.organization_id, before.updatedAt],
     }, {
       query: `UPDATE requests SET updated_at = ?, payload_json = json_set(payload_json, '$.party_size_is_minimum', json('false'))
@@ -527,10 +525,13 @@ export async function moveBooking(db: DbClient, env: CloudflareEnv, thread: Gues
   return { changeStatus: 'moved' as const }
 }
 
+type ChangeSide = { whenLabel: string; partySize: number; assignedMemberId: string | null; assignedMemberName: string | null; totalLabel?: string }
 export type BookingChangeView = {
   type: GuestThreadRow['kind']; noun: string; guestName: string; locale: string; vertical: string | null
-  before: { whenLabel: string; partySize: number; assignedMemberId: string | null; assignedMemberName: string | null }
-  after: { whenLabel: string; partySize: number; assignedMemberId: string | null; assignedMemberName: string | null }
+  /** The business proposes and the guest answers; a guest's request on their channel is answered by the business. */
+  requestedBy: 'business' | 'guest'; channel?: 'airbnb'
+  before: ChangeSide
+  after: ChangeSide
   locationTitle: string; originalLocationTitle: string
   status: BookingChangeStatus; message?: string
 }
@@ -538,7 +539,7 @@ export type BookingChangeView = {
 async function proposalView(db: DbClient, thread: GuestThreadRow, proposal: z.infer<typeof proposalSchema>, state: Pick<BookingChangeView, 'status' | 'message'>): Promise<BookingChangeView> {
   const guest = await changePresentation(db, thread, proposal)
   const summary = await sourceSummary(db, thread)
-  return { type: thread.kind, noun: await bookingNoun(db, thread), guestName: summary.guestName, locale: guest.locale, vertical: guest.vertical,
+  return { type: thread.kind, noun: await bookingNoun(db, thread), guestName: summary.guestName, locale: guest.locale, vertical: guest.vertical, requestedBy: 'business',
     before: guest.before, after: guest.after, locationTitle: guest.locationTitle, originalLocationTitle: guest.originalLocationTitle, ...state }
 }
 
@@ -549,9 +550,13 @@ export async function bookingChangeViews(db: DbClient, thread: GuestThreadRow, e
   if (!proposals.length) return views
   const states = await bookingChangeStates(db, proposals.map(entry => entry.id), now)
   for (const entry of proposals) {
-    const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
     const state = states.get(entry.id)
     if (!state) throw new Error('The booking change proposal disappeared')
+    if (isStayChangeRequest(entry)) {
+      views.set(entry.id, await stayChangeView(db, thread, entry, state.status))
+      continue
+    }
+    const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
     views.set(entry.id, await proposalView(db, thread, proposal, state))
   }
   return views
@@ -567,7 +572,7 @@ export async function respondToBookingChange(db: DbClient, env: ChangeEnv, input
     throw new HTTPError({ statusCode: 404, message: 'Change request not found' })
   }
   const entry = await getEntryById(db, input.requestId)
-  if (!entry || entry.request_id !== input.threadId || entry.event_name !== 'booking_change.requested') throw new HTTPError({ statusCode: 404, message: 'Change request not found' })
+  if (!entry || entry.request_id !== input.threadId || entry.event_name !== 'booking_change.requested' || isStayChangeRequest(entry)) throw new HTTPError({ statusCode: 404, message: 'Change request not found' })
   const thread = await getGuestRequest(db, entry.request_id)
   if (!thread) throw new HTTPError({ statusCode: 404, message: 'Change request not found' })
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))

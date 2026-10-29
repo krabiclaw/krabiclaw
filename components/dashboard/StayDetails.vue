@@ -189,7 +189,10 @@
           <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
         </div>
       </dl>
-      <p v-if="!personalScope && detail.owner === 'channel'" class="mt-4 text-base text-muted">{{ channelName }} collected payment for this stay. Change or cancel it on {{ channelName }}.</p>
+      <p v-if="!personalScope && detail.owner === 'channel'" class="mt-4 text-base text-muted">
+        {{ channelName }} collected payment for this stay. Change or cancel it on
+        <ULink v-if="detail.channel_booking_url" :to="detail.channel_booking_url" target="_blank" rel="noopener noreferrer" class="text-highlighted underline">{{ channelName }}</ULink><template v-else>{{ channelName }}</template>.
+      </p>
       <div v-if="embedded && (messagePath || callPhone)" class="mt-6 flex flex-wrap justify-center gap-3">
         <UButton v-if="messagePath" :to="messagePath" color="neutral" variant="solid" class="h-14 rounded-full px-8 shadow-lg" :label="personalScope ? t('stay.message_host') : 'Message'" :aria-label="personalScope ? t('stay.message_host') : 'Message guest'" />
         <UButton v-if="callPhone" :to="`tel:${callPhone}`" color="neutral" variant="solid" class="h-14 rounded-full px-8 shadow-lg" label="Call" />

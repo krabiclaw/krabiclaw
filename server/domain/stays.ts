@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_CHANNEL_LABELS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -91,6 +91,8 @@ export interface Stay {
   provider: 'channex' | null
   external_booking_id: string | null
   channel_booking_id: string | null
+  /** The reservation on its channel's host pages, from its confirmation code; null where the channel has none KrabiClaw links to. */
+  channel_booking_url: string | null
   /** The guest conversation in the inbox; null until a named contact opens one. An existing conversation is retained. */
   request_id: string | null
   cancelled_at: string | null
@@ -362,7 +364,15 @@ const STAY_COLUMNS = `s.id, s.product_id, c.location_id, l.timezone, s.channel, 
   s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.cancellation_policy, s.no_show_at, s.version, s.created_at, s.updated_at`
 
 function mapStay(row: Record<string, unknown>): Stay {
-  return { ...row, overbooked: Number(row.overbooked) === 1 } as unknown as Stay
+  const code = row.channel_booking_id
+  return { ...row, overbooked: Number(row.overbooked) === 1,
+    channel_booking_url: row.channel === 'airbnb' && typeof code === 'string' ? `https://www.airbnb.com/hosting/reservations/details/${encodeURIComponent(code)}` : null } as unknown as Stay
+}
+
+/** A channel's stay is changed on its channel: refused, linking to the reservation there when KrabiClaw can. */
+function channelOwned(stay: Stay, state: 'belongs to' | 'is paid through'): never {
+  const url = stay.channel_booking_url
+  fail(409, 'STAY_NOT_EDITABLE', url ? `This stay ${state} ${STAY_CHANNEL_LABELS[stay.channel]}; change it there: ${url}` : `This stay ${state} its channel; change it there`, undefined, { channel_booking_url: url })
 }
 
 /** The SQL that limits rows to homes this caller may see, and its parameters. */
@@ -1548,7 +1558,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
 async function requireAppStay(db: DbClient, access: StayAccess, stayId: string, expectedVersion: unknown): Promise<StayDetail> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
-  if (stay.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay belongs to its channel; change it there')
+  if (stay.owner !== 'app') channelOwned(stay, 'belongs to')
   if (stay.status === 'cancelled') fail(409, 'STAY_NOT_EDITABLE', 'This stay is cancelled')
   if (expectedVersion !== stay.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   return stay
@@ -1612,7 +1622,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
 export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
   requireManager(access)
   const current = await getStay(db, access, stayId)
-  if (current.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay belongs to its channel; change it there')
+  if (current.owner !== 'app') channelOwned(current, 'belongs to')
   if (input.expected_version !== current.version) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   const reason = optionalText(input.reason, 'reason', 500)
   const complete = async (version: number) => {
@@ -1819,7 +1829,7 @@ function stayPaymentInsert(access: StayAccess, stay: { id: string; currency: str
 export async function recordStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<{ stay: StayDetail; payment: StayPayment }> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
-  if (stay.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay is paid through its channel')
+  if (stay.owner !== 'app') channelOwned(stay, 'is paid through')
   const payment = stayPaymentFields(input, '', true)
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')

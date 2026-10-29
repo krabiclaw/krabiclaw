@@ -1,7 +1,7 @@
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { ConversationState } from './types'
 
-export type BookingChangeStatus = 'pending' | 'accepted' | 'declined' | 'stale' | 'expired'
+export type BookingChangeStatus = 'pending' | 'accepted' | 'declined' | 'withdrawn' | 'stale' | 'expired'
 export interface BookingChangeState { status: BookingChangeStatus; decisionId: string | null; message?: string }
 
 /** Compare the immutable source shown to the client with its current canonical record. */
@@ -17,12 +17,18 @@ function sourceMatchesSql(proposal: string, owner: string): string {
         AND json_array('reservation',NULL,NULL,NULL,v.id,v.status,v.party_size,v.starts_at,v.ends_at,v.timezone,v.location_id,NULL,${guest})=json_array(${recorded})))`
 }
 
-/** The single proposal lifecycle read: decision, elapsed validity, then source staleness. */
+/**
+ * The single proposal lifecycle read: decision, elapsed validity, then source
+ * staleness. A stay's change is its guest's request on their channel, which
+ * answers and expires it there, so until answered it is pending.
+ */
 function statusSql(proposal: string, owner: string, decision: string, now: string): string {
   return `(CASE
     WHEN ${decision}.event_name='booking_change.accepted' THEN 'accepted'
     WHEN ${decision}.event_name='booking_change.declined' THEN 'declined'
+    WHEN ${decision}.event_name='booking_change.withdrawn' THEN 'withdrawn'
     WHEN ${decision}.id IS NOT NULL THEN json('Invalid booking change decision')
+    WHEN ${owner}.kind='stay' THEN 'pending'
     WHEN julianday(${proposal}.occurred_at)+7<=julianday(${now})
       OR EXISTS (SELECT 1 FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id AND s.product_id=b.product_id WHERE b.request_id=${owner}.id AND b.organization_id=${owner}.organization_id AND s.ends_at<=${now})
       OR EXISTS (SELECT 1 FROM reservations v WHERE v.request_id=${owner}.id AND v.organization_id=${owner}.organization_id AND v.ends_at<=${now}) THEN 'expired'
