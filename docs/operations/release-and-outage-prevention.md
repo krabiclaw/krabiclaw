@@ -648,6 +648,14 @@ creator, whose transcript then answered 404; a Saltleaf location, a Saltleaf
 home and an Ember & Slice experience were each assigned to a member and
 restored. Staging v21 is retained.
 
+Browser push is the first v22 forward migration, `0001_web_push_devices.sql`.
+It rebuilds `device_tokens` with a `kind` (every existing row is an APNs
+device, `apns`) and the browser subscription keys, and admits the `web_push`
+provider on `guest_thread_deliveries`; neither table is referenced by another.
+The normal deployment applies it to each v22 replacement. A final delta from
+v21 runs it on the staged source and advances the initial comparison through
+it, so the initial artifacts stay valid.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;
