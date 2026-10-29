@@ -2,15 +2,16 @@ import { expect, request as playwrightRequest, test } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { waitForNuxtHydration } from './helpers'
 import { loginAs } from './helpers/auth'
-import { MCP_ORGANIZATION_ID, mcpData, mcpRequest } from './helpers/mcp'
+import { mcpOrganizationId, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { seededTenant } from './seed/manifest'
 import type { Collection, Product } from '../../server/types/products'
 
 // The large-batch spec asserts the demo tenant's whole catalogue under this
 // lock, so every test that adds a Product to it takes the same lock.
 let releaseTenantMutationLock: (() => Promise<void>) | undefined
 test.beforeEach(async ({ request: _request }, testInfo) => {
-  releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+  releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, mcpOrganizationId())
 })
 test.afterEach(async () => {
   await releaseTenantMutationLock?.()
@@ -37,8 +38,8 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
       })]),
     },
   })
-  const organizationId = MCP_ORGANIZATION_ID
-  const locationId = 'loc-demo'
+  const organizationId = mcpOrganizationId()
+  const locationId = seededTenant('restaurant').locations.brooklyn!.id
   const runId = randomUUID()
   const smallSku = `MCP-SALMON-6-${runId}`
   const largeSku = `MCP-SALMON-12-${runId}`

@@ -1,12 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import { devLoginHeaders, E2E_DEMO_ORGANIZATION_ID, tenantTestExtraHeaders, testBaseUrl } from './test-env'
+import { seededTenant } from './seed/manifest'
+import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
 
 const baseURL = testBaseUrl()
 const writable = ['localhost', '127.0.0.1'].includes(new URL(baseURL).hostname)
-const availabilityUrl = `${baseURL}/api/editor/organizations/org-demo/locations/loc-demo/reservation-availability`
-const configUrl = `${baseURL}/api/editor/organizations/org-demo/locations/loc-demo/reservation-config`
 
 interface Slot { time_slot: string; capacity: number | null; claimed: number; remaining: number | null; is_closed: boolean; is_full: boolean }
 interface Day { date: string; timezone: string; slots: Slot[] }
@@ -20,8 +19,12 @@ interface Day { date: string; timezone: string; slots: Slot[] }
  */
 test('concurrent guests cannot claim the same final reservation seat', async ({ page, request }, testInfo) => {
   test.skip(!writable, 'Booking writes require disposable local or preview data')
-  // The demo location's reservation capacity is shared with the MCP reservation specs.
-  const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, E2E_DEMO_ORGANIZATION_ID)
+  // The Brooklyn location's reservation capacity is shared with the MCP reservation specs.
+  const restaurant = seededTenant('restaurant')
+  const locationId = restaurant.locations.brooklyn!.id
+  const availabilityUrl = `${baseURL}/api/editor/organizations/${restaurant.organizationId}/locations/${locationId}/reservation-availability`
+  const configUrl = `${baseURL}/api/editor/organizations/${restaurant.organizationId}/locations/${locationId}/reservation-config`
+  const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, restaurant.organizationId)
   try {
     await loginAs(page.request, baseURL)
     const today = new Date()
@@ -38,7 +41,7 @@ test('concurrent guests cannot claim the same final reservation seat', async ({ 
     expect(read.status(), await read.text()).toBe(200)
     const { days }: { days: Day[] } = await read.json()
     const slot = days[0]!.slots.find(entry => !entry.is_closed)
-    expect(slot, `loc-demo offers no open reservation slot on ${date}`).toBeTruthy()
+    expect(slot, `Ember & Slice Brooklyn offers no open reservation slot on ${date}`).toBeTruthy()
 
     // One seat left, two guests: the claim carries its own capacity predicate,
     // so one lands and the other is told, never overbooked. Seats are the
@@ -59,13 +62,13 @@ test('concurrent guests cannot claim the same final reservation seat', async ({ 
     try {
       const attempt = Date.now()
       const results = await Promise.all([1, 2].map(guest => request.post(`${baseURL}/api/public/reservations`, {
-        headers: tenantTestExtraHeaders(),
+        headers: seededSiteHeaders('restaurant'),
         data: {
           idempotency_key: crypto.randomUUID(),
           name: `Last seat guest ${guest}`,
           email: `last-seat-${attempt}-${guest}@playwright.example`,
           phone: '+66812345678',
-          location_id: 'loc-demo',
+          location_id: locationId,
           date,
           time: slot!.time_slot,
           guests: '1',
