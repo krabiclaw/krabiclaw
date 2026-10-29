@@ -81,6 +81,17 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     assert.deepEqual(await sendDueScheduledGuestMessages(db, env, minutes(3)), { sent: 1, failed: 0, needs_review: 0 })
     assert.equal((await checkIn(bo.id))?.status, 'sent')
 
+    // A stay with no guest conversation has nowhere to send them: its plan is
+    // cancelled with that reason, and returns once a conversation is attached.
+    const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Cy', guest_email: 'cy@example.test', total_minor: 15_000 })
+    assert.equal((await checkIn(cy.id))?.status, 'pending')
+    await db.prepare('UPDATE stays SET request_id = NULL WHERE id = ?').bind(cy.id).run()
+    await sendDueScheduledGuestMessages(db, env, minutes(5))
+    assert.deepEqual([(await checkIn(cy.id))?.status, (await checkIn(cy.id))?.reason], ['cancelled', 'The stay has no guest conversation to send through.'])
+    await db.prepare('UPDATE stays SET request_id = ? WHERE id = ?').bind(cy.request_id, cy.id).run()
+    await sendDueScheduledGuestMessages(db, env, minutes(6))
+    assert.equal((await checkIn(cy.id))?.status, 'pending')
+
     // The automatic message's name is reserved, and every automatic message needs a schedule.
     await assert.rejects(saveMessageTemplate(db, manager, null, { title: 'Check-in instructions', body: 'x', schedule: { trigger: 'check_in', offsetDays: 0, localTime: '09:00', productIds: [cabin.id] } }), { data: { code: 'MESSAGE_TITLE_RESERVED', field: 'title' } })
     await assert.rejects(saveMessageTemplate(db, manager, null, { title: 'Hello', body: 'x', schedule: null }), { data: { code: 'MESSAGE_SCHEDULE_REQUIRED', field: 'schedule' } })
