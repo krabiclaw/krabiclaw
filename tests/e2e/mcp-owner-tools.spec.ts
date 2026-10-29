@@ -889,6 +889,7 @@ test.describe('stateless MCP server', () => {
       organizationId: string
       productId: string | null
       locationId: string
+      host: { memberId: string; profile: { public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number } | null } | null
     } | null = null
     test.beforeEach(async ({ request: _request }, testInfo) => {
       releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
@@ -942,6 +943,25 @@ test.describe('stateless MCP server', () => {
             expect(retained.locations.find(location => location.location_id === restore.locationId)).toMatchObject({ active: false, published: false })
             expect(retained.publications).toEqual([{ organization_id: restore.organizationId, published: false }])
           } catch (error) { failures.push(error) }
+        }
+        if (restore.host) {
+          // The host's profile returns to what it was before it hosted the class.
+          const { memberId, profile } = restore.host
+          for (const step of ['restore', 'verify'] as const) {
+            try {
+              const readResponse = await mcpRequest(restore.cleanupRequest, restore.baseURL, { method: 'tools/call', toolName: 'get_member_public_profile', args: { organization_id: restore.organizationId, member_id: memberId } })
+              expect(readResponse.status(), await readResponse.text()).toBe(200)
+              const current = mcpData<{ profile: { updated_at: string; public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number } | null }>(await readResponse.json()).profile
+              const expected = { public_name: profile?.public_name ?? null, public_photo_url: profile?.public_photo_url ?? null, public_bio: profile?.public_bio ?? null, public_approved: profile?.public_approved ?? 0 }
+              if (step === 'verify') { expect(current ?? expected).toMatchObject(expected); continue }
+              if (!current) continue
+              const restored = await mcpRequest(restore.cleanupRequest, restore.baseURL, { method: 'tools/call', toolName: 'update_member_public_profile', args: {
+                organization_id: restore.organizationId, member_id: memberId, expected_updated_at: current.updated_at, ...expected, public_approved: Boolean(expected.public_approved),
+              } })
+              expect(restored.status(), await restored.text()).toBe(200)
+              mcpData(await restored.json())
+            } catch (error) { failures.push(error) }
+          }
         }
         try {
           await restore.cleanupRequest.dispose()
@@ -1080,9 +1100,17 @@ test.describe('stateless MCP server', () => {
       expect(location.id).toBe('loc-demo')
       expect(location.timezone).toBe('America/New_York')
       const cleanupRequest = await playwrightRequest.newContext({ baseURL })
-      const restore = { cleanupRequest, page, baseURL: baseURL!, organizationId, productId: null as string | null, locationId: location.id }
+      const restore = { cleanupRequest, page, baseURL: baseURL!, organizationId, productId: null as string | null, locationId: location.id, host: null as NonNullable<typeof bookedSessionRestore>['host'] }
       bookedSessionRestore = restore
       await loginAs(cleanupRequest, baseURL!)
+      // A published experience names a host guests can see. The demo tenant's
+      // role actor hosts this class and returns to its own profile afterwards.
+      const { members } = mcpData<{ members: Array<{ id: string; userId: string }> }>(await call('list_organization_members', {}))
+      const host = members.find(member => member.userId === 'user-e2e-demo-role-owner')
+      expect(host, 'The canonical role actor belongs to the demo tenant').toBeDefined()
+      const { profile: originalProfile } = mcpData<{ profile: { updated_at: string; public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number } | null }>(await call('get_member_public_profile', { member_id: host!.id }))
+      restore.host = { memberId: host!.id, profile: originalProfile }
+      await call('update_member_public_profile', { member_id: host!.id, expected_updated_at: originalProfile?.updated_at ?? null, public_name: originalProfile?.public_name ?? 'Pizza class host', public_approved: true })
       const created = mcpData<{ product: { id: string; slug: string } }>(await call('create_product', { kind: 'experience', active: true, idempotency_key: crypto.randomUUID(),
         name: 'Family Pizza Class', variants: [{ name: 'Class seat', prices: [{ unit_amount: 1000, currency: settings.default_currency }] }],
       })).product
@@ -1090,7 +1118,7 @@ test.describe('stateless MCP server', () => {
       const url = `${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`
       const slots = [{ weekday: 0, start_time: '14:00' }]
       // An experience is published only once it has a bookable time at a published location.
-      await call('set_product_booking_config', { product_id: created.id, duration_minutes: 120, default_capacity: 10 })
+      await call('set_product_booking_config', { product_id: created.id, duration_minutes: 120, default_capacity: 10, assigned_member_id: host!.id })
       await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: false })
       await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
       await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: true })
