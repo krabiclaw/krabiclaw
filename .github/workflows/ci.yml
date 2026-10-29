@@ -120,10 +120,10 @@ jobs:
             exit 1
           fi
           gh run download "$run_id" -R "$GITHUB_REPOSITORY" --name production-snapshot --dir "$RUNNER_TEMP"
-      - run: openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BETTER_AUTH_SECRET -in "$RUNNER_TEMP/source.sql.enc" -out "$RUNNER_TEMP/source.sql"
+      - run: openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BETTER_AUTH_SECRET -in "$RUNNER_TEMP/source.sqlite.enc" -out "$RUNNER_TEMP/source.sqlite"
       - run: yarn local:setup
         env:
-          LOCAL_DATABASE_SOURCE_FILE: ${{ runner.temp }}/source.sql
+          LOCAL_DATABASE_SOURCE_FILE: ${{ runner.temp }}/source.sqlite
       - run: yarn test:e2e --shard=${{ matrix.shard }}/4
       # Wrangler's own log names why the local Worker stopped serving; run
       # 36298734414 died serving _nuxt chunks with nothing else to read.

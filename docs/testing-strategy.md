@@ -141,8 +141,8 @@ A pull request targeting `staging` runs `Checks` and the full E2E suite
 against a local Worker and D1 copy. The suite runs in four shards, and every
 shard loads the newest production snapshot published by the `Production
 snapshot` workflow (every six hours, or by dispatch), so a pull request's data
-is up to six hours old. A pull request never exports live production: D1
-refuses the source database's queries while an export runs. With no unexpired
+is up to six hours old. The workflow reads production in pages and never takes
+a D1 export, which would block production's other queries. With no unexpired
 snapshot the shards fail and name the workflow to run. AI Search is
 production-only, so E2E has no remote search prerequisite. There is no pull-request
 preview deployment; `staging` is the first deployed validation.

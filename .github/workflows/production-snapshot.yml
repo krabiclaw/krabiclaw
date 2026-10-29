@@ -1,10 +1,9 @@
 name: Production snapshot
 
-# The production data every pull request's E2E loads. D1 refuses the source
-# database's queries while an export runs, which tenant sites served as 500s
-# when each pull request exported live production, so it is exported here
-# every six hours and nowhere else. The repository is public: the export is
-# kept encrypted, for a day.
+# The production data every pull request's E2E loads, read from the live
+# database a page of rows at a time. A native D1 export refuses the database's
+# other queries while it runs, which tenant sites served as 500s, so none is
+# taken. The repository is public: the copy is kept encrypted, for a day.
 on:
   schedule:
     - cron: "17 */6 * * *"
@@ -43,11 +42,11 @@ jobs:
       - run: corepack yarn install --immutable
       # The preflight beside the export proves this snapshot transfers before
       # any pull request loads it.
-      - run: node --experimental-strip-types scripts/pull-production-snapshot.ts --out "$RUNNER_TEMP/target.sqlite" --export "$RUNNER_TEMP/source.sql"
-      - run: openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_KEY -in "$RUNNER_TEMP/source.sql" -out "$RUNNER_TEMP/source.sql.enc"
+      - run: node --experimental-strip-types scripts/pull-production-snapshot.ts --out "$RUNNER_TEMP/target.sqlite" --export "$RUNNER_TEMP/source.sqlite"
+      - run: openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_KEY -in "$RUNNER_TEMP/source.sqlite" -out "$RUNNER_TEMP/source.sqlite.enc"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: production-snapshot
-          path: ${{ runner.temp }}/source.sql.enc
+          path: ${{ runner.temp }}/source.sqlite.enc
           retention-days: 1
           if-no-files-found: error
