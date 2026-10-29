@@ -8,6 +8,7 @@ There is one local setup path for humans and agents:
 corepack yarn install
 corepack yarn local:setup
 corepack yarn dev
+corepack yarn local:seed   # with `yarn dev` serving port 3000
 ```
 
 Copy `.env.example` to `.env` and fill the required application secrets before
@@ -87,11 +88,15 @@ local reconcile would rewrite production's tags. With Zaraz declared absent,
 reconciliation reports `zaraz_absent` without calling Cloudflare. Declaring it
 absent while `CF_ZONE_ID` is set fails as a configuration error.
 
-`local:setup` is safe to repeat: it applies the migration chain, refreshes
-the demo, Kikuzuki, Pottery House, and NCLS fixtures, copies the shared review credential,
-gives every copied subscription a test-mode equivalent (`billing:test-mode`), and
-verifies the resulting D1 database. Do not replace its steps with direct
-Wrangler writes or a hand-edited local database.
+`local:setup` deletes the local Wrangler state and applies the migration chain
+to an empty D1. `local:seed` then builds the same synthetic businesses Playwright
+builds before every E2E run (`tests/e2e/seed`): a platform administrator, the
+KrabiClaw platform organization, and Ember & Slice (restaurant), Clayhouse
+Studio (experience) and Harbor Legal Aid (legal services). Every row is written
+through the app's own boundaries — Better Auth, provisioning, MCP tools and the
+editor's uploads — so local data is what the application itself produces. The
+seed runs against an empty database; run `local:setup` again before reseeding.
+No production data reaches a developer machine or a pull request.
 
 ## Stopping a server
 
@@ -115,22 +120,12 @@ and reloading does not clear it — the stub outlives the reload.
 If the listener on the port belongs to another worktree, use a different port
 rather than killing it.
 
-Fixtures are written before the Worker starts. Setup is not ready for a client
-handoff until the post-start social-card generation and public verification pass:
-
-```sh
-corepack yarn local:cards
-corepack yarn client:verify --url http://localhost:3000 --organization-id org-demo --tenant-slug demo
-```
-
-It signs in as the configured review account and regenerates every tenant's cards
-through the same endpoint the dashboard's own button uses. It needs `yarn dev`
-up, because rendering a card runs in the Worker, and it takes a while on the
-first run — a card is rendered and uploaded per product, post and page. Requests
-process five owners at a time. Each generated or reused PNG is fetched and its
-1200×630 dimensions checked; every skipped or failed owner is reported. Re-running
-reuses matching cards. Use `--organization-id` to limit it to one organization;
-KrabiClaw's own site is an ordinary organization here.
+`corepack yarn local:cards` regenerates every tenant's social cards through the
+same endpoint the dashboard's own button uses. Locally, pass the seeded
+administrator: `--email platform-admin@playwright.example --password '<E2E_PASSWORD>'`
+(see `config/development-auth-fixtures.ts`). It needs the Worker up, because
+rendering a card runs in the Worker. Each generated or reused PNG is fetched and
+its 1200×630 dimensions checked; every skipped or failed owner is reported.
 
 Approved `client:import --apply` runs this same generator for the imported site
 and then `client:verify`; failed generation or verification prevents handoff.
@@ -149,54 +144,34 @@ apply migrations; they do not refresh production data. A same-environment
 replacement names its previous database with `--source`, carries that source's
 keys, and follows the release contract. Replacement deltas require an explicit
 source; production loads always require one. Follow a staging refresh with
-`corepack yarn billing:test-mode --staging`: the copy carries production's live-mode
+`corepack yarn billing:test-mode`: the copy carries production's live-mode
 Stripe subscriptions, which staging's test-mode key cannot read, and that step points
 each one at a test-mode equivalent at the price Better Auth knows its plan by: an
 offered plan's current price, a retired plan's own contract price.
 
-Local setup copies production through `db:pull:local`.
-The live database is read a page of rows at a time over the D1 API into a
-SQLite copy, never through D1's native export: creating an export blocks every
-other request to its source database, and production served those requests as
-500s. Pages are not one consistent revision; a row written during the copy can
-fall either side of it, and the transfer refuses a copy whose foreign keys
-disagree. An explicit `--source` (a retired epoch database) keeps the native
-export. Use `--source-file` for an existing local copy, such as the CI
-snapshot.
-The transfer validates the schema, rows and integrity of the copy before writing
-the target, and ordinary refreshes retain the destination's signing keys.
-Existing bookings retain their original dates; setup does not manufacture
-current activity. For date-sensitive
-Today or Calendar checks, create bookings through the guest flow in the local
-environment.
+`db:pull:staging` reads the live database a page of rows at a time over the D1
+API into a SQLite copy, never through D1's native export: creating an export
+blocks every other request to its source database, and production served those
+requests as 500s. Pages are not one consistent revision; a row written during
+the copy can fall either side of it, and the transfer refuses a copy whose
+foreign keys disagree. An explicit `--source` (a retired epoch database) keeps
+the native export. The transfer validates the schema, rows and integrity of the
+copy before writing the target, and ordinary refreshes retain the destination's
+signing keys.
 
 ## Signing in
 
-Use the dedicated production review account configured by `CANARY_LOGIN_EMAIL`
-and `CANARY_LOGIN_PASSWORD` in `.env` for local development, browser verification,
-and app submission review. Provision that account through Better Auth's admin
-API with an email alias the operator owns. Better Auth owns its password,
-verification status, permissions and sessions.
-
-Local setup copies the account from production and verifies the configured
-password. It does not create a separate developer identity or reset this
-password. Sign in through the normal `/login` page; there is no developer-login
-shortcut. Test identities used for explicit authorization scenarios remain local
-fixtures for role and access tests. Playwright creates these through Better Auth using the same configured password. Their provisioning through Better Auth does not alter the review account.
-
-For buyer journeys sign in as `buyer@playwright.example` with `CANARY_LOGIN_PASSWORD`:
-a verified account with no organization. Playwright provisions it before every
-suite; after `local:setup`, create it for manual use with the Worker running:
-
-```sh
-corepack yarn local:actors
-```
+Sign in through the normal `/login` page as a seeded fixture from
+`config/development-auth-fixtures.ts`, with the shared `E2E_PASSWORD` there.
+`platform-admin@playwright.example` is a Better Auth admin and owns every seeded
+business; the other fixtures hold the memberships their names describe. There
+is no developer-login shortcut.
 
 ### Native app development accounts on staging
 
 Debug builds of the native app sign in to KrabiClaw **staging** with email and
-password (`docs/shared-auth-contract.md` D9). `local:actors` only reaches a
-local Worker, so a platform admin creates these accounts once on staging
+password (`docs/shared-auth-contract.md` D9). A platform admin creates these
+accounts once on staging
 through Better Auth's admin API, verified so they can sign in immediately. Use
 addresses at an alias the operator owns, and a password kept with the team's
 credentials, never in the repository:
@@ -217,55 +192,22 @@ creates a lodging organization, and a co-host and cleaner who join it through an
 invite link). Each answers `{"user":{…}}`; then sign in once from the app to
 confirm.
 
-`schema:local` applies new forward migrations when the schema changes. A rare
-replacement baseline, such as the v6 WNAM cutover, starts a new migration
-history; a local D1 created under the prior baseline then fails the schema
-check. Local data is a copy, so delete `.wrangler/state/v3/d1` and run
-`corepack yarn local:setup` again in that case. When local review data needs
-preserving across a replacement, retain a SQLite backup of the previous local
-D1, apply the current migrations to the new local binding with `schema:local`,
-and use the same audited transfer:
-
-```sh
-node --experimental-strip-types scripts/pull-production-snapshot.ts --local --source-file /absolute/path/to/local-backup.sqlite
-```
-
-This reads the saved local database, verifies its recorded migration chain,
-and loads only a destination carrying the current schema and migration ledger.
-
-To refresh local auth while retaining review data, stop the local app, export
-its database, and pass that export through the full setup:
-
-```sh
-corepack yarn wrangler d1 export DB --local --output /absolute/path/to/local-backup.sql
-LOCAL_DATABASE_SOURCE_FILE=/absolute/path/to/local-backup.sql corepack yarn local:setup
-```
-
-`LOCAL_DATABASE_SOURCE_FILE` applies only to local setup, using the same audited
-transfer as `--source-file`. Without it, setup copies production. Test credential
-provisioning through Better Auth does not alter the review account.
-
+`schema:local` applies new forward migrations when the schema changes. After a
+replacement baseline, such as an epoch cutover, a local D1 created under the
+prior baseline fails the schema check; run `local:setup` and `local:seed` again.
 
 ## Dashboard URLs
 
 Follow links rendered by the dashboard whenever possible. A dashboard route
 carries one tenant segment, the organization's slug.
 
-| Tenant | Organization segment (`orgSlug`) |
-| --- | --- |
-| Ember & Slice | `ember-slice-demo` |
-| Pottery House | `org-user-pottery-house` |
-| Kikuzuki | `org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX` |
-| NCLS | `north-carolina-legal-services` |
+| Business | Organization segment (`orgSlug`) | Website |
+| --- | --- | --- |
+| Ember & Slice | `ember-slice-demo` | `demo.localhost:3000` |
+| Clayhouse Studio | `clayhouse-studio` | `clayhouse.localhost:3000` |
+| Harbor Legal Aid | `harbor-legal-aid` | `harbor-legal.localhost:3000` |
 
-For example, Kikuzuki starts at:
-
-```text
-http://localhost:3000/dashboard/org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX
-```
-
-The subdomain is the tenant's public address, not a dashboard segment: Kikuzuki
-serves its website at `kikuzuki-krabi-thailand.localhost:3000`.
+For example, Ember & Slice starts at `http://localhost:3000/dashboard/ember-slice-demo`.
 
 ## Before pushing
 
@@ -282,7 +224,7 @@ corepack yarn chatgpt:submission:check && corepack yarn lint:migrations && corep
 ```
 
 These cover the static, D1, and migration checks before pushing. Pull-request
-CI also runs the full E2E suite against a local Worker and D1 copy. `test:unit`
+CI also runs the full E2E suite against a local Worker and a freshly seeded D1. `test:unit`
 alone is not enough: D1 and migration checks cover persistence behavior that
 typecheck and unit tests cannot see.
 

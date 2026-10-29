@@ -138,32 +138,38 @@ contract, not whether it expects success or failure.
 ## Release feedback loop
 
 A pull request targeting `staging` runs `Checks` and the full E2E suite
-against a local Worker and D1 copy. The suite runs in four shards, and every
-shard loads the newest production snapshot published by the `Production
-snapshot` workflow (every six hours, or by dispatch), so a pull request's data
-is up to six hours old. The workflow reads production in pages and never takes
-a D1 export, which would block production's other queries. With no unexpired
-snapshot the shards fail and name the workflow to run. AI Search is
-production-only, so E2E has no remote search prerequisite. There is no pull-request
-preview deployment; `staging` is the first deployed validation.
+against a local Worker in four shards. No production data reaches a pull
+request. Each run starts from an empty migrated D1, and Playwright's global
+setup (`tests/e2e/seed`) builds synthetic businesses through the app's own
+boundaries — Better Auth, provisioning, MCP tools and editor uploads — then
+writes a manifest specs read their identities from (`seededTenant(key)`):
 
-The E2E suite runs locally, against a local D1 and a Worker the suite starts.
-The local Worker uses the `e2e` Wrangler environment and its local D1 copy:
+- `restaurant`: Ember & Slice, two Brooklyn locations, a menu, Japanese and Thai.
+- `experience`: Clayhouse Studio, two studios, scheduled classes, one ended.
+- `legal`: Harbor Legal Aid, a Raleigh office and two consultation practice areas.
+- the KrabiClaw platform organization and its public pages.
+
+Because the seed is built by the same operations owners use, a spec's premise is
+data the application itself produced; a spec that needs more state adds it to
+the seed, never to the database directly. AI Search is production-only, so E2E
+has no remote search prerequisite. There is no pull-request preview deployment;
+`staging` is the first deployed validation.
+
+Locally the suite starts its own Worker on `PLAYWRIGHT_PORT` (default 3000)
+with its own state under `.wrangler/e2e-state-<port>`, so checkouts and agents
+can run beside each other:
 
 ```bash
-yarn local:setup       # once: migrate and copy the configured development data
-yarn e2e:local:prepare  # verify the existing copy, remove test artifacts, build
-yarn test:e2e:local
+PLAYWRIGHT_PORT=3107 corepack yarn test:e2e tests/e2e/<file>.spec.ts --project=chromium
 ```
 
-Ordinary browser and MCP journeys sign in with `CANARY_LOGIN_EMAIL` and
-`CANARY_LOGIN_PASSWORD` from `.env` (CI uses the corresponding secrets).
-Role, tenant-isolation and onboarding journeys need distinct actors; Playwright's
-global setup provisions them through Better Auth's admin and organization APIs,
-using the same configured password. It does not rebuild tenant fixtures or write
-authentication rows directly. Preparation does not recopy production on each run.
-It clears transient local rate counters so repeated runs exercise the real
-limits with a fresh quota.
+Journeys sign in through Better Auth as the fixtures in
+`config/development-auth-fixtures.ts`, with its `E2E_PASSWORD`. The seed
+creates them with Better Auth's admin API and memberships through invitations.
+
+Schema epochs are rehearsed against their live source, not in pull-request CI:
+the transfer preflight in `docs/operations/release-and-outage-prevention.md`
+(`scripts/pull-production-snapshot.ts --out`) is a required cutover step.
 
 Local Playwright waits for the Worker's health endpoint before running specs.
 The tests exercise cache invalidation without provisioning or indexing a remote

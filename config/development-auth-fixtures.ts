@@ -93,8 +93,7 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
   ...[
     'oauth-cimd',
     'oauth-private-cimd',
-    // Drives the new-site wizard end to end; every run leaves it owning one more
-    // organization, which reset-e2e-artifacts sweeps as a non-fixture org.
+    // Drives the new-site wizard end to end, owning the organization it creates.
     'onboarding-wizard',
     // Signs in like the native app, with a bearer session and no cookies, and
     // owns the organization it creates for the lodging-identity spec.

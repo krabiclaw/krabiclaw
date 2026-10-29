@@ -28,9 +28,7 @@ function organizationSubdomain(origin: string): string {
 // the welcome screen, then one question per route, each advanced by the shell's
 // own footer; the preview pane framing the owner's pending site on its own
 // subdomain; and activation making that site public inside a NEW organization
-// that becomes the session's active one. The fixture user owns one more
-// organization per run; reset-e2e-artifacts sweeps non-fixture organizations
-// older than two hours.
+// that becomes the session's active one.
 //
 // Another tenant already holds an organization-wide collection with the slug
 // this owner's menu section takes. A collection slug is unique within its
