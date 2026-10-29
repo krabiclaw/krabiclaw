@@ -635,8 +635,18 @@ development and E2E bindings use the same production replacement.
 
 The staging initial copy on 2026-10-29 loaded all 117 tables and 107,587 rows
 from staging v21. Independent API reads confirmed the replacement's baseline
-ledger, key row counts and zero foreign-key violations. The deployed staging
-Worker still used v21 at that verification.
+ledger, key row counts and zero foreign-key violations. The staging binding
+moved to v22 with `d23aa096d` on 2026-10-29. The final delta from staging v21,
+taken right after that deployment, carried 377 new rows (117 tables, 107,964
+rows) with no transforms; the four rows it left were one OAuth resource, client
+and consent and one Stripe connected account whose only change was a refresh
+timestamp. v22 then read back the native `0000_baseline.sql` ledger, matching
+identity, organization, product, booking, request and stay counts, and an empty
+`foreign_key_check`. On the deployed Worker a three-person Saltleaf group was
+created, renamed, had a member removed and re-added, and was left by its
+creator, whose transcript then answered 404; a Saltleaf location, a Saltleaf
+home and an Ember & Slice experience were each assigned to a member and
+restored. Staging v21 is retained.
 
 Before dropping or retiring a legacy table or writer:
 
