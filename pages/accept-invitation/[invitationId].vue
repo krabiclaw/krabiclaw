@@ -58,17 +58,20 @@ async function acceptInvitation() {
   accepting.value = true
   acceptError.value = null
   try {
-    await pushSubscription.refresh()
-    // The organization's name is read while the invitation is still pending; the ask names it.
-    const invitation = pushSubscription.state.value.askable ? await authClient.organization.getInvitation({ query: { id: invitationId } }) : null
-    if (invitation?.error) throw new Error(invitation.error.message || 'Failed to read the invitation')
     const result = await authClient.organization.acceptInvitation({ invitationId })
     if (result.error) throw new Error(result.error.message || 'Failed to accept invitation')
     const member = result.data?.member.role === 'member'
     const destination = member && result.data
       ? `/dashboard/account/profile/calendar/${encodeURIComponent(result.data.member.organizationId)}`
       : '/dashboard'
-    if (!invitation?.data) {
+    await pushSubscription.refresh()
+    // The ask names the organization just joined. Joining has already succeeded, so a name that
+    // cannot be read is reported and the ask is left out rather than blocking the dashboard.
+    const organization = pushSubscription.state.value.askable && result.data
+      ? await authClient.organization.getFullOrganization({ query: { organizationId: result.data.member.organizationId } })
+      : null
+    if (organization?.error) globalThis.reportError(new Error(organization.error.message || 'Could not read the organization just joined'))
+    if (!organization?.data) {
       await navigateTo(destination)
       return
     }
@@ -76,7 +79,7 @@ async function acceptInvitation() {
     await preferences.load(true)
     const labels = preferences.labels.value ?? NOTIFICATION_CATEGORY_LABELS
     joined.value = {
-      organizationName: invitation.data.organizationName,
+      organizationName: organization.data.name,
       destination,
       lede: member
         ? `Get the ${labels.reservations_bookings.toLowerCase()} assigned to you and team messages. Team messages only arrive as notifications.`

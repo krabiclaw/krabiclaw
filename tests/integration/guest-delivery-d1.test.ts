@@ -115,7 +115,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const browserKeys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])
     const browserPublic = new Uint8Array(await crypto.subtle.exportKey('raw', browserKeys.publicKey))
     const authSecret = crypto.getRandomValues(new Uint8Array(16))
-    const endpoint = 'https://push.example/send/browser-proof'
+    const endpoint = 'https://fcm.googleapis.com/fcm/send/browser-proof'
     await registerDevice(db, { kind: 'web', endpoint, p256dh: base64url(browserPublic), auth: base64url(authSecret), userId: 'user-proof', sessionId: 'session-proof' })
     // What the browser does with a push: RFC 8291 §3.4 key derivation over the RFC 8188 record.
     const decrypt = async (body: Uint8Array) => {
@@ -130,7 +130,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       return JSON.parse(new TextDecoder().decode(padded.slice(0, padded.lastIndexOf(2)))) as Record<string, unknown>
     }
     const webRequests: Array<{ url: string; encoding: string | null; authorization: string | null; payload: Record<string, unknown> }> = []
-    const webAnswers = [new Response(null, { status: 201, headers: { location: 'https://push.example/message/proof-1' } }), new Response('gone', { status: 410 })]
+    const webAnswers = [new Response(null, { status: 201, headers: { location: 'https://fcm.googleapis.com/message/proof-1' } }), new Response('gone', { status: 410 })]
     const webFetch = mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
       const headers = new Headers(init.headers)
       webRequests.push({ url, encoding: headers.get('content-encoding'), authorization: headers.get('authorization'), payload: await decrypt(new Uint8Array(init.body as ArrayBuffer)) })
@@ -140,7 +140,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     })
     try {
       await notifyPushContact(webEnv, 'web-delivered')
-      assert.deepEqual(await pushDelivery('web-delivered'), [{ provider: 'web_push', status: 'sent', error: null, provider_message_id: 'https://push.example/message/proof-1' }])
+      assert.deepEqual(await pushDelivery('web-delivered'), [{ provider: 'web_push', status: 'sent', error: null, provider_message_id: 'https://fcm.googleapis.com/message/proof-1' }])
       const [sent] = webRequests
       assert.equal(sent?.url, endpoint)
       assert.equal(sent?.encoding, 'aes128gcm')
@@ -149,7 +149,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       assert.match(String(sent?.payload.url), /^https:\/\/.+\/dashboard\//)
       assert.equal(sent?.payload.tag, 'web-delivered')
       await notifyPushContact(webEnv, 'web-gone')
-      assert.deepEqual(await pushDelivery('web-gone'), [{ provider: 'web_push', status: 'failed', error: 'Web push push.example 410 gone; device removed', provider_message_id: null }])
+      assert.deepEqual(await pushDelivery('web-gone'), [{ provider: 'web_push', status: 'failed', error: 'Web push fcm.googleapis.com 410 gone; device removed', provider_message_id: null }])
       assert.equal(await db.prepare("SELECT count(*) AS count FROM device_tokens WHERE kind = 'web'").first('count'), 0)
       assert.equal(webRequests.length, 2)
     } finally {

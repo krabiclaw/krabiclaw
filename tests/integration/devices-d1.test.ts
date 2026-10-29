@@ -120,9 +120,12 @@ test('device registration requires the current session and cascades with that se
 
     // A browser registers its push subscription with the dashboard's cookie session, and removes it by endpoint.
     const browser = await signIn('first-user')
-    const subscription = { endpoint: 'https://push.example/send/browser-proof', p256dh: 'BPj'.padEnd(87, 'a'), auth: 'c2VjcmV0LWF1dGgtYnl0ZXM' }
+    const subscription = { endpoint: 'https://fcm.googleapis.com/fcm/send/browser-proof', p256dh: 'BPj'.padEnd(87, 'a'), auth: 'c2VjcmV0LWF1dGgtYnl0ZXM' }
     for (const [body, code, field] of [
-      [{ ...subscription, endpoint: 'http://push.example/send/browser-proof' }, 'INVALID_PUSH_ENDPOINT', 'endpoint'],
+      [{ ...subscription, endpoint: 'http://fcm.googleapis.com/fcm/send/browser-proof' }, 'INVALID_PUSH_ENDPOINT', 'endpoint'],
+      // The server POSTs to a registered endpoint, so only browser push services may be one.
+      [{ ...subscription, endpoint: 'https://internal.example/hook' }, 'INVALID_PUSH_ENDPOINT', 'endpoint'],
+      [{ ...subscription, endpoint: 'https://fcm.googleapis.com.internal.example/hook' }, 'INVALID_PUSH_ENDPOINT', 'endpoint'],
       [{ ...subscription, p256dh: 'not base64url!' }, 'INVALID_PUSH_KEY', 'p256dh'],
       [{ endpoint: subscription.endpoint, p256dh: subscription.p256dh }, 'INVALID_PUSH_KEY', 'auth'],
     ] as const) {

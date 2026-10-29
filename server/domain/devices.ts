@@ -37,12 +37,19 @@ export function deviceEnvironment(value: unknown): 'sandbox' | 'production' {
   return value
 }
 
-/** A push service endpoint is an https URL (RFC 8030 §5). */
+/**
+ * The push services browsers subscribe through: Chrome, Edge, Firefox and Safari
+ * (FCM, WNS, Mozilla autopush, Apple). The server POSTs to a registered
+ * endpoint, so anything else is refused rather than becoming a destination.
+ */
+const PUSH_SERVICE_HOSTS = ['fcm.googleapis.com', 'notify.windows.com', 'push.services.mozilla.com', 'push.apple.com']
+
 export function subscriptionEndpoint(value: unknown): string {
-  if (typeof value !== 'string' || !URL.canParse(value) || new URL(value).protocol !== 'https:') {
-    throw new HTTPError({ statusCode: 422, message: 'endpoint must be the push subscription\'s https URL', data: { code: 'INVALID_PUSH_ENDPOINT', field: 'endpoint' } })
+  const url = typeof value === 'string' && URL.canParse(value) ? new URL(value) : null
+  if (!url || url.protocol !== 'https:' || !PUSH_SERVICE_HOSTS.some(host => url.hostname === host || url.hostname.endsWith(`.${host}`))) {
+    throw new HTTPError({ statusCode: 422, message: 'endpoint must be a browser push service\'s https URL', data: { code: 'INVALID_PUSH_ENDPOINT', field: 'endpoint' } })
   }
-  return value
+  return url.href
 }
 
 function subscriptionKey(value: unknown, field: 'p256dh' | 'auth'): string {
@@ -93,19 +100,19 @@ export async function unregisterDevice(
   await execute(db, 'DELETE FROM device_tokens WHERE token = ? AND kind = ? AND user_id = ? AND session_id = ?', [token, input.kind, owner.userId, owner.sessionId])
 }
 
-export type UserDevice =
+export type UserDevice = { sessionId: string } & (
   | { kind: 'apns'; token: string; environment: 'sandbox' | 'production' }
-  | { kind: 'web'; token: string; p256dh: string; auth: string }
+  | { kind: 'web'; token: string; p256dh: string; auth: string })
 
 /** Every device the person is signed in on; a session that ends takes its devices with it. */
 export async function listUserDevices(db: DbClient, userId: string): Promise<UserDevice[]> {
-  const rows = await queryAll<{ kind: 'apns' | 'web'; token: string; environment: 'sandbox' | 'production' | null; p256dh: string | null; auth: string | null }>(
-    db, 'SELECT kind, token, environment, p256dh, auth FROM device_tokens WHERE user_id = ? ORDER BY token', [userId],
+  const rows = await queryAll<{ kind: 'apns' | 'web'; token: string; session_id: string; environment: 'sandbox' | 'production' | null; p256dh: string | null; auth: string | null }>(
+    db, 'SELECT kind, token, session_id, environment, p256dh, auth FROM device_tokens WHERE user_id = ? ORDER BY token', [userId],
   )
   // The table's check constraint guarantees each kind's columns; a row that breaks it is reported, not skipped.
   return rows.map((row) => {
-    if (row.kind === 'apns' && row.environment) return { kind: 'apns', token: row.token, environment: row.environment }
-    if (row.kind === 'web' && row.p256dh && row.auth) return { kind: 'web', token: row.token, p256dh: row.p256dh, auth: row.auth }
+    if (row.kind === 'apns' && row.environment) return { kind: 'apns', token: row.token, sessionId: row.session_id, environment: row.environment }
+    if (row.kind === 'web' && row.p256dh && row.auth) return { kind: 'web', token: row.token, sessionId: row.session_id, p256dh: row.p256dh, auth: row.auth }
     throw new Error(`device_tokens row for user ${userId} is missing its ${row.kind} fields`)
   })
 }
@@ -113,14 +120,14 @@ export async function listUserDevices(db: DbClient, userId: string): Promise<Use
 /**
  * Removes a device its push service reported is gone: Apple's 410 or 400
  * BadDeviceToken, a browser push service's 404 or 410. Scoped to the
- * registration that was sent to, so a token re-registered by a newer session or
- * in the other APNs environment since then is kept.
+ * registration that was sent to, so a token re-registered since then — by a
+ * newer session, in the other APNs environment, or with new keys — is kept.
  */
 export async function retireDevice(db: DbClient, input: { userId: string; device: UserDevice }): Promise<void> {
   const { device } = input
   if (device.kind === 'apns') {
-    await execute(db, 'DELETE FROM device_tokens WHERE token = ? AND kind = \'apns\' AND user_id = ? AND environment = ?', [device.token, input.userId, device.environment])
+    await execute(db, 'DELETE FROM device_tokens WHERE token = ? AND kind = \'apns\' AND user_id = ? AND session_id = ? AND environment = ?', [device.token, input.userId, device.sessionId, device.environment])
     return
   }
-  await execute(db, 'DELETE FROM device_tokens WHERE token = ? AND kind = \'web\' AND user_id = ? AND p256dh = ?', [device.token, input.userId, device.p256dh])
+  await execute(db, 'DELETE FROM device_tokens WHERE token = ? AND kind = \'web\' AND user_id = ? AND session_id = ? AND p256dh = ?', [device.token, input.userId, device.sessionId, device.p256dh])
 }
