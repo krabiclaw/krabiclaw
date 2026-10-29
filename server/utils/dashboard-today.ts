@@ -17,6 +17,7 @@ import { getGoogleAdsCustomer, getGoogleAdsPerformanceSummary } from '~/server/u
 import { getBlogPost } from '~/server/utils/content/publishing'
 import { planOffers } from '~/shared/offers'
 import { getOrganizationEntitlements } from '~/server/utils/billing-access'
+import { platformOrigin } from '~/server/utils/dashboard-notification-links'
 
 export interface TodayFeedQuery {
   range: 'today' | 'upcoming'
@@ -113,7 +114,7 @@ async function offerCard(env: CloudflareEnv, organization: DashboardOrganization
   const plan = offer.unlock.plan
   return card({ id: `offer:${offer.id}`, to: `/dashboard/${encodeURIComponent(organization.slug)}/${offer.path}`, priority: 'opportunity',
     eyebrow: `Included with ${plan.charAt(0).toUpperCase() + plan.slice(1)}`, headline: offer.headline, description: offer.line,
-    imageUrl: offer.illustration, imageFit: 'contain', imageIcon: 'i-lucide-sparkles' })
+    imageUrl: new URL(offer.illustration, platformOrigin(env)).toString(), imageFit: 'contain', imageIcon: 'i-lucide-sparkles' })
 }
 
 // What the connected Google Ads account did in the last 7 complete days, in its own currency as Google reports it.

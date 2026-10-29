@@ -1,13 +1,17 @@
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { expect, request as playwrightRequest, test } from '@playwright/test'
+import { expect, request as playwrightRequest, test, type WebSocket } from '@playwright/test'
 import sharp from 'sharp'
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { devLoginHeaders } from './test-env'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
-import { dismissPreviewToolbar } from './helpers'
+import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import type { TeamMember, TeamMessage, TeamThread } from '../../server/domain/team-messages'
+import { ALL_VERTICALS } from '../../utils/vertical-copy'
+import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
+import type { TodayFeedPayload } from '../../shared/dashboard-today'
+import type { Product } from '../../server/types/products'
 
 // The native app authenticates with a Better Auth bearer session and nothing
 // else: no cookies, no Origin, no fetch-metadata headers.
@@ -24,7 +28,7 @@ test.describe('lodging identity boundary', () => {
   const session = (baseURL: string | undefined) => {
     const password = process.env.CANARY_LOGIN_PASSWORD
     if (!password) throw new Error('CANARY_LOGIN_PASSWORD is not configured.')
-    const call = (method: 'GET' | 'POST' | 'DELETE', path: string, init: { headers?: Record<string, string>; data?: unknown } = {}) => new Promise<{
+    const call = (method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, init: { headers?: Record<string, string>; data?: unknown } = {}) => new Promise<{
       status: number
       headers: { get: (name: string) => string | null }
       text: () => Promise<string>
@@ -56,6 +60,8 @@ test.describe('lodging identity boundary', () => {
     const api = {
       get: (path: string, init?: { headers?: Record<string, string> }) => call('GET', path, init),
       post: (path: string, init?: { headers?: Record<string, string>; data?: unknown }) => call('POST', path, init),
+      put: (path: string, init?: { headers?: Record<string, string>; data?: unknown }) => call('PUT', path, init),
+      patch: (path: string, init?: { headers?: Record<string, string>; data?: unknown }) => call('PATCH', path, init),
       delete: (path: string, init?: { headers?: Record<string, string>; data?: unknown }) => call('DELETE', path, init),
     }
     const signInBearer = async (email: string) => {
@@ -361,6 +367,324 @@ test.describe('lodging identity boundary', () => {
     const signedOut = await api.get('/api/auth/get-session', { headers: bearer })
     expect(signedOut.status).toBe(200)
     expect(await signedOut.json()).toBeNull()
+  })
+
+  for (const vertical of ALL_VERTICALS) {
+    test(`${vertical}: a manual group keeps its name and history while participants manage membership and leave`, async ({ baseURL, page, browser }, testInfo) => {
+      test.setTimeout(120_000)
+      const { api, signInBearer } = session(baseURL)
+      const teammate = findE2eAuthFixture('user-e2e-lodging-host')
+      const nonparticipant = findE2eAuthFixture('user-e2e-mcp-fresh-inaccessible')
+      const buyer = findE2eAuthFixture('user-e2e-buyer')
+      const ownerBearer = await signInBearer(fixture.email)
+      const slug = `e2e-group-${vertical}-${crypto.randomUUID().slice(0, 8)}`
+      const name = `Team Group ${vertical} ${slug}`
+      const created = await api.post('/api/auth/organization/create', {
+        headers: ownerBearer,
+        data: { name, slug, default_currency: 'THB', timezone: 'Asia/Bangkok' },
+      })
+      expect(created.status, await created.text()).toBe(200)
+      const organization = await created.json() as { id: string }
+      const memberContext = await browser.newContext()
+      const memberPage = await memberContext.newPage()
+      const memberMcp = await playwrightRequest.newContext()
+      const listPath = `/dashboard/${slug}/messages`
+      const teamListPath = `/api/dashboard/team/threads?org=${slug}`
+      try {
+        const provisioned = await api.post('/api/organizations', {
+          headers: ownerBearer,
+          data: { organizationId: organization.id, name, subdomain: slug, vertical, sourceLocale: 'en' },
+        })
+        expect(provisioned.status, await provisioned.text()).toBe(200)
+        expect(await provisioned.json()).toMatchObject({ organizationId: organization.id, subdomain: slug })
+        const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
+        expect(context.status, await context.text()).toBe(200)
+        expect(await context.json()).toMatchObject({ success: true, organization: { id: organization.id, name, slug, subdomain: slug, vertical } })
+        // Invitations use the same single-use link as a new teammate joining from the app.
+        const join = async (actor: typeof invitee, role: 'admin' | 'member') => {
+          const link = await api.post(`/api/organizations/${organization.id}/invite-links`, { headers: ownerBearer, data: { role } })
+          expect(link.status, await link.text()).toBe(201)
+          const { token } = await link.json() as { token: string }
+          const bearer = await signInBearer(actor.email)
+          const accepted = await api.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { headers: bearer })
+          expect(accepted.status, await accepted.text()).toBe(200)
+          expect(await accepted.json()).toMatchObject({ organization: { id: organization.id }, role })
+          return bearer
+        }
+        const adminBearer = await join(invitee, 'admin')
+        const memberBearer = await join(teammate, 'member')
+        const outsiderBearer = await join(nonparticipant, 'admin')
+        const buyerBearer = await signInBearer(buyer.email)
+        await loginAs(page.request, baseURL!, fixture.id)
+        await loginAs(memberContext.request, baseURL!, teammate.id)
+        await loginAs(memberMcp, baseURL!, invitee.id)
+        await page.goto(`${listPath}?view=team`)
+        await waitForNuxtHydration(page)
+        await dismissPreviewToolbar(page)
+        await page.getByRole('link', { name: 'New team conversation', exact: true }).click()
+        await page.getByRole('checkbox', { name: invitee.name, exact: true }).check()
+        await page.getByRole('checkbox', { name: teammate.name, exact: true }).check()
+        const initialName = `Handover ${slug}`
+        await page.getByRole('textbox', { name: 'Conversation name', exact: true }).fill(initialName)
+        const groupCreated = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/dashboard/team/threads')
+        await page.getByRole('button', { name: 'Start', exact: true }).click()
+        const groupResponse = await groupCreated
+        expect(groupResponse.status(), await groupResponse.text()).toBe(201)
+        const { id: threadId } = await groupResponse.json() as { id: string }
+        const groupPath = `${listPath}/team/${threadId}`
+        const teamPath = `/api/dashboard/team/threads/${threadId}`
+        const createBody = groupResponse.request().postDataJSON() as { memberIds: string[]; name: string; idempotencyKey: string }
+        expect(createBody).toMatchObject({ memberIds: [invitee.id, teammate.id].sort(), name: initialName, idempotencyKey: expect.any(String) })
+        expect(createBody.idempotencyKey).not.toBe('')
+        const retriedStart = await api.post(teamListPath, { headers: ownerBearer, data: createBody })
+        expect(retriedStart.status, await retriedStart.text()).toBe(200)
+        expect(await retriedStart.json()).toEqual({ id: threadId })
+        const changedStart = await api.post(teamListPath, { headers: ownerBearer, data: { ...createBody, name: 'Different group' } })
+        expect(changedStart.status, await changedStart.text()).toBe(409)
+        await expect(page).toHaveURL(new RegExp(`/messages/team/${threadId}\\?view=team$`))
+
+        const threads = async (headers: Record<string, string>) => {
+          const response = await api.get(teamListPath, { headers })
+          expect(response.status, await response.text()).toBe(200)
+          return (await response.json() as { threads: TeamThread[] }).threads
+        }
+        const history = async (headers: Record<string, string>) => {
+          const response = await api.get(`${teamPath}/messages?org=${slug}&limit=100`, { headers })
+          expect(response.status, await response.text()).toBe(200)
+          return (await response.json() as { messages: TeamMessage[] }).messages
+        }
+        for (const [bearer, canManage] of [[ownerBearer, true], [adminBearer, true], [memberBearer, false]] as const) {
+          const group = (await threads(bearer)).find(thread => thread.id === threadId)!
+          expect(group).toMatchObject({ name: initialName, isGroup: true, createdByUserId: fixture.id, canManage, canLeave: true, stayId: null, locationId: null })
+          expect(group.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
+        }
+        const messageIds: string[] = []
+        const bodies: string[] = []
+        for (const [actor, bearer] of [[fixture, ownerBearer], [invitee, adminBearer], [teammate, memberBearer]] as const) {
+          const body = `${actor.name} group proof ${crypto.randomUUID()}`
+          const sent = await api.post(`${teamPath}/messages?org=${slug}`, { headers: bearer, data: { body, idempotencyKey: crypto.randomUUID() } })
+          expect(sent.status, await sent.text()).toBe(201)
+          const { message } = await sent.json() as { message: TeamMessage }
+          expect(message).toMatchObject({ threadId, body, senderId: actor.id })
+          messageIds.push(message.id)
+          bodies.push(body)
+          await expect(page.locator(`[data-team-message="${message.id}"]`)).toContainText(body)
+        }
+        await page.screenshot({ path: testInfo.outputPath('team-group-conversation.png'), fullPage: true })
+        const mcpRead = await mcpRequest(memberMcp, baseURL!, { method: 'tools/call', toolName: 'get_team_conversation', args: { organization_id: organization.id, thread_id: threadId } })
+        expect(mcpRead.status(), await mcpRead.text()).toBe(200)
+        expect(mcpData<{ messages: TeamMessage[] }>(await mcpRead.json()).messages.map(message => message.id).sort()).toEqual([...messageIds].sort())
+        await memberPage.goto(`${groupPath}?view=team`)
+        await waitForNuxtHydration(memberPage)
+        await dismissPreviewToolbar(memberPage)
+        await expect(memberPage.locator(`[data-team-message="${messageIds[2]}"]`)).toContainText(bodies[2]!)
+
+        const deniedRename = await api.post(`${teamPath}/operations?org=${slug}`, { headers: memberBearer, data: { action: 'rename', name: 'Unpermitted', idempotencyKey: crypto.randomUUID() } })
+        expect(deniedRename.status, await deniedRename.text()).toBe(403)
+        expect((await threads(adminBearer)).find(thread => thread.id === threadId)?.name).toBe(initialName)
+        for (const headers of [outsiderBearer, buyerBearer]) {
+          expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers })).status).toBe(404)
+          expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers, data: { body: 'Outside', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+          expect((await api.post(`${teamPath}/operations?org=${slug}`, { headers, data: { action: 'rename', name: 'Outside', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+        }
+
+        await page.getByLabel('Conversation details', { exact: true }).click()
+        await page.getByRole('link', { name: /^Name/ }).click()
+        const renamed = `Named group ${slug}`
+        await page.getByRole('textbox', { name: 'Conversation name', exact: true }).fill(renamed)
+        await page.getByRole('button', { name: 'Save name', exact: true }).click()
+        await expect.poll(async () => (await threads(memberBearer)).find(thread => thread.id === threadId)?.name).toBe(renamed)
+        const memberManagement = await api.post(`${teamPath}/operations?org=${slug}`, { headers: memberBearer, data: { action: 'remove', userId: invitee.id, idempotencyKey: crypto.randomUUID() } })
+        expect(memberManagement.status, await memberManagement.text()).toBe(403)
+
+        await page.goto(`${groupPath}/details/members?view=team`)
+        await waitForNuxtHydration(page)
+        await page.getByRole('button', { name: `Remove ${teammate.name}`, exact: true }).click()
+        const removed = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/operations`)
+        await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
+        const removedResponse = await removed
+        expect(removedResponse.status(), await removedResponse.text()).toBe(200)
+        expect(await removedResponse.json()).toEqual({ status: 'updated', threadId })
+        expect((await threads(adminBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id].sort())
+        expect((await history(adminBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
+        // Revocation reaches an already-open browser; a stale transcript is not retained.
+        await expect(memberPage.locator('[data-team-message]')).toHaveCount(0)
+        await expect(memberPage.locator(`[data-team-thread="${threadId}"]`)).toHaveCount(0)
+        expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: memberBearer })).status).toBe(404)
+        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'No seat', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+
+        await page.getByRole('checkbox', { name: teammate.name, exact: true }).check()
+        await page.getByRole('button', { name: 'Add', exact: true }).click()
+        await expect.poll(async () => (await threads(adminBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
+        expect((await history(memberBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
+        await memberPage.goto(`${groupPath}?view=team`)
+        await waitForNuxtHydration(memberPage)
+        await expect(memberPage.locator(`[data-team-message="${messageIds[0]}"]`)).toContainText(bodies[0]!)
+        await memberPage.getByLabel('Conversation details', { exact: true }).click()
+        await expect(memberPage.getByRole('link', { name: /^Name/ })).toHaveCount(0)
+        await memberPage.getByRole('button', { name: 'Leave conversation', exact: true }).click()
+        const left = memberPage.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/operations`)
+        await memberPage.getByRole('dialog').getByRole('button', { name: 'Leave conversation', exact: true }).click()
+        const leftResponse = await left
+        expect(leftResponse.status(), await leftResponse.text()).toBe(200)
+        expect(await leftResponse.json()).toEqual({ status: 'left', threadId })
+        expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id].sort())
+        expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: memberBearer })).status).toBe(404)
+        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: memberBearer, data: { body: 'After leaving', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+
+        // The participating admin can manage; an owner's role cannot replace a lost seat.
+        const adminRename = await mcpRequest(memberMcp, baseURL!, { method: 'tools/call', toolName: 'update_team_group', args: { organization_id: organization.id, thread_id: threadId, action: 'rename', name: 'Admin handover', idempotency_key: crypto.randomUUID() } })
+        expect(adminRename.status(), await adminRename.text()).toBe(200)
+        expect(mcpData<{ status: 'updated'; threadId: string }>(await adminRename.json())).toEqual({ status: 'updated', threadId })
+        expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.name).toBe('Admin handover')
+        await page.goto(`${groupPath}/details/members?view=team`)
+        await waitForNuxtHydration(page)
+        await expect(page.getByRole('button', { name: `Remove ${invitee.name}`, exact: true })).toBeVisible()
+        await page.screenshot({ path: testInfo.outputPath('team-group-details-after-membership-changes.png'), fullPage: true })
+        const ownerLeft = await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotencyKey: crypto.randomUUID() } })
+        expect(ownerLeft.status, await ownerLeft.text()).toBe(200)
+        expect(await ownerLeft.json()).toEqual({ status: 'left', threadId })
+        expect((await api.get(`${teamPath}/messages?org=${slug}`, { headers: ownerBearer })).status).toBe(404)
+        expect((await api.post(`${teamPath}/messages?org=${slug}`, { headers: ownerBearer, data: { body: 'Owner bypass', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+        expect((await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'rename', name: 'Owner bypass', idempotencyKey: crypto.randomUUID() } })).status).toBe(404)
+        expect((await history(adminBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
+
+        // A direct conversation keeps its existing protected addressing and has no group controls.
+        const direct = await api.post(teamListPath, { headers: adminBearer, data: { memberIds: [fixture.id] } })
+        expect(direct.status, await direct.text()).toBe(201)
+        const { id: directId } = await direct.json() as { id: string }
+        expect((await threads(ownerBearer)).find(thread => thread.id === directId)).toMatchObject({ name: null, isGroup: false, canManage: false, canLeave: false })
+        const protectedDirect = await api.post(`/api/dashboard/team/threads/${directId}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotencyKey: crypto.randomUUID() } })
+        expect(protectedDirect.status, await protectedDirect.text()).toBe(409)
+        expect(await protectedDirect.json()).toMatchObject({ data: { code: 'TEAM_GROUP_PROTECTED', field: 'threadId' } })
+        await page.goto(`${listPath}/team/${directId}?view=team`)
+        await waitForNuxtHydration(page)
+        await expect(page.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
+        await loginAs(memberContext.request, baseURL!, buyer.id)
+        await memberPage.goto('/dashboard/account/messages')
+        await waitForNuxtHydration(memberPage)
+        await expect(memberPage.getByRole('link', { name: 'New team conversation', exact: true })).toHaveCount(0)
+        await expect(memberPage.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
+      } finally {
+        try {
+          const deleted = await api.post('/api/auth/organization/delete', { headers: ownerBearer, data: { organizationId: organization.id } })
+          expect(deleted.status, await deleted.text()).toBe(200)
+        } finally { await Promise.all([memberContext.close(), memberMcp.dispose()]) }
+      }
+    })
+  }
+
+  test('an experience team manages a business-scheduled booking without a booked individual and loses access when removed', async ({ baseURL, page, browser, request }) => {
+    test.setTimeout(120_000)
+    const { api, signInBearer } = session(baseURL)
+    const ownerBearer = await signInBearer(fixture.email)
+    const memberBearer = await signInBearer(invitee.email)
+    const slug = `e2e-responsibility-${crypto.randomUUID().slice(0, 8)}`
+    const name = `Experience responsibility ${slug}`
+    const created = await api.post('/api/auth/organization/create', { headers: ownerBearer, data: { name, slug, default_currency: 'THB', timezone: 'UTC' } })
+    expect(created.status, await created.text()).toBe(200)
+    const organization = await created.json() as { id: string }
+    const memberContext = await browser.newContext()
+    try {
+      const provisioned = await api.post('/api/organizations', { headers: ownerBearer, data: { organizationId: organization.id, name, subdomain: slug, vertical: 'experience', sourceLocale: 'en' } })
+      expect(provisioned.status, await provisioned.text()).toBe(200)
+      const offered = await api.post(`/api/organizations/${organization.id}/invite-links`, { headers: ownerBearer, data: { role: 'member' } })
+      expect(offered.status, await offered.text()).toBe(201)
+      const { token } = await offered.json() as { token: string }
+      const accepted = await api.post(`/api/invite-links/${token}/accept`, { headers: memberBearer })
+      expect(accepted.status, await accepted.text()).toBe(200)
+      const { memberId } = await accepted.json() as { memberId: string }
+      const profile = await api.put(`/api/organizations/${organization.id}/members/${memberId}/scheduling`, { headers: ownerBearer, data: { expected_updated_at: null, public_name: 'Experience guide', public_bio: 'Leads the local experience.', public_approved: true } })
+      expect(profile.status, await profile.text()).toBe(200)
+      const teamName = 'Experience hosts'
+      const madeTeam = await api.post('/api/auth/organization/create-team', { headers: ownerBearer, data: { organizationId: organization.id, name: teamName } })
+      expect(madeTeam.status, await madeTeam.text()).toBe(200)
+      const { id: teamId } = await madeTeam.json() as { id: string }
+      const included = await api.post('/api/auth/organization/add-team-member', { headers: ownerBearer, data: { organizationId: organization.id, teamId, userId: invitee.id } })
+      expect(included.status, await included.text()).toBe(200)
+      const context = await api.get(`/api/dashboard/context?org=${slug}`, { headers: ownerBearer })
+      expect(context.status, await context.text()).toBe(200)
+      const { locations } = await context.json() as { locations: Array<{ id: string }> }
+      expect(locations).toHaveLength(1)
+      const locationId = locations[0]!.id
+      const opened = await api.patch(`/api/dashboard/locations/${locationId}?org=${slug}`, { headers: ownerBearer, data: { timezone: 'UTC', opening_hours: { periods: [{ open: { day: 0, hour: 0, minute: 0 } }] } } })
+      expect(opened.status, await opened.text()).toBe(200)
+      const editor = `/api/editor/organizations/${organization.id}`
+      const madeProduct = await api.post(`${editor}/products`, { headers: ownerBearer, data: { kind: 'experience', name: 'Team-led local experience', active: true, variants: [{ name: 'One guest', prices: [{ unit_amount: 0, currency: 'THB' }] }] } })
+      expect(madeProduct.status, await madeProduct.text()).toBe(201)
+      const { product } = await madeProduct.json() as { product: Product }
+      const configured = await api.put(`${editor}/products/${product.id}/booking`, { headers: ownerBearer, data: { duration_minutes: 60, default_capacity: 4, scheduling_mode: 'legacy', confirmation_mode: 'review', online_payment_required: false } })
+      expect(configured.status, await configured.text()).toBe(200)
+      await loginAs(page.request, baseURL!, fixture.id)
+      await page.goto(`/dashboard/${slug}/products/${product.id}/booking/assignment`)
+      const assignment = page.locator('#dashboard-panel-booking-assignment')
+      await assignment.getByRole('radio', { name: `Team: ${teamName} 1 member: Guests see each one with a published profile`, exact: true }).check()
+      await expect(assignment.getByRole('switch', { name: 'Book each team member’s working hours', exact: true })).not.toBeChecked()
+      const assigned = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === `${editor}/products/${product.id}/booking`)
+      await assignment.getByRole('button', { name: 'Save', exact: true }).click()
+      const assignedResponse = await assigned
+      expect(assignedResponse.status(), await assignedResponse.text()).toBe(200)
+      expect(assignedResponse.request().postDataJSON()).toEqual({ scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: teamId })
+      const productRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: organization.id, product_id: product.id } })
+      expect(productRead.status(), await productRead.text()).toBe(200)
+      expect(mcpData<{ product: Product }>(await productRead.json()).product.booking).toMatchObject({ scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: teamId })
+      const placed = await api.put(`${editor}/products/${product.id}/locations/${locationId}`, { headers: ownerBearer, data: { active: true, published: false } })
+      expect(placed.status, await placed.text()).toBe(200)
+      const day = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10)
+      const sessionCreated = await api.post(`${editor}/products/${product.id}/sessions`, { headers: ownerBearer, data: { location_id: locationId, starts_at: `${day}T10:00:00.000Z`, ends_at: `${day}T11:00:00.000Z`, capacity: 4, idempotency_key: crypto.randomUUID() } })
+      expect(sessionCreated.status, await sessionCreated.text()).toBe(201)
+      const { sessions } = await sessionCreated.json() as { sessions: Array<{ id: string }> }
+      expect(sessions).toHaveLength(1)
+      const shownAtLocation = await api.put(`${editor}/products/${product.id}/locations/${locationId}`, { headers: ownerBearer, data: { active: true, published: true } })
+      expect(shownAtLocation.status, await shownAtLocation.text()).toBe(200)
+      const published = await api.put(`${editor}/products/${product.id}/publication`, { headers: ownerBearer, data: { published: true } })
+      expect(published.status, await published.text()).toBe(200)
+      const guestName = `Experience team guest ${crypto.randomUUID()}`
+      const booked = await request.post(`/api/public/products/${product.slug}/book`, { headers: { 'x-preview-tenant': slug }, data: { session_id: sessions[0]!.id, variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName, guest_email: `${slug}@playwright.example`, idempotency_key: crypto.randomUUID() } })
+      expect(booked.status(), await booked.text()).toBe(201)
+      const { request_id: requestId } = await booked.json() as { request_id: string }
+      const bookingPath = `/api/dashboard/bookings/booking/${requestId}?org=${slug}`
+      const inboxPath = `/api/dashboard/organizations/${organization.id}/guest-threads/${requestId}`
+      const memberBooking = await api.get(bookingPath, { headers: memberBearer })
+      expect(memberBooking.status, await memberBooking.text()).toBe(200)
+      expect(await memberBooking.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: null, experienceId: product.id, guestName } })
+      const today = await api.get(`/api/dashboard/today?org=${slug}`, { headers: memberBearer })
+      expect(today.status, await today.text()).toBe(200)
+      expect((await today.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`attention:${requestId}`)
+      await loginAs(memberContext.request, baseURL!, invitee.id)
+      const memberPage = await memberContext.newPage()
+      let socket: WebSocket | undefined
+      memberPage.on('websocket', next => { if (new URL(next.url()).pathname === '/api/dashboard/guest-inbox/socket') socket = next })
+      const reconciled = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === inboxPath)
+      await memberPage.goto(`/dashboard/${slug}/messages/${requestId}`)
+      expect((await reconciled).status()).toBe(200)
+      await expect(memberPage.getByRole('heading', { name: guestName, exact: true })).toBeVisible()
+      await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toBeVisible()
+      if (!socket || socket.isClosed()) throw new Error('The responsible experience member has no live inbox socket')
+      const revoked = socket.waitForEvent('framereceived', { predicate: frame => {
+        if (frame.payload === 'pong') return false
+        const event: unknown = JSON.parse(String(frame.payload))
+        return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organization.id
+      } })
+      const removed = await api.post('/api/auth/organization/remove-team-member', { headers: ownerBearer, data: { organizationId: organization.id, teamId, userId: invitee.id } })
+      expect(removed.status, await removed.text()).toBe(200)
+      await revoked
+      await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
+      await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
+      expect((await api.get(bookingPath, { headers: memberBearer })).status).toBe(404)
+      expect((await api.get(inboxPath, { headers: memberBearer })).status).toBe(404)
+      const afterToday = await api.get(`/api/dashboard/today?org=${slug}`, { headers: memberBearer })
+      expect(afterToday.status, await afterToday.text()).toBe(200)
+      expect((await afterToday.json() as TodayFeedPayload).cards.map(card => card.id)).not.toContain(`attention:${requestId}`)
+      const retained = await api.get(bookingPath, { headers: ownerBearer })
+      expect(retained.status, await retained.text()).toBe(200)
+      expect(await retained.json()).toMatchObject({ booking: { id: requestId, assignedMemberId: null, experienceId: product.id, guestName } })
+    } finally {
+      try {
+        const deleted = await api.post('/api/auth/organization/delete', { headers: ownerBearer, data: { organizationId: organization.id } })
+        expect(deleted.status, await deleted.text()).toBe(200)
+      } finally { await memberContext.close() }
+    }
   })
 
   test('a lodging organization publishes a Saya site and is deleted by its owner', async ({ baseURL }) => {

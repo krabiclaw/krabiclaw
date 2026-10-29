@@ -1,6 +1,6 @@
 <template>
   <div class="min-h-screen">
-    <header class="mx-auto max-w-7xl px-4 pt-[calc(4rem+var(--header-overlap,0px))] sm:px-6 lg:px-8">
+    <header class="tenant-container pt-[calc(4rem+var(--header-overlap,0px))]">
       <h1 class="font-[family-name:var(--font-heading)] text-4xl leading-tight text-highlighted [font-weight:var(--font-heading-weight)] sm:text-5xl">{{ t('social_posts.title') }}</h1>
       <nav v-if="locations.length > 1" class="mt-8 flex flex-wrap gap-3" :aria-label="t('social_posts.by_location')">
         <NuxtLink

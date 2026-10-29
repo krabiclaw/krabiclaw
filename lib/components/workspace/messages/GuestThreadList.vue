@@ -571,7 +571,7 @@ function refreshThreads() {
 
 
 watch(realtime.event, (event) => {
-  if (props.personalScope || !event || !('threadId' in event)) return
+  if (props.personalScope || !event || (event.type !== 'access.changed' && !('threadId' in event))) return
   if (organizationId.value && event.organizationId !== organizationId.value) return
   void refresh()
 })

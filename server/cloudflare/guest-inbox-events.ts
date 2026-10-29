@@ -77,6 +77,18 @@ export async function publishNotificationInvalidation(
   })
 }
 
+/** Every still-authorized member reconciles its own resource access. */
+export async function publishAccessInvalidation(env: GuestInboxPublicationEnv, input: { organizationId: string }): Promise<void> {
+  try {
+    await publishDashboardInvalidation(env, {
+      eventId: crypto.randomUUID(), type: 'access.changed', organizationId: input.organizationId, occurredAt: new Date().toISOString(),
+    })
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'Access changed, but open apps could not be told. Retry the same operation to refresh them.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, organization_id: input.organizationId }, cause })
+  }
+}
+
 export async function publishStayInvalidation(
   env: GuestInboxPublicationEnv,
   input: Omit<StayInvalidation, 'eventId' | 'occurredAt'>,

@@ -14,10 +14,19 @@ success, a quota or a customer-facing promise.
 
 ## Calendar and bookings
 
-Services can use the business schedule or one assigned Better Auth organization
-member's working hours, timezone and time off. Existing bookings keep their
-assignment until an explicit reassignment. Approved member profiles introduce
-the person guests will meet on the service page.
+New legal consultations book an available attorney from the explicitly selected
+attorney or legal team, using Better Auth organization membership and the
+attorney's published profile, working hours, timezone and time off. Experiences
+can use a business schedule without one named provider, or allocate an eligible
+member. Locations, offerings and homes share one responsibility model: an
+explicit Better Auth membership or Team, never both. It grants the same scoped
+work across the inbox, Today, calendar and notifications. A Team may include a
+host and supporting people. Owners and admins remain selectable; promotion
+does not clear their responsibility. Missing choices remain unassigned.
+Existing bookings retain their recorded provider until an explicit
+reassignment; staffing and offering configuration edits do not rewrite that
+history. Restaurant reservations retain their table schedule, and lodging
+retains its nightly calendar.
 
 Google Calendar sync is a Business feature. Connecting the business creates or
 reuses its KrabiClaw calendar and projects upcoming pending and confirmed
@@ -66,6 +75,13 @@ or phone. An imported Airbnb conversation can be addressed through its channel
 while the guest's contact details are withheld; the provider's conversation title
 is a label, not a verified guest name. A later booking joins that same
 conversation without discarding its recorded history.
+
+The inbox's assigned member is projected from the booked provider or current
+home/location responsibility; it is not a separate inbox owner. Assignment and
+membership changes make open inboxes recheck access. A member who loses access
+loses the displayed transcript and reply draft. Business threads retain their
+buyer, operations, messages and delivery evidence. Web and iOS show the same
+persisted booking changes and financial facts in that history.
 
 Direct replies use email and mapped Airbnb replies use the channel. Delivery
 receipts distinguish provider acceptance from delivery or reading. An attempt
@@ -155,6 +171,20 @@ to the other members' phones unless they switched team messages off; team
 messages have no email or WhatsApp channel. Owners and admins choose which
 homes a member looks after; each home has one assigned member. A member who
 leaves, is removed or becomes an owner or admin looks after none.
+
+A manually created internal conversation with at least three people is a group.
+It can have a name. Its creator and participating workspace owners and admins
+can rename it and add or remove people; any participant can leave. New people
+can read the group's history. Removing someone or leaving ends their access,
+including an open conversation, and keeps their messages. A group keeps its
+identity when fewer people remain. Starting another group with the same people
+creates a separate conversation.
+
+Direct conversations, buyer and guest conversations, and team conversations
+about a stay or location keep their protected participants and have no group
+management or leave controls. The iPhone app's Message host action includes all
+workspace owners and admins in the stay conversation. Other conversations
+include the sender and the recipients they explicitly choose.
 
 Owners and admins add people with a single-use invite link that lasts seven
 days. Whoever opens it sees the workspace and the role on KrabiClaw's invite

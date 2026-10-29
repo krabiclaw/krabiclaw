@@ -30,7 +30,19 @@ export interface TeamThreadInvalidation extends DashboardInvalidationBase {
   teamThreadId: string
 }
 
-export type DashboardInvalidation = GuestThreadInvalidation | NotificationInvalidation | StayInvalidation | TeamThreadInvalidation
+/** Access ended for one person; contains no conversation content. */
+export interface TeamThreadAccessEnded extends DashboardInvalidationBase {
+  type: 'team_thread.access_ended'
+  teamThreadId: string
+  targetUserId: string
+}
+
+/** A content-free prompt to re-read the caller's current authorized scope. */
+export interface AccessInvalidation extends DashboardInvalidationBase {
+  type: 'access.changed'
+}
+
+export type DashboardInvalidation = GuestThreadInvalidation | NotificationInvalidation | StayInvalidation | TeamThreadInvalidation | TeamThreadAccessEnded | AccessInvalidation
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -42,7 +54,10 @@ export function isDashboardInvalidation(value: unknown): value is DashboardInval
     || typeof value.organizationId !== 'string' || !value.organizationId
     || typeof value.occurredAt !== 'string' || !value.occurredAt) return false
 
+  if (value.type === 'access.changed') return Object.keys(value).every(key => ['type', 'eventId', 'organizationId', 'occurredAt'].includes(key))
   if (value.type === 'team_thread.changed') return typeof value.teamThreadId === 'string' && Boolean(value.teamThreadId)
+  if (value.type === 'team_thread.access_ended') return typeof value.teamThreadId === 'string' && Boolean(value.teamThreadId)
+    && typeof value.targetUserId === 'string' && Boolean(value.targetUserId)
 
   if (!(value.locationId === null || typeof value.locationId === 'string')) return false
 

@@ -56,7 +56,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const now = new Date().toISOString()
     const opening = requestInsertQueries({ id: 'contact-proof', kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: 'guest-proof', review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Proof Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
     await db.batch(opening.map(write => db.prepare(write.query).bind(...write.params)))
-    await Promise.all([0, 1].map(() => notifyContactSubmitted(env, db, { organizationId: 'org-proof', organizationName: 'Proof', locationId: null,
+    await Promise.all([0, 1].map(() => notifyContactSubmitted(env, db, { organizationId: 'org-proof', organizationName: 'Proof', vertical: 'restaurant', locationId: null,
       contactId: 'contact-proof', guestName: 'Proof Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })))
     assert.equal((await listGuestThreads(db, 'org-proof', { userId: 'user-proof', unreadOnly: true }))[0]?.id, 'contact-proof')
     const buyerAlerts = () => db.prepare("SELECT id, json_extract(payload_json,'$.deep_link') AS destination FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id='guest-proof' ORDER BY occurred_at,id").all().then(result => result.results)
@@ -74,7 +74,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     const notifyPushContact = async (contactEnv: typeof env, id: string) => {
       const writes = requestInsertQueries({ id, kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Proof Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
       await db.batch(writes.map(write => db.prepare(write.query).bind(...write.params)))
-      await notifyContactSubmitted(contactEnv, db, { organizationId: 'org-proof', organizationName: 'Proof', locationId: null, contactId: id, guestName: 'Proof Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })
+      await notifyContactSubmitted(contactEnv, db, { organizationId: 'org-proof', organizationName: 'Proof', vertical: 'restaurant', locationId: null, contactId: id, guestName: 'Proof Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })
     }
     const pushDelivery = (id: string) => db.prepare("SELECT d.provider, d.status, d.error, d.provider_message_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ? AND d.channel = 'push'").bind(id).all().then(result => result.results)
     // An owner alert that fails is recorded on its delivery and does not fail the guest's submission.

@@ -299,10 +299,20 @@ function refreshThreadState() {
 }
 
 watch(realtime.event, (event) => {
-  if (props.personalScope || !event || !('threadId' in event)) return
+  if (props.personalScope || !event) return
   if (event.organizationId !== dashboard.organizationId.value) return
-  if (event.threadId === props.threadId) void refresh()
+  if (event.type === 'access.changed' || ('threadId' in event && event.threadId === props.threadId)) void refresh()
 })
+
+watch(error, cause => {
+  if (cause?.statusCode !== 403 && cause?.statusCode !== 404) return
+  draft.value = ''
+  chosen.value = []
+  viewer.value = null
+  attempt.value = null
+  messagingContext.value = undefined
+  checkInOpen.value = false
+}, { flush: 'sync' })
 
 watch(realtime.connectionEpoch, (epoch) => {
   if (epoch > 0) refreshThreadState()
@@ -579,6 +589,7 @@ function systemEventIcon(entry: GuestThreadEntryViewModel) {
 function systemEventLabel(entry: GuestThreadEntryViewModel) {
   const actor = entry.actorLabel ? `${entry.actorLabel} ` : ''
   if (entry.kind === 'operation') {
+    if (entry.body?.trim()) return entry.body
     if (/^(?:payment|refund|dispute)\./.test(entry.eventName ?? '')) {
       if (!entry.body?.trim()) throw createError({ statusCode: 500, statusMessage: 'Financial conversation activity requires its display message.', fatal: true })
       return entry.body

@@ -60,17 +60,17 @@ import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { createReplayableReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 import { indexStoredPublicLocalizations, type StoredPublicLocalizationRow } from '~/server/utils/public-localization'
 import { platformLocale } from '~/shared/platform-locales'
+import { getVerticalCopy } from '~/utils/vertical-copy'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 
-const SUBJECT_LABELS: Record<string, string> = {
-  general: 'General',
-  press: 'Press',
-  partnerships: 'Partnerships',
-  catering: 'Catering',
-  careers: 'Careers',
+// The guest chose a label, not a key: on a studio the option keyed `catering`
+// reads "Workshops & events", so the label comes from the copy the form shows.
+function contactSubjectLabel(subject: string, vertical: string, locale: string) {
+  if (subject === 'catering') return getVerticalCopy(vertical, locale).contactSubjectCatering
+  return platformLocale(locale)!.messages[`site.contact_page.${subject}`] ?? subject
 }
 
 interface NotificationEnv extends CloudflareEnv, ApnsEnv {
@@ -122,6 +122,8 @@ interface ContactNotificationInput extends OrganizationContext {
   subject?: string | null
   message: string
   consentAcknowledged?: boolean
+  /** The site's vertical decides what the subject the guest chose is called. */
+  vertical: string
 }
 
 interface BookingNotificationInput extends OrganizationContext {
@@ -337,10 +339,11 @@ async function resolveOwnerRecipients(
     /** The team member a booking is assigned to hears about it alongside the owners. */
     assignedMemberId?: string | null
     memberIds?: string[]
+    requestId?: string
   },
 ): Promise<OwnerRecipient[]> {
   const [members, messagingEnabled] = await Promise.all([
-    listOrganizationNotificationMembers(env, opts.organizationId, { includeMemberIds: [...(opts.assignedMemberId ? [opts.assignedMemberId] : []), ...(opts.memberIds ?? [])] }),
+    listOrganizationNotificationMembers(env, opts.organizationId, { includeMemberIds: [...(opts.assignedMemberId ? [opts.assignedMemberId] : []), ...(opts.memberIds ?? [])], requestId: opts.requestId }),
     hasOrganizationEntitlement(env, opts.organizationId, 'messaging'),
   ])
   const recipients = await Promise.all(members.map(async (member) => {
@@ -720,6 +723,7 @@ export async function notifyOwner(
     emailPurpose: opts.message.emailPurpose,
     assignedMemberId: assigned?.assigned_member_id ?? null,
     memberIds: opts.memberIds ?? [],
+    requestId: threadContext?.guestThreadId ?? undefined,
   })
 
   // The owner reads mail sent for their business, framed by its own mark.
@@ -1095,12 +1099,12 @@ export async function notifyContactSubmitted(
 
   const ownerMessage = contactReceivedMessage({
     guestName: opts.guestName, guestEmail: opts.email,
-    subject: SUBJECT_LABELS[opts.subject ?? 'general'] ?? opts.subject ?? 'General',
+    subject: contactSubjectLabel(opts.subject ?? 'general', opts.vertical, 'en'),
     message: opts.message, productTitle: opts.productTitle ?? null,
     organizationName: restaurant, consentAcknowledged: Boolean(opts.consentAcknowledged), replyUrl: inboxUrl,
   })
   const guest = await guestPresentation(db, opts)
-  const subjectLabel = opts.subject ? platformLocale(guest.locale)!.messages[`site.contact_page.${opts.subject}`] ?? opts.subject : null
+  const subjectLabel = opts.subject ? contactSubjectLabel(opts.subject, opts.vertical, guest.locale) : null
   const guestMessage = guestContactReceivedMessage({
     ...guest,
     guestName: opts.guestName, organizationLogoUrl: await organizationLogo(db, opts.organizationId),
@@ -1767,6 +1771,7 @@ export async function notifyGuestThreadReply(
     organizationId: opts.organizationId,
     category: ownerMessage.category,
     emailPurpose: ownerMessage.emailPurpose,
+    requestId: opts.threadId,
   })
 
   const results = await Promise.allSettled(recipients.flatMap((recipient) => {

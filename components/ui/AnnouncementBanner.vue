@@ -4,7 +4,7 @@
     aria-label="Announcement"
     class="relative z-40 bg-action text-on-action"
   >
-    <div class="mx-auto flex max-w-7xl items-center justify-between gap-x-4 px-4 py-2.5 sm:px-6 lg:px-8 text-sm">
+    <div class="tenant-container flex items-center justify-between gap-x-4 py-2.5 text-sm">
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
         <p class="font-medium">
           <strong v-if="announcement?.headline" class="font-semibold">{{ announcement.headline }}</strong>

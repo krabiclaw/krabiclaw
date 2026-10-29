@@ -597,6 +597,57 @@ development and E2E bindings move to it together, immediately before
 promotion; take the production final delta from v20 right after the
 production deployment.
 
+The v21-to-v22 replacement changes
+`product_booking_configs_held_online_check` so a departed provider leaves an
+online offering explicitly Unassigned while retaining provider scheduling and
+online delivery. New legal requests still require an attorney. The parent is
+referenced by `product_availability_rules_config_scope_fk` and
+`product_sessions_config_scope_fk`, whose cascading deletion would also risk
+booked history. The complete v21 chain is archived intact in
+`migrations-history/v21/`; v22 uses the generated `0000_baseline.sql`.
+
+The transfer completes missing v21 forward migrations on its private copy,
+including `0008_team_group_management.sql`. Existing manual conversations with
+at least three current participants receive their group classification before
+the copy; stay/location conversations remain protected. Bookings, sessions,
+messages, seats, accounts, sessions and each environment's signing keys retain
+their recorded identities and values.
+
+Created on 2026-10-29 with `--location wnam`, with WNAM confirmed by Cloudflare
+before either binding or loading:
+
+- `krabiclaw-staging-v22`: `f88d2d02-401b-41b2-97f4-f546009d380c`
+- `krabiclaw-production-v22`: `f359de5d-e97d-4a14-9467-44d5b9e5c52f`
+
+Apply the generated baseline through `wrangler d1 migrations apply`, then load
+each unbound replacement through `scripts/pull-production-snapshot.ts` from its
+own explicitly named v21 source. Retain initial comparison artifacts privately
+under `~/.codex/krabiclaw-db-replacements/v22/`. Repository bindings name the
+prepared replacements; deployed Workers keep their existing v21 databases
+until the normal environment deployment. Before each cutover, perform a
+read-only delta preflight (`--out` without an environment load flag) from that
+environment's v21 source against its initial artifact. Immediately after the
+binding moves, apply the final delta once against that initial artifact. Inspect
+changed/deleted keys and carry important edits explicitly without overwriting
+replacement writes. Verify deployed schema, foreign keys and the
+affected guest workflows before retiring either v21 database. Production,
+development and E2E bindings use the same production replacement.
+
+The staging initial copy on 2026-10-29 loaded all 117 tables and 107,587 rows
+from staging v21. Independent API reads confirmed the replacement's baseline
+ledger, key row counts and zero foreign-key violations. The staging binding
+moved to v22 with `d23aa096d` on 2026-10-29. The final delta from staging v21,
+taken right after that deployment, carried 377 new rows (117 tables, 107,964
+rows) with no transforms; the four rows it left were one OAuth resource, client
+and consent and one Stripe connected account whose only change was a refresh
+timestamp. v22 then read back the native `0000_baseline.sql` ledger, matching
+identity, organization, product, booking, request and stay counts, and an empty
+`foreign_key_check`. On the deployed Worker a three-person Saltleaf group was
+created, renamed, had a member removed and re-added, and was left by its
+creator, whose transcript then answered 404; a Saltleaf location, a Saltleaf
+home and an Ember & Slice experience were each assigned to a member and
+restored. Staging v21 is retained.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;

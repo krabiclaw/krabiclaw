@@ -1,6 +1,6 @@
 import { isStayAmenityCodes, parseStayAmenityAnswers, planStayAmenityAnswers, STAY_ALARM_AMENITIES, STAY_ALARM_DETAIL_KEYS, stayAmenityAvailability, stayCodes, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
+import { assertResponsibilityTarget, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
@@ -16,7 +16,7 @@ import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } fro
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, resolvePublishedTenantPageIdentity, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
-import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { publishAccessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
 import type { AirbnbSettingSections, pushStayHomeChannel } from '~/server/domain/stays'
 import { executeWithinCapacity, liveHomeSql, reportBillingUsage } from '~/server/utils/billing'
@@ -789,12 +789,9 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   if (typeof minNights !== 'number' || !Number.isInteger(minNights) || minNights < 1 || minNights > 365) invalid('stay.min_nights must be a whole number from 1 to 365')
   const location = await queryFirst<{ id: string }>(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId])
   if (!location) notFound('That location is not in this organization')
-  const assignedMemberId = stay.assigned_member_id ?? null
-  const assignedTeamId = stay.assigned_team_id ?? null
-  if (assignedMemberId !== null && (typeof assignedMemberId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM member WHERE organizationId = ? AND id = ?', [organizationId, assignedMemberId]))) notFound('stay.assigned_member_id is not a member of this organization')
-  if (assignedTeamId !== null && (typeof assignedTeamId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM team WHERE organizationId = ? AND id = ?', [organizationId, assignedTeamId]))) notFound('stay.assigned_team_id is not a team of this organization')
+  const target = await assertResponsibilityTarget(db, organizationId, stay)
   return { location_id: locationId, check_in_time: stay.check_in_time as string, check_in_end_time: checkInEnd as string | null, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights,
-    ...planStayListing(stay), assigned_member_id: assignedMemberId as string | null, assigned_team_id: assignedTeamId as string | null }
+    ...planStayListing(stay), ...target }
 }
 
 function invalidStayField(field: string, message: string): never {
@@ -1382,7 +1379,7 @@ export async function createProduct(db: DbClient, input: {
     if (input.booking) {
       await assertBookableOffering(db, input.organizationId, planned, input.booking.data.location_id)
       const { prepareProductBookingSetup } = await import('~/server/utils/availability')
-      writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: planned.id, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data, productInSameBatch: true }))
+      writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: planned.id, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data, productInSameBatch: true, productKind: planned.kind }))
     }
     if (input.publication?.published && planned.kind === 'experience' && !input.booking && !planned.order_url) invalid('Provide booking details or an external booking destination before publishing an experience')
     if (input.publication?.published) await assertStayBookable(db, input.organizationId, planned)
@@ -1873,6 +1870,10 @@ export async function updateProduct(db: DbClient, input: {
   let reprice = false
   let settings: AirbnbSettingSections | null = null
   const complete = async (product: Product): Promise<ProductMutation> => {
+    if ((product.kind === 'stay' && (input.patch.stay?.assigned_member_id !== undefined || input.patch.stay?.assigned_team_id !== undefined))
+      || input.booking?.data.assigned_member_id !== undefined || input.booking?.data.assigned_team_id !== undefined) {
+      await publishAccessInvalidation(env, { organizationId: input.organizationId })
+    }
     let channelPush: ChannelPushCompletion = null
     if (product.kind === 'stay' && (reprice || settings !== null) && !input.deferStayNightPush) {
       if (!env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
@@ -2610,6 +2611,9 @@ export async function reconcileProducts(db: DbClient, input: {
   })
   const { pushStayHomeChannel } = await import('~/server/domain/stays')
   const complete = async (products: Product[], completion: unknown, replay = false): Promise<ProductMutation[]> => {
+    if (input.products.some(product => product.stay?.assigned_member_id !== undefined || product.stay?.assigned_team_id !== undefined)) {
+      await publishAccessInvalidation(input.env, { organizationId: input.organizationId })
+    }
     const plans = typeof completion === 'object' && completion !== null && !Array.isArray(completion) ? completion as Record<string, unknown> : null
     // Validate every saved intent before starting any product's external work.
     const changes = products.map(product => ({ product, completion: product.kind === 'stay' ? readProductChannelCompletion(plans?.[product.id], product) : null }))

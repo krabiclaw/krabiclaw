@@ -1,6 +1,6 @@
 <template>
   <div class="min-h-screen bg-default text-default">
-    <header class="mx-auto max-w-7xl px-4 pt-16 pb-12 sm:px-6 lg:px-8">
+    <header class="tenant-container pt-16 pb-12">
       <p class="tenant-kicker mb-6">{{ t('site.reviews.title') }}</p>
       <h1 class="tenant-display-md text-default">
         <template v-if="googleReviewSummary">
@@ -36,7 +36,7 @@
       </div>
     </header>
 
-    <section class="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
+    <section class="tenant-container pb-16">
       <div v-if="visibleReviews.length" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         <TenantReviewCard
           v-for="review in visibleReviews"
@@ -52,7 +52,7 @@
     </section>
 
     <!-- Load more -->
-    <div v-if="hasMore" class="mx-auto max-w-7xl px-4 pb-20 sm:px-6 lg:px-8 text-center">
+    <div v-if="hasMore" class="tenant-container pb-20 text-center">
       <button
         class="inline-flex items-center gap-2 rounded-full border border-default px-8 py-3 text-[11px] font-medium uppercase tracking-widest text-default transition hover:bg-muted"
         @click="loadMore"

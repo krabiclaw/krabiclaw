@@ -184,6 +184,7 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
       { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     assert.equal(response.status, 200)
     const today = await response.json() as TodayFeedPayload
+    assert.equal(today.cards.find(card => card.id === 'offer:calendar_sync')?.imageUrl, 'https://proof.example/images/offers/calendar.webp', 'Today exposes its platform illustration as an absolute HTTPS URL for native clients')
     assert.deepEqual(today.cards.filter(card => card.priority === 'attention').map(card => ({ id: card.id, headline: card.headline, to: card.to, bookingKind: card.bookingKind,
       stayId: card.stayId, productId: card.productId, occurrenceAt: card.occurrenceAt, timeZone: card.timeZone, imageIcon: card.imageIcon })), [{
       id: `attention:${rows[0]!.id}`, headline: 'Review conversation: Conversation supplied by Airbnb', to: `/dashboard/org/messages/${rows[0]!.id}`,

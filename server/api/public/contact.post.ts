@@ -58,7 +58,7 @@ export default defineHandler(async (event) => {
   if (subject && !VALID_SUBJECTS.includes(subject))
     return jsonResponse({ error: 'Please choose a valid subject.' }, { status: 400 })
 
-  const organization = await queryFirst<{ id: string; name?: string | null; vertical?: string | null; theme_id?: string | null }>(
+  const organization = await queryFirst<{ id: string; name?: string | null; vertical: string; theme_id?: string | null }>(
     db, 'SELECT id, name, vertical, theme_id FROM organization WHERE id = ? AND status = ? LIMIT 1', [organizationId, 'active'], )
   if (!organization) return jsonResponse({ error: 'Organization not found' }, { status: 404 })
   const sourceLocale = await getPersistedSourceLocale(db, organizationId)
@@ -110,7 +110,7 @@ export default defineHandler(async (event) => {
   // record as well.
   const followUps = await Promise.allSettled([
     notifyContactSubmitted(env, db, {
-      organizationId: organization.id, locale: language.locale, locationId: assignedLocationId, organizationName: organization.name, contactId: id, guestName: name, email, subject: subject || topic || null, message, consentAcknowledged, }),
+      organizationId: organization.id, locale: language.locale, locationId: assignedLocationId, organizationName: organization.name, vertical: organization.vertical, contactId: id, guestName: name, email, subject: subject || topic || null, message, consentAcknowledged, }),
     // A preview is the host looking at their own site, not a guest's conversion.
     event.context.previewAuthorized === true ? Promise.resolve({ recorded: false, reason: 'preview' }) : recordOrganizationConversionEvent(db, event.req, {
     organizationId: organization.id,

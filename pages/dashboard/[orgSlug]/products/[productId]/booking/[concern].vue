@@ -19,24 +19,12 @@
       <UFormField v-else-if="concern === 'confirmation'" name="confirmation_mode">
         <URadioGroup v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
       </UFormField>
-      <div v-else-if="concern === 'assignment'" class="space-y-6">
+      <div v-if="concern === 'assignment' || concern === 'enabled' && legal && p.form.bookable" class="space-y-6">
         <UFormField name="assigned_member_id" :label="p.bookingCopy.value.assigneeLabel">
-          <p v-if="membersError" role="alert" class="mb-3 text-error">Team members could not be loaded.</p>
-          <p v-else-if="membersStatus !== 'success'" class="mb-3 text-muted">Loading team members…</p>
-          <URadioGroup v-else v-model="host" :items="hostOptions" variant="card" indicator="end" color="neutral" class="w-full" :ui="{ item: 'items-center', wrapper: 'flex items-center gap-4' }">
-            <template #label="{ item }">
-              <span class="flex items-center gap-4">
-                <UAvatar :src="item.avatar ?? undefined" :alt="item.label" :icon="item.team ? 'i-lucide-users' : undefined" size="xl" />
-                <span>
-                  <span class="block font-medium text-highlighted">{{ item.label }}</span>
-                  <span class="block text-sm font-normal" :class="item.published ? 'text-muted' : 'text-warning'">{{ item.state }}</span>
-                </span>
-              </span>
-            </template>
-          </URadioGroup>
+          <ResponsibilityPicker v-model:member-id="p.form.assigned_member_id" v-model:team-id="p.form.assigned_team_id" :organization-id="p.organizationId" :disabled="p.saving.value" :people-label="peopleLabel" required profiles />
           <UButton v-if="unpublishedHost" class="mt-4" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/team/${unpublishedHost.id}/profile`">Edit {{ unpublishedHost.name }}'s profile</UButton>
         </UFormField>
-        <SettingRow v-model="hostHours" :disabled="!host || p.form.held_online" :label="workingHoursLabel" :description="`${peopleLabel} choose from ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} own hours instead of the weekly schedule.`" />
+        <SettingRow v-model="hostHours" :disabled="!p.form.assigned_member_id && !p.form.assigned_team_id || p.form.held_online || legal && hostHours" :label="workingHoursLabel" :description="legal ? 'Each new consultation is booked with an available attorney from this selection. Existing consultations keep their booked attorney.' : `${peopleLabel} choose from ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} own hours instead of the weekly schedule.`" />
       </div>
       <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" :label="`Require online payment for paid ${occurrence}s`" />
@@ -56,6 +44,7 @@ import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { productEditorKey, type BookingConcern } from '~/components/dashboard/ProductEditorPage.vue'
 import OfferCard from '~/components/dashboard/OfferCard.vue'
 import { offer } from '~/shared/offers'
+import ResponsibilityPicker from '~/components/dashboard/ResponsibilityPicker.vue'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -71,34 +60,22 @@ const settings = computed(() => ({
   duration: { title: 'Duration', lead: `How long does each ${occurrence.value} last? Existing appointments keep their saved duration.` },
   capacity: { title: legal.value ? 'Client limit' : 'Guest limit', lead: `How many ${p.bookingCopy.value.guestsLabelPlural} can book the same ${occurrence.value}? Existing appointments keep their saved ${p.bookingCopy.value.guestLabel} limit.` },
   confirmation: { title: 'Confirmation', lead: `Confirm ${legal.value ? 'consultations' : 'bookings'} as soon as ${p.bookingCopy.value.guestsLabelPlural} ${legal.value ? 'request a time' : 'reserve'}, or review each request before confirming.` },
-  assignment: { title: p.bookingCopy.value.assigneeLabel, lead: `${legal.value ? 'Who handles this consultation' : 'Who runs it'}. ${peopleLabel.value} see ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} published profile on the page. A published host profile is required before publishing this offering. Existing bookings keep their assigned host.` },
+  assignment: { title: p.bookingCopy.value.assigneeLabel, lead: legal.value ? 'Choose an attorney or legal team for new consultations. Clients book an available attorney’s working hours and see their published profile. Existing consultations keep their booked attorney.' : `Who runs it. ${peopleLabel.value} see ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} published profile on the page. A published host profile is required before publishing this offering. Existing bookings keep their assigned host.` },
   payment: { title: 'Payment', lead: `${peopleLabel.value} pay before their booking is made. Free ${occurrence.value}s remain bookable.` },
   location: { title: 'Meeting format', lead: `Enable online ${legal.value ? 'consultations' : 'booking'} in ${p.form.assigned_team_id ? 'each team member’s' : `the ${p.bookingCopy.value.assigneeNoun}’s`} working hours. Edit physical availability and repeating times at each saved ${legal.value ? 'office' : 'location'}.` },
 }))
 const dashboard = useDashboardOrganization()
 const paymentEntitled = computed(() => dashboard.entitlements.value.payments === true)
-const { data: members, error: membersError, status: membersStatus } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
-// The host is who runs it: one member or one team. Whose hours guests book is a separate choice.
-const host = computed({
-  get: () => p.form.assigned_team_id ? `team:${p.form.assigned_team_id}` : p.form.assigned_member_id ? `member:${p.form.assigned_member_id}` : undefined,
-  set: (value: string | undefined) => {
-    p.form.assigned_team_id = value?.startsWith('team:') ? value.slice(5) : null
-    p.form.assigned_member_id = value?.startsWith('member:') ? value.slice(7) : null
-  },
+const { data: members, status: membersStatus } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
+watch(() => [p.form.assigned_member_id, p.form.assigned_team_id], ([memberId, teamId]) => {
+  if (legal.value && (memberId || teamId)) p.form.scheduling_mode = 'provider'
 })
 const hostHours = computed({
   get: () => p.form.scheduling_mode === 'provider',
   set: (value: boolean) => { p.form.scheduling_mode = value ? 'provider' : 'legacy' },
 })
-const profileState = (published: boolean) => published ? 'Profile published' : `Profile not published: ${p.bookingCopy.value.guestsLabelPlural} can't see it yet`
-// Offered only once the list has loaded; see the template's loading and error states.
 // A chosen member guests can't see yet: their profile is one step away.
-const unpublishedHost = computed(() => members.value?.members.find(member => `member:${member.id}` === host.value && member.scheduling?.public_approved !== 1) ?? null)
-// Each host as guests will see them: the published photo, else the account picture.
-const hostOptions = computed(() => members.value ? [
-  ...members.value.members.map(member => ({ label: member.name, avatar: member.scheduling?.public_photo_url || member.image, published: member.scheduling?.public_approved === 1, team: false, state: profileState(member.scheduling?.public_approved === 1), value: `member:${member.id}` })),
-  ...members.value.teams.map(team => ({ label: team.name, avatar: null, published: true, team: true, state: `${team.members.length} ${team.members.length === 1 ? 'member' : 'members'}: ${p.bookingCopy.value.guestsLabelPlural} see each one with a published profile`, value: `team:${team.id}` })),
-] : [])
+const unpublishedHost = computed(() => members.value?.members.find(member => member.id === p.form.assigned_member_id && member.scheduling?.public_approved !== 1) ?? null)
 const setting = computed(() => settings.value[concern.value as keyof typeof settings.value] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return
@@ -122,7 +99,7 @@ watch(capacityChoice, choice => {
   else if (Number(p.form.booking_capacity) < 2) p.form.booking_capacity = ''
 })
 const valid = computed(() => {
-  if (concern.value === 'assignment') return membersStatus.value === 'success' && Boolean(host.value)
+  if (concern.value === 'assignment' || concern.value === 'enabled' && legal.value && p.form.bookable) return membersStatus.value === 'success' && Boolean(p.form.assigned_member_id || p.form.assigned_team_id) && (!legal.value || p.form.scheduling_mode === 'provider')
   if (concern.value === 'duration') return Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0
   if (concern.value === 'capacity') return capacityChoice.value !== 'group' || (Number.isSafeInteger(Number(p.form.booking_capacity)) && Number(p.form.booking_capacity) >= 2)
   if (concern.value === 'location') return !p.form.held_online || p.form.scheduling_mode === 'provider'

@@ -288,11 +288,11 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const schedulingMembersResource = useMemberSchedulingList(() => organizationId)
   const { data: schedulingMembers, error: schedulingMembersError } = schedulingMembersResource
   const assignmentSummary = computed(() => {
-    if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Administrators'
+    if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Unassigned'
     if (schedulingMembersError.value) return 'Team members could not be loaded'
     if (!schedulingMembers.value) return 'Loading team members…'
-    if (detailsForm.assigned_team_id) return schedulingMembers.value.teams.find(t => t.id === detailsForm.assigned_team_id)?.name ?? 'Assigned team'
-    return schedulingMembers.value.members.find(m => m.id === detailsForm.assigned_member_id)?.name ?? 'Assigned member'
+    if (detailsForm.assigned_team_id) return schedulingMembers.value.teams.find(t => t.id === detailsForm.assigned_team_id)?.name ?? 'Assigned team not found in this business'
+    return schedulingMembers.value.members.find(m => m.id === detailsForm.assigned_member_id)?.name ?? 'Assigned member not found in this business'
   })
 
   const statusSummary = computed(() => location.value?.status === 'active' ? 'Published' : 'Draft')

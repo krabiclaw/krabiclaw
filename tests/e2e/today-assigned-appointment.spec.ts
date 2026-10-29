@@ -221,12 +221,13 @@ test('an assigned staff member can review a future online consultation from Toda
       if (product) {
         await body(await page.request.put(`${EDITOR}/products/${product.id}/publication`, { data: { published: false } }), 200)
         if (requestId) {
-          // Booked history is retained by the canonical Product lifecycle.
-          await body(await page.request.put(`${EDITOR}/products/${product.id}/booking`, { data: { held_online: false, scheduling_mode: 'legacy', assigned_member_id: null } }), 200)
+          // Archive the authored consultation with its attorney configuration and booked history.
           await body(await page.request.patch(`${EDITOR}/products/${product.id}`, { data: { active: false } }), 200)
           const archived = await body<{ product: Product }>(await page.request.get(`${EDITOR}/products/${product.id}`), 200)
-          expect(archived.product).toMatchObject({ active: false, booking: { held_online: false, assigned_member_id: null } })
+          expect(archived.product).toMatchObject({ active: false, booking: { held_online: true, scheduling_mode: 'provider', assigned_member_id: actor.id, assigned_team_id: null } })
           expect(archived.product.publications).toContainEqual({ organization_id: ORGANIZATION, published: false })
+          const history = await body<{ booking: DashboardBookingDetails }>(await page.request.get(`/api/dashboard/bookings/booking/${requestId}`, { params: { org: SLUG } }), 200)
+          expect(history.booking).toMatchObject({ id: requestId, status: 'cancelled', assignedMemberId: actor.id })
         } else await body(await page.request.delete(`${EDITOR}/products/${product.id}`), 200)
       }
     } catch (error) { failures.push(error) }

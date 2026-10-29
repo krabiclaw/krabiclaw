@@ -14,7 +14,7 @@ import { roleSatisfies } from '../../server/utils/mcp-auth.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 test('member self-service uses Better Auth permissions, public approval is admin-only, and selected disconnected busy data fails closed for only that member', {timeout:120000},async(t)=>{
- const runtime=new Miniflare({workers:[{config:{name:'member-scheduling-proof',compatibilityDate:'2024-11-01',manifest:{mainModule:'index.mjs',modules:{'index.mjs':{type:'esm',contents:'export default {fetch(){return new Response("ok")}}'}}},env:{DB:{type:'d1'}}}}]})
+ const runtime=new Miniflare({workers:[{config:{name:'member-scheduling-proof',compatibilityDate:'2024-11-01',manifest:{mainModule:'index.mjs',modules:{'index.mjs':{type:'esm',contents:'export class Hub {fetch(){return new Response(null,{status:204})}} export default {fetch(){return new Response("ok")}}'}}},exports:{Hub:{type:'durable-object',storage:'sqlite'}},env:{DB:{type:'d1'},GUEST_INBOX_HUBS:{type:'durable-object',worker:'member-scheduling-proof',exportName:'Hub'}}}}]})
  const db=await runtime.getD1Database('DB')
  try {
   await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))).map(sql=>db.prepare(sql)))
@@ -23,7 +23,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,periodEnd) VALUES('sub-org','business','org','active',4070908800)").run()
   for(const id of ['owner','one','two','outsider'])await db.prepare('INSERT INTO user(id,name,email,emailVerified)VALUES(?,?,?,1)').bind(id,id,`${id}@example.test`).run()
   for(const [id,role]of [['owner','owner'],['one','member'],['two','member']])await db.prepare("INSERT INTO member(id,organizationId,userId,role)VALUES(?,'org',?,?)").bind(`member-${id}`,id,role).run()
-  const env={DB:db,STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests',BETTER_AUTH_URL:'https://proof.example',BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://krabiclaw.test',GOOGLE_CLIENT_ID:'test-google-client',GOOGLE_CLIENT_SECRET:'test-google-secret'} as CloudflareEnv
+  const env={...await runtime.getBindings<CloudflareEnv>(),DB:db,STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests',BETTER_AUTH_URL:'https://proof.example',BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://krabiclaw.test',GOOGLE_CLIENT_ID:'test-google-client',GOOGLE_CLIENT_SECRET:'test-google-secret'} as CloudflareEnv
   const own={env,userId:'one',organizationId:'org'},owner={...own,userId:'owner'},hours={timezone:'America/New_York',weekly:Array.from({length:7},(_,weekday)=>({weekday,start:'09:00',end:'17:00'})),time_off:[],expected_updated_at:null}
   assert.equal(await roleSatisfies('org','member','member'),true)
   assert.equal(await roleSatisfies('org','member','admin'),false)
@@ -150,7 +150,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]})
   const day=new Date(Date.now()+3*86400000).toISOString().slice(0,10),start=`${day}T14:00:00.000Z`,end=`${day}T15:00:00.000Z`
   for(const [id,member]of [['one','member-one'],['two','member-two']]) {
-   await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('service',?,'org',?,?,'owner','owner')").bind(id,id,id).run()
+   await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('experience',?,'org',?,?,'owner','owner')").bind(id,id,id).run()
    await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by)VALUES(?,'org',?,'Standard','owner','owner')").bind(`variant-${id}`,id).run()
    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,held_online,created_by,updated_by)VALUES(?,'org','provider',?,60,1,1,'owner','owner')").bind(id,member).run()
    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,'org',?,?,'UTC',?,?,1,'owner','owner')").bind(`session-${id}`,id,member,start,end).run()
@@ -217,7 +217,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   assert.equal(JSON.parse(audit!).old_member_id,'member-two')
   assert.equal(JSON.parse(audit!).new_member_id,'member-one')
   assert.equal(JSON.parse(audit!).actor_user_id,'owner')
-  assert.equal(await db.prepare("SELECT assigned_member_id FROM product_booking_configs WHERE product_id='two'").first('assigned_member_id'),'member-two','moving one booking leaves the service with its provider')
+  assert.equal(await db.prepare("SELECT assigned_member_id FROM product_booking_configs WHERE product_id='two'").first('assigned_member_id'),'member-two','moving one booking leaves the offering with its provider')
   await assert.rejects(()=>reassignBookingProvider(owner,{...move,idempotency_key:'already-there'}),/already with that team member/)
   const occupiedRevision=await db.prepare('SELECT updated_at FROM bookings WHERE id=?').bind(healthy.bookingId).first<string>('updated_at')
   await assert.rejects(()=>reassignBookingProvider(owner,{booking_id:healthy.bookingId,member_id:'member-one',expected_updated_at:occupiedRevision!,idempotency_key:'overlap-refused'}),/isn’t free at this time/)

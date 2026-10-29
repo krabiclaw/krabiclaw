@@ -53,7 +53,7 @@
   <section v-else-if="variant === 'home'" id="features" class="relative py-24 overflow-hidden" data-parity-section="features">
     <div class="absolute inset-0 -z-10" style="background: linear-gradient(180deg, var(--ui-bg-elevated) 0%, var(--ui-bg) 100%);"></div>
 
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="tenant-container">
       <div class="text-center max-w-2xl mx-auto mb-14 flex flex-col items-center gap-4">
         <span v-if="eyebrow" class="kc-eyebrow text-muted">{{ eyebrow }}</span>
         <h2 class="text-[clamp(32px,4vw,48px)] font-extrabold tracking-tight leading-[1.05] m-0">

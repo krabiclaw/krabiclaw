@@ -22,7 +22,6 @@ import { getPlatformOrganization } from '~/server/utils/platform-organization'
 import { sendPasswordResetEmail, sendVerificationEmail } from '~/server/utils/auth-email'
 import { validatePassword } from '~/utils/password-validation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import type { InferSelectModel } from 'drizzle-orm'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
 import { platformAdminAccessControl, platformAdminRoles } from '~/utils/platform-admin-access'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
@@ -39,8 +38,8 @@ import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revoke
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
 import { isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
 import { integrationsThroughAccount } from '~/server/utils/organization-integrations'
-
-type MemberRow = InferSelectModel<typeof schema.member>
+import { publishAccessInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { reconcileResponsibilities } from '~/server/utils/member-access'
 
 type IntegrationCallbackContext = GenericEndpointContext['context'] & { integrationAccountId?: string }
 
@@ -348,29 +347,31 @@ function buildAuth(env: CloudflareEnv) {
   // hook could join, so the change record and the audit row commit together
   // with each other, and a failure of either reaches the caller.
   const recordMemberChange = async (organizationId: string, audit: BatchQuery[] = []) => {
+    await reconcileResponsibilities(env, db, { organizationId })
     await executeBatch(db, [publicResourceCacheInvalidationQuery(organizationId, 'member-change'), ...audit])
+    await publishAccessInvalidation(env, { organizationId })
   }
   const configuredOrganizationOptions = {
     ...organizationOptions,
     organizationHooks: {
       beforeCreateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
-      // A removed member or changed role reads differently on every site. A
-      // member who is gone, or who now sees every home, looks after none
-      // (reconciled across the organization, so a failed run is repaired by the
-      // next change); the live dashboard socket re-reads membership per event.
-      // Better Auth's /organization/leave runs no member hook, so the
-      // after-hook below covers it.
-      afterRemoveMember: async ({ organization }: { organization: { id: string } }) => {
-        await recordMemberChange(organization.id)
-        const { releaseUnassignableHomes } = await import('~/server/domain/stays')
-        await releaseUnassignableHomes(env, db, { organizationId: organization.id })
-      },
-      afterUpdateMemberRole: async ({ organization }: { organization: { id: string } }) => {
-        await recordMemberChange(organization.id)
-        const { releaseUnassignableHomes } = await import('~/server/domain/stays')
-        await releaseUnassignableHomes(env, db, { organizationId: organization.id })
-      },
+      afterAddMember: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
+      afterAcceptInvitation: async ({ member }: { member: { organizationId: string } }) => recordMemberChange(member.organizationId),
+      afterRemoveMember: async ({ member }: { member: { id: string; organizationId: string; userId: string } }) => recordMemberChange(member.organizationId, [organizationEventQuery({
+        organizationId: member.organizationId,
+        eventType: 'member.removed',
+        entityType: 'member',
+        entityId: member.id,
+        metadata: { userId: member.userId },
+      })]),
+      afterUpdateMemberRole: async ({ member }: { member: { id: string; organizationId: string; userId: string; role: string } }) => recordMemberChange(member.organizationId, [organizationEventQuery({
+        organizationId: member.organizationId,
+        eventType: 'member.role_changed',
+        entityType: 'member',
+        entityId: member.id,
+        metadata: { userId: member.userId, role: member.role },
+      })]),
       afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
         const { materializeMemberSessions } = await import('~/server/utils/availability')
         await materializeMemberSessions(db, { organizationId: team.organizationId, userId: user.id, actorId: 'system' })
@@ -453,8 +454,6 @@ function buildAuth(env: CloudflareEnv) {
           if (left instanceof Error || !ctx.context.session) return
           const organizationId = (ctx.body as { organizationId: string }).organizationId
           await recordMemberChange(organizationId)
-          const { releaseUnassignableHomes } = await import('~/server/domain/stays')
-          await releaseUnassignableHomes(env, db, { organizationId })
           return
         }
         if (ctx.path !== '/callback/:id') return
@@ -538,12 +537,10 @@ function buildAuth(env: CloudflareEnv) {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
             await deleteBuyerCustomers(db, env, user.id)
             await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
-            // The account's member rows cascade away with it; the homes they
-            // looked after are released last, since an assignment names a member
-            // without a foreign key.
-            const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+            // Current business responsibility ends with membership. The actual
+            // individual recorded on historical bookings remains unchanged.
             for (const { organizationId } of await queryAll<{ organizationId: string }>(db, 'SELECT DISTINCT "organizationId" FROM member WHERE "userId" = ?', [user.id])) {
-              await releaseUnassignableHomes(env, db, { organizationId, departingUserId: user.id })
+              await reconcileResponsibilities(env, db, { organizationId, departingUserId: user.id })
             }
           },
         },
@@ -584,37 +581,6 @@ function buildAuth(env: CloudflareEnv) {
             // including for internal creations that have no HTTP response context.
             context?.setHeader('x-signup-measurement', encodeURIComponent(JSON.stringify(measurement)))
             if (measurement.status === 'failed') console.error('signup_measurement_failed', { userId: user.id, reason: measurement.reason })
-          }
-        }
-      },
-      // Better Auth's org-plugin after-hooks only pass the affected row, not the
-      // acting session, so member.update/delete events are attributed to no actor.
-      member: {
-        create: {
-          after: async (member: MemberRow) => {
-            await recordMemberChange(member.organizationId)
-          }
-        },
-        update: {
-          after: async (member: MemberRow) => {
-            await recordMemberChange(member.organizationId, [organizationEventQuery({
-              organizationId: member.organizationId,
-              eventType: 'member.role_changed',
-              entityType: 'member',
-              entityId: member.id,
-              metadata: { userId: member.userId, role: member.role },
-            })])
-          }
-        },
-        delete: {
-          after: async (member: MemberRow) => {
-            await recordMemberChange(member.organizationId, [organizationEventQuery({
-              organizationId: member.organizationId,
-              eventType: 'member.removed',
-              entityType: 'member',
-              entityId: member.id,
-              metadata: { userId: member.userId },
-            })])
           }
         }
       },
