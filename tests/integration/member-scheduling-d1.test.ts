@@ -4,7 +4,7 @@ import { symmetricEncrypt } from 'better-auth/crypto'
 import { Miniflare } from 'miniflare'
 import { generateSQLiteDrizzleJson,generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
-import { writeMemberScheduling, readMemberScheduling, requireSchedulingAccess, refreshMemberBusy, refreshWorkingWindows, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
+import { writeMemberScheduling, readMemberScheduling, memberSchedulingList, requireSchedulingAccess, refreshMemberBusy, refreshWorkingWindows, workingWindows, selectBusyCalendars } from '../../server/domain/member-scheduling.ts'
 import { claimSessionCapacity, CapacityUnavailableError } from '../../server/utils/availability.ts'
 import { publicProductHosts } from '../../server/utils/public-provider.ts'
 import { reassignBookingProvider } from '../../server/domain/provider-reassignment.ts'
@@ -32,6 +32,8 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await assert.rejects(()=>writeMemberScheduling(own,'member-two',hours))
   await assert.rejects(()=>writeMemberScheduling(own,'member-one',{...hours,public_approved:true}))
   assert.equal(await readMemberScheduling(db,'org','member-one'),null,'membership can exist before either profile or hours are saved')
+  assert.deepEqual((await memberSchedulingList(owner)).members.map(({id,name})=>({id,name})).sort((a,b)=>a.id.localeCompare(b.id)),[{id:'member-one',name:'one'},{id:'member-owner',name:'owner'},{id:'member-two',name:'two'}],'members without an authored name use their account name')
+  await assert.rejects(()=>memberSchedulingList({...own,userId:'outsider'}),{statusCode:403,message:'Membership required'})
   const initialInvalidations=await db.prepare("SELECT count(*) n FROM public_resource_cache_invalidations WHERE organization_id='org'").first('n')
   for(const public_name of [undefined,null,'','   ']) {
    await assert.rejects(()=>writeMemberScheduling(owner,'member-one',{expected_updated_at:null,public_name,public_approved:true}),{statusCode:400,message:'Set a nonblank public name before publishing the member profile'})
@@ -39,6 +41,8 @@ test('member self-service uses Better Auth permissions, public approval is admin
    assert.equal(await db.prepare("SELECT count(*) n FROM public_resource_cache_invalidations WHERE organization_id='org'").first('n'),initialInvalidations)
   }
   const profile=await writeMemberScheduling(own,'member-one',{expected_updated_at:null,public_name:'Approved name',public_bio:'Public bio'})
+  assert.deepEqual((await memberSchedulingList(own)).members.map(({id,name,self})=>({id,name,self})),[{id:'member-one',name:'Approved name',self:true}],'the member sees only their own identity using the authored team-facing name')
+  assert.equal((await memberSchedulingList(owner)).members.find(member=>member.id==='member-one')?.name,'Approved name','the owner sees the same authored name in assignment choices')
   assert.deepEqual({timezone:profile.timezone,weekly:profile.weekly,time_off:profile.time_off,calendar_ids:profile.calendar_ids},{timezone:null,weekly:null,time_off:null,calendar_ids:[]})
   const profileRow=await db.prepare("SELECT * FROM member_scheduling WHERE member_id='member-one'").first()
   for(const field of ['timezone','weekly_json','time_off_json','windows_json','windows_until'])assert.equal(profileRow?.[field],null,'a profile does not fabricate working facts')

@@ -4206,3 +4206,42 @@ test('a stay socket in a service organization closes when Better Auth removes it
     await cleaner.close()
   }
 })
+
+test('a host reads every home on the multi-calendar and opens a night on that home’s own calendar', async ({ page, baseURL }) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, headers, slug, api, productId } = await createStayHome(page, baseURL!)
+  const madeHome = await request.post(api('stay-homes'), { headers, data: { name: 'Bay House', timezone: TIME_ZONE, address: '1 Bay Road', city: 'Krabi', country: 'TH',
+    state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
+    base_price_minor: 320_000, idempotency_key: crypto.randomUUID() } })
+  await expectStatus(madeHome, 201)
+  const bay = (await madeHome.json() as { home: { product_id: string } }).home
+  const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1,
+    guest_name: 'Grid', guest_surname: 'Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
+  await expectStatus(made, 201)
+  const stay = (await made.json() as { stay: { id: string } }).stay
+
+  // The read the grid draws, and the native app reads: every home, its nights, and the stays on them.
+  const window = await request.get(api(`stay-homes/calendar?from=${localDay(0)}&to=${localDay(7)}`))
+  await expectStatus(window, 200)
+  const read = await window.json() as { homes: Array<{ home: { product_id: string; name: string }; nights: Array<{ date: string; stay_id: string | null; price_minor: number | null }> }>; stays: Array<{ id: string; guest_name: string }> }
+  expect(read.homes.map(entry => entry.home.name)).toEqual(['Bay House', 'Cliff Cabin'])
+  expect(read.homes[1]!.nights.map(night => night.stay_id)).toEqual([null, stay.id, stay.id, null, null, null, null])
+  expect(read.homes[0]!.nights.map(night => night.price_minor)).toEqual(Array(7).fill(320_000))
+  expect(read.stays.map(entry => [entry.id, entry.guest_name])).toEqual([[stay.id, 'Grid']])
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/dashboard/${slug}/calendar?view=homes`)
+  const grid = page.getByTestId('stay-homes-grid')
+  await expect(grid.locator(`[data-home="${bay.product_id}"] span`)).toHaveText(['Bay House', '1 Bay Road, Krabi'])
+  await expect(grid.locator(`[data-stay="${stay.id}"]`)).toHaveText('Grid Guest')
+  await expect(grid.locator(`[data-home="${bay.product_id}"] + div [data-night="${localDay(2)}"]`)).toHaveText('3200')
+  // The grid scrolls inside itself; the phone page does not scroll sideways.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await grid.locator(`[data-home="${bay.product_id}"] + div [data-night="${localDay(2)}"]`).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/calendar\\?.*product_id=${bay.product_id}`))
+  expect(new URL(page.url()).searchParams.get('date')).toBe(localDay(2))
+  const calendar = page.locator('#dashboard-panel-stay-night-calendar')
+  await expect(calendar.locator(`[data-reka-calendar-cell-trigger][data-value="${localDay(2)}"]:not([data-outside-view])`)).toHaveAttribute('data-selected')
+})

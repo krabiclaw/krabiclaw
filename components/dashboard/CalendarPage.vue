@@ -64,7 +64,7 @@
       </p>
 
       <!-- The period and its date navigation share one quiet toolbar. -->
-      <header class="flex items-center justify-between py-2">
+      <header v-if="view !== 'homes'" class="flex items-center justify-between py-2">
         <h2 class="text-base font-semibold text-highlighted">
           <time :datetime="view === 'year' ? String(shownYear) : monthKey">{{ periodLabel }}</time>
         </h2>
@@ -75,7 +75,8 @@
         </div>
       </header>
 
-      <template v-if="view !== 'year'">
+      <StayHomesGrid v-if="view === 'homes'" :location-id="scope" />
+      <template v-else-if="view !== 'year'">
         <USkeleton v-if="month.status === 'loading'" class="h-96 w-full" />
         <UAlert
           v-else-if="month.status === 'error'"
@@ -169,7 +170,7 @@
       </template>
 
       <!-- Year: Tailwind's twelve small months; a dot where the day has something. -->
-      <div v-else class="grid grid-cols-1 gap-x-8 gap-y-12 py-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div v-else-if="view === 'year'" class="grid grid-cols-1 gap-x-8 gap-y-12 py-4 sm:grid-cols-2 xl:grid-cols-3">
         <section v-for="block in yearMonths" :key="block.key" class="text-center" :data-month="block.key">
           <button type="button" class="text-sm font-semibold text-highlighted hover:text-primary" @click="openMonth(block.key)">{{ block.label }}</button>
           <USkeleton v-if="block.status === 'loading'" class="mt-6 h-40 w-full" />
@@ -275,6 +276,7 @@ import { NuxtLink } from '#components'
 import { CalendarDate, getDayOfWeek, getLocalTimeZone, parseDate, today } from '@internationalized/date'
 import AgendaRow from '~/lib/components/workspace/dashboard/AgendaRow.vue'
 import AgendaFilters from './AgendaFilters.vue'
+import StayHomesGrid from './StayHomesGrid.vue'
 import CalendarOfferingFilter from './CalendarOfferingFilter.vue'
 import { closeDates, closureOnDate, getDateIntervals, openDates, parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { formatCalendarDate, formatTimestamp, isValidCalendarDate, localNow } from '~/utils/timezone'
@@ -293,6 +295,7 @@ const props = defineProps<{
   offeringItems?: { label: string; value: string }[]
   offeringsError?: string
   canCreateStay?: boolean
+  hasHomes?: boolean
 }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.
@@ -316,14 +319,18 @@ const timeZone = getLocalTimeZone()
 const todayDate = today(timeZone)
 const todayKey = todayDate.toString()
 
-// The three views of Airbnb's calendar; the URL carries which, and which month, so a reload lands where you were.
-type CalendarView = 'list' | 'month' | 'year'
+// The three views of Airbnb's calendar, and its multi-calendar of every home
+// where the organization has homes; the URL carries which, and which month, so
+// a reload lands where you were.
+type CalendarView = 'list' | 'month' | 'year' | 'homes'
 const VIEWS: Record<CalendarView, { label: string; icon: string }> = {
   list: { label: 'List', icon: 'i-lucide-list' },
   month: { label: 'Month', icon: 'i-lucide-layout-grid' },
   year: { label: 'Year', icon: 'i-lucide-grid-3x3' },
+  homes: { label: 'Homes', icon: 'i-lucide-rows-3' },
 }
-const view = ref<CalendarView>(route.query.view === 'list' || route.query.view === 'year' ? route.query.view : 'month')
+const homesView = !props.personalScope && !props.sessionProduct && props.hasHomes
+const view = ref<CalendarView>(route.query.view === 'list' || route.query.view === 'year' || (homesView && route.query.view === 'homes') ? route.query.view : 'month')
 const routeMonth = typeof route.query.month === 'string' && /^\d{4}-\d{2}$/.test(route.query.month) ? route.query.month : null
 const routeDay = typeof route.params.day === 'string' ? route.params.day : null
 const routeDate = props.sessionProduct && typeof route.query.date === 'string' ? route.query.date : null
@@ -332,7 +339,7 @@ const shownYear = ref(shownMonth.value.year)
 const monthKey = computed(() => monthKeyOf(shownMonth.value))
 
 const viewItems = computed(() => [
-  (Object.keys(VIEWS) as CalendarView[]).map(key => ({
+  (Object.keys(VIEWS) as CalendarView[]).filter(key => key !== 'homes' || homesView).map(key => ({
     label: VIEWS[key].label,
     icon: VIEWS[key].icon,
     type: 'checkbox' as const,
@@ -511,7 +518,7 @@ async function ensureLoaded(keys: string[]): Promise<void> {
   await Promise.all(keys.filter(key => monthData.value.get(key)?.status !== 'ready' && monthData.value.get(key)?.status !== 'loading').map(key => loadMonth(key)))
 }
 function neededKeys(): string[] {
-  return view.value === 'year' ? yearKeys.value : [monthKey.value]
+  return view.value === 'year' ? yearKeys.value : view.value === 'homes' ? [] : [monthKey.value]
 }
 async function resetMonths(): Promise<void> {
   generation.value += 1
@@ -699,7 +706,7 @@ await ensureLoaded(neededKeys())
 // The URL says which view and which month; the data follows the period.
 watch([view, monthKey, shownYear], () => {
   if (selecting.value) stopSelecting()
-  void router.replace({ query: { ...route.query, view: view.value === 'month' ? undefined : view.value, month: monthKey.value === monthKeyOf(todayDate) ? undefined : monthKey.value } })
+  void router.replace({ query: { ...route.query, view: view.value === 'month' ? undefined : view.value, month: monthKey.value === monthKeyOf(todayDate) ? undefined : monthKey.value, from: view.value === 'homes' ? route.query.from : undefined } })
   void ensureLoaded(neededKeys())
 })
 

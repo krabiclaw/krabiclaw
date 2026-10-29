@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
@@ -277,6 +277,8 @@ export interface StayNight {
 
 const MAX_LIST_DAYS = 400
 const MAX_CALENDAR_DAYS = 500
+/** Every home's nights at once: three months, a window a multi-calendar pages through. */
+const MAX_HOMES_CALENDAR_DAYS = 92
 const MAX_CALENDAR_BYTES = 2_000_000
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
@@ -1138,46 +1140,67 @@ export async function readStayCalendar(db: DbClient, access: StayAccess, input: 
   return { home, nights, stays }
 }
 
+/**
+ * Every night of [from, to) at every home this caller may see, the
+ * multi-calendar's read: each home with its nights, and the stays holding any
+ * of them. A night's stay_id names its stay in `stays`.
+ */
+export async function readStayCalendars(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown }): Promise<{ from: string; to: string; homes: Array<{ home: StayHome; nights: StayNight[] }>; stays: Stay[] }> {
+  const { from, to } = range(input, MAX_HOMES_CALENDAR_DAYS)
+  const [homes, stays] = await Promise.all([stayHomes(db, access, null), staysOverlapping(db, access, { from, to })])
+  const nights = homes.length ? await homesNights(db, access.organizationId, homes, from, to) : []
+  return { from, to, homes: homes.map((home, index) => ({ home, nights: nights[index]! })), stays }
+}
+
 /** A hold's claim counts while its hold is active and unexpired; this selects the claims that no longer do. */
 const LAPSED_HOLD_CLAIM_SQL = `stay_nights.hold_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h
   WHERE h.id = stay_nights.hold_id AND h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
 
 /** Every night of [from, to) at one home, read for whoever already has the home. */
 async function homeNights(db: DbClient, organizationId: string, home: StayHome, from: string, to: string): Promise<StayNight[]> {
+  return (await homesNights(db, organizationId, [home], from, to))[0]!
+}
+
+/** Every night of [from, to) at each of these homes, in their order: three queries for any number of homes. */
+async function homesNights(db: DbClient, organizationId: string, homes: readonly StayHome[], from: string, to: string): Promise<StayNight[][]> {
+  const ids = d1JsonStringSet(homes.map(home => home.product_id))
   const [overrides, claims, pushes] = await Promise.all([
-    queryAll<Record<string, unknown>>(db, 'SELECT * FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [organizationId, home.product_id, from, to]),
-    queryAll<{ date: string; stay_id: string | null; held_until: string | null; calendar: StayCalendarChannel | null }>(db, `SELECT stay_nights.date, stay_nights.stay_id, h.expires_at AS held_until, k.channel AS calendar FROM stay_nights
+    queryAll<Record<string, unknown>>(db, 'SELECT * FROM product_nights WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND date >= ? AND date < ?', [organizationId, ids, from, to]),
+    queryAll<{ product_id: string; date: string; stay_id: string | null; held_until: string | null; calendar: StayCalendarChannel | null }>(db, `SELECT stay_nights.product_id, stay_nights.date, stay_nights.stay_id, h.expires_at AS held_until, k.channel AS calendar FROM stay_nights
       LEFT JOIN payment_checkout_holds h ON h.id = stay_nights.hold_id
       LEFT JOIN stay_calendar_links k ON k.id = stay_nights.calendar_link_id
-      WHERE stay_nights.organization_id = ? AND stay_nights.product_id = ? AND stay_nights.date >= ? AND stay_nights.date < ? AND NOT (${LAPSED_HOLD_CLAIM_SQL})`, [organizationId, home.product_id, from, to]),
-    queryAll<{ date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [organizationId, home.product_id, from, to]),
+      WHERE stay_nights.organization_id = ? AND stay_nights.product_id IN (SELECT value FROM json_each(?)) AND stay_nights.date >= ? AND stay_nights.date < ? AND NOT (${LAPSED_HOLD_CLAIM_SQL})`, [organizationId, ids, from, to]),
+    queryAll<{ product_id: string; date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT product_id, date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND date >= ? AND date < ?', [organizationId, ids, from, to]),
   ])
-  const overrideByDate = new Map(overrides.map(row => [String(row.date), row]))
-  const claimByDate = new Map(claims.map(row => [row.date, row]))
-  const pushByDate = new Map(pushes.map(row => [row.date, { state: row.state, detail: row.detail }]))
-  const nights: StayNight[] = []
-  for (let offset = 0; offset < days(from, to); offset++) {
-    const night = addDays(from, offset)
-    const row = overrideByDate.get(night)
-    const claim = claimByDate.get(night)
-    const stayId = claim?.stay_id ?? null
-    const heldUntil = claim && claim.stay_id === null ? claim.held_until : null
-    const closed = Number(row?.closed ?? 0) === 1
-    nights.push({
-      date: night, available: !closed && !claim, stay_id: stayId, closed,
-      price_minor: row?.price_minor === null || row?.price_minor === undefined ? home.base_price_minor : Number(row.price_minor),
-      min_stay_arrival: row?.min_stay_arrival == null ? null : Number(row.min_stay_arrival),
-      min_stay_through: row?.min_stay_through == null ? null : Number(row.min_stay_through),
-      max_stay: row?.max_stay == null ? null : Number(row.max_stay),
-      closed_to_arrival: Number(row?.closed_to_arrival ?? 0) === 1,
-      closed_to_departure: Number(row?.closed_to_departure ?? 0) === 1,
-      source: row ? row.source as 'host' | 'import' : null,
-      held_until: heldUntil,
-      calendar: claim?.calendar ?? null,
-      channel: pushByDate.get(night) ?? null,
-    })
-  }
-  return nights
+  const overrideByNight = new Map(overrides.map(row => [`${String(row.product_id)} ${String(row.date)}`, row]))
+  const claimByNight = new Map(claims.map(row => [`${row.product_id} ${row.date}`, row]))
+  const pushByNight = new Map(pushes.map(row => [`${row.product_id} ${row.date}`, { state: row.state, detail: row.detail }]))
+  return homes.map((home) => {
+    const nights: StayNight[] = []
+    for (let offset = 0; offset < days(from, to); offset++) {
+      const night = addDays(from, offset)
+      const key = `${home.product_id} ${night}`
+      const row = overrideByNight.get(key)
+      const claim = claimByNight.get(key)
+      const stayId = claim?.stay_id ?? null
+      const heldUntil = claim && claim.stay_id === null ? claim.held_until : null
+      const closed = Number(row?.closed ?? 0) === 1
+      nights.push({
+        date: night, available: !closed && !claim, stay_id: stayId, closed,
+        price_minor: row?.price_minor === null || row?.price_minor === undefined ? home.base_price_minor : Number(row.price_minor),
+        min_stay_arrival: row?.min_stay_arrival == null ? null : Number(row.min_stay_arrival),
+        min_stay_through: row?.min_stay_through == null ? null : Number(row.min_stay_through),
+        max_stay: row?.max_stay == null ? null : Number(row.max_stay),
+        closed_to_arrival: Number(row?.closed_to_arrival ?? 0) === 1,
+        closed_to_departure: Number(row?.closed_to_departure ?? 0) === 1,
+        source: row ? row.source as 'host' | 'import' : null,
+        held_until: heldUntil,
+        calendar: claim?.calendar ?? null,
+        channel: pushByNight.get(key) ?? null,
+      })
+    }
+    return nights
+  })
 }
 
 /**
