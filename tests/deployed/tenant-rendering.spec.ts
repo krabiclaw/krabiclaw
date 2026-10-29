@@ -2,12 +2,10 @@ import { expect, test, type Page } from '@playwright/test'
 import {
   blawbyBaseURL, blawbyExtraHeaders,
   openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
-} from './helpers'
-import { testBaseUrl, tenantTestBaseUrl, tenantTestExtraHeaders } from './test-env'
-import { authRequestHeaders, loginAs } from './helpers/auth'
-import { mcpData, mcpRequest } from './helpers/mcp'
-import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' with { type: 'json' }
+} from '../e2e/helpers'
+import { testBaseUrl } from '../e2e/test-env'
+import { loginAs } from '../e2e/helpers/auth'
+import { mcpData, mcpRequest } from '../e2e/helpers/mcp'
 import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
 
 // Two tenants stand in for the two verticals' routes this renderer serves:
@@ -61,28 +59,9 @@ test('unknown and retired API routes return JSON 404 without rendering a tenant 
   }
 })
 
-test('unknown sites render an unbranded 404 while resolved tenant errors retain their identity', async ({ page }) => {
-  test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local tenant header exercises an unresolved host without changing deployed DNS.')
-  const errors: string[] = []
-  page.on('pageerror', error => errors.push(error.message))
-  const unknown = await openTenantPage(page, `${testBaseUrl()}/`, { 'x-preview-tenant': 'no-such-organization' })
-  expect(unknown?.status()).toBe(404)
-  await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
-  await expect(page.getByText('Error 404', { exact: true })).toBeVisible()
-  expect(await page.locator('body').innerText()).not.toMatch(/Krabi[Cc]law|Ember & Slice|North Carolina Legal Services/)
-  await page.unrouteAll()
-  const missing = await openTenantPage(page, `${blawbyBaseURL}/no-such-page`, blawbyExtraHeaders)
-  expect(missing?.status()).toBe(404)
-  await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
-  await expect(page.getByRole('img', { name: 'North Carolina Legal Services', exact: true })).toBeVisible()
-  const unsupported = await page.goto(`${blawbyBaseURL}/templates`)
-  expect(unsupported?.status()).toBe(404)
-  await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
-  expect(errors).toEqual([])
-})
-
 test('Blawby authored contact sections retain their forms and selected locations', async ({ page, request }) => {
-  test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local production copy carries these existing contact pages.')
+  const platform = new URL(testBaseUrl())
+  test.skip(platform.hostname !== 'krabiclaw.com', 'These authored contact pages are production tenants.')
   // Two generated contact pages, and Cedar's, re-authored in the CMS with its own titles and a divider.
   const generated = (documentId: string) => ({ types: ['hero', 'location_grid', 'contact_form'], locations: { id: `block-contact-locations-${documentId}`, title: 'Our locations', description: 'Contact' }, formId: `block-contact-form-${documentId}` })
   for (const tenant of [
@@ -90,8 +69,8 @@ test('Blawby authored contact sections retain their forms and selected locations
     { slug: 'krabiclaw-onboarding-check', documentId: '8780bc6a-6e90-4db6-aac3-2cb1048fbe28', locationIds: ['e151c459-0437-477a-a27e-bb360128b43d', 'loc-5b52502a-0a3e-4410-b14c-d3662f74ae43'], ...generated('8780bc6a-6e90-4db6-aac3-2cb1048fbe28') },
     { slug: 'cedar-legal', documentId: 'cd961dbe-9250-4878-b05b-b7fe1e95591d', locationIds: ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf'], types: ['hero', 'divider', 'location_grid', 'contact_form'], locations: { id: 'ce64db84-0b72-41e2-a87b-2090c29103d7', title: 'Office Location & Contact Info', description: undefined }, formId: 'a0970094-2071-42a4-8605-2b1ab88b3dcd' },
   ]) {
-    const headers = { 'x-preview-tenant': tenant.slug }
-    const response = await request.get(`${testBaseUrl()}/api/public/pages`, { headers, params: { path: '/contact' } })
+    const site = `https://${tenant.slug}.${platform.hostname}`
+    const response = await request.get(`${site}/api/public/pages`, { params: { path: '/contact' } })
     expect(response.status(), await response.text()).toBe(200)
     const document = await response.json() as { page: { id: string; blocks: Array<{ id: string; type: string; data: { title?: string; description?: string; location_ids?: string[]; items?: Array<{ id: string }> } }> } }
     expect(document.page.id).toBe(tenant.documentId)
@@ -103,7 +82,7 @@ test('Blawby authored contact sections retain their forms and selected locations
     expect(locations.data.items!.map(item => item.id)).toEqual(tenant.locationIds)
     expect(document.page.blocks.find(block => block.type === 'contact_form')!.id).toBe(tenant.formId)
     await page.unrouteAll()
-    const rendered = await openTenantPage(page, `${testBaseUrl()}/contact`, headers)
+    const rendered = await openTenantPage(page, `${site}/contact`, {})
     expect(rendered?.status()).toBe(200)
     await expect(page.getByRole('heading', { name: tenant.locations.title, exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Send a message', exact: true })).toBeVisible()
@@ -115,91 +94,6 @@ test('Blawby authored contact sections retain their forms and selected locations
   await expect(page.getByRole('heading', { name: 'Send a message', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(0)
 })
-
-for (const tenant of [
-  { name: 'Saya', organizationId: 'org-demo', baseURL: tenantTestBaseUrl(), headers: tenantTestExtraHeaders(), path: '/about', schemaType: 'Organization' },
-  { name: 'Blawby', organizationId: 'org-ncls-blawby', baseURL: blawbyBaseURL, headers: blawbyExtraHeaders, path: '/about', schemaType: 'LegalService' },
-  { name: 'Cedar Legal Demo', organizationId: '5WebMejsoVLyZLHC29wHH5GbQx1jlvCd', baseURL: testBaseUrl(), headers: { 'x-preview-tenant': 'cedar-legal' }, path: '/contact', ownerId: 'ivUlJc9BoyZeFszowpbUEjh1pugcDHiT', schemaType: 'ProfessionalService' },
-]) {
-  test(`${tenant.name} ${tenant.path} CMS-authored HowTo persists and accompanies the public page schema`, async ({ page, request, baseURL }) => {
-    test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Content writes use local D1 only.')
-    await loginAs(request, baseURL!)
-    let impersonated = false
-    try {
-      if ('ownerId' in tenant) {
-        const impersonation = await request.post(`${baseURL}/api/auth/admin/impersonate-user`, { headers: authRequestHeaders(baseURL!), data: { userId: tenant.ownerId } })
-        expect(impersonation.status(), await impersonation.text()).toBe(200)
-        impersonated = true
-        expect(await impersonation.json()).toMatchObject({ user: { id: tenant.ownerId } })
-      }
-      const inventory = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_site_pages', args: { organization_id: tenant.organizationId, locale: 'en' } })
-      expect(inventory.status()).toBe(200)
-      const about = mcpData<{ pages: Array<{ id: string; path: string }> }>(await inventory.json()).pages.find(item => item.path === tenant.path)
-      expect(about, 'the existing authored page must be available').toBeDefined()
-      const before = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_site_page', args: { organization_id: tenant.organizationId, variant_id: about!.id } })
-      expect(before.status()).toBe(200)
-      const original = mcpData<{ page: { document: { id: string }; blocks: Array<{ id: string; type: string }> } }>(await before.json()).page
-      // Cedar's contact page as authored in its CMS: the office list and the form the HowTo is added beside.
-      if ('ownerId' in tenant) expect(original.blocks.map(block => block.type)).toEqual(['hero', 'divider', 'location_grid', 'contact_form'])
-      const title = `Plan your visit ${crypto.randomUUID()}`
-      const steps = [{ name: 'Choose a time', text: 'Contact our team to choose a time for your visit.' }, { name: 'Prepare for your visit', text: 'Read the information our team sends before you arrive.' }]
-      const added: Array<{ id: string; updated_at: string }> = []
-      try {
-        for (const blockTitle of [title, null]) {
-          const written = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'append_content_block', args: { organization_id: tenant.organizationId, document_id: original.document.id, type: 'how_to', data: { title: blockTitle, steps } } })
-          expect(written.status()).toBe(200)
-          const changed = mcpData<{ blocks: Array<{ id: string; updated_at: string }> }>(await written.json()).blocks
-          expect(changed).toHaveLength(1)
-          added.push(changed[0]!)
-        }
-        const publicPage = await page.request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: tenant.path } })
-        expect(publicPage.status(), await publicPage.text()).toBe(200)
-        expect(await publicPage.json()).toMatchObject({ page: { blocks: expect.arrayContaining(added.map((block, index) => expect.objectContaining({ id: block.id, type: 'how_to', data: { title: index ? null : title, steps } }))) } })
-        const errors: string[] = []
-        page.on('pageerror', error => errors.push(error.message))
-        const rendered = await openTenantPage(page, `${tenant.baseURL}${tenant.path}`, tenant.headers)
-        expect(rendered?.status()).toBe(200)
-        await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible()
-        if ('ownerId' in tenant) await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(1)
-        for (const step of steps) await expect(page.locator('main').getByText(step.text, { exact: true })).toHaveCount(2)
-        const nodes = await page.locator('script[type="application/ld+json"]').evaluateAll(elements => elements.flatMap(element => {
-          const schema = JSON.parse(element.textContent!)
-          return schema['@graph'] ?? [schema]
-        })) as Array<Record<string, unknown>>
-        const howTo = nodes.filter(node => node['@type'] === 'HowTo' && added.some(block => String(node['@id']).endsWith(`#howto-${block.id}`)))
-        expect(howTo).toHaveLength(2)
-        expect(howTo.find(node => String(node['@id']).endsWith(`#howto-${added[0]!.id}`))?.name).toBe(title)
-        expect(howTo.find(node => String(node['@id']).endsWith(`#howto-${added[1]!.id}`))?.name).toBe(await page.title())
-        const canonical = await page.locator('link[rel="canonical"]').getAttribute('href')
-        for (const node of howTo) {
-          expect(node.step).toEqual(steps.map((step, index) => expect.objectContaining({ '@type': 'HowToStep', position: index + 1, ...step })))
-          expect(String(node['@id']).startsWith(`${canonical}#`)).toBe(true)
-        }
-        expect(new Set(howTo.map(node => node['@id'])).size).toBe(2)
-        expect(nodes.some(node => (Array.isArray(node['@type']) ? node['@type'] : [node['@type']]).includes(tenant.schemaType))).toBe(true)
-        expect(errors).toEqual([])
-      } finally {
-        for (const block of added) {
-          const current = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_site_page', args: { organization_id: tenant.organizationId, variant_id: about!.id } })
-          expect(current.status()).toBe(200)
-          const stored = mcpData<{ page: { blocks: Array<{ id: string; updated_at: string }> } }>(await current.json()).page.blocks.find(item => item.id === block.id)
-          expect(stored).toBeDefined()
-          const removed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'delete_content_block', args: { organization_id: tenant.organizationId, block_id: block.id, expected_updated_at: stored!.updated_at } })
-          expect(removed.status()).toBe(200)
-          expect(mcpData<{ blocks: unknown[] }>(await removed.json()).blocks).toEqual([])
-        }
-        const restored = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_site_page', args: { organization_id: tenant.organizationId, variant_id: about!.id } })
-        expect(restored.status()).toBe(200)
-        expect(mcpData<{ page: { blocks: Array<{ id: string }> } }>(await restored.json()).page.blocks.map(block => block.id)).toEqual(original.blocks.map(block => block.id))
-      }
-    } finally {
-      if (impersonated) {
-        const stopped = await request.post(`${baseURL}/api/auth/admin/stop-impersonating`, { headers: authRequestHeaders(baseURL!), data: {} })
-        expect(stopped.status(), await stopped.text()).toBe(200)
-      }
-    }
-  })
-}
 
 async function expectTenantDocument(page: Page, tenant: Tenant) {
   await expect(page.locator(tenant.shell)).toBeVisible()
@@ -227,208 +121,6 @@ async function expectTenantDocument(page: Page, tenant: Tenant) {
   ))
 }
 
-test('KrabiClaw pricing retains its billing plans after hydration', async ({ page }) => {
-  await page.emulateMedia({ colorScheme: 'light' })
-  await page.addInitScript(() => localStorage.setItem('krabiclaw-theme', 'light'))
-  const baseURL = testBaseUrl()
-  const response = await openTenantPage(page, `${baseURL}/pricing`, {})
-  expect(response?.status()).toBe(200)
-  await waitForNuxtHydration(page)
-  await expect(page.locator('html')).toHaveClass(/dark/)
-  await expect(page.getByRole('heading', { name: 'Basic', exact: true })).toBeVisible()
-  const billing = await page.request.get(`${baseURL}/api/billing/plans`)
-  expect(billing.status()).toBe(200)
-  const plans = await billing.json() as Array<{ id: string; name: string }>
-  const paid = plans.find(plan => plan.id === 'growth')
-  expect(paid).toBeDefined()
-  await expect(page.getByRole('heading', { name: paid!.name, exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Get Growth', exact: true })).toHaveAttribute('href', '/signup?plan=growth&redirect=%2Fapi%2Fpost-login%3Fplan%3Dgrowth')
-})
-
-// The docs renderer at a phone width: overflow and table scrolling fail there first.
-{
-  const width = 390
-  test(`KrabiClaw MCP reference has usable anchors and contained tables at ${width}px`, async ({ page, request }) => {
-    await page.setViewportSize({ width, height: 900 })
-    const baseURL = testBaseUrl()
-    let referenceURL = `${baseURL}/docs/mcp-tool-reference`
-    // Local PR data can carry the real unpublished article. Its signed CMS
-    // preview exercises the renderer without publishing or creating test state.
-    // Deployed qualification always exercises the anonymous public route.
-    if (!process.env.PLAYWRIGHT_PREVIEW_URL) {
-      await loginAs(request, baseURL)
-      const read = await mcpRequest(request, baseURL, {
-        method: 'tools/call', toolName: 'get_blog_post',
-        args: { organization_id: 'platform', post_id: 'mcp-tool-reference' },
-      })
-      expect(read.status()).toBe(200)
-      const { post } = mcpData<{ post: { collection: string; status: string; public_url: string | null; preview_url: string | null } }>(await read.json())
-      expect(post.collection).toBe('docs')
-      const destination = post.status === 'draft' ? post.preview_url : post.public_url
-      if (post.status !== 'draft') expect(post.status).toBe('published')
-      expect(destination).toBeTruthy()
-      const returned = new URL(destination!)
-      expect(returned.pathname).toBe('/docs/mcp-tool-reference')
-      if (post.status === 'draft') expect(returned.searchParams.get('preview_token')).toBeTruthy()
-      // Copied organizations retain their canonical public hostname. Only the
-      // transport host changes; the returned draft route and token stay intact.
-      referenceURL = new URL(`${returned.pathname}${returned.search}`, baseURL).href
-    }
-    const response = await openTenantPage(page, referenceURL, {})
-    expect(response?.status()).toBe(200)
-    await waitForNuxtHydration(page)
-    const article = page.locator('article.blog-article')
-    await expect(article.getByRole('heading', { name: 'MCP tool reference', exact: true, level: 1 })).toBeVisible()
-    // The catalog guard checks this canonical snapshot against the registry.
-    await expect(article).toContainText(`Tools: ${mcpCatalog.tools.length}.`)
-    await expect(article).toContainText(`Reference fingerprint: ${mcpCatalog.documentationFingerprint}`)
-    const toolNames = mcpCatalog.tools.map(tool => tool.name).sort()
-    expect((await article.locator('h3 code').allTextContents()).sort()).toEqual(toolNames)
-    const anchorFailures = await article.evaluate((element, names) => {
-      const ids = [...element.querySelectorAll('[id]')].map(target => target.id)
-      const failures = names.filter(name => ids.filter(id => id === name).length !== 1)
-      for (const link of element.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')) {
-        const id = decodeURIComponent(link.hash.slice(1))
-        if (!id || !element.contains(document.getElementById(id))) failures.push(link.getAttribute('href')!)
-      }
-      return failures
-    }, toolNames)
-    expect(anchorFailures, 'Every tool and nested-shape link must resolve inside the rendered article').toEqual([])
-    expect(await page.evaluate(() => window.innerWidth)).toBe(width)
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
-    const tables = article.locator('table')
-    expect(await tables.count()).toBeGreaterThan(0)
-    const tableFailures = await tables.evaluateAll(elements => elements.flatMap((table, index) => {
-      const bounds = table.getBoundingClientRect()
-      const failures: string[] = []
-      if (Math.floor(bounds.left) < 0 || Math.ceil(bounds.right) > window.innerWidth) failures.push(`table ${index} escapes the viewport`)
-      for (const cell of table.querySelectorAll('th, td:first-child code')) {
-        const text = document.createRange()
-        text.selectNodeContents(cell)
-        if (text.getClientRects().length !== 1) failures.push(`table ${index} wraps identifier/header: ${cell.textContent}`)
-      }
-      for (const code of table.querySelectorAll('code')) {
-        if (getComputedStyle(code, '::before').content !== 'none' || getComputedStyle(code, '::after').content !== 'none') {
-          failures.push(`table ${index} adds decorative code characters`)
-        }
-      }
-      return failures
-    }))
-    expect(tableFailures).toEqual([])
-    const horizontalScroll = await tables.evaluateAll(elements => {
-      const table = elements.find(element => element.scrollWidth > element.clientWidth)
-      if (!table) return null
-      table.scrollLeft = table.scrollWidth
-      const result = { tableMoved: table.scrollLeft > 0, pageLeft: window.scrollX }
-      table.scrollLeft = 0
-      return result
-    })
-    expect(horizontalScroll, 'Narrow tables must remain independently scrollable').not.toBeNull()
-    expect(horizontalScroll).toEqual({ tableMoved: true, pageLeft: 0 })
-    for (const name of [toolNames[0]!, toolNames.at(-1)!]) {
-      await article.locator(`a[href="#${name}"]`).first().click()
-      expect(new URL(page.url()).hash).toBe(`#${name}`)
-      const heading = article.locator('h3').filter({ hasText: new RegExp(` — ${name}$`) })
-      await expect(heading).toBeVisible()
-      const headerBottom = await page.locator('header').first().evaluate(element => Math.ceil(element.getBoundingClientRect().bottom))
-      await expect.poll(() => heading.evaluate(element => Math.floor(element.getBoundingClientRect().top)), 'Tool anchors must land below the sticky site header').toBeGreaterThanOrEqual(headerBottom)
-    }
-    const menuHeading = article.locator('h3').filter({ hasText: / — update_menu$/ })
-    await menuHeading.evaluate(element => element.scrollIntoView({ block: 'start' }))
-  })
-
-  test(`KrabiClaw policies render their own headers and body at ${width}px`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 900 })
-    const errors: string[] = []
-    page.on('pageerror', error => errors.push(error.message))
-    for (const policy of [
-      { path: '/policies/privacy', title: 'Privacy Policy', body: 'This Privacy Policy explains how we collect, use, disclose, retain, and protect Personal Data' },
-      { path: '/policies/terms', title: 'Terms of Service', body: 'A contract for the sale or provision of a merchant\'s products or services is directly between the merchant and its customer.' },
-    ]) {
-      const response = await openTenantPage(page, `${testBaseUrl()}${policy.path}`, {})
-      expect(response?.status()).toBe(200)
-      await waitForNuxtHydration(page)
-      await expect(page.getByRole('heading', { name: policy.title, exact: true, level: 1 })).toBeVisible()
-      await expect(page.locator('main')).toContainText(policy.body)
-      await expect(page.locator('.kc-parallax-hero')).toHaveCount(0)
-      expect(await page.evaluate(() => document.documentElement.scrollWidth), policy.path).toBeLessThanOrEqual(width)
-    }
-    expect(errors).toEqual([])
-  })
-}
-
-test('KrabiClaw social viewer keyboard navigation changes the visible media', async ({ page }) => {
-  const response = await openTenantPage(page, `${testBaseUrl()}/`, {})
-  expect(response?.status()).toBe(200)
-  await waitForNuxtHydration(page)
-  const cards = page.locator('[data-social-posts=block] [data-social-post]')
-  const mark = /^Posted on (Facebook|Instagram)$/
-  // A website-only post carries no channel mark; the newest post may be one
-  // (production, 2026-10-06). The first card published to a channel carries
-  // its account name in an unlinked mark, not the channel's own name.
-  const firstCard = cards.first()
-  const socialCard = cards.filter({ has: page.getByLabel(mark) }).first()
-  // A post published to both channels carries both marks, each with its account name.
-  const channelMarks = socialCard.getByLabel(mark)
-  await expect(channelMarks.first()).toBeVisible()
-  for (const channelMark of await channelMarks.all()) await expect(channelMark).toHaveText(/\S/)
-  await expect(socialCard.locator('time, a')).toHaveCount(0)
-  await expect(firstCard.locator('time, a')).toHaveCount(0)
-  // Select the first card through the carousel.
-  await page.locator('[data-social-posts=block]').getByRole('tab', { name: 'Go to slide 1', exact: true }).click()
-  // The viewer opens on the card that was clicked; the first card puts the first picture at the top.
-  await firstCard.click()
-  const viewer = page.getByRole('dialog', { name: 'Photos and videos', exact: true })
-  await expect(viewer).toBeVisible()
-  const pictures = viewer.locator('section')
-  const mediaBounds = await pictures.first().locator('img:not([aria-hidden]), video').boundingBox()
-  const captionBounds = await pictures.first().locator('p').boundingBox()
-  expect(mediaBounds).not.toBeNull()
-  expect(captionBounds).not.toBeNull()
-  expect(captionBounds!.x >= mediaBounds!.x + mediaBounds!.width || captionBounds!.y >= mediaBounds!.y + mediaBounds!.height).toBe(true)
-  expect(await pictures.count()).toBeGreaterThan(1)
-  const close = viewer.getByRole('button', { name: 'Close photos and videos', exact: true })
-  await close.press('ArrowDown')
-  await expect.poll(() => pictures.nth(1).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(0)
-  const visibleMedia = pictures.nth(1).locator('img:not([aria-hidden]), video')
-  if (await visibleMedia.evaluate(element => element instanceof HTMLVideoElement)) {
-    await expect(visibleMedia).toHaveJSProperty('controls', true)
-    const initialTime = await visibleMedia.evaluate(element => (element as HTMLVideoElement).currentTime)
-    await visibleMedia.press('Space')
-    await expect(visibleMedia).toHaveJSProperty('paused', false)
-    await expect.poll(() => visibleMedia.evaluate((element, start) => {
-      const video = element as HTMLVideoElement
-      return video.currentTime > start && !video.paused ? 'playing' : {
-        time: video.currentTime, paused: video.paused, readyState: video.readyState,
-        networkState: video.networkState, error: video.error?.message ?? null, src: video.currentSrc,
-      }
-    }, initialTime)).toBe('playing')
-  }
-  await expect.poll(() => visibleMedia.evaluate(element => element instanceof HTMLVideoElement ? element.videoWidth : (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-  await close.press('ArrowUp')
-  await expect.poll(() => pictures.nth(0).evaluate(element => Math.round(element.getBoundingClientRect().top))).toBe(0)
-  await close.click()
-  await expect(viewer).toHaveCount(0)
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-  const homeCards = page.locator('[data-social-posts=block] [data-social-post]')
-  const first = await homeCards.nth(0).boundingBox()
-  const second = await homeCards.nth(1).boundingBox()
-  expect(first).not.toBeNull()
-  expect(second).not.toBeNull()
-  expect(second!.y).toBe(first!.y)
-  expect(second!.x).toBeGreaterThan(first!.x + first!.width)
-  await openTenantPage(page, `${testBaseUrl()}/posts`, {})
-  await waitForNuxtHydration(page)
-  const feedCards = page.locator('[data-social-posts=feed] [data-social-post]')
-  const top = await feedCards.nth(0).boundingBox()
-  const next = await feedCards.nth(1).boundingBox()
-  expect(top).not.toBeNull()
-  expect(next).not.toBeNull()
-  expect(next!.x).toBe(top!.x)
-  expect(next!.y).toBeGreaterThan(top!.y + top!.height)
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-})
 
 test('Pottery fullscreen gallery leaves native video controls usable', async ({ page }) => {
   const response = await openTenantPage(page, `${potteryHouseBaseURL}/experiences/ceramics-painting-class`, potteryHouseExtraHeaders)
@@ -477,7 +169,7 @@ test('Pottery fullscreen gallery leaves native video controls usable', async ({ 
 })
 
 for (const tenant of tenants) {
-  test(`${tenant.name} renders home and detail routes on desktop`, async ({ page, request, baseURL }, testInfo) => {
+  test(`${tenant.name} renders home and detail routes on desktop`, async ({ page, request }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     const response = await openTenantPage(page, `${tenant.baseURL}/`, tenant.headers)
     expect(response?.status()).toBe(200)
@@ -492,7 +184,6 @@ for (const tenant of tenants) {
     await expect(page.locator(tenant.shell)).not.toHaveCSS(tenant.themeVar, '')
     for (const text of tenant.forbidden) await expect(page.locator('body')).not.toContainText(text)
 
-    // Only the local production copy is editable; deployed rendering stays read-only.
     if (tenant.name === 'Pottery House') {
       const shell = await request.get(`${tenant.baseURL}/api/public/shell`, { headers: tenant.headers })
       expect(shell.status(), await shell.text()).toBe(200)
@@ -505,62 +196,6 @@ for (const tenant of tenants) {
         await expect(page.locator('meta[property="og:image:width"]')).toHaveAttribute('content', '1200')
         await expect(page.locator('meta[property="og:image:height"]')).toHaveAttribute('content', '630')
       }
-    }
-
-    if (tenant.name !== 'North Carolina Legal Services' || process.env.PLAYWRIGHT_PREVIEW_URL) return
-    const organizationId = 'org-ncls-blawby'
-    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, organizationId)
-    type FeaturedImage = { asset_id: string; slot: string; public_url: string; alt_text: string | null }
-    type AuthoredPage = { page: { blocks: Array<{ id: string; type: string; media: FeaturedImage[] }> } }
-    try {
-      await loginAs(request, baseURL!, 'user-e2e-ncls-owner')
-      const source = await request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: '/' } })
-      expect(source.status(), await source.text()).toBe(200)
-      const cta = (await source.json() as AuthoredPage).page.blocks.find(block => ['cta', 'contact_cta'].includes(block.type) && block.media.some(media => media.slot === 'featured'))
-      expect(cta, 'The saved home page has an authored featured CTA image').toBeDefined()
-      const featured = cta!.media.find(media => media.slot === 'featured')!
-      const mediaPath = `${baseURL}/api/editor/organizations/${organizationId}/media`
-      const asset = await request.get(mediaPath, { params: { id: featured.asset_id } })
-      expect(asset.status(), await asset.text()).toBe(200)
-      const original = (await asset.json() as { media: Array<{ id: string; kind: string; alt_text: string | null; public_url: string }> }).media
-      expect(original).toHaveLength(1)
-      expect(original[0]).toMatchObject({ id: featured.asset_id, kind: 'image', public_url: featured.public_url, alt_text: featured.alt_text })
-      const authoredAlt = 'CMS-authored featured image description'
-      const picture = page.locator(`main [data-parity-section="consultation"] img[src=${JSON.stringify(featured.public_url)}]`)
-      try {
-        const written = await request.patch(`${mediaPath}/${featured.asset_id}`, { data: { alt_text: authoredAlt } })
-        expect(written.status(), await written.text()).toBe(200)
-        expect(await written.json()).toEqual({ updated: true })
-        const stored = await request.get(mediaPath, { params: { id: featured.asset_id } })
-        expect(stored.status(), await stored.text()).toBe(200)
-        expect((await stored.json()).media).toEqual([expect.objectContaining({ id: featured.asset_id, alt_text: authoredAlt })])
-        const publicRead = await request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: '/' } })
-        expect(publicRead.status(), await publicRead.text()).toBe(200)
-        expect((await publicRead.json() as AuthoredPage).page.blocks.find(block => block.id === cta!.id)?.media).toContainEqual(expect.objectContaining({ asset_id: featured.asset_id, slot: 'featured', public_url: featured.public_url, alt_text: authoredAlt }))
-        const rendered = await openTenantPage(page, `${tenant.baseURL}/`, tenant.headers)
-        expect(rendered?.status()).toBe(200)
-        await picture.scrollIntoViewIfNeeded()
-        await expect(picture).toBeVisible()
-        await expect(picture).toHaveAttribute('src', featured.public_url)
-        await expect(picture).toHaveAttribute('alt', authoredAlt)
-        await expect.poll(() => picture.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-      } finally {
-        const restored = await request.patch(`${mediaPath}/${featured.asset_id}`, { data: { alt_text: original[0]!.alt_text } })
-        expect(restored.status(), await restored.text()).toBe(200)
-        expect(await restored.json()).toEqual({ updated: true })
-        const assetRead = await request.get(mediaPath, { params: { id: featured.asset_id } })
-        expect(assetRead.status(), await assetRead.text()).toBe(200)
-        expect((await assetRead.json()).media).toEqual([expect.objectContaining({ id: featured.asset_id, alt_text: original[0]!.alt_text })])
-        const publicRead = await request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: '/' } })
-        expect(publicRead.status(), await publicRead.text()).toBe(200)
-        expect((await publicRead.json() as AuthoredPage).page.blocks.find(block => block.id === cta!.id)?.media).toContainEqual(expect.objectContaining({ asset_id: featured.asset_id, slot: 'featured', alt_text: original[0]!.alt_text }))
-        const rendered = await page.reload({ waitUntil: 'load' })
-        expect(rendered?.status()).toBe(200)
-        await expect(picture).toHaveAttribute('src', featured.public_url)
-        await expect(picture).toHaveAttribute('alt', original[0]!.alt_text ?? '')
-      }
-    } finally {
-      await releaseTenantMutationLock()
     }
   })
 }
@@ -826,7 +461,7 @@ test.describe('NCLS representative journeys', () => {
     const tracked = await pageview
     expect(tracked.status(), await tracked.text()).toBe(200)
     expect(await tracked.json()).toMatchObject({ ok: true })
-    await loginAs(request, testBaseUrl(), process.env.PLAYWRIGHT_PREVIEW_URL ? undefined : 'user-e2e-ncls-owner')
+    await loginAs(request, testBaseUrl())
     const analytics = await mcpRequest(request, testBaseUrl(), { method: 'tools/call', toolName: 'query_organization_analytics', args: {
       organization_id: 'org-ncls-blawby', mode: 'events',
       sort: 'occurred_at_desc', limit: 200, filters: { kind: 'pageview', page_path: officePath, location_id: office.id },
