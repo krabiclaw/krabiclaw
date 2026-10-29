@@ -57,6 +57,10 @@ class FakeChannex {
     if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1') {
       return Response.json({ data: { id: 'chan-1', type: 'channel', attributes: { rate_plans: ['1', '2', '3'].map(listing => ({ id: `map-${listing}`, rate_plan_id: `rate-${listing}`, settings: { listing_id: `listing-${listing}` } })) } } })
     }
+    // Airbnb's own instant-booking setting, which every booking-settings update restates.
+    if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1/action/listing_details') {
+      return Response.json({ data: { listing: { id: url.searchParams.get('listing_id'), booking_settings: { instant_booking_allowed_category: 'everyone' } } } })
+    }
     if (init.method === 'PUT' && (/^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path) || (path as string) === '/channels/chan-1/execute/update_booking_setting')) {
       this.settings.push({ path, body: JSON.parse(init.body as string) })
       return this.settingsAnswer ? this.settingsAnswer() : Response.json({ data: {} })
@@ -547,7 +551,11 @@ test('Airbnb settings preflight the whole catalog and unchanged settings do not 
       assert.deepEqual(channex.settings, [])
     }
 
-    const unchanged = { check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', cancellation_policy: null, long_term_cancellation_policy: null, min_nights: 2 } as const
+    // A new home starts on Airbnb's own policies, and none can be cleared.
+    for (const field of ['cancellation_policy', 'long_term_cancellation_policy'] as const) {
+      await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: { [field]: null } } }), { status: 400, data: { code: 'INVALID_STAY_FIELD', field: `stay.${field}` } })
+    }
+    const unchanged = { check_in_time: '16:00', check_in_end_time: null, check_out_time: '10:00', cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm', min_nights: 2 } as const
     assert.equal((await updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: unchanged } })).channel_push, null)
     assert.equal((await reconcileProducts(db, { env, organizationId: ORG, actor: { actorId: OWNER }, products: [{ product_id: connected, kind: 'stay', name: 'Cabin', stay: { ...stay, ...unchanged } }] }))[0]!.channel_push, null)
     assert.equal((await updateStayHome(env, db, manager, connected, unchanged)).channel_push, null)
@@ -606,9 +614,9 @@ test('removed guest controls retain the committed channel completion intent for 
     assert.deepEqual(saved.details, { featured: false, house_rules: 'Shoes off' })
     const updateReceipt = `product-update:${ORG}:${connected}:removed-controls-repair`
     const updateIntent = await db.prepare("SELECT json_extract(payload_json, '$.metadata.channel_completion') AS intent FROM activity_entries WHERE dedupe_key=?").bind(updateReceipt).first<string>('intent')
-    assert.deepEqual(JSON.parse(updateIntent!), { nights: false, settings: { booking: true, availability: false } })
+    assert.deepEqual(JSON.parse(updateIntent!), { nights: false, settings: { booking: true, cancellation: false, availability: false } })
     assert.deepEqual(channex.settings, [{ path: '/channels/chan-1/execute/update_booking_setting', body: {
-      channel_rate_plan_id: 'map-1', data: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10 },
+      channel_rate_plan_id: 'map-1', data: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10, instant_booking_allowed_category: 'everyone' },
     } }], 'unknown guest controls stay omitted from the canonical provider payload')
     const attemptedUpdate = channex.settings[0]
     channex.settingsAnswer = undefined
@@ -641,7 +649,7 @@ test('removed guest controls retain the committed channel completion intent for 
     const catalogReceipt = `catalog-reconcile:${ORG}:catalog-removed-controls-repair`
     const catalogIntent = await db.prepare("SELECT json_extract(payload_json, '$.metadata.channel_completion') AS intent FROM activity_entries WHERE dedupe_key=?").bind(catalogReceipt).first<string>('intent')
     assert.deepEqual(JSON.parse(catalogIntent!), {
-      [connected]: { nights: false, settings: { booking: true, availability: false } },
+      [connected]: { nights: false, settings: { booking: true, cancellation: false, availability: false } },
       [local]: { nights: false, settings: null },
     })
     assert.equal(channex.settings.length, 1)

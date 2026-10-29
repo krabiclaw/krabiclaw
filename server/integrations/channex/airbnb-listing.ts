@@ -2,6 +2,7 @@ import { HTTPError } from 'nitro'
 import tzLookup from '@photostructure/tz-lookup'
 import { isValidTimezone } from '~/utils/timezone'
 import { DETAIL_FIELDS, type AirbnbPropertyType, type DetailField } from '~/shared/airbnb-import'
+import { AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, type StayCancellationPolicy, type StayLongTermCancellationPolicy } from '~/shared/stay-listing'
 import { channexRequest, type ChannexEnv } from './client'
 import { ChannexDataError, integer, object, received, string, type JsonRecord } from './data'
 
@@ -48,6 +49,12 @@ export interface ListingDetails {
   checkInTime: string | null
   checkInEndTime: string | null
   checkOutTime: string | null
+  /**
+   * Airbnb's policies (`booking_settings.cancellation_policy_settings`) as ours,
+   * for stays under 28 nights and for longer ones; null where Airbnb sent none.
+   */
+  cancellationPolicy: StayCancellationPolicy | null
+  longTermCancellationPolicy: StayLongTermCancellationPolicy | null
 }
 
 /** The organization's guest contact details, which every imported home carries. */
@@ -98,6 +105,19 @@ function hourTime(value: unknown, label: string): string | null {
   return `${String(hour % 24).padStart(2, '0')}:00`
 }
 
+/**
+ * Airbnb's code as our policy of the same title and wording, or null when
+ * Airbnb sent none. A code with no policy here (read live on 2026-10-29:
+ * `flexible`, `better_strict_with_grace_period`, `CANCEL_LONG_TERM_FAIR`,
+ * `CANCEL_LONG_TERM_WITH_GRACE_PERIOD`) stops the import for review.
+ */
+function airbnbPolicy<T extends string>(codes: Readonly<Partial<Record<T, string>>>, value: unknown, label: string): T | null {
+  if (value === undefined || value === null) return null
+  const policy = (Object.keys(codes) as T[]).find(key => codes[key] === value)
+  if (!policy) fail(422, 'UNSUPPORTED_CANCELLATION_POLICY', `Airbnb ${label} "${received(value)}" has no verified KrabiClaw policy. Import stopped for review.`)
+  return policy
+}
+
 /** The IANA zone at the listing's coordinates. Airbnb sends none of its own. */
 function coordinateTimezone(lat: unknown, lng: unknown): string | null {
   if (typeof lat !== 'number' || typeof lng !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lng)) return null
@@ -105,14 +125,31 @@ function coordinateTimezone(lat: unknown, lng: unknown): string | null {
   return isValidTimezone(zone) ? zone : null
 }
 
-/** Channex's `listing_details` action: the listing record as Airbnb reports it. */
-async function listingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
+/** Channex's `listing_details` action: the listing record as Airbnb reports it, or a ChannexDataError. */
+async function readListingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
   const raw = await channexRequest(env, `/channels/${encodeURIComponent(channelId)}/action/listing_details?${new URLSearchParams({ listing_id: listingId })}`)
-  return provided(() => {
-    const record = object(object(raw.data, 'Listing details').listing, 'Airbnb listing')
-    if (record.id !== listingId) throw new ChannexDataError('Airbnb returned a different listing')
-    return record
-  })
+  const record = object(object(raw.data, 'Listing details').listing, 'Airbnb listing')
+  if (record.id !== listingId) throw new ChannexDataError('Airbnb returned a different listing')
+  return record
+}
+
+async function listingRecord(env: ChannexEnv, channelId: string, listingId: string): Promise<JsonRecord> {
+  try {
+    return await readListingRecord(env, channelId, listingId)
+  } catch (error) {
+    return provided(() => { throw error })
+  }
+}
+
+/**
+ * Who may book the listing instantly (`booking_settings.instant_booking_allowed_category`).
+ * Channex refuses a booking-settings update without it ("can't be blank", seen on
+ * 2026-10-30) and KrabiClaw has no setting of its own for it, so every update
+ * restates the listing's.
+ */
+export async function instantBookingCategory(env: ChannexEnv, channelId: string, listingId: string): Promise<string> {
+  const listing = await readListingRecord(env, channelId, listingId)
+  return string(object(listing.booking_settings, 'Booking settings').instant_booking_allowed_category, 'Instant booking allowed category')
 }
 
 export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {
@@ -140,6 +177,7 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       if (!propertyType) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified KrabiClaw mapping. Import stopped for review.`)
       fields.propertyType = propertyType
     }
+    const cancellation = booking.cancellation_policy_settings === undefined || booking.cancellation_policy_settings === null ? {} : object(booking.cancellation_policy_settings, 'Cancellation policy settings')
     return {
       id: listingId, title: string(listing.name, 'Listing name'), currency: string(pricing.listing_currency, 'Currency'),
       maxGuests: integer(listing.person_capacity, 'Guest capacity', 1), defaultOccupancy: integer(pricing.guests_included, 'Included guests', 1),
@@ -148,6 +186,8 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
       checkInTime: hourTime(booking.check_in_time_start, 'booking_settings.check_in_time_start'),
       checkInEndTime: hourTime(booking.check_in_time_end, 'booking_settings.check_in_time_end'),
       checkOutTime: hourTime(booking.check_out_time, 'booking_settings.check_out_time'),
+      cancellationPolicy: airbnbPolicy<StayCancellationPolicy>(AIRBNB_CANCELLATION_CATEGORIES, cancellation.cancellation_policy_category, 'cancellation policy'),
+      longTermCancellationPolicy: airbnbPolicy<StayLongTermCancellationPolicy>(AIRBNB_LONG_TERM_CANCELLATION_IDS, cancellation.lts_cancellation_policy_id, 'long-term cancellation policy'),
     }
   })
 }
