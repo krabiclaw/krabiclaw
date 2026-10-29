@@ -1124,20 +1124,12 @@ test.describe('stateless MCP server', () => {
       await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: true })
       await call('set_product_publication', { product_id: created.id, published: true })
       await loginAs(page.request, baseURL!)
-      // The location's schedule is the one Product editor's Booking, scoped to that location.
+      // An experience's Booking defaults live in the Product editor; its bookable times live in Calendar.
       await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
       await waitForNuxtHydration(page)
       await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
       await expect(page.getByRole('link', { name: 'Guest limit Up to 10 guests per session', exact: true })).toBeVisible()
-      const scheduleConcern = page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-schedule')
-      await expect(scheduleConcern).toHaveAccessibleName(`Weekly schedule ${location.title} · Sunday`)
-      await expect(scheduleConcern).toHaveAttribute('href', `/dashboard/ember-slice-demo/products/${created.id}/booking/schedule?location_id=loc-demo`)
-      await scheduleConcern.click()
-      const sunday = page.locator('#dashboard-panel-booking-schedule').getByTestId('editor-row-sunday')
-      await expect(sunday).toHaveAccessibleName('Sunday 2:00 PM')
-      await sunday.click()
-      await expect(page.getByLabel('Start time 1', { exact: true })).toHaveValue('14:00')
-      await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await expect(page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-availability')).toHaveAttribute('href', `/dashboard/ember-slice-demo/calendar?product_id=${created.id}&locationId=loc-demo`)
       const read = async () => {
         const response = await request.get(`${url}/sessions`)
         expect(response.status(), await response.text()).toBe(200)
@@ -1152,9 +1144,9 @@ test.describe('stateless MCP server', () => {
       expect(booked.status(), await booked.text()).toBe(201)
       const before = (await read()).find(row => row.id === target!.id)!
       expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
-      await page.getByRole('button', { name: 'Remove start time 1', exact: true }).click()
-      await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page.getByRole('link', { name: 'Sunday No sessions', exact: true })).toBeVisible()
+      // The CMS availability writer clears the weekly times; the booked occurrence keeps its authority.
+      const clearing = await request.put(`${url}/availability`, { data: { location_id: 'loc-demo', slots: [] } })
+      expect(clearing.status(), await clearing.text()).toBe(200)
       const cleared = await request.get(`${url}/availability?location_id=loc-demo`)
       expect(cleared.status()).toBe(200)
       expect((await cleared.json()).rules).toEqual([])
