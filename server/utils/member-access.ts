@@ -287,6 +287,8 @@ export interface OrganizationNotificationMember {
   userId: string
   email: string
   phone: string | null
+  /** An owner or admin; anyone else receives an alert because it names them. */
+  organizationWide: boolean
 }
 
 export async function listOrganizationNotificationMembers(
@@ -298,7 +300,7 @@ export async function listOrganizationNotificationMembers(
   const members = await listAllOrganizationMembers(adapter, organizationId)
   // Keyed by user, not by member row: a duplicated membership must not become
   // a duplicated alert.
-  const byUserId = new Map<string, { id: string; email: string }>()
+  const byUserId = new Map<string, { id: string; email: string; organizationWide: boolean }>()
   const included = new Set(options.includeMemberIds)
   if (options.requestId) {
     const scope = assignedGuestThreadScope('r', { column: 'recipient.userId' })
@@ -308,7 +310,8 @@ export async function listOrganizationNotificationMembers(
   }
   for (const member of members) {
     if (!(isOrganizationWideRole(member.role) || included.has(member.id))) continue
-    byUserId.set(member.user.id, { id: member.user.id, email: member.user.email })
+    const organizationWide = isOrganizationWideRole(member.role) || byUserId.get(member.user.id)?.organizationWide === true
+    byUserId.set(member.user.id, { id: member.user.id, email: member.user.email, organizationWide })
   }
   if (byUserId.size === 0) return []
 
@@ -334,6 +337,7 @@ export async function listOrganizationNotificationMembers(
     return {
       userId: id,
       email: byUserId.get(id)!.email,
+      organizationWide: byUserId.get(id)!.organizationWide,
       phone: user.phoneNumber && user.phoneNumberVerified ? user.phoneNumber : null,
     }
   })

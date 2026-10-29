@@ -1223,6 +1223,10 @@ test('a member reads a stay at a home they look after as its turnover on every r
     const whole = await getStay(db, manager, stay.id)
     assert.deepEqual([whole.guest_surname, whole.guest_email, whole.notes, whole.total_minor, whole.paid_minor, whole.payments.length, whole.request_id], ['Silva', 'ana@example.test', 'Door code 4411', 45_000, 20_000, 1, stay.request_id])
     assert.equal((await listStays(db, manager, window))[0]!.guest_surname, 'Silva')
+    // A site checkout saves the guest's whole name in guest_name; the member still reads the first name.
+    const wholeName = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'whole-name', check_in_date: '2026-11-05', check_out_date: '2026-11-07', adults: 1, guest_name: '  Bo   Lee ', total_minor: 30_000 })
+    assert.equal((await getStay(db, cleaner, wholeName.id)).guest_name, 'Bo')
+    assert.equal((await getStay(db, manager, wholeName.id)).guest_name, 'Bo   Lee')
     // A member with no responsibility for the home reads nothing of it.
     assert.deepEqual(await listStays(db, outsider, window), [])
     await assert.rejects(getStay(db, outsider, stay.id), code('STAY_NOT_FOUND'))

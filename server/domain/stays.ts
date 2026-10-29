@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -114,7 +114,8 @@ export const STAY_TURNOVER_FIELDS = ['id', 'product_id', 'location_id', 'timezon
 export type StayTurnover = Pick<Stay, typeof STAY_TURNOVER_FIELDS[number]>
 
 export function stayTurnover(stay: Stay): StayTurnover {
-  return Object.fromEntries(STAY_TURNOVER_FIELDS.map(field => [field, stay[field]])) as StayTurnover
+  const turnover = Object.fromEntries(STAY_TURNOVER_FIELDS.map(field => [field, stay[field]])) as StayTurnover
+  return { ...turnover, guest_name: stayGuestFirstName(stay.guest_name) }
 }
 
 export interface StayPayment {

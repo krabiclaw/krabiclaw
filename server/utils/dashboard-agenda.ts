@@ -8,7 +8,7 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { postEditorPath } from '~/server/utils/dashboard-links'
 import type { Stay } from '~/server/domain/stays'
-import { STAY_CHANNEL_LABELS } from '~/shared/bookings'
+import { STAY_CHANNEL_LABELS, stayGuestFirstName } from '~/shared/bookings'
 
 export const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const
 export type AgendaKind = typeof AGENDA_KINDS[number]
@@ -338,11 +338,13 @@ export async function listAgenda(
   for (const stay of query.assignedMemberId ? [] : stays) {
     if (!isValidTimezone(stay.timezone)) throw new Error(`Timezone is not configured for stay ${stay.id}`)
     // Only a channel may withhold the guest's name (stays_app_guest_check).
-    const named = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ')
+    // A member reads the guest as their turnover names them: by first name.
+    const named = staff ? stayGuestFirstName(stay.guest_name) ?? '' : [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ')
     if (!named && (stay.owner !== 'channel' || stay.channel === 'direct')) throw new HTTPError({ statusCode: 500, message: `Stay ${stay.id} has no guest name`, data: { code: 'INVALID_STAY', field: 'guest_name', stay_id: stay.id } })
     const guest = named || `Name not provided by ${STAY_CHANNEL_LABELS[stay.channel]}`
-    // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and departure do.
-    const title = Number(stay.overbooked) === 1 ? `Overbooked · ${guest}` : guest
+    // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and
+    // departure do, for the managers who resolve it; a member's turnover carries no booking state.
+    const title = !staff && Number(stay.overbooked) === 1 ? `Overbooked · ${guest}` : guest
     const moments: Array<['arrival' | 'departure' | 'current', string, string]> = scope.buyerUserId ? [['arrival', stay.check_in_date, stay.check_in_time]]
       : [['arrival', stay.check_in_date, stay.check_in_time], ['departure', stay.check_out_date, stay.check_out_time]]
     if (!scope.buyerUserId && !staff && query.currentStaysAt) {

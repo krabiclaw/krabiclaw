@@ -10,7 +10,7 @@ import { buildWhatsAppTemplatePayload, sendWhatsAppNotification, WhatsAppTemplat
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getWhatsAppDeliveryMode } from '~/server/utils/whatsapp-delivery'
 import { buildReplyToAddress } from '~/server/utils/submission-messages'
-import { listOrganizationNotificationMembers } from '~/server/utils/member-access'
+import { assignedResponsibilitySql, listOrganizationNotificationMembers } from '~/server/utils/member-access'
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
 import { sendApnsAlert, type ApnsAlert, type ApnsEnv } from '~/server/utils/apns'
@@ -46,6 +46,7 @@ import {
   reviewReceivedMessage,
   stayBookedMessage,
   stayCancelledMessage,
+  stayTurnoverAlert,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
@@ -324,6 +325,8 @@ export interface OwnerRecipient {
   unsubscribeOneClickUrl: string | null
   /** The person's signed-in app devices, empty when they switched push off for the category. */
   pushDevices: UserDevice[]
+  /** An owner or admin, who reads the whole event; anyone else reads it as the event projects for them. */
+  organizationWide: boolean
 }
 
 /**
@@ -371,6 +374,7 @@ async function resolveOwnerRecipients(
       unsubscribeUrl: unsubscribe?.pageUrl ?? null,
       unsubscribeOneClickUrl: unsubscribe?.oneClickUrl ?? null,
       pushDevices,
+      organizationWide: member.organizationWide,
     }
   }))
   return recipients.filter((recipient): recipient is OwnerRecipient => recipient !== null)
@@ -568,6 +572,8 @@ function ownerPushSends(
     template: string
     eventKey?: string
     message: NotificationMessage
+    /** The stay a member's projected alert opens, in place of its guest conversation. */
+    stayId?: string
   },
 ): Array<Promise<void>> {
   return recipient.pushDevices.map(device => sendPushThreadNotification(env, db, {
@@ -578,14 +584,15 @@ function ownerPushSends(
       title: input.message.title,
       body: input.message.preheader,
       url: async () => input.message.primaryAction?.url ?? await dashboardPathUrl(env, db, input.organizationId, '/notifications'),
-      threadId: input.context.guestThreadId,
-      // Every push names what it opens: a guest conversation, or the in-app notification.
+      threadId: input.stayId ? null : input.context.guestThreadId,
+      // Every push names what it opens: a stay, a guest conversation, or the in-app notification.
       data: {
         organizationId: input.organizationId,
         userId: recipient.userId,
-        ...(input.context.guestThreadId
-          ? { kind: 'guest', threadId: input.context.guestThreadId }
-          : { kind: 'notification', notificationId: input.notificationId }),
+        ...(input.stayId ? { kind: 'stay', stayId: input.stayId }
+          : input.context.guestThreadId
+            ? { kind: 'guest', threadId: input.context.guestThreadId }
+            : { kind: 'notification', notificationId: input.notificationId }),
       },
     },
   }))
@@ -734,8 +741,15 @@ export async function notifyOwner(
     operatorEmails?: string[]
     /** A conversation whose responsible members are recipients, without the event being a fact on it. */
     responsibleRequestId?: string
+    /**
+     * The same event as members who are not owners or admins receive it, built
+     * by the same message builder from the facts they may read, and the stay it
+     * opens for them. Without one, every recipient reads `message`.
+     */
+    memberAlert?: { message: NotificationMessage; stayId: string }
   }
 ) {
+  if (opts.memberAlert && opts.whatsappTemplate) throw new Error('A member projection of an alert has no WhatsApp template')
   const threadContext = opts.notificationSource
     ? { guestThreadId: opts.notificationSource.threadId, sourceEntryId: opts.notificationSource.entryId }
     : opts.submissionType && opts.submissionType !== 'invitation' && opts.submissionId
@@ -771,7 +785,9 @@ export async function notifyOwner(
   })
 
   // The owner reads mail sent for their business, framed by its own mark.
-  const message = { ...opts.message, organizationLogoUrl: await organizationLogo(db, opts.organizationId) }
+  const organizationLogoUrl = await organizationLogo(db, opts.organizationId)
+  const message = { ...opts.message, organizationLogoUrl }
+  const memberMessage = opts.memberAlert ? { ...opts.memberAlert.message, organizationLogoUrl } : message
 
   const whatsappVars = opts.whatsappTemplate && recipients.some(recipient => recipient.phone)
     ? toWhatsAppVars(message, opts.whatsappTemplate)
@@ -785,12 +801,14 @@ export async function notifyOwner(
 
   const results = await Promise.allSettled(recipients.flatMap((recipient) => {
     const sends: Array<Promise<unknown>> = []
+    const projected = !recipient.organizationWide && opts.memberAlert !== undefined
+    const recipientMessage = projected ? memberMessage : message
     if (recipient.email) {
       const to = recipient.email
       sends.push((async () => {
         // Rendered per person: the footer carries that recipient's own opt-out
         // link, so the same event cannot hand one member another's.
-        const rendered = await renderNotificationEmail(message, {
+        const rendered = await renderNotificationEmail(recipientMessage, {
           platformDomain: getPlatformDomain(env),
           preferencesUrl: `https://${getPlatformDomain(env)}/dashboard/account/profile/notifications`,
           unsubscribeUrl: recipient.unsubscribeUrl,
@@ -798,7 +816,8 @@ export async function notifyOwner(
         await sendEmailNotification(env, db, {
           ...opts,
           to,
-          email: { subject: sanitizeEmailHeaderValue(message.title), ...rendered },
+          title: recipientMessage.title,
+          email: { subject: sanitizeEmailHeaderValue(recipientMessage.title), ...rendered },
           unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
           delivery: threadDelivery(deliveryContext, 'owner_alert', 'email', opts.template, to, opts.deliveryEventKey),
         })
@@ -836,7 +855,8 @@ export async function notifyOwner(
       context: deliveryContext,
       template: opts.template,
       eventKey: opts.deliveryEventKey,
-      message,
+      message: recipientMessage,
+      ...(projected ? { stayId: opts.memberAlert!.stayId } : {}),
     }))
     return sends
   }))
@@ -1373,6 +1393,21 @@ export async function notifyBookingCreated(
  * the guest by a confirmation email in the site's language with the dates,
  * times, guests, what they paid and the home's check-in instructions.
  */
+/**
+ * A stay alert's member audience: the members responsible for its home, by
+ * member or team, who read it as the turnover (`stayTurnoverAlert`) and open
+ * the stay rather than its guest conversation.
+ */
+async function stayTurnoverAudience(env: NotificationEnv, db: DbClient, organizationId: string, stay: { id: string; product_id: string; arrival_time: string | null }) {
+  const responsible = await queryAll<{ id: string }>(db, `SELECT m.id FROM member m JOIN product_stay_configs c ON c.organization_id = m.organizationId
+    WHERE c.organization_id = ? AND c.product_id = ? AND ${assignedResponsibilitySql('c', 'm.userId')}`, [organizationId, stay.product_id])
+  return {
+    memberIds: responsible.map(member => member.id),
+    stayUrl: await dashboardPathUrl(env, db, organizationId, `/bookings/stay/${encodeURIComponent(stay.id)}`),
+    arrival: stay.arrival_time === null ? null : formatTime(stay.arrival_time, 'en-US'),
+  }
+}
+
 export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organizationId: string, stayId: string) {
   // Loaded when used: the stays domain reaches notifications through the guest inbox.
   const { readCheckoutStay } = await import('~/server/domain/stays')
@@ -1389,23 +1424,25 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const home = stay.home
   const studio = organizationName({ organizationId, organizationName: organization.name })
   const threadContext = await getOpeningThreadContext(db, 'stay', stay.request_id)
-  const [replyTo, inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
+  const [replyTo, inboxUrl, hero, logoUrl, guest, contact, audience] = await Promise.all([
     buildReplyToAddress(env, 'stay', stay.request_id),
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
     messageHero(db, organizationId, { type: 'product', id: home.product_id }),
     organizationLogo(db, organizationId),
     guestPresentation(db, { organizationId, organizationName: studio, productId: home.product_id, productTitle: home.name, locationId: home.location_id }),
     resolveLocationContact(db, organizationId, home.location_id),
+    stayTurnoverAudience(env, db, organizationId, stay),
   ])
   const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
   const when = (date: string, time: string, locale: string) => `${formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${formatTime(time, locale)}`
   const party = [`${stay.adults} adult${stay.adults === 1 ? '' : 's'}`, ...(stay.children ? [`${stay.children} child${stay.children === 1 ? '' : 'ren'}`] : []), ...(stay.infants ? [`${stay.infants} infant${stay.infants === 1 ? '' : 's'}`] : [])].join(', ')
-  const ownerMessage = stayBookedMessage({
+  const ownerInput = {
     guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
-    checkIn: when(stay.check_in_date, home.check_in_time, 'en-US'), checkOut: when(stay.check_out_date, home.check_out_time, 'en-US'),
+    checkIn: when(stay.check_in_date, home.check_in_time, 'en-US'), checkOut: when(stay.check_out_date, home.check_out_time, 'en-US'), arrival: audience.arrival,
     nights: String(nights), guests: party, total: formatMinorAmount(stay.total_minor, stay.currency, 'en-US'), notes: stay.notes,
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
-  })
+  }
+  const ownerMessage = stayBookedMessage(ownerInput)
   const guestMessage = guestStayConfirmedMessage({
     manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
     locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, homeName: guest.productTitle ?? home.name,
@@ -1422,11 +1459,10 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
   const guestTitle = `${guestMessage.title} — ${guestMessage.facts.find(fact => fact.key === 'what')?.value ?? home.name}`
   const results = await Promise.allSettled([
-    // Owners and admins only: this alert carries the guest's contact, payment and conversation.
-    // A member looking after the home reads the stay as a turnover.
     notifyOwner(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, template: 'new_stay', title: ownerMessage.title, payload, message: ownerMessage,
       notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
+      memberIds: audience.memberIds, memberAlert: { message: stayBookedMessage(stayTurnoverAlert(ownerInput, audience.stayUrl)), stayId: stay.id },
     }),
     sendEmailNotification(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
@@ -1508,7 +1544,9 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     }),
   }).parse(stored)
   if (recorded.refund_minor !== refundMinor || entry.body !== recorded.email.text) throw new Error('Stay cancellation notification differs from its recorded refund or email')
-  const ownerMessage = stayCancelledMessage(recorded.owner)
+  const audience = await stayTurnoverAudience(env, db, organizationId, stay)
+  const ownerInput = { ...recorded.owner, arrival: audience.arrival }
+  const ownerMessage = stayCancelledMessage(ownerInput)
   const threadContext = { guestThreadId: stay.request_id, sourceEntryId: entry.id }
   const payload = { stay_id: stay.id, organization_name: recorded.email.fromName, deep_link: recorded.owner.replyUrl ?? '' }
   const results = await Promise.allSettled([
@@ -1516,6 +1554,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, template: 'stay_cancelled', payload,
       notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
       title: ownerMessage.title, message: ownerMessage,
+      memberIds: audience.memberIds, memberAlert: { message: stayCancelledMessage(stayTurnoverAlert(ownerInput, audience.stayUrl)), stayId: stay.id },
     })] : []),
     sendEmailNotification(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,

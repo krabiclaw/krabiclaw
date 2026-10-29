@@ -194,6 +194,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     }
     const memberMcpPayment = await memberCall('record_stay_payment', { stay_id: stay.id, amount_minor: 100, method: 'cash', paid_on: localDay(0), idempotency_key: crypto.randomUUID() })
     expect(memberMcpPayment.data).toBeNull()
+    expect(memberMcpPayment.error).toContain('Insufficient permissions')
     // The dashboard's stay screen renders the turnover and nothing of the guest's contact or money.
     const memberPage = await memberContext.newPage()
     const stayRead = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === `/api/dashboard/stays/${stay.id}`)

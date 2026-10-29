@@ -75,7 +75,7 @@ type Home = Pick<StayHome, 'product_id' | 'name' | 'location_id' | 'currency' | 
 // A manager reads each stay's surname and channel; a member's turnover has neither.
 type GridStay = Pick<StayTurnover, 'id' | 'product_id' | 'guest_name' | 'check_in_date' | 'check_out_date'> & Partial<Pick<Stay, 'guest_surname' | 'channel'>>
 type Night = Pick<StayNight, 'date' | 'available' | 'stay_id' | 'closed' | 'price_minor' | 'held_until' | 'calendar'>
-interface Payload { from: string; to: string; homes: { home: Home; nights: Night[] }[]; stays: GridStay[] }
+interface Payload { from: string; to: string; homes: { home: Home; nights: Night[] }[]; stays: GridStay[]; manage: boolean }
 
 // Today and thirty nights after it, paged by a week or a month; the URL keeps where you were.
 const SPAN = 31
@@ -89,13 +89,13 @@ const to = computed(() => parseDate(from.value).add({ days: SPAN }).toString())
 const dates = computed(() => Array.from({ length: SPAN }, (_, index) => parseDate(from.value).add({ days: index }).toString()))
 
 const isText = (value: unknown) => value === null || typeof value === 'string'
-const isPayload = (value: unknown): value is Payload => isRecord(value) && value.from === from.value && value.to === to.value && Array.isArray(value.homes) && Array.isArray(value.stays)
+const isPayload = (value: unknown): value is Payload => isRecord(value) && value.from === from.value && value.to === to.value && Array.isArray(value.homes) && Array.isArray(value.stays) && typeof value.manage === 'boolean'
   && value.homes.every(entry => isRecord(entry) && isRecord(entry.home) && typeof entry.home.product_id === 'string' && typeof entry.home.name === 'string' && typeof entry.home.location_id === 'string'
     && isCurrencyCode(entry.home.currency) && (entry.home.address === null || isRecord(entry.home.address)) && Array.isArray(entry.nights) && entry.nights.length === SPAN
     && entry.nights.every((night, index) => isRecord(night) && night.date === dates.value[index] && typeof night.available === 'boolean' && typeof night.closed === 'boolean' && isText(night.stay_id)
       && (night.price_minor === null || typeof night.price_minor === 'number') && isText(night.held_until) && isText(night.calendar)))
   && value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && typeof stay.product_id === 'string' && isText(stay.guest_name)
-    && (!('channel' in stay) || isText(stay.guest_surname) && Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel))) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
+    && (value.manage ? isText(stay.guest_surname) && Object.hasOwn(STAY_CHANNEL_LABELS, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date))
 
 const { data, error, status, refresh } = await useAsyncData(
   () => `stay-homes-grid:${String(route.params.orgSlug)}:${from.value}`,

@@ -226,7 +226,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
   if (!isValidTimezone(home.timezone)) return false
   if (!value.stays.every(stay => isRecord(stay) && typeof stay.id === 'string' && stay.product_id === props.productId
     && isValidCalendarDate(stay.check_in_date) && isValidCalendarDate(stay.check_out_date) && stay.check_out_date > stay.check_in_date
-    && nullableText(stay.guest_name) && (!('channel' in stay) || nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel))) && typeof stay.status === 'string')) return false
+    && nullableText(stay.guest_name) && (props.manage ? nullableText(stay.guest_surname) && Object.hasOwn(channels, String(stay.channel)) : !('guest_surname' in stay) && !('channel' in stay)) && typeof stay.status === 'string')) return false
   return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(item => isRecord(item) && isValidCalendarDate(item.date)
     && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.stay_id) && nullableAmount(item.price_minor)
     && (item.calendar === null || item.calendar === 'vrbo')
