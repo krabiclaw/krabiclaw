@@ -200,7 +200,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     const stayRead = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === `/api/dashboard/stays/${stay.id}`)
     await memberPage.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`)
     await expectStatus(await stayRead, 200)
-    const details = memberPage.locator('#stay-details')
+    const details = memberPage.locator('#dashboard-panel-stay-details')
     await expect(details.getByRole('heading', { name: `${guestName}’s group of 3`, exact: true })).toBeVisible()
     await expect(details.getByText('2 adults, 1 child', { exact: true })).toBeVisible()
     await expect(details.getByText(/^3:30\sPM$/u)).toBeVisible()
