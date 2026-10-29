@@ -150,6 +150,28 @@ export const STAY_LONG_TERM_CANCELLATION_POLICIES = {
 } as const satisfies Record<string, { label: string; summary: string; terms: readonly string[] }>
 export type StayLongTermCancellationPolicy = keyof typeof STAY_LONG_TERM_CANCELLATION_POLICIES
 
+/**
+ * What Airbnb gives a new listing until the host chooses: Flexible and Firm
+ * Long Term (an untouched draft in Airbnb's listing editor, read 2026-10-29).
+ * A home always has both policies; a new one starts on these.
+ */
+export const NEW_HOME_CANCELLATION_POLICIES = { cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm' } as const satisfies {
+  cancellation_policy: StayCancellationPolicy
+  long_term_cancellation_policy: StayLongTermCancellationPolicy
+}
+
+/**
+ * Each policy's code in Airbnb's `booking_settings.cancellation_policy_settings`,
+ * as Channex reads and writes it (`cancellation_policy_category`,
+ * `lts_cancellation_policy_id`). Airbnb offers no Strict to set or read.
+ */
+export const AIRBNB_CANCELLATION_CATEGORIES = {
+  flexible: 'flexible', moderate: 'moderate', limited: 'firm_14', firm: 'better_strict_with_grace_period',
+} as const satisfies Partial<Record<StayCancellationPolicy, string>>
+export const AIRBNB_LONG_TERM_CANCELLATION_IDS = {
+  firm: 'CANCEL_LONG_TERM_FAIR', strict: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD',
+} as const satisfies Record<StayLongTermCancellationPolicy, string>
+
 /** How guests get in (Airbnb's check-in method cards), with the SF Symbol the app shows. */
 export const STAY_CHECK_IN_METHODS = {
   smart_lock: { label: 'Smart lock', description: 'Guests unlock the door with an app or a code.', icon: 'i-lucide-smartphone', symbol: 'lock.iphone' },

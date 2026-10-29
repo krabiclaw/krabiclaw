@@ -14,7 +14,7 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT, type StayArrivalGuide } from '~/shared/stay-arrival'
-import { isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { AIRBNB_CANCELLATION_CATEGORIES, AIRBNB_LONG_TERM_CANCELLATION_IDS, isStayAmenity, parseStayAmenityAnswers, parseStayMapSharing, STAY_ALARM_DETAIL_KEYS, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayAmenityAnswer, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { validateProductDetails, validateStayAlarmDetails, stayHouseRuleLines } from '~/shared/product-details'
 import { staySafetyLines, stayAlarmLines } from '~/shared/stay-safety'
 import { formatTime, isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
@@ -511,6 +511,9 @@ export interface NewStayHome {
   max_guests: number
   min_nights: number
   base_price_minor: number | null
+  /** Left out, a new home starts on Airbnb's own: NEW_HOME_CANCELLATION_POLICIES. */
+  cancellation_policy?: StayCancellationPolicy
+  long_term_cancellation_policy?: StayLongTermCancellationPolicy
 }
 
 /** A home's details read from a request body; each problem names its field. */
@@ -557,6 +560,12 @@ function homeDetails(body: Record<string, unknown>) {
 /** Read a new home's details from a request body; each problem names its field. */
 export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   const { text, timezone, time, name, maxGuests, minNights, basePrice } = homeDetails(body)
+  const policy = <K extends 'cancellation_policy' | 'long_term_cancellation_policy'>(key: K, codes: Record<NonNullable<NewStayHome[K]>, unknown>): Partial<Pick<NewStayHome, K>> => {
+    const value = body[key]
+    if (value === undefined) return {}
+    if (typeof value !== 'string' || !Object.hasOwn(codes, value)) fail(422, 'INVALID_DETAIL', `${key} must be one of ${Object.keys(codes).join(', ')}`, key)
+    return { [key]: value } as Partial<Pick<NewStayHome, K>>
+  }
   const home: NewStayHome = {
     name: name(true)!, timezone: timezone(true)!,
     ...homeAddress(body, ''),
@@ -564,6 +573,9 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
     check_in_time: time('check_in_time', true)!, check_in_end_time: time('check_in_end_time', false), check_out_time: time('check_out_time', true)!,
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
     base_price_minor: basePrice(),
+    // Left out, the product writer gives a new home Airbnb's own; an empty one is refused before the location is made.
+    ...policy('cancellation_policy', STAY_CANCELLATION_POLICIES),
+    ...policy('long_term_cancellation_policy', STAY_LONG_TERM_CANCELLATION_POLICIES),
   }
   if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
   return home
@@ -779,7 +791,9 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
-      stay: { location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null },
+      stay: { location_id: locationId, check_in_time: home.check_in_time, check_in_end_time: home.check_in_end_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null,
+        ...(home.cancellation_policy === undefined ? {} : { cancellation_policy: home.cancellation_policy }),
+        ...(home.long_term_cancellation_policy === undefined ? {} : { long_term_cancellation_policy: home.long_term_cancellation_policy }) },
     },
   })
   return await readStayHome(db, access, product.id)
@@ -1256,15 +1270,6 @@ export async function deliverPendingChannelNights(db: DbClient, env: StayMutatio
 
 /** A base price or minimum stay changes the same 500 future nights on every write surface. */
 /**
- * Our cancellation policies as Airbnb's own: the option of the same title and
- * wording in Airbnb's listing editor (read 2026-10-23), as Channex names it.
- * Airbnb's editor offers no Strict, so a home syncing with Airbnb is refused one.
- */
-const AIRBNB_CANCELLATION: Partial<Record<StayCancellationPolicy, string>> = {
-  flexible: 'flexible', moderate: 'moderate', limited: 'firm_14', firm: 'better_strict_with_grace_period',
-}
-
-/**
  * Refuse, before anything is written, settings a home syncing with Airbnb
  * cannot send. The same mapper validates and sends the normalized values.
  */
@@ -1275,20 +1280,26 @@ export async function requireAirbnbAcceptable(db: DbClient, organizationId: stri
   const syncing = await queryFirst(db, "SELECT 1 FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1", [organizationId, productId])
   if (syncing) fail(422, 'AIRBNB_UNSUPPORTED_VALUE', settings.refusal, settings.field)
 }
-const AIRBNB_LONG_TERM_CANCELLATION: Record<StayLongTermCancellationPolicy, string> = { firm: 'CANCEL_LONG_TERM_FAIR', strict: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD' }
 /** House rules Airbnb takes as guest controls, by product detail. */
 const AIRBNB_GUEST_CONTROLS = { pets_allowed: 'allows_pets_as_host', smoking_allowed: 'allows_smoking_as_host', events_allowed: 'allows_events_as_host' } as const
-/** Which of a connected home's Airbnb listing settings a product write changes, by section. */
-export type AirbnbSettingSections = { [Section in keyof AirbnbListingSettings]: boolean }
+/**
+ * Which of a connected home's Airbnb listing settings a product write changes:
+ * the check-in and checkout hours and house rules, the cancellation policies,
+ * and the minimum stay. The policies are their own section so an edit that
+ * leaves them alone never restates Airbnb's cancellation settings.
+ */
+export type AirbnbSettingSections = { booking: boolean; cancellation: boolean; availability: boolean }
 
 /** Compare complete normalized snapshots to select the sections this write changes. */
 export function touchesAirbnbSettings(patch: UpdateProductInput, previous: UpdateProductInput): AirbnbSettingSections | null {
+  const changed = (field: 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'cancellation_policy' | 'long_term_cancellation_policy') => patch.stay?.[field] !== undefined && patch.stay[field] !== previous.stay?.[field]
   const sections = {
-    booking: (['check_in_time', 'check_in_end_time', 'check_out_time', 'cancellation_policy', 'long_term_cancellation_policy'] as const).some(field => patch.stay?.[field] !== undefined && patch.stay[field] !== previous.stay?.[field])
+    booking: (['check_in_time', 'check_in_end_time', 'check_out_time'] as const).some(changed)
       || (Object.keys(AIRBNB_GUEST_CONTROLS) as Array<keyof typeof AIRBNB_GUEST_CONTROLS>).some(key => patch.details?.[key] !== previous.details?.[key]),
+    cancellation: (['cancellation_policy', 'long_term_cancellation_policy'] as const).some(changed),
     availability: patch.stay?.min_nights !== undefined && patch.stay.min_nights !== previous.stay?.min_nights,
   }
-  return sections.booking || sections.availability ? sections : null
+  return sections.booking || sections.cancellation || sections.availability ? sections : null
 }
 
 type AirbnbHomeSettings = Pick<StayHome, 'check_in_time' | 'check_in_end_time' | 'check_out_time' | 'cancellation_policy' | 'long_term_cancellation_policy' | 'min_nights'>
@@ -1297,14 +1308,17 @@ type AirbnbHomeSettings = Pick<StayHome, 'check_in_time' | 'check_in_end_time' |
  * A home's Airbnb listing settings, or why one of its values cannot be one.
  * Airbnb takes whole hours: a check-in start from 08:00 to 02:00 the next day
  * ("8"–"26"), an end up to 03:00 ("27") or flexible, and a checkout hour.
- * Only what the home has is sent: an unset house rule or policy is left as
- * Airbnb has it. Prices are not listing settings here: every night's price,
- * the base price's included, already reaches Airbnb with the nightly calendar.
+ * Only the sections a write changed are sent, and only what the home has: an
+ * unset house rule is left as Airbnb has it. Prices are not listing settings
+ * here: every night's price, the base price's included, already reaches
+ * Airbnb with the nightly calendar.
  */
 function airbnbListingSettings(home: AirbnbHomeSettings, details: Product['details'], sections: AirbnbSettingSections): AirbnbListingSettings | { refusal: string; field: string } {
-  const booking = sections.booking ? airbnbBookingSettings(home, details) : {}
-  if ('refusal' in booking) return booking as { refusal: string; field: string }
-  return { booking, availability: sections.availability ? { default_min_nights: home.min_nights } : {} }
+  const hours = sections.booking ? airbnbBookingSettings(home, details) : {}
+  if ('refusal' in hours) return hours as { refusal: string; field: string }
+  const cancellation = sections.cancellation ? airbnbCancellationSettings(home) : {}
+  if ('refusal' in cancellation) return cancellation as { refusal: string; field: string }
+  return { booking: { ...hours, ...cancellation }, availability: sections.availability ? { default_min_nights: home.min_nights } : {} }
 }
 
 function airbnbBookingSettings(home: AirbnbHomeSettings, details: Product['details']): Record<string, unknown> | { refusal: string; field: string } {
@@ -1331,14 +1345,19 @@ function airbnbBookingSettings(home: AirbnbHomeSettings, details: Product['detai
   booking.check_out_time = checkout
   const controls = Object.fromEntries((Object.entries(AIRBNB_GUEST_CONTROLS) as Array<[keyof typeof AIRBNB_GUEST_CONTROLS, string]>).flatMap(([key, control]) => typeof details[key] === 'boolean' ? [[control, details[key]]] : []))
   if (Object.keys(controls).length) booking.guest_controls = controls
-  const category = home.cancellation_policy ? AIRBNB_CANCELLATION[home.cancellation_policy] : undefined
-  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, field: 'cancellation_policy' }
-  const cancellation = {
-    ...(category ? { cancellation_policy_category: category } : {}),
-    ...(home.long_term_cancellation_policy ? { lts_cancellation_policy_id: AIRBNB_LONG_TERM_CANCELLATION[home.long_term_cancellation_policy] } : {}),
-  }
-  if (Object.keys(cancellation).length) booking.cancellation_policy_settings = cancellation
   return booking
+}
+
+/** A home's two policies as Airbnb's own options of the same title and wording. Airbnb has no Strict to set. */
+function airbnbCancellationSettings(home: AirbnbHomeSettings): Record<string, unknown> | { refusal: string; field: string } {
+  const categories: Partial<Record<StayCancellationPolicy, string>> = AIRBNB_CANCELLATION_CATEGORIES
+  const category = home.cancellation_policy ? categories[home.cancellation_policy] : undefined
+  if (home.cancellation_policy && !category) return { refusal: `Airbnb has no ${STAY_CANCELLATION_POLICIES[home.cancellation_policy].label} cancellation policy. Choose Flexible, Moderate, Limited or Firm for a home that syncs with Airbnb.`, field: 'cancellation_policy' }
+  const settings = {
+    ...(category ? { cancellation_policy_category: category } : {}),
+    ...(home.long_term_cancellation_policy ? { lts_cancellation_policy_id: AIRBNB_LONG_TERM_CANCELLATION_IDS[home.long_term_cancellation_policy] } : {}),
+  }
+  return Object.keys(settings).length ? { cancellation_policy_settings: settings } : {}
 }
 
 /**

@@ -489,6 +489,9 @@ export class AirbnbConnection {
       // The check-in window and checkout are Airbnb's; a listing without a start or checkout hour is set on Airbnb first.
       if (!details.checkInTime) fail(422, 'MISSING_AIRBNB_FIELD', 'Set a check-in start time on Airbnb, then import again.', { field: 'booking_settings.check_in_time_start' })
       if (!details.checkOutTime) fail(422, 'MISSING_AIRBNB_FIELD', 'Set a checkout time on Airbnb, then import again.', { field: 'booking_settings.check_out_time' })
+      // The home books under the listing's own policies, as a guest on Airbnb would.
+      if (!details.cancellationPolicy) fail(422, 'MISSING_AIRBNB_FIELD', 'Choose a cancellation policy on Airbnb, then import again.', { field: 'booking_settings.cancellation_policy_settings.cancellation_policy_category' })
+      if (!details.longTermCancellationPolicy) fail(422, 'MISSING_AIRBNB_FIELD', 'Choose a long-term cancellation policy on Airbnb, then import again.', { field: 'booking_settings.cancellation_policy_settings.lts_cancellation_policy_id' })
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
       const contact = this.organizationContactUpdate(details, values)
       const property: ImportProperty = {
@@ -515,6 +518,7 @@ export class AirbnbConnection {
         name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
         zip_code: values.zipCode, phone: values.phone, email: values.email, check_in_time: details.checkInTime, check_in_end_time: details.checkInEndTime, check_out_time: details.checkOutTime,
         max_guests: details.maxGuests, min_nights: calendar[0]!.minStay, base_price_minor: provided(() => minorUnits(details.nightlyRate, organization.default_currency)),
+        cancellation_policy: details.cancellationPolicy, long_term_cancellation_policy: details.longTermCancellationPolicy,
       }), `airbnb-listing:${listingId}`)
       // The nights land before the mapping: until the mapping exists a retry
       // runs this whole step again (the location and product replay by their
