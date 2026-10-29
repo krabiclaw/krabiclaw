@@ -188,8 +188,8 @@ test.describe('lodging identity boundary', () => {
         const invalidCursorResult = (await invalidCursor.json()).result
         expect(invalidCursorResult.isError).toBe(true)
         expect(invalidCursorResult.structuredContent).toBeUndefined()
-        // A cursor is both its time and its id; the team-message domain refuses half of one.
-        expect(JSON.parse(invalidCursorResult.content[0].text)).toMatchObject({ status: 422, code: 'INVALID_CURSOR', message: 'before and beforeId are sent together' })
+        // Half a cursor passes the schema, which has no combinator Claude clients mis-render; the team-message domain refuses it.
+        expect(JSON.parse(invalidCursorResult.content[0].text)).toEqual({ status: 422, message: 'before and beforeId are sent together', code: 'INVALID_CURSOR' })
       }
       const afterInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
       expect(afterInvalidCursor.status, await afterInvalidCursor.text()).toBe(200)

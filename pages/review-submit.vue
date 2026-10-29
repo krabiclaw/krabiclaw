@@ -27,13 +27,18 @@
             <div class="space-y-8 pt-8">
               <div>
                 <p id="overall-rating-label" class="text-base font-semibold text-highlighted">Overall</p>
-                <UInputRating v-model="rating" size="xl" class="mt-3" aria-labelledby="overall-rating-label" data-testid="review-overall-rating" />
+                <UInputRating v-model="rating" size="xl" class="mt-3" aria-labelledby="overall-rating-label" data-testid="review-overall-rating">
+                  <template #item="{ filled }"><TenantIcon name="star" :solid="filled" class="block size-full" :class="filled ? '' : 'text-muted'" /></template>
+                </UInputRating>
               </div>
               <div class="space-y-5 border-t border-default pt-6">
                 <p class="text-sm text-muted">Rate any of these you’d like to. You can skip them.</p>
                 <div v-for="question in requestData.questions" :key="question.key" class="flex flex-wrap items-center justify-between gap-3">
                   <p :id="`rating-${question.key}`" class="text-sm font-medium text-highlighted">{{ question.label }}</p>
-                  <UInputRating v-model="categories[question.key]" clearable :aria-labelledby="`rating-${question.key}`" :data-testid="`review-category-${question.key}`" />
+                  <UInputRating v-model="categories[question.key]" clearable :aria-labelledby="`rating-${question.key}`" :data-testid="`review-category-${question.key}`">
+                    <!-- A chosen star is solid, as on the site's review cards: color alone does not show it on every theme. -->
+                    <template #item="{ filled }"><TenantIcon name="star" :solid="filled" class="block size-full" :class="filled ? '' : 'text-muted'" /></template>
+                  </UInputRating>
                 </div>
               </div>
             </div>

@@ -12,6 +12,13 @@
 @source "../../.nuxt/ui/input.ts";
 @source "../../.nuxt/ui/select.ts";
 @source "../../.nuxt/ui/select-menu.ts";
+/* The guest review steps on a business site, and the alerts public pages show. */
+@source "../../.nuxt/ui/alert.ts";
+@source "../../.nuxt/ui/input-rating.ts";
+@source "../../.nuxt/ui/radio-group.ts";
+@source "../../.nuxt/ui/stepper.ts";
+@source "../../.nuxt/ui/switch.ts";
+@source "../../.nuxt/ui/textarea.ts";
 @source "../../app.config.ts";
 /* Markdown copy controls are created by this composable, not a Vue template. */
 @source "../../composables/useCopyableCodeBlocks.ts";

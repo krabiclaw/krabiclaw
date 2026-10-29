@@ -3,7 +3,7 @@ import type { StayHome, StayNight } from '~/server/domain/stays'
 import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
 import { channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object, string } from './data'
-import { CALENDAR_NIGHTS, instantBookingCategory } from './airbnb-listing'
+import { CALENDAR_NIGHTS, keptBookingSettings } from './airbnb-listing'
 import { HTTPError } from 'nitro'
 import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
 
@@ -516,8 +516,12 @@ export async function pushAirbnbListingSettings(db: DbClient, env: ChannexEnv, o
     if (!listing || typeof listing.id !== 'string') return { state: 'needs_review', detail: 'Channex has no mapping for this listing; its settings were not sent to Airbnb' }
     const mappingId = encodeURIComponent(listing.id)
     if (Object.keys(settings.booking).length) {
-      const category = await instantBookingCategory(env, row!.channel_id, row!.listing_id)
-      await channexRequest(env, `${path}/execute/update_booking_setting`, 'PUT', { channel_rate_plan_id: listing.id, data: { ...settings.booking, instant_booking_allowed_category: category } })
+      const kept = await keptBookingSettings(env, row!.channel_id, row!.listing_id)
+      const controls = settings.booking.guest_controls
+      await channexRequest(env, `${path}/execute/update_booking_setting`, 'PUT', { channel_rate_plan_id: listing.id, data: {
+        ...settings.booking, instant_booking_allowed_category: kept.instantBooking,
+        ...(controls === undefined ? {} : { guest_controls: { ...kept.guestControls, ...object(controls, 'guest_controls') } }),
+      } })
     }
     if (Object.keys(settings.availability).length) await channexRequest(env, `${path}/mappings/${mappingId}/availability_settings`, 'PUT', { availability_settings: settings.availability })
     return { state: 'pushed', detail: null }
