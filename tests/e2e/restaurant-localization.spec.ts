@@ -2,10 +2,33 @@ import { expect, test, type APIRequestContext, type APIResponse, type Page } fro
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { loginAs } from './helpers/auth'
 import { mcpRequest } from './helpers/mcp'
-import { E2E_KIKUZUKI_ORGANIZATION_ID, kikuzukiTestBaseUrl, kikuzukiTestExtraHeaders, testBaseUrl } from './test-env'
+import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
+import { seededTenant } from './seed/manifest'
 
-const organizationId = E2E_KIKUZUKI_ORGANIZATION_ID
+// Ember & Slice translated into Thai: its name, its Brooklyn location, the
+// Brooklyn Specials section and its clam pie. Read once the seed has run.
 const locale = 'th'
+const thai = {
+  name: 'เอมเบอร์ แอนด์ สไลซ์ นิวยอร์ก',
+  description: 'พิซซ่าเตาฟืนในนิวยอร์ก',
+  location: 'เอมเบอร์ แอนด์ สไลซ์ บรูคลิน',
+  section: 'พิเศษบรูคลิน',
+  dish: 'พิซซ่าหอยบรูคลิน',
+}
+let organizationId = ''
+let slug = ''
+let brooklyn = { id: '', slug: '' }
+let specialsId = ''
+let dish = { id: '', name: '' }
+function readSeed() {
+  const restaurant = seededTenant('restaurant')
+  organizationId = restaurant.organizationId
+  slug = restaurant.slug
+  brooklyn = restaurant.locations.brooklyn!
+  specialsId = restaurant.collections['brooklyn-specials']!.id
+  dish = restaurant.products['brooklyn-special']!
+}
+test.beforeEach(readSeed)
 
 async function expectStatus(response: APIResponse, expected: number) {
   const body = response.status() === expected ? '' : await response.text()
@@ -30,15 +53,16 @@ async function expectLocalizedMenu(page: Page) {
   await expect(page.getByRole('navigation', { name: 'การนำทางหลัก' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'การนำทางหลัก' }).getByRole('link', { name: 'เมนู', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'จองโต๊ะ' }).first()).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Kikuzuki กระบี่ ประเทศไทย' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'Kikuzuki โรบาตายากิและอิซากายะญี่ปุ่น · ซูชิ', exact: true })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'ซูชิทูน่า' }).first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: thai.name })).toBeVisible()
+  await expect(page.getByRole('button', { name: `${thai.location} · ${thai.section}`, exact: true })).toBeVisible()
+  await expect(page.getByRole('link', { name: thai.dish }).first()).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'ภาษา', exact: true })).toHaveValue('th')
-  await expect(page.locator('body')).not.toContainText('Tuna Sushi')
+  await expect(page.locator('body')).not.toContainText(dish.name)
 }
 
 test.beforeAll(async ({ playwright }, testInfo) => {
   testInfo.setTimeout(120_000)
+  readSeed()
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
@@ -48,45 +72,38 @@ test.beforeAll(async ({ playwright }, testInfo) => {
 
     await putLocalization(owner, 'organization', organizationId, {
       values: {
-        name: 'Kikuzuki กระบี่ ประเทศไทย',
-        brand_description: 'อาหารญี่ปุ่นต้นตำรับในกระบี่',
+        name: thai.name,
+        brand_description: thai.description,
       },
     })
-    const locationResponse = await owner.get(`/api/organizations/${organizationId}/locations/loc-kikuzuki`)
+    const locationResponse = await owner.get(`/api/organizations/${organizationId}/locations/${brooklyn.id}`)
     await expectStatus(locationResponse, 200)
     expect(await locationResponse.json()).toMatchObject({
       location: {
         opening_hours: {
           periods: expect.arrayContaining([2, 3].map(day => ({
-            open: { day, hour: 14, minute: 0 }, close: { day, hour: 23, minute: 0 },
+            open: { day, hour: 11, minute: 0 }, close: { day, hour: 22, minute: 0 },
           }))),
         },
       },
     })
-    await putLocalization(owner, 'business_location', 'loc-kikuzuki', {
-      route_path: '/th/locations/kikuzuki-japanese-robatayaki-izakaya',
+    await putLocalization(owner, 'business_location', brooklyn.id, {
+      route_path: `/th/locations/${brooklyn.slug}`,
       values: {
-        title: 'Kikuzuki โรบาตายากิและอิซากายะญี่ปุ่น',
-        address: { addressLines: ['325'], sublocality: 'ตำบลอ่าวนาง', locality: 'กระบี่' },
-        description: 'ร้านอาหารญี่ปุ่นใจกลางกระบี่',
-        short_description: 'โรบาตายากิและซูชิในอ่าวนาง',
+        title: thai.location,
+        address: { addressLines: ['120'], sublocality: 'บรูคลิน', locality: 'นิวยอร์ก' },
+        description: 'พิซซ่าเตาฟืนบนถนนแอตแลนติก',
+        short_description: 'พิซซ่าและโต๊ะสำหรับครอบครัว',
       },
     })
-    // Menu sections are collections now; their names localize on the
-    // collection. The id is read from the site rather than written here — a
-    // tenant's own ids are its business, not a constant in a test.
-    const collectionsResponse = await owner.get(`/api/editor/organizations/${organizationId}/collections?location_id=loc-kikuzuki`)
-    await expectStatus(collectionsResponse, 200)
-    const { collections } = await collectionsResponse.json() as { collections: Array<{ id: string; slug: string }> }
-    const sushi = collections.find(collection => collection.slug === 'sushi')
-    expect(sushi, 'Kikuzuki has a sushi collection to translate').toBeTruthy()
-    await putLocalization(owner, 'collection', sushi!.id, {
-      values: { name: 'ซูชิ' },
+    // Menu sections are collections; their names localize on the collection.
+    await putLocalization(owner, 'collection', specialsId, {
+      values: { name: thai.section },
     })
-    await putLocalization(owner, 'product', 'item-kiku-tuna-sushi', {
+    await putLocalization(owner, 'product', dish.id, {
       values: {
-        name: 'ซูชิทูน่า',
-        description: 'ทูน่า',
+        name: thai.dish,
+        description: 'หอยลายกับกระเทียม',
       },
     })
   } finally {
@@ -96,7 +113,7 @@ test.beforeAll(async ({ playwright }, testInfo) => {
 
 test('a localization batch with a missing product leaves existing translations unchanged', async ({ request, baseURL }) => {
   await loginAs(request, baseURL!)
-  const path = `/api/editor/organizations/${organizationId}/localization/product/item-kiku-tuna-sushi/${locale}`
+  const path = `/api/editor/organizations/${organizationId}/localization/product/${dish.id}/${locale}`
   const before = await request.get(path)
   expect(before.status()).toBe(200)
   const existing = await before.json()
@@ -105,7 +122,7 @@ test('a localization batch with a missing product leaves existing translations u
     args: {
       organization_id: organizationId, resource_type: 'product', locale,
       items: [
-        { resource_id: 'item-kiku-tuna-sushi', values: { name: 'Must not be written' } },
+        { resource_id: dish.id, values: { name: 'Must not be written' } },
         { resource_id: 'missing-localization-product', values: { name: 'Missing' } },
       ],
     },
@@ -119,29 +136,29 @@ test('a localization batch with a missing product leaves existing translations u
   expect(await after.json()).toEqual(existing)
 })
 
-test('Kikuzuki keeps its Thai shell and collection translations on a hard load', async ({ page }) => {
+test('The restaurant keeps its Thai shell and collection translations on a hard load', async ({ page }) => {
   const errors: string[] = []
   page.on('console', message => {
     if (message.type() === 'error') errors.push(message.text())
   })
-  const response = await openTenantPage(page, `${kikuzukiTestBaseUrl()}/th/menu`, kikuzukiTestExtraHeaders())
+  const response = await openTenantPage(page, `${seededSiteURL('restaurant')}/th/menu`, seededSiteHeaders('restaurant'))
   expect(response?.status()).toBe(200)
   await expectLocalizedMenu(page)
   await page.reload()
   await expectLocalizedMenu(page)
 
   await page.getByRole('combobox', { name: 'ภาษา', exact: true }).selectOption('en')
-  await expect(page).toHaveURL(`${kikuzukiTestBaseUrl()}/menu`)
+  await expect(page).toHaveURL(`${seededSiteURL('restaurant')}/menu`)
   await expect(page.locator('[data-hydrated]')).toHaveAttribute('data-hydrated', 'true')
   await expect(page.locator('html')).toHaveAttribute('lang', 'en')
   await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Tuna Sushi' }).first()).toBeVisible()
+  await expect(page.getByRole('link', { name: dish.name }).first()).toBeVisible()
 
   await page.getByRole('combobox', { name: 'Language', exact: true }).selectOption('th')
-  await expect(page).toHaveURL(`${kikuzukiTestBaseUrl()}/th/menu`)
+  await expect(page).toHaveURL(`${seededSiteURL('restaurant')}/th/menu`)
   await expectLocalizedMenu(page)
 
-  const contactResponse = await openTenantPage(page, `${kikuzukiTestBaseUrl()}/th/contact`, kikuzukiTestExtraHeaders())
+  const contactResponse = await openTenantPage(page, `${seededSiteURL('restaurant')}/th/contact`, seededSiteHeaders('restaurant'))
   expect(contactResponse?.status()).toBe(200)
   await expect(page.locator('html')).toHaveAttribute('lang', locale)
   await expect(page.getByText('ติดต่อเรา', { exact: true }).first()).toBeVisible()
@@ -150,18 +167,18 @@ test('Kikuzuki keeps its Thai shell and collection translations on a hard load',
 
   const locationPageResponse = await openTenantPage(
     page,
-    `${kikuzukiTestBaseUrl()}/th/locations/kikuzuki-japanese-robatayaki-izakaya`,
-    kikuzukiTestExtraHeaders(),
+    `${seededSiteURL('restaurant')}/th/locations/${brooklyn.slug}`,
+    seededSiteHeaders('restaurant'),
   )
   expect(locationPageResponse?.status()).toBe(200)
   for (const day of ['วันอังคาร', 'วันพุธ']) {
     const hoursRow = page.getByText(day, { exact: true }).locator('..')
-    await expect(hoursRow).toContainText('14:00')
-    await expect(hoursRow).toContainText('23:00')
+    await expect(hoursRow).toContainText('11:00')
+    await expect(hoursRow).toContainText('22:00')
   }
 
   for (const path of ['/th/reservations', '/th/menu']) {
-    const builtInResponse = await openTenantPage(page, `${kikuzukiTestBaseUrl()}${path}`, kikuzukiTestExtraHeaders())
+    const builtInResponse = await openTenantPage(page, `${seededSiteURL('restaurant')}${path}`, seededSiteHeaders('restaurant'))
     expect(builtInResponse?.status()).toBe(200)
     await expect(page.locator('html')).toHaveAttribute('lang', locale)
     await expect(page.getByRole('navigation', { name: 'การนำทางหลัก' }).getByRole('link', { name: 'เมนู', exact: true })).toBeVisible()
@@ -171,7 +188,7 @@ test('Kikuzuki keeps its Thai shell and collection translations on a hard load',
 
 // Brand's Translations row is a link to the Brand's translations mode, and the
 // mode reads the organization's own localization, the type the registry knows.
-test('Kikuzuki Brand translations open from their URL in the stored language', async ({ browser, playwright }) => {
+test('The restaurant\'s Brand translations open from their URL in the stored language', async ({ browser, playwright }) => {
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   try {
@@ -179,7 +196,7 @@ test('Kikuzuki Brand translations open from their URL in the stored language', a
     const dashboardContext = await browser.newContext({ baseURL, storageState: await owner.storageState() })
     const cms = await dashboardContext.newPage()
     try {
-      const brandPath = `/dashboard/${organizationId}/website/brand`
+      const brandPath = `/dashboard/${slug}/website/brand`
       await openTenantPage(cms, `${baseURL}${brandPath}`, {})
       await expect(cms.locator('#dashboard-panel-organization-brand').getByRole('link', { name: /^Translations/ })).toHaveAttribute('href', `${brandPath}?editMode=translations`)
       const loaded = cms.waitForResponse(response => response.request().method() === 'GET'
@@ -188,8 +205,8 @@ test('Kikuzuki Brand translations open from their URL in the stored language', a
       await cms.goto(`${baseURL}${brandPath}?editMode=translations&locale=${locale}`)
       await waitForNuxtHydration(cms)
       expect((await loaded).status()).toBe(200)
-      await expect(cms.getByTestId('localize-field-name')).toHaveValue('Kikuzuki กระบี่ ประเทศไทย')
-      await expect(cms.getByTestId('localize-field-brand_description')).toHaveValue('อาหารญี่ปุ่นต้นตำรับในกระบี่')
+      await expect(cms.getByTestId('localize-field-name')).toHaveValue(thai.name)
+      await expect(cms.getByTestId('localize-field-brand_description')).toHaveValue(thai.description)
     } finally {
       await cms.close()
       await dashboardContext.close()
@@ -199,7 +216,7 @@ test('Kikuzuki Brand translations open from their URL in the stored language', a
   }
 })
 
-test('Kikuzuki translations preserve published addresses and save an added language privately', async ({ browser, playwright }) => {
+test('The restaurant\'s translations preserve published addresses and save an added language privately', async ({ browser, playwright }) => {
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   try {
@@ -209,7 +226,7 @@ test('Kikuzuki translations preserve published addresses and save an added langu
     try {
       // Languages is a row on the location's settings list; it opens the
       // location's translations mode, which its URL holds with the language.
-      const settingsPath = `/dashboard/${organizationId}/locations/kikuzuki-japanese-robatayaki-izakaya/settings`
+      const settingsPath = `/dashboard/${slug}/locations/${brooklyn.slug}/settings`
       await openTenantPage(cms, `${baseURL}${settingsPath}`, {})
       await cms.getByRole('link', { name: /^Languages/ }).click()
       await expect(cms).toHaveURL(`${baseURL}${settingsPath}?editMode=translations`)
@@ -219,22 +236,22 @@ test('Kikuzuki translations preserve published addresses and save an added langu
       // A reload reconstructs the same record, mode and language from the URL.
       await cms.reload()
       await expect(cms.getByTestId('localize-language')).toContainText('ไทย')
-      await expect(cms.getByTestId('localize-field-address.addressLines')).toHaveValue('325')
-      await expect(cms.getByTestId('localize-field-address.sublocality')).toHaveValue('ตำบลอ่าวนาง')
+      await expect(cms.getByTestId('localize-field-address.addressLines')).toHaveValue('120')
+      await expect(cms.getByTestId('localize-field-address.sublocality')).toHaveValue('บรูคลิน')
       const originalTitle = await cms.getByTestId('localize-field-title').inputValue()
       await expect(cms.getByTestId('localize-save')).toBeDisabled()
       const revisedTitle = `${originalTitle} revised`
       await cms.getByTestId('localize-field-title').fill(revisedTitle)
       const saveResponse = await Promise.all([
-        cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/localization/business_location/loc-kikuzuki/th')),
+        cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes(`/localization/business_location/${brooklyn.id}/th`)),
         cms.getByTestId('localize-save').click(),
       ]).then(([response]) => response)
       expect(saveResponse.status()).toBe(200)
       const payload = saveResponse.request().postDataJSON() as { values: { address: unknown } }
-      expect(payload.values.address).toEqual({ addressLines: ['325'], sublocality: 'ตำบลอ่าวนาง', locality: 'กระบี่' })
-      const savedThai = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: 'loc-kikuzuki', locale: 'th' } })
+      expect(payload.values.address).toEqual({ addressLines: ['120'], sublocality: 'บรูคลิน', locality: 'นิวยอร์ก' })
+      const savedThai = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: brooklyn.id, locale: 'th' } })
       expect(savedThai.status()).toBe(200)
-      expect((await savedThai.json()).result.structuredContent.localization.values).toMatchObject({ title: revisedTitle, address: { addressLines: ['325'], sublocality: 'ตำบลอ่าวนาง', locality: 'กระบี่' } })
+      expect((await savedThai.json()).result.structuredContent.localization.values).toMatchObject({ title: revisedTitle, address: { addressLines: ['120'], sublocality: 'บรูคลิน', locality: 'นิวยอร์ก' } })
       // Saving leaves the mode, so the URL no longer reopens it.
       await expect(cms).not.toHaveURL(/editMode=/)
       await expect(cms.getByTestId('localize-language')).toHaveCount(0)
@@ -244,11 +261,11 @@ test('Kikuzuki translations preserve published addresses and save an added langu
       await expect(cms.getByTestId('localize-field-title')).toHaveValue(revisedTitle)
       await cms.getByTestId('localize-field-title').fill(originalTitle)
       const restored = await Promise.all([
-        cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes('/localization/business_location/loc-kikuzuki/th')),
+        cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes(`/localization/business_location/${brooklyn.id}/th`)),
         cms.getByTestId('localize-save').click(),
       ]).then(([response]) => response)
       expect(restored.status()).toBe(200)
-      const restoredThai = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: 'loc-kikuzuki', locale: 'th' } })
+      const restoredThai = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: brooklyn.id, locale: 'th' } })
       expect(restoredThai.status()).toBe(200)
       expect((await restoredThai.json()).result.structuredContent.localization.values).toMatchObject({ title: originalTitle, address: payload.values.address })
 
@@ -259,7 +276,7 @@ test('Kikuzuki translations preserve published addresses and save an added langu
         available_catalogs: Array<{ locale: string; label: string }>
       }
       const privateLanguage = beforeLanguages.available_catalogs.find(candidate => !beforeLanguages.languages.some(language => language.locale === candidate.locale))
-      expect(privateLanguage, 'Kikuzuki has an unadded platform language for private authoring').toBeTruthy()
+      expect(privateLanguage, 'The restaurant has an unadded platform language for private authoring').toBeTruthy()
       const privateLocale = privateLanguage!.locale
       try {
         const added = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'add_organization_language', args: { organization_id: organizationId, locale: privateLocale } })
@@ -271,19 +288,19 @@ test('Kikuzuki translations preserve published addresses and save an added langu
         await expect(cms.getByRole('option', { name: 'English', exact: true })).toHaveCount(0)
         await cms.getByRole('option', { name: `${privateLanguage!.label} · Not published`, exact: true }).click()
         await expect(cms.getByTestId('translation-publication-state')).toContainText('Not published')
-        await cms.getByTestId('localize-field-title').fill('Private Kikuzuki translation')
-        await cms.getByTestId('localize-field-address.addressLines').fill('325 private translation')
+        await cms.getByTestId('localize-field-title').fill('Private Ember & Slice translation')
+        await cms.getByTestId('localize-field-address.addressLines').fill('120 private translation')
         const privateSave = await Promise.all([
-          cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes(`/localization/business_location/loc-kikuzuki/${privateLocale}`)),
+          cms.waitForResponse(response => response.request().method() === 'PUT' && response.url().includes(`/localization/business_location/${brooklyn.id}/${privateLocale}`)),
           cms.getByTestId('localize-save').click(),
         ]).then(([response]) => response)
         expect(privateSave.status()).toBe(200)
-        expect(privateSave.request().postDataJSON()).toEqual({ values: { title: 'Private Kikuzuki translation', address: { addressLines: ['325 private translation'] } } })
-        const persisted = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: 'loc-kikuzuki', locale: privateLocale } })
+        expect(privateSave.request().postDataJSON()).toEqual({ values: { title: 'Private Ember & Slice translation', address: { addressLines: ['120 private translation'] } } })
+        const persisted = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'get_resource_localization', args: { organization_id: organizationId, resource_type: 'business_location', resource_id: brooklyn.id, locale: privateLocale } })
         expect(persisted.status()).toBe(200)
         const persistedBody = await persisted.json()
-        expect(persistedBody.result.structuredContent).toMatchObject({ localization: { values: { title: 'Private Kikuzuki translation', address: { addressLines: ['325 private translation'] } } } })
-        const productId = 'item-kiku-tuna-sushi'
+        expect(persistedBody.result.structuredContent).toMatchObject({ localization: { values: { title: 'Private Ember & Slice translation', address: { addressLines: ['120 private translation'] } } } })
+        const productId = dish.id
         const productTranslationUrl = `/api/editor/organizations/${organizationId}/localization/product/${productId}/${privateLocale}`
         const authoredValues = { name: 'Private tuna translation', description: '', marketing_features: ['Prepared to order'], unit_label: 'serving', details: { ingredients: [], allergens: ['Fish'] } }
         const authored = await mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'put_resource_localization', args: { organization_id: organizationId, resource_type: 'product', resource_id: productId, locale: privateLocale, values: authoredValues } })
@@ -293,7 +310,7 @@ test('Kikuzuki translations preserve published addresses and save an added langu
         // are valid values; null and false must be rejected without replacing it.
         await expectStatus(await owner.put(productTranslationUrl, { data: { values: { ...authoredValues, unit_label: null } } }), 422)
         await expectStatus(await owner.put(productTranslationUrl, { data: { values: { ...authoredValues, description: false } } }), 422)
-        await cms.goto(`${baseURL}/dashboard/${organizationId}/products/${productId}?editMode=translations&locale=${privateLocale}`)
+        await cms.goto(`${baseURL}/dashboard/${slug}/products/${productId}?editMode=translations&locale=${privateLocale}`)
         await waitForNuxtHydration(cms)
         await expect(cms.getByTestId('localize-field-name')).toHaveValue(authoredValues.name)
         await expect(cms.getByTestId('localize-field-description')).toHaveValue('')

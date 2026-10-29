@@ -120,7 +120,7 @@ export async function seedE2e(baseURL: string) {
   const { admin, platformOrganizationId } = await bootstrapAdministrator(baseURL)
   try {
     await createActors(admin)
-    const manifest: SeedManifest = { baseURL, adminUserId: E2E_ADMIN_ID, tenants: {} as SeedManifest['tenants'] }
+    const manifest: SeedManifest = { baseURL, adminUserId: E2E_ADMIN_ID, platformOrganizationId, tenants: {} as SeedManifest['tenants'] }
     const create: CreateTenant = plan => createTenant(baseURL, plan)
     const [{ seedRestaurant }, { seedExperience }, { seedLegal }] = await Promise.all([
       import('./tenants/restaurant.ts'), import('./tenants/experience.ts'), import('./tenants/legal.ts'),

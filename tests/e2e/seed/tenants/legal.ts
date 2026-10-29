@@ -24,6 +24,8 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
     await setWorkingHours(tool, attorneyMemberId, 'America/New_York', [1, 2, 3, 4, 5], '09:00', '17:00')
     await publishProfile(tool, attorneyMemberId, 'Dana Brooks, Esq.', 'Dana represents families in custody, support and divorce matters.')
 
+    // Its buttons use the site's accent colour.
+    await tool('update_organization_settings', { button_color: 'accent' })
     const logo = await seedMedia(owner, tenant, 'logo', 'office.avif', 'Harbor Legal Aid')
     await tool('set_media', { placement: { owner_type: 'organization', owner_id: tenant.organizationId, slot: 'logo' }, asset_id: logo.id })
     const officeImage = await seedMedia(owner, tenant, 'office', 'office.avif', 'The Raleigh office reception')
@@ -81,7 +83,13 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
     const { pages } = await tool<{ pages: Array<{ id: string; path: string }> }>('list_site_pages', { locale: 'en' })
     const home = pages.find(page => page.path === '/')
     if (!home) throw new Error('Harbor Legal Aid has no home page')
-    const { page } = await tool<{ page: { document: { id: string } } }>('get_site_page', { variant_id: home.id })
+    const { page } = await tool<{ page: { document: { id: string }; blocks: Array<{ id: string; type: string; updated_at: string; data: { title?: string } }> } }>('get_site_page', { variant_id: home.id })
+    const hero = page.blocks.find(block => block.type === 'hero')
+    if (!hero) throw new Error('Harbor Legal Aid\'s home page has no hero')
+    await tool('replace_content_block', {
+      block_id: hero.id, expected_updated_at: hero.updated_at,
+      data: { title: hero.data.title ?? 'Harbor Legal Aid', subtitle: 'Free legal help for families in Wake County.', cta_label: 'Request a consultation', cta_url: '/schedule' },
+    })
     await tool('append_content_block', {
       document_id: page.document.id, type: 'contact_cta',
       data: { title: 'Talk to an attorney', description: 'Request a free consultation about your situation.', label: 'Request a consultation', url: '/schedule' },

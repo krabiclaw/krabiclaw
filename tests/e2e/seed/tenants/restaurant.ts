@@ -23,6 +23,8 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const margherita = await seedMedia(owner, tenant, 'margherita', 'dish.avif', 'Margherita pizza with basil')
     const burrata = await seedMedia(owner, tenant, 'burrata', 'venue.avif', 'Burrata with tomatoes')
     const diningRoom = await seedMedia(owner, tenant, 'dining-room', 'room.avif', 'The Brooklyn dining room')
+    const logo = await seedMedia(owner, tenant, 'logo', 'dish.avif', 'Ember & Slice')
+    await tool('set_media', { placement: { owner_type: 'organization', owner_id: tenant.organizationId, slot: 'logo' }, asset_id: logo.id })
     for (const asset of [burrata, diningRoom]) {
       await tool('attach_media', { placement: { owner_type: 'business_location', owner_id: williamsburg.id, slot: 'gallery' }, asset_id: asset.id })
     }
@@ -58,7 +60,7 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     await collection('brooklyn-specials', 'Brooklyn Specials', [special], brooklyn.id)
 
     // The home page's hero sends guests to the menu.
-    const { pages } = await tool<{ pages: Array<{ id: string; path: string }> }>('list_site_pages', { locale: 'en' })
+    const { pages } = await tool<{ pages: Array<{ id: string; page_id: string; path: string }> }>('list_site_pages', { locale: 'en' })
     const home = pages.find(page => page.path === '/')
     if (!home) throw new Error('Ember & Slice has no home page')
     const { page } = await tool<{ page: { blocks: Array<{ id: string; type: string; updated_at: string; data: { title?: string } }> } }>('get_site_page', { variant_id: home.id })
@@ -68,6 +70,24 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
       block_id: hero.id, expected_updated_at: hero.updated_at,
       data: { title: hero.data.title ?? 'Ember & Slice', subtitle: 'Wood-fired pizza in Brooklyn and Williamsburg.', cta_label: 'Reserve a table', cta_url: '/reservations', secondary_label: 'View menu', secondary_url: '/menu' },
     })
+
+    // The site is also published in Japanese and Thai for visitors, each starting with its homepage.
+    const translations = {
+      ja: { title: 'エンバー＆スライス', subtitle: 'ブルックリンとウィリアムズバーグの薪窯ピザ。', cta_label: 'テーブルを予約', secondary_label: 'メニューを見る' },
+      th: { title: 'เอมเบอร์ แอนด์ สไลซ์', subtitle: 'พิซซ่าเตาฟืนในบรูคลินและวิลเลียมส์เบิร์ก', cta_label: 'จองโต๊ะ', secondary_label: 'ดูเมนู' },
+    }
+    for (const [locale, copy] of Object.entries(translations)) {
+      await tool('add_organization_language', { locale })
+      await tool('create_site_page', {
+        page_id: home.page_id, locale, path: '/', title: copy.title,
+        blocks: [{ type: 'hero', source_block_id: hero.id, data: { ...copy, cta_url: '/reservations', secondary_url: '/menu' } }],
+      })
+      // Its locations carry the language too, so their pages (reservations among them) exist in it.
+      for (const place of [brooklyn, williamsburg]) {
+        await tool('put_resource_localization', { resource_type: 'business_location', resource_id: place.id, locale, values: { title: place.title } })
+      }
+      await tool('publish_organization_language', { locale })
+    }
 
     const { category } = await tool<{ category: { id: string; name: string } }>('create_article_category', { collection: 'blog', name: 'Kitchen', description: 'Notes from the kitchen' })
     tenant.categories.kitchen = { id: category.id, name: category.name }
