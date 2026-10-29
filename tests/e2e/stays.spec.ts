@@ -4162,18 +4162,21 @@ for (const concern of ['arrival-guide', 'calendar-and-cleaner'] as const) {
 
       // Another device's edit updates the assigned stay without navigation. An
       // ordered later event proves that the intervening other-home event was filtered.
+      // The cleaner reads the stay as its turnover: the first name and arrival
+      // change in place, while the surname and the host's notes never reach them.
       const current = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[0]!.id })
-      const renamed = await call<{ stay: { version: number }; saved_fields: Record<string, unknown>; channel_push: unknown }>('update_stay', { stay_id: stays[0]!.id, expected_version: current.data!.stay.version, guest_name: 'Ana Live' })
+      const renamed = await call<{ stay: { version: number }; saved_fields: Record<string, unknown>; channel_push: unknown }>('update_stay', { stay_id: stays[0]!.id, expected_version: current.data!.stay.version, guest_name: 'Lia' })
       expect(renamed.error).toBeNull()
-      expect(renamed.data!.saved_fields).toEqual({ guest_name: 'Ana Live' })
+      expect(renamed.data!.saved_fields).toEqual({ guest_name: 'Lia' })
       expect(renamed.data!.channel_push).toBeNull()
-      await expect(cleanerPage.getByRole('heading', { name: 'Ana’s group of 2', level: 2, exact: true })).toBeVisible()
-      await expect(cleanerPage.getByText('Ana Live Silva', { exact: true })).toBeVisible()
+      await expect(cleanerPage.getByRole('heading', { name: 'Lia’s group of 2', level: 2, exact: true })).toBeVisible()
+      await expect(cleanerPage.getByText('Silva')).toHaveCount(0)
       const privateStay = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[1]!.id })
       expect((await call('update_stay', { stay_id: stays[1]!.id, expected_version: privateStay.data!.stay.version, notes: 'Other home only' })).error).toBeNull()
-      const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, notes: 'Visible live note' })
+      const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, arrival_time: '18:30', notes: 'Host-only live note' })
       expect(noted.error).toBeNull()
-      await expect(cleanerPage.getByText('Visible live note', { exact: true })).toBeVisible()
+      await expect(cleanerPage.getByText(/^6:30\sPM$/u)).toBeVisible()
+      await expect(cleanerPage.getByText('Host-only live note')).toHaveCount(0)
       // The page can render the note before the socket's frame is recorded here.
       await expect.poll(() => liveEvents.filter(event => 'stayId' in event).length).toBe(2)
       expect(liveEvents.filter(event => 'stayId' in event).map(event => event.stayId)).toEqual([stays[0]!.id, stays[0]!.id])
@@ -4259,11 +4262,12 @@ test('a stay socket in a service organization closes when Better Auth removes it
     // The real first-open reconciliation read proves the app socket completed
     // its upgrade before the other device publishes the event under assertion.
     expect((await openedRead).status()).toBe(200)
-    const renamed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: stay.version, guest_name: 'Membership Live' } })
+    // The member reads the stay as its turnover, so the live change is one it shows: the arrival time.
+    const renamed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: stay.version, arrival_time: '18:30' } })
     await expectStatus(renamed, 200)
     const version = (await renamed.json() as { stay: { version: number } }).stay.version
     await expect(cleanerPage.getByRole('heading', { name: 'Membership', level: 2, exact: true })).toBeVisible()
-    await expect(cleanerPage.getByText('Membership Live', { exact: true })).toBeVisible()
+    await expect(cleanerPage.getByText(/^6:30\sPM$/u)).toBeVisible()
     await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
     const socket = sockets.find(socket => !socket.isClosed())
     expect(socket).toBeDefined()
