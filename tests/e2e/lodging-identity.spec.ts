@@ -188,7 +188,8 @@ test.describe('lodging identity boundary', () => {
         const invalidCursorResult = (await invalidCursor.json()).result
         expect(invalidCursorResult.isError).toBe(true)
         expect(invalidCursorResult.structuredContent).toBeUndefined()
-        expect(invalidCursorResult.content[0].text).toContain('Invalid arguments for tool get_team_conversation')
+        // A cursor is both its time and its id; the team-message domain refuses half of one.
+        expect(JSON.parse(invalidCursorResult.content[0].text)).toMatchObject({ status: 422, code: 'INVALID_CURSOR', message: 'before and beforeId are sent together' })
       }
       const afterInvalidCursor = await api.get(`${teamPath}/messages?org=${slug}`, { headers: bearer })
       expect(afterInvalidCursor.status, await afterInvalidCursor.text()).toBe(200)

@@ -6,9 +6,11 @@ import { seededTenant } from './seed/manifest'
 import { insightsPath } from '../../server/utils/dashboard-links'
 import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES, type ConversionEventDefinition } from '../../utils/organization-conversion-events'
 
-// The seed's guest visits and contact messages happen today; the range ends today in the businesses' clocks.
-const today = new Date().toISOString().slice(0, 10)
-const range = { startDate: new Date(Date.now() - 29 * 86_400_000).toISOString().slice(0, 10), endDate: today }
+// The seed's guest visits and contact messages happen today; the range is the
+// 30 days ending today in the business's own clock, which is not UTC's date
+// for much of the day in Bangkok or New York.
+const localDate = (timeZone: string, at: number) => new Intl.DateTimeFormat('en-CA', { timeZone }).format(at)
+const rangeIn = (timeZone: string) => ({ startDate: localDate(timeZone, Date.now() - 29 * 86_400_000), endDate: localDate(timeZone, Date.now()) })
 const businesses = [
   { user: 'user-e2e-ncls-owner', key: 'legal', words: ['Viewed a practice area', 'Clicked Book a consultation', 'Requested a consultation', 'Scheduled'] },
   { user: 'user-e2e-kikuzuki-owner', key: 'restaurant', words: ['Viewed a dish', 'Started a reservation', 'Reserved', 'Seated'] },
@@ -20,7 +22,8 @@ const cellCount = (text: string) => text === '—' ? 0 : Number(text.split(' · 
 
 for (const business of businesses) {
   test(`Insights shows the ${business.key} business its funnel from visit to request, by source`, async ({ page, baseURL }) => {
-    const { organizationId, slug } = seededTenant(business.key)
+    const { organizationId, slug, timezone } = seededTenant(business.key)
+    const range = rangeIn(timezone)
     await dismissPreviewToolbar(page)
     await loginAs(page.request, baseURL!, business.user)
     expect((await page.goto(insightsPath(slug, range)))?.status()).toBe(200)
