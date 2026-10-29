@@ -6,7 +6,7 @@ import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { devLoginHeaders } from './test-env'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
-import { dismissPreviewToolbar } from './helpers'
+import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import type { TeamMember, TeamMessage, TeamThread } from '../../server/domain/team-messages'
 import { ALL_VERTICALS } from '../../utils/vertical-copy'
 import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
@@ -419,6 +419,7 @@ test.describe('lodging identity boundary', () => {
         await loginAs(memberContext.request, baseURL!, teammate.id)
         await loginAs(memberMcp, baseURL!, invitee.id)
         await page.goto(`${listPath}?view=team`)
+        await waitForNuxtHydration(page)
         await dismissPreviewToolbar(page)
         await page.getByRole('link', { name: 'New team conversation', exact: true }).click()
         await page.getByRole('checkbox', { name: invitee.name, exact: true }).check()
@@ -474,6 +475,7 @@ test.describe('lodging identity boundary', () => {
         expect(mcpRead.status(), await mcpRead.text()).toBe(200)
         expect(mcpData<{ messages: TeamMessage[] }>(await mcpRead.json()).messages.map(message => message.id).sort()).toEqual([...messageIds].sort())
         await memberPage.goto(`${groupPath}?view=team`)
+        await waitForNuxtHydration(memberPage)
         await dismissPreviewToolbar(memberPage)
         await expect(memberPage.locator(`[data-team-message="${messageIds[2]}"]`)).toContainText(bodies[2]!)
 
@@ -496,6 +498,7 @@ test.describe('lodging identity boundary', () => {
         expect(memberManagement.status, await memberManagement.text()).toBe(403)
 
         await page.goto(`${groupPath}/details/members?view=team`)
+        await waitForNuxtHydration(page)
         await page.getByRole('button', { name: `Remove ${teammate.name}`, exact: true }).click()
         const removed = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `${teamPath}/operations`)
         await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
@@ -515,6 +518,7 @@ test.describe('lodging identity boundary', () => {
         await expect.poll(async () => (await threads(adminBearer)).find(thread => thread.id === threadId)?.participants.map(person => person.id).sort()).toEqual([fixture.id, invitee.id, teammate.id].sort())
         expect((await history(memberBearer)).map(message => message.id).sort()).toEqual([...messageIds].sort())
         await memberPage.goto(`${groupPath}?view=team`)
+        await waitForNuxtHydration(memberPage)
         await expect(memberPage.locator(`[data-team-message="${messageIds[0]}"]`)).toContainText(bodies[0]!)
         await memberPage.getByLabel('Conversation details', { exact: true }).click()
         await expect(memberPage.getByRole('link', { name: /^Name/ })).toHaveCount(0)
@@ -534,6 +538,7 @@ test.describe('lodging identity boundary', () => {
         expect(mcpData<{ status: 'updated'; threadId: string }>(await adminRename.json())).toEqual({ status: 'updated', threadId })
         expect((await threads(ownerBearer)).find(thread => thread.id === threadId)?.name).toBe('Admin handover')
         await page.goto(`${groupPath}/details/members?view=team`)
+        await waitForNuxtHydration(page)
         await expect(page.getByRole('button', { name: `Remove ${invitee.name}`, exact: true })).toBeVisible()
         await page.screenshot({ path: testInfo.outputPath('team-group-details-after-membership-changes.png'), fullPage: true })
         const ownerLeft = await api.post(`${teamPath}/operations?org=${slug}`, { headers: ownerBearer, data: { action: 'leave', idempotencyKey: crypto.randomUUID() } })
@@ -553,9 +558,11 @@ test.describe('lodging identity boundary', () => {
         expect(protectedDirect.status, await protectedDirect.text()).toBe(409)
         expect(await protectedDirect.json()).toMatchObject({ data: { code: 'TEAM_GROUP_PROTECTED', field: 'threadId' } })
         await page.goto(`${listPath}/team/${directId}?view=team`)
+        await waitForNuxtHydration(page)
         await expect(page.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
         await loginAs(memberContext.request, baseURL!, buyer.id)
         await memberPage.goto('/dashboard/account/messages')
+        await waitForNuxtHydration(memberPage)
         await expect(memberPage.getByRole('link', { name: 'New team conversation', exact: true })).toHaveCount(0)
         await expect(memberPage.getByLabel('Conversation details', { exact: true })).toHaveCount(0)
       } finally {
