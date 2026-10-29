@@ -32,7 +32,7 @@ export async function attachReviewCategoryRatings<T extends Record<string, unkno
  * `locationId` names one location's reviews, `null` the reviews attached to no
  * location, and omitting it lists every review on the site.
  */
-export async function listOrganizationReviews(db: DbClient, organizationId: string, options: { publishedOnly?: boolean; locationId?: string | null } = {}) {
+export async function listOrganizationReviews(db: DbClient, organizationId: string, options: { publishedOnly?: boolean; locationId?: string | null } = {}): Promise<Array<Record<string, unknown> & { publication_authorized: boolean; verified: boolean; category_ratings?: Array<{ category: ReviewCategory; rating: number }> }>> {
   const locationFilter = options.locationId ? ' AND r.location_id = ?' : options.locationId === null ? ' AND r.location_id IS NULL' : ''
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT r.id, r.organization_id, r.location_id, r.author_name,
@@ -47,7 +47,8 @@ export async function listOrganizationReviews(db: DbClient, organizationId: stri
   `, options.locationId ? [organizationId, options.locationId] : [organizationId])
   const reviews = await attachReviewMedia(db, organizationId, rows.map(({ is_stay_location, ...row }) =>
     publicReviewRow(row, options.publishedOnly === true && publicLocationIsProtected(is_stay_location), options.publishedOnly === true)))
-  if (options.publishedOnly) return reviews.map(review => ({ ...review, category_ratings: [] as Array<{ category: ReviewCategory; rating: number }> }))
+  // The public reads a review's words and overall rating; the per-question scores are the team's.
+  if (options.publishedOnly) return reviews
   return await attachReviewCategoryRatings(db, reviews)
 }
 
