@@ -32,6 +32,11 @@ export async function useGuestThread(threadId: Ref<string> | ComputedRef<string>
     )
   }, { server: !personalScope.value })
 
+  // A revoked resource is no longer a displayable cached conversation.
+  watch(error, cause => {
+    if (cause?.statusCode === 403 || cause?.statusCode === 404) data.value = undefined
+  }, { flush: 'sync' })
+
   const thread = computed(() => data.value?.thread ?? null)
 
   return { data, thread, pending, error, refresh, organizationId }

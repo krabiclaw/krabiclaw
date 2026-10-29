@@ -1,5 +1,5 @@
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertAssignedBookingAccess, assignedHomeSql, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertAssignedBookingAccess, assignedResponsibilitySql, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { getGuestRequest } from '~/server/domain/requests'
 import { getStay, readStayHome, stayAccessFor, type StayAccess } from '~/server/domain/stays'
@@ -202,7 +202,7 @@ export async function listScheduledGuestMessages(db: DbClient, access: StayAcces
   }
   const rows = await queryAll<ScheduledGuestMessageRow>(db, `SELECT m.* FROM scheduled_guest_messages m
     JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
-    WHERE m.organization_id = ? ${requestId === null ? '' : 'AND m.request_id = ?'} ${access.manage ? '' : `AND ${assignedHomeSql('c')}`}
+    WHERE m.organization_id = ? ${requestId === null ? '' : 'AND m.request_id = ?'} ${access.manage ? '' : `AND ${assignedResponsibilitySql('c')}`}
     ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?`,
   [access.organizationId, ...(requestId === null ? [] : [requestId]), ...(access.manage ? [] : [access.userId, access.userId]), query.limit + 1, query.offset])
   const page = messageListPage(rows.map(scheduledGuestMessage), query)

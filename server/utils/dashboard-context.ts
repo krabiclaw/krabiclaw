@@ -6,7 +6,7 @@ import type { H3Event } from 'nitro'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertOrganizationWideAccess, assignedLocationSql, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertOrganizationWideAccess, assignedResponsibilitySql, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
 import { getOrganizationPlan } from '~/server/utils/billing-access'
 
 import { parsePostalAddress } from '~/utils/postal-address'
@@ -371,7 +371,7 @@ export async function listDashboardLocations(
     WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
       ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM products p WHERE p.organization_id = l.organization_id AND (${ASSIGNED_SERVICE_SQL})
         AND (EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id = p.organization_id AND pl.product_id = p.id AND pl.location_id = l.id)
-          OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))) OR ${assignedLocationSql('l')})` : ''}
+          OR EXISTS (SELECT 1 FROM product_sessions ps WHERE ps.organization_id = p.organization_id AND ps.product_id = p.id AND ps.location_id = l.id))) OR ${assignedResponsibilitySql('l')})` : ''}
     ORDER BY l.title ASC
   `, assignedUserId ? [organizationId, assignedUserId, assignedUserId, assignedUserId, assignedUserId] : [organizationId])
   const [media, organizationPlacements] = await Promise.all([

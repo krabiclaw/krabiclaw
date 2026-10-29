@@ -831,7 +831,8 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	check("product_booking_configs_capacity_check", sql`default_capacity IS NULL OR default_capacity >= 0`),
 	check("product_booking_configs_confirmation_check", sql`confirmation_mode IN ('instant', 'review')`),
 	check("product_booking_configs_payment_check", sql`online_payment_required IN (0, 1)`),
-	check("product_booking_configs_held_online_check", sql`held_online IN (0, 1) AND (held_online = 0 OR (scheduling_mode = 'provider' AND (assigned_member_id IS NOT NULL OR assigned_team_id IS NOT NULL)))`),
+	// A provider's departure may clear responsibility without changing online delivery.
+	check("product_booking_configs_held_online_check", sql`held_online IN (0, 1) AND (held_online = 0 OR scheduling_mode = 'provider')`),
 ]);
 
 // Typed weekly recurrence. This replaces the `recurring_slots` JSON map; it is
@@ -2429,8 +2430,11 @@ export const team_threads = sqliteTable("team_threads", {
 	stay_id: text(),
 	location_id: text(),
 	created_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
-	// SHA-256 of the stay, location, and the sorted member ids the conversation was started
-	// with: starting the same conversation again, or twice at once, finds this one.
+	name: text(),
+	// Kept after members leave: a group never becomes a direct conversation.
+	is_group: integer({ mode: "boolean" }).default(false).notNull(),
+	// Direct/contextual conversations use their initial roster. Mutable groups
+	// use a caller-scoped creation key, independent of their changing roster.
 	participants_key: text().notNull(),
 	// The newest message's time, or the creation time before the first message.
 	last_message_at: text().notNull(),

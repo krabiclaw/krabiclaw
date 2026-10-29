@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext } from '@playwright/test'
+import { expect, test, type BrowserContext, type WebSocket } from '@playwright/test'
 import { loginAs, authRequestHeaders } from './helpers/auth'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -7,6 +7,7 @@ import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import type { AgendaPayload } from '../../server/utils/dashboard-agenda'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 import type { GuestThreadDetailViewModel, GuestThreadListPage } from '../../server/domain/guest-threads/types'
+import { isDashboardInvalidation } from '../../shared/dashboard-invalidations'
 
 const ORG = '/dashboard/ember-slice-demo'
 
@@ -155,12 +156,14 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     const memberRequest = memberContext.request
     await loginAs(page.request, baseURL!)
     original = await readAssignment()
-    expect(original).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
     const members = await page.request.get('/api/dashboard/members', { params: { org } })
     expect(members.status(), await members.text()).toBe(200)
     actor = (await members.json() as { members: Member[] }).members.find(member => member.userId === 'user-e2e-demo-role-owner')
     expect(actor, 'The canonical role actor already belongs to the demo tenant').toBeDefined()
     if (!actor) throw new Error('The canonical demo role actor is missing')
+    // The branch keeps the tenant's own responsibility; the actor holds none of it.
+    expect(original.assigned_member_id).not.toBe(actor.id)
+    expect(original.assigned_team_id).toBeNull()
     const teams = await page.request.get('/api/auth/organization/list-teams', { params: { organizationId } })
     expect(teams.status(), await teams.text()).toBe(200)
     originalTeamIds = (await teams.json() as Array<{ id: string }>).map(team => team.id).sort()
@@ -198,6 +201,8 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     expect(changed.status(), await changed.text()).toBe(200)
     await loginAs(memberRequest, baseURL!, actor.userId)
     const memberPage = await memberContext.newPage()
+    const sockets: WebSocket[] = []
+    memberPage.on('websocket', socket => sockets.push(socket))
     await dismissPreviewToolbar(memberPage)
     const verifyAccess = async (assigned: boolean) => {
       for (const range of ['today', 'upcoming'] as const) {
@@ -234,8 +239,14 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
         await expect(memberPage.locator(`[data-card-id="reservation:${reservationId}"]`)).toHaveAttribute('href', `${destination}?range=upcoming`)
         await memberPage.getByRole('tab', { name: 'Today', exact: true }).click()
         await expect(memberPage.locator(`[data-card-id="attention:${reservationId}"]`)).toHaveAttribute('href', destination)
+        const openedThread = memberPage.waitForResponse(response => response.request().method() === 'GET'
+          && new URL(response.url()).pathname === `${inboxPath}/${reservationId}`)
         expect((await memberPage.goto(`${ORG}/messages/${reservationId}`))?.status()).toBe(200)
         await expect(memberPage.locator(`[data-thread-row="${reservationId}"]`)).toContainText(guestName)
+        // The first-open reconciliation read happens after the real socket upgrade.
+        expect((await openedThread).status()).toBe(200)
+        await expect(memberPage.getByText('New reservation', { exact: true })).toBeVisible()
+        await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toBeVisible()
       }
     }
     await verifyAccess(false)
@@ -258,8 +269,23 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     expect(teamSaved.status(), await teamSaved.text()).toBe(200)
     expect(await readAssignment()).toMatchObject(assignedTeam)
     await verifyAccess(true)
+    const socket = sockets.findLast(socket => !socket.isClosed() && new URL(socket.url()).pathname === '/api/dashboard/guest-inbox/socket')
+    expect(socket, 'The open guest conversation has a live dashboard socket').toBeDefined()
+    if (!socket) throw new Error('The assigned member has no live dashboard socket')
+    const accessChanged = socket.waitForEvent('framereceived', { predicate: frame => {
+      if (frame.payload === 'pong') return false
+      const event: unknown = JSON.parse(String(frame.payload))
+      return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organizationId
+    } })
     const cleared = await page.request.patch(locationPath, { params: { org }, data: { assigned_member_id: null, assigned_team_id: null } })
     expect(cleared.status(), await cleared.text()).toBe(200)
+    await accessChanged
+    // Revocation clears the conversation already on screen before any fresh navigation or member reads.
+    await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
+    await expect(memberPage.getByText('New reservation', { exact: true })).toHaveCount(0)
+    await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
+    await expect(memberPage.locator(`[data-thread-row="${reservationId}"]`)).toHaveCount(0)
+    await expect(memberPage.getByText('This conversation is no longer available', { exact: true })).toBeVisible()
     expect(await readAssignment()).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
     await verifyAccess(false)
   } catch (error) {

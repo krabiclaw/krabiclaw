@@ -339,10 +339,11 @@ async function resolveOwnerRecipients(
     /** The team member a booking is assigned to hears about it alongside the owners. */
     assignedMemberId?: string | null
     memberIds?: string[]
+    requestId?: string
   },
 ): Promise<OwnerRecipient[]> {
   const [members, messagingEnabled] = await Promise.all([
-    listOrganizationNotificationMembers(env, opts.organizationId, { includeMemberIds: [...(opts.assignedMemberId ? [opts.assignedMemberId] : []), ...(opts.memberIds ?? [])] }),
+    listOrganizationNotificationMembers(env, opts.organizationId, { includeMemberIds: [...(opts.assignedMemberId ? [opts.assignedMemberId] : []), ...(opts.memberIds ?? [])], requestId: opts.requestId }),
     hasOrganizationEntitlement(env, opts.organizationId, 'messaging'),
   ])
   const recipients = await Promise.all(members.map(async (member) => {
@@ -722,6 +723,7 @@ export async function notifyOwner(
     emailPurpose: opts.message.emailPurpose,
     assignedMemberId: assigned?.assigned_member_id ?? null,
     memberIds: opts.memberIds ?? [],
+    requestId: threadContext?.guestThreadId ?? undefined,
   })
 
   // The owner reads mail sent for their business, framed by its own mark.
@@ -1769,6 +1771,7 @@ export async function notifyGuestThreadReply(
     organizationId: opts.organizationId,
     category: ownerMessage.category,
     emailPurpose: ownerMessage.emailPurpose,
+    requestId: opts.threadId,
   })
 
   const results = await Promise.allSettled(recipients.flatMap((recipient) => {

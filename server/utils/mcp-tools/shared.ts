@@ -107,6 +107,8 @@ export const locationObject = {
     id: { type: 'string', minLength: 1 },
     slug: { type: 'string', minLength: 1 },
     title: { type: 'string' },
+    assigned_member_id: { type: ['string', 'null'], description: 'Responsible Better Auth membership ID from list_organization_members, not userId. Null is unassigned. Choose a member or team, never both; clear assigned_team_id when choosing a member.' },
+    assigned_team_id: { type: ['string', 'null'], description: 'Responsible Better Auth Team ID from list_teams. Its current members receive assigned location work. Choose a member or team, never both; clear assigned_member_id when choosing a team.' },
     stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'Public map precision for places to stay at this location; both choices keep their street address private.' },
     phone: { type: ['string', 'null'] },
     email: { type: ['string', 'null'] },
@@ -145,7 +147,7 @@ export const locationObject = {
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
   },
-  required: ['id', 'slug', 'title', 'stay_map_sharing', 'latitude', 'longitude', 'status', 'timezone', 'created_at', 'updated_at', 'media'],
+  required: ['id', 'slug', 'title', 'assigned_member_id', 'assigned_team_id', 'stay_map_sharing', 'latitude', 'longitude', 'status', 'timezone', 'created_at', 'updated_at', 'media'],
 }
 
 export const locationMutationResultObject = {
@@ -903,6 +905,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   list_team_conversation_recipients: R,
   list_team_conversations: R,
   start_team_conversation: { ...W, idempotentHint: true },
+  update_team_group: { ...D, idempotentHint: true },
   get_team_conversation: R,
   send_team_message: { ...W, openWorldHint: true, idempotentHint: true },
   mark_team_conversation_read: D,

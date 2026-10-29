@@ -2,7 +2,7 @@ import { DurableObject } from 'cloudflare:workers'
 import { HTTPError } from 'nitro'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../../shared/dashboard-invalidations'
 import { queryFirst } from '~/server/db'
-import { assertAssignedBookingAccess, assignedHomeSql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertAssignedBookingAccess, assignedResponsibilitySql, memberAccessPrincipal, resolveOrganizationMembership, roleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 
 type GuestInboxHubEnv = CloudflareEnv
@@ -45,6 +45,15 @@ async function socketMembership(env: GuestInboxHubEnv, attachment: InboxSocketAt
 
 async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachment, membership: ResolvedMembership, event: DashboardInvalidation): Promise<boolean> {
   if (attachment.organizationId !== event.organizationId) return false
+  // Scope changes carry no resource or person identity. Former assignees must
+  // learn to re-read too, even though resource events no longer reach them.
+  if (event.type === 'access.changed') return true
+  if (event.type === 'team_thread.access_ended') {
+    if (event.targetUserId !== attachment.userId) return false
+    // An old keyed retry must not evict someone who has since been re-added.
+    return !await queryFirst(env.DB, `SELECT 1 FROM team_thread_members s JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id
+      WHERE s.organization_id = ? AND s.thread_id = ? AND m.userId = ?`, [attachment.organizationId, event.teamThreadId, attachment.userId])
+  }
   // A team conversation is its members' alone, whatever their role.
   if (event.type === 'team_thread.changed') {
     return Boolean(await queryFirst(env.DB, `SELECT 1 FROM team_thread_members s JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id
@@ -55,7 +64,7 @@ async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachme
   if ('targetUserId' in event) return event.targetUserId === attachment.userId
   if ('productId' in event) {
     return Boolean(await queryFirst(env.DB, `SELECT c.product_id FROM product_stay_configs c
-      WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedHomeSql('c')})`,
+      WHERE c.organization_id = ? AND c.product_id = ? AND (${assignedResponsibilitySql('c')})`,
     [attachment.organizationId, event.productId, attachment.userId, attachment.userId]))
   }
   try {

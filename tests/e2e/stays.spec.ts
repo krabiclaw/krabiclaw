@@ -106,6 +106,87 @@ function previewLocators(page: Page) {
   return { previewLink, previewModal, previewIframe, preview: previewIframe.contentFrame() }
 }
 
+test('a responsible home team sees its stay and conversation until Better Auth removes its membership', async ({ page, browser, baseURL }) => {
+  test.setTimeout(120_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Home responsibility uses disposable local data only')
+  const { headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
+  const memberContext = await browser.newContext({ baseURL })
+  try {
+    await loginAs(memberContext.request, baseURL!, 'user-e2e-lodging-native')
+    const offered = await page.request.post(`/api/organizations/${organizationId}/invite-links`, { data: { role: 'member' } })
+    await expectStatus(offered, 201)
+    const { token } = await offered.json() as { token: string }
+    const accepted = await memberContext.request.post(`/api/invite-links/${token}/accept`, { data: {} })
+    await expectStatus(accepted, 200)
+    const teamName = 'Home hosts'
+    const team = await page.request.post('/api/auth/organization/create-team', { headers, data: { organizationId, name: teamName } })
+    await expectStatus(team, 200)
+    const { id: teamId } = await team.json() as { id: string }
+    const included = await page.request.post('/api/auth/organization/add-team-member', { headers, data: { organizationId, teamId, userId: 'user-e2e-lodging-native' } })
+    await expectStatus(included, 200)
+    await page.goto(`/dashboard/${slug}/products/${productId}/team`)
+    const responsibility = page.locator('#dashboard-panel-product-team')
+    await expect(responsibility.getByRole('radio', { name: 'Unassigned No person or team is assigned.', exact: true })).toBeChecked()
+    await responsibility.getByRole('radio', { name: `Team: ${teamName} 1 member`, exact: true }).check()
+    const assigned = page.waitForResponse(response => response.request().method() === 'PATCH'
+      && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
+    await responsibility.getByRole('button', { name: 'Save', exact: true }).click()
+    await expectStatus(await assigned, 200)
+    const productRead = await call<{ product: Product }>('get_product', { product_id: productId })
+    expect(productRead.error).toBeNull()
+    expect(productRead.data!.product.stay).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
+    const guestName = `Home team guest ${crypto.randomUUID()}`
+    const made = await page.request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(0), check_out_date: localDay(2), adults: 1,
+      guest_name: guestName, guest_email: `${slug}@playwright.example`, total_minor: 0, idempotency_key: crypto.randomUUID() } })
+    await expectStatus(made, 201)
+    const { stay } = await made.json() as { stay: StayDetail }
+    expect(stay.request_id).toBeTruthy()
+    const stayPath = api(`stays/${stay.id}`)
+    const inboxPath = `/api/dashboard/organizations/${organizationId}/guest-threads/${stay.request_id}`
+    const memberStay = await memberContext.request.get(stayPath)
+    await expectStatus(memberStay, 200)
+    expect((await memberStay.json() as { stay: StayDetail }).stay).toMatchObject({ id: stay.id, product_id: productId, guest_name: guestName })
+    const today = await memberContext.request.get(api('today'))
+    await expectStatus(today, 200)
+    expect((await today.json() as import('../../shared/dashboard-today').TodayFeedPayload).cards.map(card => card.id)).toContain(`stay:${stay.id}:arrival`)
+    const memberPage = await memberContext.newPage()
+    let socket: WebSocket | undefined
+    memberPage.on('websocket', next => { if (new URL(next.url()).pathname === '/api/dashboard/guest-inbox/socket') socket = next })
+    const reconciled = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === inboxPath)
+    await memberPage.goto(`/dashboard/${slug}/messages/${stay.request_id}`)
+    await expectStatus(await reconciled, 200)
+    await expect(memberPage.getByRole('heading', { name: guestName, exact: true })).toBeVisible()
+    await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toBeVisible()
+    if (!socket || socket.isClosed()) throw new Error('The responsible home member has no live inbox socket')
+    const revoked = socket.waitForEvent('framereceived', { predicate: frame => {
+      if (frame.payload === 'pong') return false
+      const event: unknown = JSON.parse(String(frame.payload))
+      return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organizationId
+    } })
+    const removed = await page.request.post('/api/auth/organization/remove-team-member', { headers, data: { organizationId, teamId, userId: 'user-e2e-lodging-native' } })
+    await expectStatus(removed, 200)
+    await revoked
+    await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
+    await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
+    await expectStatus(await memberContext.request.get(stayPath), 404)
+    await expectStatus(await memberContext.request.get(inboxPath), 404)
+    const homes = await memberContext.request.get(api('stay-homes'))
+    await expectStatus(homes, 200)
+    expect((await homes.json() as { homes: Array<{ product_id: string }> }).homes.map(home => home.product_id)).not.toContain(productId)
+    const afterToday = await memberContext.request.get(api('today'))
+    await expectStatus(afterToday, 200)
+    expect((await afterToday.json() as import('../../shared/dashboard-today').TodayFeedPayload).cards.map(card => card.id)).not.toContain(`stay:${stay.id}:arrival`)
+    const retained = await page.request.get(stayPath)
+    await expectStatus(retained, 200)
+    expect((await retained.json() as { stay: StayDetail }).stay).toMatchObject({ id: stay.id, product_id: productId, guest_name: guestName, request_id: stay.request_id })
+  } finally {
+    try {
+      const deleted = await page.request.post('/api/auth/organization/delete', { headers, data: { organizationId } })
+      await expectStatus(deleted, 200)
+    } finally { await memberContext.close() }
+  }
+})
+
 test('a host creates a stay and its buyer returns to arrival details, messages, notifications and cancellation', async ({ page, browser, baseURL }) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
@@ -2954,7 +3035,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   const membership = members.data!.members.find(member => member.id === host.memberId)!
   expect(membership.user.id).not.toBe(membership.id)
   const userIdAssignment = await call('update_product', { product_id: productId, stay: { assigned_member_id: membership.user.id } })
-  expect(JSON.parse(userIdAssignment.error!)).toMatchObject({ status: 404, message: 'stay.assigned_member_id is not a member of this organization' })
+  expect(JSON.parse(userIdAssignment.error!)).toMatchObject({ status: 422, code: 'INVALID_RESPONSIBILITY', message: 'The responsible member must belong to this organization' })
   const unchangedAssignment = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`)
   await expectStatus(unchangedAssignment, 200)
   expect((await unchangedAssignment.json()).product.stay).toMatchObject({ assigned_member_id: null, assigned_team_id: null })

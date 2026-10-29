@@ -7,8 +7,15 @@ is required. The initial implementation supports an explicitly configured single
 calendar. The owner's subsequent review supersedes the single-operator target:
 team members must have individual recurring availability and explicit service
 eligibility, with automatic assignment rather than a guest-facing provider choice.
-This provider allocation is not implemented by the current calendar-group guard;
-it remains a foundation integration requirement before enabling a multi-member team.
+The canonical provider allocator resolves that explicit eligibility to an
+available attorney and records the attorney on each new consultation. Legal
+consultation configuration requires provider scheduling and an explicit attorney
+or legal team. A practice area without a booking capability remains informational.
+Physical consultations keep their configured weekly or dated times and filter
+those times through attorney availability; online consultations generate times
+from attorney working hours. Missing required attorney configuration fails
+visibly. No attorney is inferred from an owner, a first team member, or a home
+operator, and historical booked assignments are not backfilled or rewritten.
 
 ## Shared interfaces across the four feature PRs
 

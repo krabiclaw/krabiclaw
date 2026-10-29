@@ -319,11 +319,12 @@ CREATE TABLE `channel_sync_log` (
 	`external_id` text NOT NULL,
 	`status` text NOT NULL,
 	`detail` text,
+	`task_id` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "channel_sync_log_provider_check" CHECK(provider = 'channex'),
+	CONSTRAINT "channel_sync_log_provider_check" CHECK(provider IN ('channex', 'google_calendar')),
 	CONSTRAINT "channel_sync_log_direction_check" CHECK(direction IN ('inbound', 'outbound')),
-	CONSTRAINT "channel_sync_log_kind_check" CHECK(kind IN ('booking_revision', 'availability', 'restrictions')),
+	CONSTRAINT "channel_sync_log_kind_check" CHECK(kind IN ('booking_revision', 'availability', 'restrictions', 'calendar_event')),
 	CONSTRAINT "channel_sync_log_status_check" CHECK(status IN ('applied', 'acknowledged', 'ignored_disconnected', 'failed', 'needs_review', 'pushed')),
 	CONSTRAINT "channel_sync_log_failed_check" CHECK(status NOT IN ('failed', 'needs_review') OR detail IS NOT NULL),
 	CONSTRAINT "channel_sync_log_created_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)
@@ -340,6 +341,7 @@ CREATE TABLE `channel_threads` (
 	`request_id` text NOT NULL,
 	`external_booking_id` text,
 	`provider_updated_at` text NOT NULL,
+	`moved_from_thread_id` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	PRIMARY KEY(`provider`, `external_thread_id`),
@@ -506,6 +508,36 @@ CREATE UNIQUE INDEX `content_documents_links_org_unique` ON `content_documents` 
 CREATE INDEX `content_documents_org_kind_status_idx` ON `content_documents` (`kind`,`row_role`,`status`,`sort_order`);--> statement-breakpoint
 CREATE INDEX `content_documents_location_kind_status_idx` ON `content_documents` (`location_id`,`kind`,`row_role`,`status`,`sort_order`);--> statement-breakpoint
 CREATE UNIQUE INDEX `content_documents_scope_role_unique` ON `content_documents` (`organization_id`,`id`,`row_role`,`kind`);--> statement-breakpoint
+CREATE TABLE `content_reports` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`reporter_user_id` text,
+	`subject` text NOT NULL,
+	`request_id` text,
+	`team_message_id` text,
+	`author_user_id` text,
+	`reason` text NOT NULL,
+	`excerpt` text NOT NULL,
+	`blocked` integer NOT NULL,
+	`status` text NOT NULL,
+	`resolved_by_user_id` text,
+	`resolved_at` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`reporter_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`request_id`) REFERENCES `requests`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`team_message_id`) REFERENCES `team_messages`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`author_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`resolved_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "content_reports_subject_check" CHECK((subject = 'guest_thread' AND team_message_id IS NULL) OR (subject = 'team_message' AND request_id IS NULL AND blocked = 0)),
+	CONSTRAINT "content_reports_reason_check" CHECK(length(reason) BETWEEN 1 AND 1000 AND reason = trim(reason)),
+	CONSTRAINT "content_reports_resolution_check" CHECK((status = 'open') = (resolved_at IS NULL)),
+	CONSTRAINT "content_reports_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND (resolved_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', resolved_at, '+0 days') IS resolved_at))
+);
+--> statement-breakpoint
+CREATE INDEX `content_reports_status_created_idx` ON `content_reports` (`status`,`created_at`);--> statement-breakpoint
+CREATE INDEX `content_reports_request_idx` ON `content_reports` (`request_id`);--> statement-breakpoint
+CREATE INDEX `content_reports_team_message_idx` ON `content_reports` (`team_message_id`);--> statement-breakpoint
 CREATE TABLE `device_tokens` (
 	`token` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,
@@ -579,6 +611,23 @@ CREATE TABLE `google_calendar_setup` (
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
+CREATE TABLE `google_calendar_sync` (
+	`organization_id` text PRIMARY KEY NOT NULL,
+	`integration_revision` text NOT NULL,
+	`channel_id` text NOT NULL,
+	`channel_token` text NOT NULL,
+	`resource_id` text,
+	`channel_expires_at` text,
+	`sync_token` text,
+	`reschedules` integer DEFAULT 1 NOT NULL,
+	`last_pulled_at` text,
+	`last_error` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `google_calendar_sync_channel_unique` ON `google_calendar_sync` (`channel_id`);--> statement-breakpoint
 CREATE TABLE `guest_thread_deliveries` (
 	`id` text PRIMARY KEY NOT NULL,
 	`entry_id` text NOT NULL,
@@ -587,6 +636,8 @@ CREATE TABLE `guest_thread_deliveries` (
 	`purpose` text NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`provider_message_id` text,
+	`email_json` text,
+	`email_message_id` text,
 	`error` text,
 	`non_delivery_confirmed` integer,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
@@ -815,7 +866,7 @@ CREATE TABLE `member` (
 	FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE INDEX `member_userId_organizationId_idx` ON `member` (`userId`,`organizationId`);--> statement-breakpoint
+CREATE UNIQUE INDEX `member_userId_organizationId_unique` ON `member` (`userId`,`organizationId`);--> statement-breakpoint
 CREATE INDEX `member_organizationId_idx` ON `member` (`organizationId`);--> statement-breakpoint
 CREATE UNIQUE INDEX `member_id_organizationId_unique` ON `member` (`id`,`organizationId`);--> statement-breakpoint
 CREATE TABLE `member_scheduling` (
@@ -1123,6 +1174,27 @@ CREATE INDEX `organization_domains_org_idx` ON `organization_domains` (`organiza
 CREATE UNIQUE INDEX `idx_organization_domains_one_canonical` ON `organization_domains` (`organization_id`) WHERE role = 'canonical' AND status = 'active';--> statement-breakpoint
 CREATE UNIQUE INDEX `organization_domains_one_active_subdomain` ON `organization_domains` (`organization_id`) WHERE type = 'subdomain' AND status = 'active';--> statement-breakpoint
 CREATE INDEX `idx_organization_domains_reconcile` ON `organization_domains` (`status`,`next_check_at`);--> statement-breakpoint
+CREATE TABLE `organization_goals` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`intent` text NOT NULL,
+	`constraints` text,
+	`target_at` text,
+	`status` text NOT NULL,
+	`created_by_user_id` text,
+	`updated_by_user_id` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`created_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`updated_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "organization_goals_text_check" CHECK(length(trim(intent)) BETWEEN 1 AND 2000 AND (constraints IS NULL OR length(trim(constraints)) BETWEEN 1 AND 2000)),
+	CONSTRAINT "organization_goals_status_check" CHECK(status IN ('active', 'archived')),
+	CONSTRAINT "organization_goals_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (target_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', target_at, '+0 days') IS target_at))
+);
+--> statement-breakpoint
+CREATE INDEX `organization_goals_status_idx` ON `organization_goals` (`organization_id`,`status`,`updated_at`);--> statement-breakpoint
+CREATE UNIQUE INDEX `organization_goals_scope_unique` ON `organization_goals` (`organization_id`,`id`);--> statement-breakpoint
 CREATE TABLE `organization_integrations` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -1585,7 +1657,7 @@ CREATE TABLE `product_booking_configs` (
 	CONSTRAINT "product_booking_configs_capacity_check" CHECK(default_capacity IS NULL OR default_capacity >= 0),
 	CONSTRAINT "product_booking_configs_confirmation_check" CHECK(confirmation_mode IN ('instant', 'review')),
 	CONSTRAINT "product_booking_configs_payment_check" CHECK(online_payment_required IN (0, 1)),
-	CONSTRAINT "product_booking_configs_held_online_check" CHECK(held_online IN (0, 1) AND (held_online = 0 OR (scheduling_mode = 'provider' AND (assigned_member_id IS NOT NULL OR assigned_team_id IS NOT NULL))))
+	CONSTRAINT "product_booking_configs_held_online_check" CHECK(held_online IN (0, 1) AND (held_online = 0 OR scheduling_mode = 'provider'))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `product_booking_configs_org_product_unique` ON `product_booking_configs` (`organization_id`,`product_id`);--> statement-breakpoint
@@ -1604,6 +1676,8 @@ CREATE TABLE `product_channel_mappings` (
 	`import_content` text,
 	`import_written` text,
 	`enabled` integer DEFAULT 0 NOT NULL,
+	`delivery_lease` text,
+	`delivery_lease_until` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	PRIMARY KEY(`product_id`, `provider`),
@@ -2016,6 +2090,32 @@ CREATE TABLE `rate_limits` (
 );
 --> statement-breakpoint
 CREATE INDEX `idx_rate_limits_expires` ON `rate_limits` (`expires_at`);--> statement-breakpoint
+CREATE TABLE `recommendation_feedback` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`user_id` text NOT NULL,
+	`operation` text NOT NULL,
+	`subject_id` text NOT NULL,
+	`evidence_revision` text NOT NULL,
+	`goal_id` text,
+	`goal_revision` text,
+	`decision` text NOT NULL,
+	`note` text,
+	`defer_until` text,
+	`created_at` text NOT NULL,
+	`updated_at` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`goal_id`) REFERENCES `organization_goals`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "recommendation_feedback_operation_check" CHECK(operation IN ('article.update', 'article.publish', 'guest_thread.reply') AND length(trim(subject_id)) > 0),
+	CONSTRAINT "recommendation_feedback_revision_check" CHECK(length(evidence_revision) = 64 AND evidence_revision NOT GLOB '*[^a-f0-9]*' AND ((goal_id IS NULL AND goal_revision IS NULL) OR (goal_id IS NOT NULL AND length(trim(goal_id)) > 0 AND goal_revision IS NOT NULL))),
+	CONSTRAINT "recommendation_feedback_decision_check" CHECK(decision IN ('accept', 'dismiss', 'defer', 'correct') AND ((decision = 'defer' AND defer_until IS NOT NULL) OR (decision <> 'defer' AND defer_until IS NULL)) AND (decision <> 'correct' OR note IS NOT NULL) AND (note IS NULL OR length(trim(note)) BETWEEN 1 AND 2000)),
+	CONSTRAINT "recommendation_feedback_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (goal_revision IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', goal_revision, '+0 days') IS goal_revision) AND (defer_until IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', defer_until, '+0 days') IS defer_until))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `recommendation_feedback_reference_unique` ON `recommendation_feedback` (`organization_id`,`user_id`,`operation`,`subject_id`,`evidence_revision`) WHERE "recommendation_feedback"."goal_id" IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `recommendation_feedback_goal_reference_unique` ON `recommendation_feedback` (`organization_id`,`user_id`,`operation`,`subject_id`,`evidence_revision`,`goal_id`,`goal_revision`) WHERE "recommendation_feedback"."goal_id" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `recommendation_feedback_actor_idx` ON `recommendation_feedback` (`organization_id`,`user_id`,`updated_at`);--> statement-breakpoint
 CREATE TABLE `requests` (
 	`id` text PRIMARY KEY NOT NULL,
 	`kind` text NOT NULL,
@@ -2027,6 +2127,7 @@ CREATE TABLE `requests` (
 	`resolved_at` text,
 	`archived_at` text,
 	`archived_by_user_id` text,
+	`blocked_at` text,
 	`payload_json` text NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
@@ -2380,6 +2481,7 @@ CREATE TABLE `stays` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `stays_idempotency_unique` ON `stays` (`organization_id`,`idempotency_key`) WHERE idempotency_key IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `stays_provider_booking_unique` ON `stays` (`provider`,`external_booking_id`) WHERE external_booking_id IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `stays_channel_reservation_unique` ON `stays` (`organization_id`,`channel`,`channel_booking_id`) WHERE channel_booking_id IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `stays_request_unique` ON `stays` (`request_id`) WHERE request_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `stays_product_dates_idx` ON `stays` (`product_id`,`check_in_date`,`check_out_date`);--> statement-breakpoint
 CREATE INDEX `stays_org_dates_idx` ON `stays` (`organization_id`,`check_in_date`,`status`);--> statement-breakpoint
@@ -2556,6 +2658,8 @@ CREATE TABLE `team_threads` (
 	`stay_id` text,
 	`location_id` text,
 	`created_by_user_id` text,
+	`name` text,
+	`is_group` integer DEFAULT 0 NOT NULL,
 	`participants_key` text NOT NULL,
 	`last_message_at` text NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,

@@ -199,11 +199,17 @@ test('a bound page and its share address follow publication while its booking is
     await setProductPublication(db, { organizationId: ORG, productId: product.id, published: true, actor: ACTOR })
     const visible = { page: product.page?.id, listed: true, publicUrl: `https://legal-services.proof.example${path}` }
     assert.deepEqual(await published(), visible)
-    await setProductBookingConfig(db, { organizationId: ORG, productId: product.id, actorId: ACTOR.actorId, env, patch: { duration_minutes: 30 } })
+    await assert.rejects(setProductBookingConfig(db, { organizationId: ORG, productId: product.id, actorId: ACTOR.actorId, env, patch: { duration_minutes: 30 } }), (error: unknown) => {
+      const failure = error as { status: number; data: unknown }
+      assert.equal(failure.status, 409)
+      assert.deepEqual(failure.data, { code: 'ATTORNEY_REQUIRED', field: 'scheduling_mode' })
+      return true
+    })
     const saved = await getProduct(db, ORG, product.id)
     assert.equal(saved.active, false)
+    assert.equal(saved.booking, null)
     const projection = await productPublicPresentation(db, env, ORG, saved)
-    assert.deepEqual(projection.readiness, { ready: false, missing: ['variants.prices', 'booking.schedule'] })
+    assert.equal(projection.readiness, null, 'an informational legal page has no consultation configuration to assess')
     assert.deepEqual(await published(), visible)
     assert.equal((await getPublishedTenantPage(db, ORG, path!))?.blocks[0]?.data.markdown,
       'Employment law information remains available before consultations open.')

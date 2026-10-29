@@ -10,7 +10,7 @@
         <span class="block text-base text-highlighted">{{ label }}</span>
         <span v-if="description" class="mt-1 block text-sm text-muted">{{ description }}</span>
       </label>
-      <USwitch :id="switchId" v-model="model" :disabled="disabled" class="mt-0.5 shrink-0" />
+      <USwitch :id="switchId" v-model="model" :aria-label="label" :disabled="disabled" class="mt-0.5 shrink-0" />
     </div>
     <div v-if="$slots.default" class="mt-4">
       <slot />

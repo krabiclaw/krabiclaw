@@ -1,8 +1,8 @@
 import { HTTPError } from 'nitro'
 import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { liveHomeSql } from '~/server/utils/billing'
@@ -349,7 +349,7 @@ function mapStay(row: Record<string, unknown>): Stay {
 
 /** The SQL that limits rows to homes this caller may see, and its parameters. */
 function visibleHomes(access: StayAccess, alias = 'c'): { sql: string; params: string[] } {
-  return access.manage ? { sql: '1 = 1', params: [] } : { sql: assignedHomeSql(alias), params: [access.userId, access.userId] }
+  return access.manage ? { sql: '1 = 1', params: [] } : { sql: assignedResponsibilitySql(alias), params: [access.userId, access.userId] }
 }
 
 function requireManager(access: StayAccess): asserts access is StayAccess & { manage: true } {
@@ -689,13 +689,8 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if ('published' in body && Object.keys(body).length > 1) fail(422, 'INVALID_DETAIL', 'Change published on its own', 'published')
   if ('description' in body && typeof body.description !== 'string') fail(422, 'INVALID_DETAIL', 'description must be text; send an empty one to clear it', 'description')
   for (const key of LISTING_FIELDS) if (key in body) (stay as Record<string, unknown>)[key] = body[key]
-  for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
-    if (!(key in body)) continue
-    const value = body[key]
-    if (value !== null && (typeof value !== 'string' || !await queryFirst(db, `SELECT 1 FROM ${table} WHERE ${column} = ? AND id = ?`, [access.organizationId, value]))) {
-      fail(422, 'INVALID_DETAIL', `${key} must be a ${table} of this organization, or null`, key)
-    }
-    stay[key] = value as string | null
+  for (const field of ['assigned_member_id', 'assigned_team_id'] as const) {
+    if (body[field] !== undefined) stay[field] = body[field] as string | null
   }
   const alarmDetails = Object.fromEntries(Object.values(STAY_ALARM_DETAIL_KEYS).filter(key => Object.hasOwn(body, key)).map(key => [key, body[key]]))
   const patch: UpdateProductInput = Object.keys(alarmDetails).length
@@ -753,94 +748,6 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     }
     return { home: updated, airbnb_unsynced: airbnbUnsynced(updated, Object.keys(body)) }
   })
-}
-
-/**
- * The homes one member looks after, set at once. Each named home is assigned
- * to that member — a home has one assigned member, so another member's
- * assignment there is replaced — and the member's other homes are cleared.
- * Owners and admins already see every home and are never assigned one.
- */
-export async function setMemberHomes(env: CloudflareEnv & GuestInboxPublicationEnv, db: DbClient, access: StayAccess, memberId: string, productIds: unknown): Promise<{ memberId: string; productIds: string[] }> {
-  requireManager(access)
-  const member = await (await organizationAdapter(env)).findMemberById(memberId)
-  if (!member || member.organizationId !== access.organizationId) fail(404, 'MEMBER_NOT_FOUND', 'That person is not a member of this organization', 'memberId')
-  if (isOrganizationWideRole(member.role)) fail(409, 'MEMBER_SEES_ALL_HOMES', 'Owners and admins already see every home', 'memberId')
-  if (!Array.isArray(productIds) || productIds.some(id => typeof id !== 'string' || !id)) fail(422, 'INVALID_HOME_IDS', 'productIds must list homes of this organization', 'productIds')
-  const selected = [...new Set(productIds as string[])]
-  const homes = await queryAll<{ product_id: string; location_id: string; assigned_member_id: string | null }>(db, `
-    SELECT product_id, location_id, assigned_member_id FROM product_stay_configs
-     WHERE organization_id = ? AND (product_id IN (SELECT value FROM json_each(?)) OR assigned_member_id = ?)`, [access.organizationId, d1JsonStringSet(selected), memberId])
-  const chosen = new Set(selected)
-  if (homes.filter(home => chosen.has(home.product_id)).length !== selected.length) fail(422, 'INVALID_HOME_IDS', 'productIds must list homes of this organization', 'productIds')
-  const changed = homes.filter(home => chosen.has(home.product_id) ? home.assigned_member_id !== memberId : home.assigned_member_id === memberId)
-  const now = new Date().toISOString()
-  if (changed.length) {
-    await executeBatch(db, [{
-      query: `UPDATE product_stay_configs SET assigned_member_id = ?, updated_at = ?, updated_by = ?
-               WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND assigned_member_id IS NOT ?`,
-      params: [memberId, now, access.actorId, access.organizationId, d1JsonStringSet(selected), memberId],
-    }, {
-      query: `UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = ?
-               WHERE organization_id = ? AND assigned_member_id = ? AND product_id NOT IN (SELECT value FROM json_each(?))`,
-      params: [now, access.actorId, access.organizationId, memberId, d1JsonStringSet(selected)],
-    }, organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'stay.homes_assigned', entityType: 'member', entityId: memberId,
-      metadata: { product_ids: selected.sort(), changed_product_ids: changed.map(home => home.product_id).sort() } })], { operation: 'Assign homes to a member' })
-  }
-  // The member may have left or become a manager after the check above; the
-  // release scan that change ran may have finished before this write, so the
-  // write is undone here and the caller told.
-  const current = await (await organizationAdapter(env)).findMemberById(memberId)
-  if (changed.length && (!current || current.organizationId !== access.organizationId || current.role.split(',').some(isOrganizationWideRole))) {
-    await releaseUnassignableHomes(env, db, { organizationId: access.organizationId })
-    fail(409, 'MEMBER_CHANGED', 'That person left the organization or now sees every home', 'memberId')
-  }
-  const assigned = await queryAll<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND assigned_member_id = ? ORDER BY product_id', [access.organizationId, memberId])
-  // The member's Today and Calendar, and everyone else's open views of these homes, reload.
-  for (const home of changed) {
-    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: now })
-  }
-  return { memberId, productIds: assigned.map(row => row.product_id) }
-}
-
-/**
- * Homes looked after only by a current member who is not an owner or admin;
- * every other assignment is released. A member who left, was removed or now
- * sees every home looks after none, and so does `departingUserId`, whose
- * account is being deleted. Better Auth has committed the membership change and
- * names no actor to its hooks, so the system records it; open views of those
- * homes reload. It reconciles the whole organization, so if one run fails the
- * next membership change there clears what it left.
- */
-export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string; departingUserId?: string }): Promise<void> {
-  const unassignable = `organization_id = ? AND assigned_member_id IS NOT NULL AND NOT EXISTS (
-    SELECT 1 FROM member m WHERE m.id = product_stay_configs.assigned_member_id AND m."organizationId" = product_stay_configs.organization_id
-      AND m."userId" IS NOT ? AND (',' || m.role || ',') NOT LIKE '%,owner,%' AND (',' || m.role || ',') NOT LIKE '%,admin,%')`
-  const params = [input.organizationId, input.departingUserId ?? null]
-  const homes = await queryAll<{ product_id: string; location_id: string; assigned_member_id: string }>(db,
-    `SELECT product_id, location_id, assigned_member_id FROM product_stay_configs WHERE ${unassignable}`, params)
-  if (!homes.length) return
-  const now = new Date().toISOString()
-  // Each home read above is cleared only while it still names the member read,
-  // in the same transaction as its audit entry, so the entries and
-  // invalidations name exactly the homes released; an assignment written
-  // meanwhile is left to the writer's own re-check.
-  const cleared: typeof homes = []
-  for (let start = 0; start < homes.length; start += 400) {
-    const chunk = homes.slice(start, start + 400)
-    const results = await executeBatch(db, chunk.flatMap(home => [{
-      query: `UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = 'system'
-               WHERE ${unassignable} AND product_id = ? AND assigned_member_id = ?`,
-      params: [now, ...params, home.product_id, home.assigned_member_id],
-    }, organizationEventQuery({
-      organizationId: input.organizationId, actorType: 'system', eventType: 'stay.homes_assigned', entityType: 'member', entityId: home.assigned_member_id,
-      metadata: { product_ids: [], changed_product_ids: [home.product_id] }, onlyIfPreviousChangedOneRow: true,
-    })]), { operation: 'Release homes no current member looks after' })
-    chunk.forEach((home, index) => { if (results[index * 2]?.meta.changes === 1) cleared.push(home) })
-  }
-  for (const home of cleared) {
-    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: input.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: now })
-  }
 }
 
 /**

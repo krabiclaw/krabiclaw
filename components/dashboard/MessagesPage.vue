@@ -12,6 +12,7 @@
     <TeamThreadList v-if="teamScope && canReadTeam" @first="firstThread = $event" />
     <GuestThreadList v-else-if="personalScope || canReadGuests" :personal-scope="personalScope" @first="firstThread = $event" />
     <UAlert v-else class="m-6" color="error" title="Messages are unavailable" description="Your membership does not allow access to conversations." />
+    <UAlert v-if="accessError" class="m-6" color="error" title="Conversation access changed" :description="accessError" />
   </DashboardIndexPanel>
 </template>
 
@@ -22,6 +23,9 @@ import TeamThreadList from '~/lib/components/workspace/messages/TeamThreadList.v
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { authClient } from '~/lib/auth-client'
 import type { organizationRoles } from '~/utils/organization-access'
+import type { TeamThread } from '~/server/domain/team-messages'
+import { useTeamGroupLeaveRequest } from '~/lib/components/workspace/messages/team-thread-client'
+import { getErrorMessage } from '~/utils/errors'
 const props = defineProps<{ personalScope?: boolean }>()
 const route = useRoute()
 const router = useRouter()
@@ -38,6 +42,21 @@ const messageView = computed({
 })
 const pastOnly = computed(() => route.query.archived !== undefined)
 const firstThread = ref<RouteLocationRaw | null>(null)
+const session = authClient.useSession()
+const accessError = ref('')
+const leaveRequest = useTeamGroupLeaveRequest()
+const cachedTeamThreads = useNuxtData<{ threads: TeamThread[] }>(`team-threads:${dashboard.organizationId.value}`)
+const realtime = useDashboardInvalidations()
+watch(realtime.event, async event => {
+  if (event?.type !== 'team_thread.access_ended' || event.organizationId !== dashboard.organizationId.value || event.targetUserId !== session.value.data?.user.id) return
+  if (cachedTeamThreads.data.value) cachedTeamThreads.data.value = { threads: cachedTeamThreads.data.value.threads.filter(thread => thread.id !== event.teamThreadId) }
+  clearNuxtData(`team-messages:${event.organizationId}:${event.teamThreadId}`)
+  if (route.params.teamThreadId !== event.teamThreadId) return
+  if (leaveRequest.value === event.teamThreadId) return
+  firstThread.value = null
+  try { await navigateTo({ path: listPath.value, query: { view: 'team' } }, { replace: true }) }
+  catch (error) { accessError.value = getErrorMessage(error, 'The conversation could not be closed after access ended') }
+})
 watch(teamScope, () => { firstThread.value = null }, { flush: 'sync' })
 useSeoMeta({ title: 'Messages | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

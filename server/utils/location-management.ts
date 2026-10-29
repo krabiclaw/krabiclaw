@@ -13,7 +13,8 @@ import { resourceLocalizationDeletionQueries } from '~/server/utils/localization
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { capacityRefusalOf, executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
-import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { publishAccessInvalidation, publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { assertResponsibilityTarget } from '~/server/utils/member-access'
 
 type SetupEnv = CloudflareEnv;
 
@@ -324,13 +325,7 @@ export async function createLocation(
     return locationValidationFailure(error, 'special_hours');
   }
 
-  for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
-    if (!(key in input)) continue;
-    const value = input[key];
-    if (value !== null && value !== undefined && (typeof value !== 'string' || !await queryFirst(db, `SELECT 1 FROM ${table} WHERE ${column} = ? AND id = ?`, [organizationId, value]))) {
-      return { status: 422, data: { error: `${key} must be a ${table} of this organization, or null`, code: 'INVALID_LOCATION_FIELD', field: key } };
-    }
-  }
+  await assertResponsibilityTarget(db, organizationId, input);
 
   const baseSlug = toSlug((input.slug ?? title).trim());
   const id = crypto.randomUUID();
@@ -533,13 +528,7 @@ export async function updateLocation(
     };
   }
 
-  for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
-    if (!(key in input)) continue;
-    const value = input[key];
-    if (value !== null && value !== undefined && (typeof value !== 'string' || !await queryFirst(db, `SELECT 1 FROM ${table} WHERE ${column} = ? AND id = ?`, [organizationId, value]))) {
-      return { status: 422, data: { error: `${key} must be a ${table} of this organization, or null`, code: 'INVALID_LOCATION_FIELD', field: key } };
-    }
-  }
+  const responsibility = await assertResponsibilityTarget(db, organizationId, input, { assigned_member_id: existing.assigned_member_id ?? null, assigned_team_id: existing.assigned_team_id ?? null });
 
   const now = new Date().toISOString();
   const sets: string[] = ["updated_at = ?"];
@@ -568,8 +557,6 @@ export async function updateLocation(
     "seo_title",
     "seo_description",
     "canonical_url",
-    "assigned_member_id",
-    "assigned_team_id",
   ] as const;
 
   if (input.status !== undefined && input.status !== 'active' && input.status !== 'inactive') {
@@ -586,6 +573,12 @@ export async function updateLocation(
             ? submittedPhone.phone
             : input[field] ?? null,
       );
+    }
+  }
+  if (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined) {
+    for (const field of ['assigned_member_id', 'assigned_team_id'] as const) {
+      sets.push(`${field} = ?`);
+      params.push(responsibility[field]);
     }
   }
 
@@ -652,6 +645,9 @@ export async function updateLocation(
     // active again is guarded by the same home-activation boundary.
     const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active', allowHomeActivation: options.allowHomeActivation });
     const changed = (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
+    if (changed && (input.assigned_member_id !== undefined || input.assigned_team_id !== undefined)) {
+      await publishAccessInvalidation(env, { organizationId });
+    }
     // The saved privacy mode must be visible even if readback or card work fails.
     if (changed) await purgePublicResourceCacheNow(env, organizationId);
     return changed;
