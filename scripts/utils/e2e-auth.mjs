@@ -1,4 +1,5 @@
-import { findE2eAuthFixture } from '../../config/development-auth-fixtures.ts'
+import { E2E_PASSWORD, findE2eAuthFixture } from '../../config/development-auth-fixtures.ts'
+import { seededTenant } from '../../tests/e2e/seed/manifest.ts'
 
 function responseCookies(response) {
   return response.headers.getSetCookie()
@@ -29,7 +30,7 @@ async function expectOk(response, label) {
 export async function credentialSession(baseURL, options = {}) {
   const fixture = options.userId ? findE2eAuthFixture(options.userId) : null
   const email = options.email || fixture?.email || process.env.CANARY_LOGIN_EMAIL
-  const password = options.password || (process.env.CANARY_LOGIN_PASSWORD)
+  const password = options.password || (fixture ? E2E_PASSWORD : process.env.CANARY_LOGIN_PASSWORD)
   if (!email || !password) throw new Error('Configure CANARY_LOGIN_EMAIL and CANARY_LOGIN_PASSWORD, or supply the requested explicit credential.')
 
   const origin = new URL(baseURL).origin
@@ -41,7 +42,7 @@ export async function credentialSession(baseURL, options = {}) {
   let cookie = mergeCookieHeader('', signIn)
   if (!cookie) throw new Error('Better Auth credential sign-in did not return a session cookie.')
 
-  const organizationId = options.organizationId || (fixture ? fixture.memberships?.[0]?.organizationId : process.env.CANARY_ORG_ID)
+  const organizationId = options.organizationId || (fixture?.memberships?.[0] ? seededTenant(fixture.memberships[0].tenant).organizationId : fixture ? undefined : process.env.CANARY_ORG_ID)
   if (organizationId) {
     const activeOrganization = await expectOk(await fetch(new URL('/api/auth/organization/set-active', baseURL), {
       method: 'POST',

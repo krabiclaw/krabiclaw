@@ -8,7 +8,8 @@ import type {
 } from '../../server/domain/guest-threads/types'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import { E2E_DEMO_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHeaders, potteryHouseTestExtraHeaders, tenantTestExtraHeaders, testBaseUrl } from './test-env'
+import { seededTenant } from './seed/manifest'
+import { devLoginHeaders, seededSiteHeaders, testBaseUrl } from './test-env'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
@@ -38,7 +39,13 @@ interface DeliveryList {
 }
 
 const baseURL = testBaseUrl()
-const organizationId = E2E_POTTERY_ORGANIZATION_ID
+// Contact threads run on the seeded experience business; reservations on the
+// restaurant's Brooklyn location.
+const organizationId = () => seededTenant('experience').organizationId
+const organizationSlug = () => seededTenant('experience').slug
+const demoOrganizationId = () => seededTenant('restaurant').organizationId
+const demoSlug = () => seededTenant('restaurant').slug
+const demoLocationId = () => seededTenant('restaurant').locations.brooklyn!.id
 const ownerId = 'user-e2e-pottery-owner'
 const secondOwnerId = 'user-e2e-pottery-location-owner'
 const foreignOwnerId = 'user-e2e-kikuzuki-owner'
@@ -62,7 +69,7 @@ interface LocationSlot { date: string; time: string }
  * booking could land.
  *
  * Cleanup clears the location's special hours outright, so this must never land on a
- * slot loc-demo already has: the editor calendar (read with includePast, so it covers
+ * slot the location already has: the editor calendar (read with includePast, so it covers
  * the whole day) says which minutes are taken, and minutes that are a multiple of five
  * are skipped so the time cannot sit on any ordinary 15/30/60-minute grid either.
  */
@@ -77,7 +84,7 @@ function openableMinuteToday(local: { date: string; time: string }, taken: Reado
 }
 
 async function loadLocationDay(request: APIRequestContext, date: string) {
-  const response = await request.get('/api/editor/organizations/org-demo/locations/loc-demo/reservation-availability', {
+  const response = await request.get(`/api/editor/organizations/${demoOrganizationId()}/locations/${demoLocationId()}/reservation-availability`, {
     params: { from: date, to: date },
   })
   await expectStatus(response, 200)
@@ -91,20 +98,20 @@ async function loadLocationDay(request: APIRequestContext, date: string) {
  * exactly sixty minutes wide yields precisely the one minute asked for.
  */
 async function readSpecialHours(request: APIRequestContext): Promise<unknown> {
-  const response = await request.get('/api/organizations/org-demo/locations/loc-demo')
+  const response = await request.get(`/api/organizations/${demoOrganizationId()}/locations/${demoLocationId()}`)
   await expectStatus(response, 200)
   return (await response.json() as { location: { special_hours: unknown } }).location.special_hours ?? null
 }
 
 function restoreSpecialHours(request: APIRequestContext, special: unknown) {
-  return request.patch('/api/organizations/org-demo/locations/loc-demo', { data: { special_hours: special } })
+  return request.patch(`/api/organizations/${demoOrganizationId()}/locations/${demoLocationId()}`, { data: { special_hours: special } })
 }
 
 function setLocationSlot(request: APIRequestContext, slot: LocationSlot) {
   const [hours, minutes] = slot.time.split(':').map(Number)
   const closeMinute = hours! * 60 + minutes! + 60
   const close = `${String(Math.floor(closeMinute / 60) % 24).padStart(2, '0')}:${String(closeMinute % 60).padStart(2, '0')}`
-  return request.patch('/api/organizations/org-demo/locations/loc-demo', {
+  return request.patch(`/api/organizations/${demoOrganizationId()}/locations/${demoLocationId()}`, {
     data: {
       special_hours: [{
         kind: 'hours',
@@ -121,7 +128,7 @@ function setLocationSlot(request: APIRequestContext, slot: LocationSlot) {
 // value here: it means the location had none, which is not the same as "leave it".
 let priorReservationDuration: { value: number | null } | null = null
 let priorSpecialHours: { value: unknown } | null = null
-// loc-demo's hours and reservation capacity are shared with the calendar and MCP specs.
+// The Brooklyn location's hours and reservation capacity are shared with the calendar and MCP specs.
 let releaseDemoLock: (() => Promise<void>) | null = null
 
 test.afterEach(async ({ page }) => {
@@ -131,14 +138,14 @@ test.afterEach(async ({ page }) => {
     if (priorReservationDuration) {
       const duration = priorReservationDuration.value
       priorReservationDuration = null
-      const policy = await page.request.get('/api/editor/organizations/org-demo/locations/loc-demo/reservation-config')
+      const policy = await page.request.get(`/api/editor/organizations/${demoOrganizationId()}/locations/${demoLocationId()}/reservation-config`)
       await expectStatus(policy,200)
-      await expectStatus(await page.request.put('/api/editor/organizations/org-demo/locations/loc-demo/reservation-config', { data: { duration_minutes: duration, expected_updated_at: (await policy.json()).config.updated_at } }),200)
+      await expectStatus(await page.request.put(`/api/editor/organizations/${demoOrganizationId()}/locations/${demoLocationId()}/reservation-config`, { data: { duration_minutes: duration, expected_updated_at: (await policy.json()).config.updated_at } }),200)
     }
     if (!priorSpecialHours) return
     const previous = priorSpecialHours.value
     priorSpecialHours = null
-    // A cleanup that quietly 4xxs would leave loc-demo open at an hour it does not serve,
+    // A cleanup that quietly 4xxs would leave the location open at an hour it does not serve,
     // and PATCH resolves on any status, so the status is asserted rather than assumed.
     await expectStatus(await restoreSpecialHours(page.request, previous), 200)
   } finally {
@@ -149,7 +156,7 @@ test.afterEach(async ({ page }) => {
 // The list has no search of its own any more (search is the dashboard's one
 // palette), so the guest under test is picked out of the tenant's contact threads.
 async function loadThreadList(request: APIRequestContext, guestName: string) {
-  const response = await request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, {
+  const response = await request.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, {
     params: { type: 'contact' },
   })
   await expectStatus(response, 200)
@@ -160,7 +167,7 @@ async function loadThreadList(request: APIRequestContext, guestName: string) {
 async function loadThreadDetail(
   request: APIRequestContext,
   threadId: string,
-  targetOrganizationId = organizationId,
+  targetOrganizationId = organizationId(),
 ) {
   const response = await request.get(`/api/dashboard/organizations/${targetOrganizationId}/guest-threads/${threadId}`)
   await expectStatus(response, 200)
@@ -201,7 +208,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     const message = `Canonical source detail proof ${nonce}`
     const startedAt = new Date().toISOString()
     const submission = await owner.post(`/api/public/contact`, {
-      headers: potteryHouseTestExtraHeaders(),
+      headers: seededSiteHeaders('experience'),
       data: { name: guestName, email: guestEmail, subject, message },
     })
     await expectStatus(submission, 201)
@@ -216,13 +223,13 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(secondOwnerListBefore.threads).toHaveLength(1)
     const threadId = ownerListBefore.threads[0]!.id
     const organizationList = await owner.get('/api/dashboard/guest-threads', {
-      params: { org: organizationId, type: 'contact' },
+      params: { org: organizationSlug(), type: 'contact' },
     })
     await expectStatus(organizationList, 200)
     expect((await organizationList.json() as { threads: GuestThreadListItemViewModel[] }).threads.filter(thread => thread.guestName === guestName))
       .toMatchObject([{ id: threadId }])
     await expectStatus(await foreignOwner.get('/api/dashboard/guest-threads', {
-      params: { org: organizationId, type: 'contact' },
+      params: { org: organizationSlug(), type: 'contact' },
     }), 404)
     expect(secondOwnerListBefore.threads[0]!.id).toBe(threadId)
     expect(ownerListBefore.threads[0]).toMatchObject({ guestName, submissionType: 'contact', unread: true })
@@ -300,16 +307,16 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
     expect(secondOwnerListAfterRead.threads[0]).toMatchObject({ id: threadId, unread: false, unreadCount: 0 })
     expect(contactNotification(secondOwnerNotificationsAfterRead, guestName).read_at).toEqual(expect.any(String))
 
-    const foreignRead = await foreignOwner.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${threadId}`)
+    const foreignRead = await foreignOwner.get(`/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}`)
     expect([403, 404]).toContain(foreignRead.status())
-    const foreignMutation = await foreignOwner.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${threadId}/operations/reply`, {
+    const foreignMutation = await foreignOwner.post(`/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}/operations/reply`, {
       data: { body: `Foreign reply ${nonce}`, idempotencyKey: `foreign-reply-${nonce}` },
     })
     expect([403, 404]).toContain(foreignMutation.status())
 
     const replyBody = `Idempotent owner reply ${nonce}`
     const idempotencyKey = `guest-thread-reply-${nonce}`
-    const replyUrl = `/api/dashboard/organizations/${organizationId}/guest-threads/${threadId}/operations/reply`
+    const replyUrl = `/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}/operations/reply`
     const sendReply = () => owner.post(replyUrl, {
       headers: { 'idempotency-key': idempotencyKey },
       data: { body: replyBody },
@@ -332,7 +339,7 @@ test('guest thread state stays source-owned, per-user, tenant-isolated, and idem
 
     const deliveryResponse = await owner.get('/api/dev/notifications', {
       headers: devLoginHeaders(),
-      params: { organization_id: organizationId, since: startedAt },
+      params: { organization_id: organizationId(), since: startedAt },
     })
     await expectStatus(deliveryResponse, 200)
     const deliveries = (await deliveryResponse.json() as DeliveryList).deliveries.filter(row =>
@@ -362,8 +369,8 @@ type Mailbox = 'current' | 'past'
 // Both list loaders, so the mailbox vocabulary cannot survive in only one.
 async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
   const [byId, byOrg] = await Promise.all([
-    request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { mailbox } }),
-    request.get('/api/dashboard/guest-threads', { params: { org: organizationId, mailbox } }),
+    request.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, { params: { mailbox } }),
+    request.get('/api/dashboard/guest-threads', { params: { org: organizationSlug(), mailbox } }),
   ])
   await expectStatus(byId, 200)
   await expectStatus(byOrg, 200)
@@ -375,7 +382,7 @@ async function loadMailbox(request: APIRequestContext, mailbox: Mailbox) {
 
 async function submitContact(request: APIRequestContext, guestName: string) {
   const response = await request.post('/api/public/contact', {
-    headers: potteryHouseTestExtraHeaders(),
+    headers: seededSiteHeaders('experience'),
     data: { name: guestName, email: `${guestName.replace(/\W+/g, '-').toLowerCase()}@playwright.example`, subject: 'partnerships', message: `Mailbox proof for ${guestName}` },
   })
   await expectStatus(response, 201)
@@ -390,8 +397,8 @@ test('archive and Move to messages file a conversation without reordering the in
     await Promise.all([loginAs(owner, baseURL, ownerId), loginAs(foreignOwner, baseURL, foreignOwnerId)])
 
     // The retired vocabulary is refused by both loaders rather than ignored.
-    await expectStatus(await owner.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { occurrence: 'upcoming' } }), 400)
-    await expectStatus(await owner.get('/api/dashboard/guest-threads', { params: { org: organizationId, occurrence: 'past' } }), 400)
+    await expectStatus(await owner.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, { params: { occurrence: 'upcoming' } }), 400)
+    await expectStatus(await owner.get('/api/dashboard/guest-threads', { params: { org: organizationSlug(), occurrence: 'past' } }), 400)
 
     const nonce = Date.now()
     const filedName = `Mailbox filed ${nonce}`
@@ -409,7 +416,7 @@ test('archive and Move to messages file a conversation without reordering the in
     expect(before).toMatchObject({ mailbox: 'current', archivedAt: null, archivedByUserId: null, canArchive: true, canUnarchive: false })
 
     const operationUrl = (action: 'archive' | 'unarchive') =>
-      `/api/dashboard/organizations/${organizationId}/guest-threads/${threadId}/operations/${action}`
+      `/api/dashboard/organizations/${organizationId()}/guest-threads/${threadId}/operations/${action}`
 
     // Another business's owner cannot reach it, and a key is required.
     expect([403, 404]).toContain((await foreignOwner.post(operationUrl('archive'), { data: { idempotencyKey: `foreign-${nonce}` } })).status())
@@ -452,9 +459,9 @@ test('archive and Move to messages file a conversation without reordering the in
 
     // A conversation Past because its booking ended cannot be moved back.
     const ended = (await loadMailbox(owner, 'past')).byId.find(thread => !thread.manuallyArchived)
-    expect(ended, 'Pottery House fixtures include a booking that has ended').toBeDefined()
+    expect(ended, 'the experience seed includes a booking that has ended').toBeDefined()
     expect(ended).toMatchObject({ mailbox: 'past', canArchive: false, canUnarchive: false })
-    const refused = await owner.post(`/api/dashboard/organizations/${organizationId}/guest-threads/${ended!.id}/operations/unarchive`, {
+    const refused = await owner.post(`/api/dashboard/organizations/${organizationId()}/guest-threads/${ended!.id}/operations/unarchive`, {
       data: { idempotencyKey: `unarchive-ended-${nonce}` },
     })
     await expectStatus(refused, 409)
@@ -483,7 +490,7 @@ for (const viewport of [
     // list, and that navigation re-renders the rows, so the screen has settled
     // only once a thread is open.
     const openMessages = async (query = '') => {
-      await page.goto(`${baseURL}/dashboard/${organizationId}/messages${query}`)
+      await page.goto(`${baseURL}/dashboard/${organizationSlug()}/messages${query}`)
       await expect(page.locator('[data-guest-thread-list-hydrated="true"]')).toBeVisible()
       if (viewport.name === 'desktop') await expect(page).toHaveURL(/\/messages\/[^/?]+(\?|$)/)
     }
@@ -511,9 +518,9 @@ for (const viewport of [
 
     // A conversation Past because its booking ended offers no way back; its
     // guest can still be reported or blocked.
-    const pastThreads = (await (await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { mailbox: 'past' } })).json() as { threads: GuestThreadListItemViewModel[] }).threads
+    const pastThreads = (await (await page.request.get(`/api/dashboard/organizations/${organizationId()}/guest-threads`, { params: { mailbox: 'past' } })).json() as { threads: GuestThreadListItemViewModel[] }).threads
     const ended = pastThreads.find(thread => !thread.manuallyArchived)
-    expect(ended, 'Pottery House fixtures include a booking that has ended').toBeDefined()
+    expect(ended, 'the experience seed includes a booking that has ended').toBeDefined()
     await expect(page.locator(`[data-thread-row="${ended!.id}"]`)).toBeVisible()
     await page.locator(`[data-thread-row="${ended!.id}"]`).getByRole('button', { name: /^Conversation actions for / }).click()
     await expect(page.getByRole('menuitem')).toHaveText(['Report', 'Block guest'])
@@ -552,10 +559,10 @@ for (const viewport of [
 
 test('Today uses the CMS patterns and sends one reservation change request', async ({ page }, testInfo) => {
   test.skip(!writable, 'Today writes require disposable local or preview data')
-  releaseDemoLock = await acquireTenantMutationLock(testInfo, E2E_DEMO_ORGANIZATION_ID)
+  releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
   await loginAs(page.request, baseURL)
 
-  const reservationConfig = '/api/editor/organizations/org-demo/locations/loc-demo/reservation-config'
+  const reservationConfig = `/api/editor/organizations/${demoOrganizationId()}/locations/${demoLocationId()}/reservation-config`
   const priorPolicy = await page.request.get(reservationConfig)
   await expectStatus(priorPolicy,200)
   const policy = (await priorPolicy.json()).config
@@ -567,16 +574,16 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const guestName = `${firstName} Chen`
   const guestEmail = `maya-${now}@example.test`
   const availability = await page.request.get('/api/public/reservations/availability', {
-    params: { date: new Date(now).toISOString().slice(0, 10), location_id: 'loc-demo' },
-    headers: tenantTestExtraHeaders(),
+    params: { date: new Date(now).toISOString().slice(0, 10), location_id: demoLocationId() },
+    headers: seededSiteHeaders('restaurant'),
   })
   await expectStatus(availability, 200)
   const { timezone } = await availability.json() as { timezone: string }
   expect(timezone).toEqual(expect.any(String))
   // The Today tab shows only bookings whose day key equals the *location's* current
   // local day (listTodayAgenda), and listReservationSlots drops every slot already in
-  // the past. loc-demo's ordinary hours end at 20:00 Asia/Bangkok, so once CI runs
-  // after that — 13:00-17:00 UTC, every day — the location's today has no bookable
+  // the past. the Brooklyn location's ordinary hours end at 22:00 America/New_York, so once a
+  // run starts after that, the location's today has no bookable
   // slot left and a guest who "arrives today" cannot be created at all. Dated hours for
   // the rest of today are what special hours exist for, so the test opens one instead of
   // depending on the hour CI happens to start.
@@ -606,7 +613,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
       date = localDateAt(new Date(plan), timezone)
       for (let dayOffset = 0; dayOffset < 4 && !slot; dayOffset += 1) {
         date = localDateAt(new Date(plan + dayOffset * 86_400_000), timezone)
-        const day = await page.request.get('/api/public/reservations/availability', { params: { date, location_id: 'loc-demo' }, headers: tenantTestExtraHeaders() })
+        const day = await page.request.get('/api/public/reservations/availability', { params: { date, location_id: demoLocationId() }, headers: seededSiteHeaders('restaurant') })
         await expectStatus(day, 200)
         // is_closed answers whether the location serves the time, not whether anyone is
         // left to seat: a slot at capacity comes back is_full with is_closed false, and
@@ -615,14 +622,14 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
         const { dates } = await day.json() as { dates: Array<{ slots: Array<{ time_slot: string; is_closed: boolean; is_full: boolean }> }> }
         slot = dates[0]?.slots.filter(candidate => !candidate.is_closed && !candidate.is_full).at(-1)
       }
-      expect(slot, `loc-demo offers no open slot within four days of ${localDateAt(new Date(plan), timezone)}`).toBeTruthy()
+      expect(slot, `The Brooklyn location offers no open slot within four days of ${localDateAt(new Date(plan), timezone)}`).toBeTruthy()
       time = slot!.time_slot
     } else {
       ({ date, time } = plan)
     }
     const response = await page.request.post('/api/public/reservations', {
-      headers: tenantTestExtraHeaders(),
-      data: { name, email, phone: '+12025550123', date, time, guests: '2', location_id: 'loc-demo', idempotency_key: crypto.randomUUID() },
+      headers: seededSiteHeaders('restaurant'),
+      data: { name, email, phone: '+12025550123', date, time, guests: '2', location_id: demoLocationId(), idempotency_key: crypto.randomUUID() },
     })
     await expectStatus(response, 201)
     const { id } = await response.json() as { id: string }
@@ -633,28 +640,28 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
 
   await dismissPreviewToolbar(page)
 
-  await page.goto(`${baseURL}/dashboard/ember-slice-demo`)
+  await page.goto(`${baseURL}/dashboard/${demoSlug()}`)
   // Today counts outstanding work now; this new reservation is a review card
   // whose whole-card link must still open the exact booking's actions.
-  const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
+  const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: demoSlug() } })
   await expectStatus(todayResponse, 200)
   const todayFeed = await todayResponse.json() as TodayFeedPayload
   const reviewCard = todayFeed.cards.find(card => card.id === `attention:${bookingIds[0]}`)
   expect(reviewCard?.headline).toBe(`Review ${guestName}’s reservation`)
-  expect(reviewCard?.to).toBe(`/dashboard/ember-slice-demo/bookings/reservation/${bookingIds[0]}`)
+  expect(reviewCard?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`)
   await expect(page.getByRole('heading', { name: /^You have \d+ things? to do$/ })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
 
   const upcomingResponse = await page.request.get('/api/dashboard/today', { params: {
-    org: 'ember-slice-demo', range: 'upcoming', from: localToday.date,
+    org: demoSlug(), range: 'upcoming', from: localToday.date,
     to: localDateAt(new Date(now + 5 * 86_400_000), timezone),
   } })
   await expectStatus(upcomingResponse, 200)
   const upcomingFeed = await upcomingResponse.json() as TodayFeedPayload
   const upcomingCard = upcomingFeed.cards.find(card => card.id === `reservation:${upcomingBookingId}`)
-  expect(upcomingCard?.to).toBe(`/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}`)
+  expect(upcomingCard?.to).toBe(`/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}`)
   expect(localDateAt(new Date(upcomingCard!.occurrenceAt!), timezone) > localToday.date).toBe(true)
   expect(upcomingFeed.cards.some(card => card.id === `reservation:${bookingIds[0]}`)).toBe(false)
 
@@ -664,7 +671,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
   const detailPanel = page.locator('#dashboard-panel-booking-details')
   const body = detailPanel.locator(':scope > [data-slot="body"]')
-  const summaryResponse = await page.request.get(`/api/dashboard/bookings/reservation/${bookingIds[0]}`, { params: { org: 'ember-slice-demo' } })
+  const summaryResponse = await page.request.get(`/api/dashboard/bookings/reservation/${bookingIds[0]}`, { params: { org: demoSlug() } })
   await expectStatus(summaryResponse, 200)
   const summary = (await summaryResponse.json() as { booking: DashboardBookingDetails }).booking
   expect(summary).toMatchObject({ guestName, guestPhone: '+12025550123', partySize: 2 })
@@ -676,7 +683,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     const identity = detailPanel.getByRole('heading', { level: 2, name: `${firstName}’s group of ${summary.partySize}`, exact: true })
     const message = detailPanel.getByRole('link', { name: 'Message guest', exact: true })
     const call = detailPanel.getByRole('link', { name: 'Call', exact: true })
-    await expect(message).toHaveAttribute('href', `/dashboard/ember-slice-demo/messages/${encodeURIComponent(summary.threadId!)}`)
+    await expect(message).toHaveAttribute('href', `/dashboard/${demoSlug()}/messages/${encodeURIComponent(summary.threadId!)}`)
     await expect(call).toHaveAttribute('href', `tel:${summary.guestPhone}`)
     await expect(identity).toBeInViewport()
     await expect(message).toBeInViewport()
@@ -773,8 +780,8 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await page.goBack()
 
   const note = `Today page note ${Date.now()}`
-  const noteContext = '?range=upcoming&locationId=loc-demo&kinds=reservation'
-  const recordPath = `/dashboard/ember-slice-demo/bookings/reservation/${bookingIds[0]}`
+  const noteContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=reservation`
+  const recordPath = `/dashboard/${demoSlug()}/bookings/reservation/${bookingIds[0]}`
   const noteEndpoint = `/api/dashboard/bookings/reservation/${bookingIds[0]}/notes`
   await page.goto(`${baseURL}${recordPath}${noteContext}`)
   const noteInput = detailPanel.getByRole('textbox', { name: 'Add a note to yourself', exact: true })
@@ -786,7 +793,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(noteResponse.request().postDataJSON()).toMatchObject({ note, idempotencyKey: expect.any(String) })
   expect(noteResponse.request().postDataJSON()).not.toHaveProperty('noteId')
   await expect(noteInput).toHaveValue('')
-  const notedThread = await loadThreadDetail(page.request, summary.threadId!, 'org-demo')
+  const notedThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
   const addedNotes = notedThread.entries.filter(entry => entry.eventName === 'internal_note.added' && entry.body === note)
   expect(addedNotes).toHaveLength(1)
   expect(addedNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: note, payload: { private: true } })
@@ -803,7 +810,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const secondResponse = await secondWrite
   await expectStatus(secondResponse, 200)
   expect(secondResponse.request().postDataJSON()).toMatchObject({ note: secondNote, idempotencyKey: expect.any(String) })
-  const secondThread = await loadThreadDetail(page.request, summary.threadId!, 'org-demo')
+  const secondThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
   const secondNotes = secondThread.entries.filter(entry => entry.eventName === 'internal_note.added' && entry.body === secondNote)
   expect(secondNotes).toHaveLength(1)
   expect(secondNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: secondNote, payload: { private: true } })
@@ -825,7 +832,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(noteRevisionResponse.request().postDataJSON()).toEqual({ note: revisedNote, idempotencyKey: expect.any(String), noteId: addedNotes[0]!.id, revisionId: addedNotes[0]!.id })
   await expect(page).toHaveURL(`${baseURL}${recordPath}${noteContext}`)
   await expect(noteInput).toHaveValue('')
-  const revisedThread = await loadThreadDetail(page.request, summary.threadId!, 'org-demo')
+  const revisedThread = await loadThreadDetail(page.request, summary.threadId!, demoOrganizationId())
   const revisedNotes = revisedThread.entries.filter(entry => entry.eventName === 'internal_note.updated' && entry.body === revisedNote)
   expect(revisedNotes).toHaveLength(1)
   expect(revisedNotes[0]).toMatchObject({ kind: 'operation', actorKind: 'member', channel: 'system', body: revisedNote,
@@ -843,17 +850,17 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await expect(page.getByRole('link', { name: 'Change date', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeVisible()
 
-  const changeContext = '?range=upcoming&locationId=loc-demo&kinds=reservation'
-  await page.goto(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}/change${changeContext}`)
+  const changeContext = `?range=upcoming&locationId=${demoLocationId()}&kinds=reservation`
+  await page.goto(`${baseURL}/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}/change${changeContext}`)
   const beforeResponse = await page.request.get(
     `/api/dashboard/bookings/reservation/${upcomingBookingId}`,
-    { params: { org: 'ember-slice-demo' } },
+    { params: { org: demoSlug() } },
   )
   await expectStatus(beforeResponse, 200)
   const before = await beforeResponse.json() as { booking: { partySize: number; threadId: string } }
   const targetPartySize = before.booking.partySize === 99 ? 98 : before.booking.partySize + 1
   await page.getByRole('link', { name: 'Change guests', exact: true }).click()
-  await expect(page).toHaveURL(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}/change/guests${changeContext}`)
+  await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}/change/guests${changeContext}`)
   await page.getByRole('spinbutton', { name: 'Guests', exact: true }).fill(String(targetPartySize))
   await page.getByRole('button', { name: 'Done', exact: true }).click()
   const requestedAt = new Date().toISOString()
@@ -865,9 +872,9 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   const changeResponse = await requestCompleted
   expect(changeResponse.status(), await changeResponse.text()).toBe(200)
   await expect(page.getByRole('heading', { name: 'Coming up', exact: true })).toBeVisible({ timeout: 30_000 })
-  await expect(page).toHaveURL(`${baseURL}/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}${changeContext}`)
+  await expect(page).toHaveURL(`${baseURL}/dashboard/${demoSlug()}/bookings/reservation/${upcomingBookingId}${changeContext}`)
 
-  const detail = await loadThreadDetail(page.request, before.booking.threadId, 'org-demo')
+  const detail = await loadThreadDetail(page.request, before.booking.threadId, demoOrganizationId())
   const requests = detail.entries.filter(entry =>
     entry.eventName === 'booking_change.requested' && entry.occurredAt >= requestedAt,
   )
@@ -875,7 +882,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   expect(requests[0]!.payload).toMatchObject({ after: { partySize: targetPartySize } })
   const deliveryResponse = await page.request.get('/api/dev/notifications', {
     headers: devLoginHeaders(),
-    params: { organization_id: 'org-demo', since: requestedAt },
+    params: { organization_id: demoOrganizationId(), since: requestedAt },
   })
   await expectStatus(deliveryResponse, 200)
   const deliveries = (await deliveryResponse.json() as DeliveryList).deliveries.filter(row => row.entry_id === requests[0]!.id)
@@ -894,11 +901,11 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
 
     const afterResponse = await page.request.get(
       `/api/dashboard/bookings/reservation/${upcomingBookingId}`,
-      { params: { org: 'ember-slice-demo' } },
+      { params: { org: demoSlug() } },
     )
     await expectStatus(afterResponse, 200)
     expect(await afterResponse.json()).toMatchObject({ booking: { partySize: targetPartySize } })
-    const afterDetail = await loadThreadDetail(page.request, before.booking.threadId, 'org-demo')
+    const afterDetail = await loadThreadDetail(page.request, before.booking.threadId, demoOrganizationId())
     expect(afterDetail.entries.filter(entry =>
       entry.eventName === 'booking_change.accepted'
       && entry.payload?.requestId === request.id,
@@ -908,7 +915,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
 
 test('buyer conversation approves and declines canonical changes without moving a pending reservation', async ({ page, playwright }, testInfo) => {
   test.skip(!local, 'Buyer decisions and log-only delivery use disposable local data')
-  releaseDemoLock = await acquireTenantMutationLock(testInfo, E2E_DEMO_ORGANIZATION_ID)
+  releaseDemoLock = await acquireTenantMutationLock(testInfo, demoOrganizationId())
   const owner = await playwright.request.newContext({ baseURL })
   let threadId: string | null = null
   try {
@@ -918,7 +925,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     for (let offset = 1; offset <= 7 && !slot; offset++) {
       const date = new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
       const available = await page.request.get('/api/public/reservations/availability', {
-        params: { date, location_id: 'loc-demo' }, headers: tenantTestExtraHeaders(),
+        params: { date, location_id: demoLocationId() }, headers: seededSiteHeaders('restaurant'),
       })
       await expectStatus(available, 200)
       const { dates } = await available.json() as { dates: Array<{ slots: Array<{ time_slot: string; is_closed: boolean; is_full: boolean }> }> }
@@ -927,13 +934,13 @@ test('buyer conversation approves and declines canonical changes without moving 
     }
     expect(slot, 'The existing restaurant fixture has a future reservable time').not.toBeNull()
     const created = await page.request.post('/api/public/reservations', {
-      headers: tenantTestExtraHeaders(),
-      data: { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', ...slot!, guests: '1', location_id: 'loc-demo', idempotency_key: crypto.randomUUID() },
+      headers: seededSiteHeaders('restaurant'),
+      data: { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', ...slot!, guests: '1', location_id: demoLocationId(), idempotency_key: crypto.randomUUID() },
     })
     await expectStatus(created, 201)
     threadId = (await created.json() as { request_id: string }).request_id
     const read = async () => {
-      const response = await owner.get(`/api/dashboard/bookings/reservation/${threadId}`, { params: { org: 'ember-slice-demo' } })
+      const response = await owner.get(`/api/dashboard/bookings/reservation/${threadId}`, { params: { org: demoSlug() } })
       await expectStatus(response, 200)
       return (await response.json() as { booking: { updatedAt: string; bookingDate: string; bookingTime: string; partySize: number; locationId: string } }).booking
     }
@@ -941,11 +948,11 @@ test('buyer conversation approves and declines canonical changes without moving 
     const requestChange = async (partySize: number) => {
       const current = await read()
       const response = await owner.post(`/api/dashboard/bookings/reservation/${threadId}/changes`, {
-        params: { org: 'ember-slice-demo' },
+        params: { org: demoSlug() },
         data: { kind: 'reservation', locationId: current.locationId, bookingDate: current.bookingDate, bookingTime: current.bookingTime.slice(0, 5), partySize, expectedUpdatedAt: current.updatedAt, idempotencyKey: crypto.randomUUID() },
       })
       await expectStatus(response, 200)
-      const detail = await loadThreadDetail(owner, threadId!, 'org-demo')
+      const detail = await loadThreadDetail(owner, threadId!, demoOrganizationId())
       const proposal = detail.entries.findLast(entry => entry.eventName === 'booking_change.requested')
       expect(proposal?.bookingChange?.status).toBe('pending')
       return proposal!
@@ -968,7 +975,7 @@ test('buyer conversation approves and declines canonical changes without moving 
     await expect(card).toContainText('Your original booking is unchanged.')
     await expect(card.getByRole('button', { name: 'Accept changes', exact: true })).toHaveCount(0)
     expect(await read()).toMatchObject({ partySize: 1, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
-    const afterDecline = await loadThreadDetail(owner, threadId, 'org-demo')
+    const afterDecline = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(afterDecline.entries.filter(entry => entry.eventName === 'booking_change.declined' && entry.payload?.requestId === first.id)).toHaveLength(1)
 
     const second = await requestChange(2)
@@ -980,13 +987,13 @@ test('buyer conversation approves and declines canonical changes without moving 
     await expectStatus(await accepted, 200)
     await expect(card.filter({ hasText: 'Changes accepted' })).toContainText('Your booking has been updated.')
     expect(await read()).toMatchObject({ partySize: 2, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
-    const final = await loadThreadDetail(owner, threadId, 'org-demo')
+    const final = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(final.entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === second.id)).toHaveLength(1)
     const replay = await page.request.post('/api/account/bookings/change', {
       headers: authRequestHeaders(baseURL), data: { thread_id: threadId, request_id: second.id, decision: 'accept' },
     })
     await expectStatus(replay, 200)
-    expect((await loadThreadDetail(owner, threadId, 'org-demo')).entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === second.id)).toHaveLength(1)
+    expect((await loadThreadDetail(owner, threadId, demoOrganizationId())).entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === second.id)).toHaveLength(1)
     await page.goto(`${baseURL}/dashboard/account/activity/reservation/${threadId}`)
     await page.getByRole('button', { name: 'Manage reservation', exact: true }).click()
     await page.getByRole('link', { name: 'Send a change request', exact: true }).click()
@@ -999,16 +1006,16 @@ test('buyer conversation approves and declines canonical changes without moving 
     await page.getByRole('button', { name: 'Send a change request', exact: true }).click()
     await expectStatus(await sentRequest, 200)
     await expect(page.getByText('Your change request was sent to the business. Your booking is unchanged while it is reviewed.', { exact: true })).toBeVisible()
-    const requested = await loadThreadDetail(owner, threadId, 'org-demo')
+    const requested = await loadThreadDetail(owner, threadId, demoOrganizationId())
     expect(requested.conversationState).toBe('needs_attention')
     expect(requested.operationalRecord).toEqual(final.operationalRecord)
     const customerRequest = requested.entries.filter(entry => entry.kind === 'message' && entry.actorKind === 'guest' && entry.body === changeMessage)
     expect(customerRequest).toHaveLength(1)
-    const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: 'org-demo', since: sentAt } })
+    const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: demoOrganizationId(), since: sentAt } })
     await expectStatus(requestDelivery, 200)
     expect((await requestDelivery.json() as DeliveryList).deliveries.some(delivery => delivery.entry_id === customerRequest[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
   } finally {
-    if (threadId) await expectStatus(await owner.post(`/api/dashboard/organizations/org-demo/guest-threads/${threadId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } }), 200)
+    if (threadId) await expectStatus(await owner.post(`/api/dashboard/organizations/${demoOrganizationId()}/guest-threads/${threadId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } }), 200)
     await owner.dispose()
   }
 })

@@ -2,7 +2,8 @@ import { expect, test, type BrowserContext, type WebSocket } from '@playwright/t
 import { loginAs, authRequestHeaders } from './helpers/auth'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import { tenantTestExtraHeaders } from './test-env'
+import { seededSiteHeaders } from './test-env'
+import { seededTenant } from './seed/manifest'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import type { AgendaPayload } from '../../server/utils/dashboard-agenda'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
@@ -39,7 +40,7 @@ test('Upcoming keeps its navigation and loading visible while its real first pag
     const requested = page.waitForRequest(request => isUpcoming(new URL(request.url())))
     try {
       const response = phase === 'open'
-        ? await page.goto(`${ORG}?locationId=loc-demo&range=upcoming`)
+        ? await page.goto(`${ORG}?locationId=${seededTenant('restaurant').locations.brooklyn.id}&range=upcoming`)
         : await page.reload()
       expect(response?.status()).toBe(200)
       await requested
@@ -71,20 +72,20 @@ test('Today keeps its location across range changes', async ({ page, baseURL }) 
   await page.getByRole('button', { name: 'Filter activity', exact: true }).click()
   await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toHaveAttribute('aria-expanded', 'false')
   await page.getByRole('tab', { name: 'Upcoming', exact: true }).click()
-  await expect(page).toHaveURL(url => url.searchParams.get('locationId') === 'loc-demo' && url.searchParams.get('range') === 'upcoming')
+  await expect(page).toHaveURL(url => url.searchParams.get('locationId') === seededTenant('restaurant').locations.brooklyn.id && url.searchParams.get('range') === 'upcoming')
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
   await page.reload()
-  await expect(page).toHaveURL(url => url.searchParams.get('locationId') === 'loc-demo' && url.searchParams.get('range') === 'upcoming')
+  await expect(page).toHaveURL(url => url.searchParams.get('locationId') === seededTenant('restaurant').locations.brooklyn.id && url.searchParams.get('range') === 'upcoming')
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
 
   await page.getByRole('tab', { name: 'Today', exact: true }).click()
-  await expect(page).toHaveURL(url => url.searchParams.get('locationId') === 'loc-demo' && url.searchParams.get('range') !== 'upcoming')
+  await expect(page).toHaveURL(url => url.searchParams.get('locationId') === seededTenant('restaurant').locations.brooklyn.id && url.searchParams.get('range') !== 'upcoming')
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toHaveAttribute('aria-selected', 'true')
 })
 
 test('an assigned member receives no owner work or unassigned restaurant work', async ({ page, browser, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Role changes use disposable local actors only')
-  const release = await acquireTenantMutationLock(testInfo, 'org-demo')
+  const release = await acquireTenantMutationLock(testInfo, seededTenant('restaurant').organizationId)
   await loginAs(page.request, baseURL!)
   const response = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
   expect(response.status(), await response.text()).toBe(200)
@@ -98,7 +99,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
     const ownerFeed = await ownerResponse.json() as TodayFeedPayload
     expect(ownerFeed.cards.length, 'The owner sees organization-wide work the member must not').toBeGreaterThan(0)
     const changed = await page.request.post('/api/auth/organization/update-member-role', {
-      headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo', memberId: actor!.id, role: 'member' },
+      headers: authRequestHeaders(baseURL!), data: { organizationId: seededTenant('restaurant').organizationId, memberId: actor!.id, role: 'member' },
     })
     expect(changed.status(), await changed.text()).toBe(200)
     await loginAs(memberContext.request, baseURL!, actor!.userId)
@@ -115,7 +116,7 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   } finally {
     try {
       const restored = await page.request.post('/api/auth/organization/update-member-role', {
-        headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo', memberId: actor!.id, role: actor!.role },
+        headers: authRequestHeaders(baseURL!), data: { organizationId: seededTenant('restaurant').organizationId, memberId: actor!.id, role: actor!.role },
       })
       expect(restored.status(), await restored.text()).toBe(200)
       const read = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
@@ -131,10 +132,10 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
 test('branch assignments grant and revoke a member’s reservation agenda and inbox through native team membership', async ({ page, browser, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Reservations and role changes use disposable local data only')
-  const release = await acquireTenantMutationLock(testInfo, 'org-demo')
+  const release = await acquireTenantMutationLock(testInfo, seededTenant('restaurant').organizationId)
   const org = 'ember-slice-demo'
-  const organizationId = 'org-demo'
-  const locationId = 'loc-demo'
+  const organizationId = seededTenant('restaurant').organizationId
+  const locationId = seededTenant('restaurant').locations.brooklyn.id
   const locationPath = `/api/dashboard/locations/${locationId}`
   const inboxPath = `/api/dashboard/organizations/${organizationId}/guest-threads`
   type Assignment = { assigned_member_id: string | null; assigned_team_id: string | null }
@@ -169,7 +170,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     originalTeamIds = (await teams.json() as Array<{ id: string }>).map(team => team.id).sort()
 
     const availability = await request.get('/api/public/reservations/availability', {
-      headers: tenantTestExtraHeaders(), params: { location_id: locationId, date: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), days: 7 },
+      headers: seededSiteHeaders('restaurant'), params: { location_id: locationId, date: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10), days: 7 },
     })
     expect(availability.status(), await availability.text()).toBe(200)
     const calendar = await availability.json() as { timezone: string; dates: Array<{ date: string; slots: Array<{ time_slot: string; starts_at: string; is_closed: boolean; is_full: boolean; remaining: number | null }> }> }
@@ -178,7 +179,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     expect(slot, 'The existing demo reservation policy and hours expose a future table for two').toBeDefined()
     if (!day || !slot) throw new Error('The existing demo location has no future table for two')
     const guestName = `Branch${Date.now()} Guest`
-    const booked = await request.post('/api/public/reservations', { headers: tenantTestExtraHeaders(), data: {
+    const booked = await request.post('/api/public/reservations', { headers: seededSiteHeaders('restaurant'), data: {
       name: guestName, email: `branch-assignment-${Date.now()}@playwright.example`, phone: '+61491570007',
       date: day.date, time: slot.time_slot, guests: '2', location_id: locationId, idempotency_key: crypto.randomUUID(),
     } })

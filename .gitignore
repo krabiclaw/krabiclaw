@@ -18,6 +18,7 @@ node_modules
 logs
 *.log
 test-results/
+test-results-*/
 playwright-report/
 .lighthouseci/
 
@@ -93,3 +94,6 @@ tsconfig.spot.json
 
 # Per-customer onboarding intake files (yarn client:onboard --from) — customer data, never commit
 /client-intake/
+
+# The local E2E seed manifest, written by Playwright global setup
+tests/e2e/.seed/

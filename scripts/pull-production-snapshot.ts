@@ -1,16 +1,15 @@
 /**
- * Local and staging start from a copy of production instead of hand-maintained
- * seed definitions, so what they test against is what customers actually have.
+ * Staging starts from a copy of production, and every schema epoch rehearses
+ * and loads its replacement databases from their live source, here.
  *
  * The row copy is transferred through scripts/transfer-database-export.mjs:
  * rows are copied into the current migration chain and audited before a target
  * is written.
  *
- * Local development and a normal production-to-staging refresh omit jwks:
- * each destination retains its own signing keys. A same-environment replacement
+ * A normal production-to-staging refresh omits jwks: the destination retains
+ * its own signing keys. A same-environment replacement
  * names its source and carries that source's jwks across the binding repoint.
  *
- *   node --experimental-strip-types scripts/pull-production-snapshot.ts --local
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --staging
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --out <target.sqlite> [--source <database>] [--export <source.sql>]
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source <replaced database> [--delta-from <initial.sqlite>]
@@ -28,8 +27,8 @@
  * and its manifest are kept at that path and nothing remote is written. Beside a
  * load, `--out` keeps the loaded target there. `--export` keeps the copy read
  * from the source (`.sqlite` from the live database, `.sql` from a native
- * export), which a later `--source-file` (or LOCAL_DATABASE_SOURCE_FILE) loads
- * without reading the source again.
+ * export), which a later `--source-file` preflight reads without reading the
+ * source again.
  * `--delta-from <initial target.sqlite>` writes only the rows the initial
  * transfer did not hold, for the final copy after the binding is repointed, and
  * names every row it did hold that has changed or gone since.
@@ -49,11 +48,9 @@ import { printTransferReport, SCHEMA_OBJECTS_QUERY, transferDatabaseExport } fro
 // production's eight, three product sessions against production's 808. A gate
 // standing in front of `main` on data that does not resemble production is the
 // reason tenant rendering, booking and localisation defects kept reaching
-// production green. Staging is the same restore as local with `--env staging`;
-// ordinary refreshes retain staging signing keys; replacements retain source keys.
+// production green. Ordinary refreshes retain staging signing keys; replacements retain source keys.
 const { values } = parseArgs({
   options: {
-    local: { type: 'boolean', default: false },
     staging: { type: 'boolean', default: false },
     production: { type: 'boolean', default: false },
     out: { type: 'string' },
@@ -66,17 +63,16 @@ const { values } = parseArgs({
 })
 // `--out` alone is the preflight. Beside a load it keeps the transformed
 // target at that path, which is what a later `--delta-from` compares against.
-const loads = (['local', 'staging', 'production'] as const).filter(name => values[name])
-if (loads.length > 1 || (loads.length === 0 && !values.out)) throw new Error('Choose one of --local, --staging or --production, or --out <target.sqlite> alone for a preflight.')
+const loads = (['staging', 'production'] as const).filter(name => values[name])
+if (loads.length > 1 || (loads.length === 0 && !values.out)) throw new Error('Choose one of --staging or --production, or --out <target.sqlite> alone for a preflight.')
 const target = loads[0] ?? 'out'
 try { process.loadEnvFile() } catch (error) {
   if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
 }
-if (target === 'local' && !values['source-file']) values['source-file'] = process.env.LOCAL_DATABASE_SOURCE_FILE
-if (values['source-file'] && target !== 'local' && target !== 'out') throw new Error('--source-file is for a local migration or read-only preflight.')
+if (values['source-file'] && target !== 'out') throw new Error('--source-file is for a read-only preflight.')
 if (values['source-file'] && values.source !== 'DB') throw new Error('Choose --source or --source-file, not both.')
 if (values['source-file'] && values.export) throw new Error('--export keeps a new export; --source-file has none to keep.')
-const omitJwks = target === 'local' || (target === 'staging' && values.source === 'DB')
+const omitJwks = target === 'staging' && values.source === 'DB'
 // Production is only ever loaded as a schema replacement: the top-level `DB`
 // binding already names the replacement, and the database it replaces has to
 // be named, or the source would be the destination.
@@ -234,7 +230,7 @@ try {
   if (target === 'out') {
     console.log(`Preflight passed: ${manifest.tables.length} tables (${rows} rows) from ${values.source} into ${targetPath}; payload ${payloadPath}. Nothing remote was written.`)
   } else {
-    const destination = target === 'local' ? ['--local'] : target === 'production' ? ['--remote'] : ['--env', target, '--remote']
+    const destination = target === 'production' ? ['--remote'] : ['--env', target, '--remote']
     // The payload is data only and must match the exact current migration
     // chain before any remote row is written.
     const expectedSchema = manifest.schema
@@ -244,9 +240,7 @@ try {
     const actualSchema = new Map((actual?.results ?? []).map(object => [key(object), object.sql]))
     const drift = expectedSchema.filter(object => actualSchema.get(key(object)) !== object.sql).map(key)
     if (drift.length || actualSchema.size !== expectedSchema.length) {
-      throw new Error(`${target} D1 does not carry the current migration chain (${drift.length ? drift.slice(0, 5).join(', ') : 'extra objects'} differ); no data was written. ${target === 'local'
-        ? 'Delete .wrangler/state/v3/d1 and run `corepack yarn local:setup` again.'
-        : 'Apply pending forward migrations or use the schema replacement in docs/operations/release-and-outage-prevention.md if a referenced constraint changed.'}`)
+      throw new Error(`${target} D1 does not carry the current migration chain (${drift.length ? drift.slice(0, 5).join(', ') : 'extra objects'} differ); no data was written. Apply pending forward migrations or use the schema replacement in docs/operations/release-and-outage-prevention.md if a referenced constraint changed.`)
     }
     // Every deploy runs `d1 migrations apply` before it ships. A destination
     // whose ledger does not already record each migration file would have the
@@ -260,7 +254,7 @@ try {
     if (JSON.stringify(ledgered) !== JSON.stringify(migrationFiles)) {
       throw new Error(`${target} D1 records migrations [${ledgered.join(', ')}] but the repository has [${migrationFiles.join(', ')}]; no data was written. Build it with \`wrangler d1 migrations apply\`, not by executing the baseline file.`)
     }
-    if (deltaFrom && target !== 'local') {
+    if (deltaFrom) {
       if (!accountId || !apiToken) throw new Error('Remote delta requires a configured Cloudflare account and API token.')
       const config = readWranglerConfig({ config: 'wrangler.toml', env: target === 'staging' ? 'staging' : undefined })
       const databaseId = config.d1_databases.find((database: { binding: string; database_id?: string }) => database.binding === 'DB')?.database_id

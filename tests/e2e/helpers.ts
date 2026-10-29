@@ -1,14 +1,4 @@
 import { expect, test, type Frame, type Page, type Request, type Response } from '@playwright/test'
-import { blawbyTestBaseUrl, blawbyTestExtraHeaders, tenantTestBaseUrl, potteryHouseTestBaseUrl, tenantTestExtraHeaders, potteryHouseTestExtraHeaders } from './test-env'
-
-export const tenantBaseURL = tenantTestBaseUrl()
-export const potteryHouseBaseURL = potteryHouseTestBaseUrl()
-export const blawbyBaseURL = blawbyTestBaseUrl()
-// Extra headers for tenant tests against local hosts.
-// Deployed staging tenant tests use direct environment aliases.
-export const tenantExtraHeaders = tenantTestExtraHeaders()
-export const potteryHouseExtraHeaders = potteryHouseTestExtraHeaders()
-export const blawbyExtraHeaders = blawbyTestExtraHeaders()
 
 interface ZarazConsentApi {
   APIReady: boolean

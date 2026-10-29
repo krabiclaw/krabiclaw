@@ -4,9 +4,10 @@ import type { Product, ProductBookingConfig } from '../../server/types/products'
 import type { GuestThreadDetailViewModel } from '../../server/domain/guest-threads/types'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { dismissPreviewToolbar } from './helpers'
-import { MCP_ORGANIZATION_ID, mcpData, mcpRequest } from './helpers/mcp'
+import { mcpOrganizationId, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import { blawbyTestExtraHeaders, devLoginHeaders, E2E_POTTERY_ORGANIZATION_ID as org, potteryHouseTestExtraHeaders } from './test-env'
+import { seededTenant } from './seed/manifest'
+import { devLoginHeaders, seededSiteHeaders } from './test-env'
 
 type Created = { success: boolean; operational_booking_id: string; request_id: string; status: string; replayed: boolean; code?: string }
 
@@ -18,10 +19,13 @@ const missingProviderConfiguration = paymentsProviderConfigured ? [] : ['payment
 
 test('MCP Product booking uses public capacity, durable replay, guest identity and canonical inbox transitions', async ({ page, request, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Writes and log-only delivery require isolated local D1')
+  const clayhouse = seededTenant('experience')
+  const org = clayhouse.organizationId
+  const wheelClass = clayhouse.products['wheel-class']!
   const release = await acquireTenantMutationLock(testInfo, org)
   try {
     await loginAs(request, baseURL!, 'user-e2e-pottery-owner')
-    const product = 'exp-ph-wheel'
+    const product = wheelClass.id
     const editor = `${baseURL}/api/editor/organizations/${org}/products/${product}`
     const beforeConfiguration = await request.get(editor)
     expect(beforeConfiguration.status(), await beforeConfiguration.text()).toBe(200)
@@ -62,7 +66,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect((await policyReadback.json()).product.booking).toMatchObject({ duration_minutes: 120, default_capacity: 8, confirmation_mode: 'review' })
       const since = new Date().toISOString()
       const key = crypto.randomUUID()
-      const args = { product_slug: 'pottery-wheel-class', session_id: available[0]!.id, party_size: 1, guest_name: 'MCP Guest', guest_email: 'pottery-owner@playwright.example', idempotency_key: key, source: 'operator', external_reference: `external-${key}`, guest_acknowledgement: false }
+      const args = { product_slug: wheelClass.slug, session_id: available[0]!.id, party_size: 1, guest_name: 'MCP Guest', guest_email: 'pottery-owner@playwright.example', idempotency_key: key, source: 'operator', external_reference: `external-${key}`, guest_acknowledgement: false }
       const fakeConfirmation = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'create_product_booking', args: { organization_id: org, ...args, confirm: true } })
       expect(fakeConfirmation.status()).toBe(200)
       expect((await fakeConfirmation.json()).result.isError).toBe(true)
@@ -222,7 +226,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       ids.push(instant.operational_booking_id)
       expect(instant.success).toBe(true)
       expect(instant.status).toBe('confirmed')
-      const publicResponse = await request.post(`${baseURL}/api/public/products/pottery-wheel-class/book`, { headers: potteryHouseTestExtraHeaders(), data: { guest_name: 'Public Guest', guest_email: args.guest_email, session_id: available[2]!.id, party_size: 1, idempotency_key: crypto.randomUUID() } })
+      const publicResponse = await request.post(`${baseURL}/api/public/products/${wheelClass.slug}/book`, { headers: seededSiteHeaders('experience'), data: { guest_name: 'Public Guest', guest_email: args.guest_email, session_id: available[2]!.id, party_size: 1, idempotency_key: crypto.randomUUID() } })
       expect(publicResponse.status(), await publicResponse.text()).toBe(201)
       const publicCreated = await publicResponse.json() as Created
       ids.push(publicCreated.operational_booking_id)
@@ -242,7 +246,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const experienceThread = (await experienceThreadResponse.json()).thread
       expect(experienceThread.conversationState).toBe('needs_attention')
       expect(experienceThread.entries.filter((entry: { actorKind: string; body: string }) => entry.actorKind === 'guest' && entry.body === 'Could we attend the following week instead?')).toHaveLength(1)
-      const foreign = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product_booking', args: { organization_id: 'org-demo', operational_booking_id: instant.operational_booking_id } })
+      const foreign = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product_booking', args: { organization_id: seededTenant('restaurant').organizationId, operational_booking_id: instant.operational_booking_id } })
       expect(foreign.status()).toBe(200)
       expect((await foreign.json()).result.isError).toBe(true)
     } finally {
@@ -262,7 +266,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
 
 test('MCP online collection returns the real Payments setup handoff without changing the offering or creating a payment', async ({ request, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Write verification requires isolated local D1')
-  const organizationId = MCP_ORGANIZATION_ID
+  const organizationId = mcpOrganizationId()
   const release = await acquireTenantMutationLock(testInfo, organizationId)
   let productId: string | null = null
   try {
@@ -336,8 +340,8 @@ test('MCP online collection returns the real Payments setup handoff without chan
 test('MCP consultation attorney replacement waits for buyer conversation approval and preserves the other client', async ({ page, playwright, request, baseURL }, testInfo) => {
   test.setTimeout(180_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Consultation writes and log-only notifications require disposable local D1')
-  const organizationId = 'org-ncls-blawby'
-  const slug = 'north-carolina-legal-services'
+  const organizationId = seededTenant('legal').organizationId
+  const slug = seededTenant('legal').slug
   const editor = `/api/editor/organizations/${organizationId}`
   const release = await acquireTenantMutationLock(testInfo, organizationId)
   const attorneyRequest = await playwright.request.newContext({ baseURL })
@@ -366,8 +370,8 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     const membership = await body<{ members: Array<{ id: string; userId: string; role: string; user: { email: string } }> }>(await request.get('/api/auth/organization/list-members', { params: { organizationId } }))
     for (const [userId, client] of [['user-e2e-ncls-consultation-owner', attorneyRequest], ['user-e2e-ncls-owner', request]] as const) {
       const member = membership.members.find(member => member.userId === userId)
-      expect(member, 'The consultation uses the existing NCLS Better Auth actor memberships').toBeDefined()
-      if (!member) throw new Error('The NCLS attorney fixture membership is missing')
+      expect(member, 'The consultation uses the seeded Harbor Legal Aid Better Auth actor memberships').toBeDefined()
+      if (!member) throw new Error('The Harbor Legal Aid attorney fixture membership is missing')
       const saved = await body<{ scheduling: Schedule | null }>(await request.get(`/api/organizations/${organizationId}/members/${member.id}/scheduling`))
       const teams = await body<Array<{ id: string }>>(await request.get('/api/auth/organization/list-user-teams', { params: { organizationId, userId } }))
       actors.push({ ...member, previous: saved.scheduling, teamIds: teams.map(team => team.id), changed: false, client })
@@ -405,7 +409,7 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     if (!originalSession || !replacementSession) throw new Error('The attorney team has no matching consultation sessions')
     expect(replacementSession.ends_at).toBe(originalSession.ends_at)
     for (const [client, guestName, email] of [[page.request, 'E2E Buyer', 'buyer@playwright.example'], [otherClient, 'Other consultation client', 'other-consultation@playwright.example']] as const) {
-      const booked = await body<Created>(await client.post(`/api/public/products/${product.slug}/book`, { headers: blawbyTestExtraHeaders(), data: {
+      const booked = await body<Created>(await client.post(`/api/public/products/${product.slug}/book`, { headers: seededSiteHeaders('legal'), data: {
         session_id: originalSession.id, variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName, guest_email: email, locale: 'en', idempotency_key: crypto.randomUUID(),
       } }), 201)
       expect(booked.status).toBe('pending')

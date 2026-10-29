@@ -3,7 +3,8 @@ import { createHmac, randomUUID } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { buildReplyToAddress } from '../../server/utils/submission-messages'
 import { loginAs } from './helpers/auth'
-import { devLoginHeaders } from './test-env'
+import { seededTenant } from './seed/manifest'
+import { devLoginHeaders, seededSiteHeaders } from './test-env'
 
 test('signed Stripe ingress accepts a signed event and rejects invalid signatures', async ({ request }) => {
   const eventId = `evt_e2e_${randomUUID().replaceAll('-', '')}`
@@ -96,30 +97,31 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
       }
     })
   }
+  const organizationId = seededTenant('restaurant').organizationId
   const name = `E5 ${randomUUID().slice(0, 12)}`
   const guestEmail = 'guest@e2e.example.test'
   const submitted = await fetchPhase('create contact', '/api/public/contact', {
     method: 'POST',
     // The public routes resolve their tenant from the host, and this runs against
     // the platform's, so the tenant is named rather than inferred.
-    headers: { 'x-preview-tenant': 'demo' },
+    headers: seededSiteHeaders('restaurant'),
     data: { name, email: guestEmail, message: 'Please confirm the continuity check.', subject: 'general' },
   })
   expect(submitted.status(), await submitted.text()).toBe(201)
   await test.step('authenticate owner and select organization', () => loginAs(request, baseURL!, 'user-e2e-demo-owner'), { timeout: 30_000 })
   // This asked for ?search=<name> and asserted the whole inbox held one thread.
   // The route never implemented search, so the filter was dropped and the
-  // assertion held only while org-demo happened to contain exactly one thread.
+  // assertion held only while the tenant happened to contain exactly one thread.
   // The route refuses unknown parameters now, so asking for one is a 400.
-  const rejected = await fetchPhase('reject unsupported filter', '/api/dashboard/organizations/org-demo/guest-threads', { params: { search: name } })
+  const rejected = await fetchPhase('reject unsupported filter', `/api/dashboard/organizations/${organizationId}/guest-threads`, { params: { search: name } })
   expect(rejected.status(), await rejected.text()).toBe(400)
 
-  const listed = await fetchPhase('find contact thread', '/api/dashboard/organizations/org-demo/guest-threads', {})
+  const listed = await fetchPhase('find contact thread', `/api/dashboard/organizations/${organizationId}/guest-threads`, {})
   expect(listed.status(), await listed.text()).toBe(200)
   const { threads } = await listed.json() as { threads: Array<{ id: string; guestName: string }> }
   const own = threads.filter(thread => thread.guestName === name)
-  expect(own, `no guest thread named ${name} in org-demo's ${threads.length} threads`).toHaveLength(1)
-  const detailUrl = `/api/dashboard/organizations/org-demo/guest-threads/${own[0]!.id}`
+  expect(own, `no guest thread named ${name} in the restaurant's ${threads.length} threads`).toHaveLength(1)
+  const detailUrl = `/api/dashboard/organizations/${organizationId}/guest-threads/${own[0]!.id}`
   const initialResponse = await fetchPhase('read initial entries', detailUrl, {})
   expect(initialResponse.status(), await initialResponse.text()).toBe(200)
   const { thread: initial } = await initialResponse.json()
@@ -136,7 +138,7 @@ test('native email replies retain their RFC ancestry through repeated dashboard 
   }
   const readDeliveries = async (phase: string) => {
     const response = await fetchPhase(phase, '/api/dev/notifications', {
-      headers: devLoginHeaders(), params: { organization_id: 'org-demo', limit: 500 },
+      headers: devLoginHeaders(), params: { organization_id: organizationId, limit: 500 },
     })
     expect(response.status(), await response.text()).toBe(200)
     const { deliveries } = await response.json() as { deliveries: EmailReceipt[] }

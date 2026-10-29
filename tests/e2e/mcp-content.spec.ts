@@ -1,9 +1,14 @@
 import { expect, test } from '@playwright/test'
 import Ajv from 'ajv'
 import { loginAs } from './helpers/auth'
-import { openTenantPage, tenantBaseURL, tenantExtraHeaders, waitForNuxtHydration } from './helpers'
-import { MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
+import { openTenantPage, waitForNuxtHydration } from './helpers'
+import { mcpOrganizationId, mcpRequest, mcpData } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { seededTenant } from './seed/manifest'
+import { seededSiteHeaders, seededSiteURL } from './test-env'
+
+const tenantBaseURL = () => seededSiteURL('restaurant')
+const tenantExtraHeaders = () => seededSiteHeaders('restaurant')
 
 // Split out of mcp.spec.ts (content/publishing tool tests) — see
 // helpers/mcp.ts for why. This group covers post publishing, tenant blog
@@ -11,17 +16,18 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 
 test.describe('stateless MCP server', () => {
   test('a named reservation cancellation policy excludes raw cutoff fields without changing the saved policy', async ({ request, baseURL }, testInfo) => {
-    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+    const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, mcpOrganizationId())
     try {
       await loginAs(request, baseURL!)
-      const policyUrl = `${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}/locations/loc-demo/reservation-config`
+      const locationId = seededTenant('restaurant').locations.brooklyn!.id
+      const policyUrl = `${baseURL}/api/editor/organizations/${mcpOrganizationId()}/locations/${locationId}/reservation-config`
       const beforeResponse = await request.get(policyUrl)
       expect(beforeResponse.status()).toBe(200)
       const before = await beforeResponse.json()
-      expect(before.config, 'The existing demo location takes table reservations').not.toBeNull()
+      expect(before.config, 'The seeded Brooklyn location takes table reservations').not.toBeNull()
       for (const rawFields of [{ free_cancellation_until_minutes: 60 }, { reschedule_allowed: false }, { reschedule_cutoff_minutes: 60 }]) {
         const conflicted = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'update_reservation_policy', args: {
-          organization_id: MCP_ORGANIZATION_ID, location_id: 'loc-demo', expected_updated_at: before.config.updated_at,
+          organization_id: mcpOrganizationId(), location_id: locationId, expected_updated_at: before.config.updated_at,
           cancellation_policy: 'flexible', ...rawFields,
         } })
         expect(conflicted.status()).toBe(200)
@@ -38,11 +44,11 @@ test.describe('stateless MCP server', () => {
   test('separate language operations publish only authored translations and preserve source content', async ({ request, page, baseURL }, testInfo) => {
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Language writes use local D1 only.')
     test.setTimeout(120_000)
-    const release = await acquireTenantMutationLock(testInfo, MCP_ORGANIZATION_ID)
+    const release = await acquireTenantMutationLock(testInfo, mcpOrganizationId())
     try {
     await loginAs(request, baseURL!)
     const localesResponse = await mcpRequest(request, baseURL!, {
-      method: 'tools/call', toolName: 'list_organization_locales', args: { organization_id: MCP_ORGANIZATION_ID },
+      method: 'tools/call', toolName: 'list_organization_locales', args: { organization_id: mcpOrganizationId() },
     })
     expect(localesResponse.status()).toBe(200)
     type Language = { locale: string; status: 'published' | 'disabled'; is_source: boolean }
@@ -52,7 +58,7 @@ test.describe('stateless MCP server', () => {
     const locale = ['vi', 'ja'].find(candidate => !locales.some(saved => saved.locale === candidate))!
     expect(locale, 'The paid fixture has an available language that has not been added').toBeTruthy()
     const response = await mcpRequest(request, baseURL!, {
-      method: 'tools/call', toolName: 'get_product_catalog_localization', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+      method: 'tools/call', toolName: 'get_product_catalog_localization', args: { organization_id: mcpOrganizationId(), locale },
     })
     expect(response.status()).toBe(200)
     const body = await response.json()
@@ -64,7 +70,7 @@ test.describe('stateless MCP server', () => {
     const destination = new URL(action.dashboard_url)
     expect(destination.pathname).toMatch(/^\/dashboard\/[^/]+\/website\/localization$/)
 
-    const editor = `${baseURL}/api/editor/organizations/${MCP_ORGANIZATION_ID}`
+    const editor = `${baseURL}/api/editor/organizations/${mcpOrganizationId()}`
     const pagesResponse = await request.get(`${editor}/pages`)
     expect(pagesResponse.status()).toBe(200)
     const sourcePages = (await pagesResponse.json() as { pages: Array<{ id: string; page_id: string; path: string }> }).pages
@@ -80,7 +86,7 @@ test.describe('stateless MCP server', () => {
     const dashboardSourceRead = await request.get(`${editor}/pages/${dashboardPage!.id}`)
     expect(dashboardSourceRead.status()).toBe(200)
     const dashboardSource = (await dashboardSourceRead.json()).page
-    const publicSource = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/' } })
+    const publicSource = await page.request.get(`${tenantBaseURL()}/api/public/pages`, { headers: tenantExtraHeaders(), params: { path: '/' } })
     expect(publicSource.status()).toBe(200)
     const originalPublicSource = (await publicSource.json()).page
     const languagePath = `${editor}/locales/${locale}`
@@ -89,7 +95,7 @@ test.describe('stateless MCP server', () => {
     const translatedText = locale === 'vi' ? 'Khám phá thực đơn của Ember & Slice.' : 'Ember & Sliceのメニューをご覧ください。'
     try {
       const added = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'add_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+        method: 'tools/call', toolName: 'add_organization_language', args: { organization_id: mcpOrganizationId(), locale },
       })
       expect(added.status()).toBe(200)
       const addedLanguages = mcpData<{ locales: Language[] }>(await added.json()).locales
@@ -101,15 +107,16 @@ test.describe('stateless MCP server', () => {
 
       // A translation names one resource type. Fields from another type must
       // be refused before creating even the first representation in a batch.
-      const mediaLocalization = `${editor}/localization/media_asset/media-demo-margherita/${locale}`
+      const margheritaPhoto = seededTenant('restaurant').media.margherita!.id
+      const mediaLocalization = `${editor}/localization/media_asset/${margheritaPhoto}/${locale}`
       const untranslatedMedia = await request.get(mediaLocalization)
       expect(untranslatedMedia.status()).toBe(404)
       for (const [toolName, fields] of [
-        ['put_resource_localization', { resource_id: 'media-demo-margherita', values: { name: 'This is not media alt text' } }],
-        ['replace_resource_localizations', { items: [{ resource_id: 'media-demo-margherita', values: { name: 'This is not media alt text' } }] }],
+        ['put_resource_localization', { resource_id: margheritaPhoto, values: { name: 'This is not media alt text' } }],
+        ['replace_resource_localizations', { items: [{ resource_id: margheritaPhoto, values: { name: 'This is not media alt text' } }] }],
       ] as const) {
         const wrongResourceFields = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: {
-          organization_id: MCP_ORGANIZATION_ID, resource_type: 'media_asset', locale, ...fields,
+          organization_id: mcpOrganizationId(), resource_type: 'media_asset', locale, ...fields,
         } })
         expect(wrongResourceFields.status()).toBe(200)
         expect((await wrongResourceFields.json()).result.isError).toBe(true)
@@ -118,7 +125,7 @@ test.describe('stateless MCP server', () => {
       }
 
       const premature = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+        method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: mcpOrganizationId(), locale },
       })
       expect(premature.status()).toBe(200)
       const prematureBody = await premature.json()
@@ -126,7 +133,7 @@ test.describe('stateless MCP server', () => {
       expect(prematureBody.result?.content?.[0]?.text).toContain('Translate the homepage before publishing this language')
 
       const translationArgs = {
-        organization_id: MCP_ORGANIZATION_ID, page_id: home!.page_id, locale, path: '/', title: translatedTitle,
+        organization_id: mcpOrganizationId(), page_id: home!.page_id, locale, path: '/', title: translatedTitle,
         blocks: [{ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } }],
       }
       for (const [change, message] of [
@@ -178,7 +185,7 @@ test.describe('stateless MCP server', () => {
       let authored = (await translatedRead.json()).localization
       expect(authored).toMatchObject({ root_id: home!.page_id, locale, title: translatedTitle, path: '/' })
       expect(authored.content_blocks).toContainEqual(expect.objectContaining({ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } }))
-      const privateRoute = await page.request.get(`${tenantBaseURL}/${locale}`, { headers: tenantExtraHeaders, maxRedirects: 0 })
+      const privateRoute = await page.request.get(`${tenantBaseURL()}/${locale}`, { headers: tenantExtraHeaders(), maxRedirects: 0 })
       expect(privateRoute.status()).toBe(404)
 
       for (const identity of [{ route_path: `/${locale}/moved-home` }, { values: { title: 'Must not be saved', slug: 'moved-home' } }]) {
@@ -192,7 +199,7 @@ test.describe('stateless MCP server', () => {
       }
       const renamed = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'put_resource_localization', args: {
-          organization_id: MCP_ORGANIZATION_ID, resource_type: 'content_document', resource_id: home!.page_id,
+          organization_id: mcpOrganizationId(), resource_type: 'content_document', resource_id: home!.page_id,
           locale, expected_updated_at: authored.updated_at, values: { title: translatedTitle + ' · Updated' },
         },
       })
@@ -206,35 +213,35 @@ test.describe('stateless MCP server', () => {
       authored = renamedLocalization
 
       const published = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+        method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: mcpOrganizationId(), locale },
       })
       expect(published.status()).toBe(200)
       expect(mcpData<{ locales: Language[] }>(await published.json()).locales).toContainEqual(expect.objectContaining({ locale, status: 'published' }))
       const publishedSettings = await request.get(`${editor}/locales`)
       expect(publishedSettings.status()).toBe(200)
       expect((await publishedSettings.json()).languages).toContainEqual(expect.objectContaining({ locale, status: 'published' }))
-      const publicTranslation = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/', locale } })
+      const publicTranslation = await page.request.get(`${tenantBaseURL()}/api/public/pages`, { headers: tenantExtraHeaders(), params: { path: '/', locale } })
       expect(publicTranslation.status(), await publicTranslation.text()).toBe(200)
       expect((await publicTranslation.json()).page).toMatchObject({
         id: authored.id, page_id: home!.page_id, locale, title: authored.title,
         blocks: [expect.objectContaining({ type: 'markdown', data: { markdown: translatedText, editor_mode: 'rich' } })],
       })
-      const publicRoute = await openTenantPage(page, `${tenantBaseURL}/${locale}`, tenantExtraHeaders)
+      const publicRoute = await openTenantPage(page, `${tenantBaseURL()}/${locale}`, tenantExtraHeaders())
       expect(publicRoute?.status()).toBe(200)
       await expect(page.locator('html')).toHaveAttribute('lang', locale)
       await expect(page.getByText(translatedText, { exact: true })).toBeVisible()
-      const untranslatedRoute = await page.request.get(`${tenantBaseURL}/${locale}${dashboardPage!.path}`, { headers: tenantExtraHeaders, maxRedirects: 0 })
+      const untranslatedRoute = await page.request.get(`${tenantBaseURL()}/${locale}${dashboardPage!.path}`, { headers: tenantExtraHeaders(), maxRedirects: 0 })
       expect(untranslatedRoute.status()).toBe(404)
       // This built-in route owns its catalog, rather than an authored page.
-      const emptyCatalog = await page.request.get(`${tenantBaseURL}/api/public/page`, {
-        headers: tenantExtraHeaders, params: { page: 'experiences', datasets: 'products', locale },
+      const emptyCatalog = await page.request.get(`${tenantBaseURL()}/api/public/page`, {
+        headers: tenantExtraHeaders(), params: { page: 'experiences', datasets: 'products', locale },
       })
       expect(emptyCatalog.status(), await emptyCatalog.text()).toBe(200)
       expect((await emptyCatalog.json()).products).toEqual([])
-      const emptyCatalogRoute = await page.request.get(`${tenantBaseURL}/${locale}/experiences`, { headers: tenantExtraHeaders, maxRedirects: 0 })
+      const emptyCatalogRoute = await page.request.get(`${tenantBaseURL()}/${locale}/experiences`, { headers: tenantExtraHeaders(), maxRedirects: 0 })
       expect(emptyCatalogRoute.status()).toBe(404)
       const disabledForAuthoring = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'disable_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+        method: 'tools/call', toolName: 'disable_organization_language', args: { organization_id: mcpOrganizationId(), locale },
       })
       expect(disabledForAuthoring.status()).toBe(200)
       expect(mcpData<{ locales: Language[] }>(await disabledForAuthoring.json()).locales).toContainEqual(expect.objectContaining({ locale, status: 'disabled' }))
@@ -255,7 +262,7 @@ test.describe('stateless MCP server', () => {
       const dashboardCreate = page.waitForResponse(response => {
         const url = new URL(response.url())
         return response.request().method() === 'POST' && url.origin === new URL(baseURL!).origin
-          && url.pathname === `/api/editor/organizations/${MCP_ORGANIZATION_ID}/pages`
+          && url.pathname === `/api/editor/organizations/${mcpOrganizationId()}/pages`
       })
       await page.getByTestId('localize-save').click()
       const dashboardCreatedResponse = await dashboardCreate
@@ -276,7 +283,7 @@ test.describe('stateless MCP server', () => {
       const dashboardUpdate = page.waitForResponse(response => {
         const url = new URL(response.url())
         return response.request().method() === 'PATCH' && url.origin === new URL(baseURL!).origin
-          && url.pathname === `/api/editor/organizations/${MCP_ORGANIZATION_ID}/pages/${dashboardCreated.id}`
+          && url.pathname === `/api/editor/organizations/${mcpOrganizationId()}/pages/${dashboardCreated.id}`
       })
       await page.getByTestId('localize-save').click()
       const dashboardUpdatedResponse = await dashboardUpdate
@@ -291,26 +298,26 @@ test.describe('stateless MCP server', () => {
       const dashboardSourceAfter = await request.get(`${editor}/pages/${dashboardPage!.id}`)
       expect(dashboardSourceAfter.status()).toBe(200)
       expect((await dashboardSourceAfter.json()).page).toEqual(dashboardSource)
-      const privateDashboardRoute = await page.request.get(`${tenantBaseURL}/${locale}/about`, { headers: tenantExtraHeaders, maxRedirects: 0 })
+      const privateDashboardRoute = await page.request.get(`${tenantBaseURL()}/${locale}/about`, { headers: tenantExtraHeaders(), maxRedirects: 0 })
       expect(privateDashboardRoute.status()).toBe(404)
 
       const republished = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+        method: 'tools/call', toolName: 'publish_organization_language', args: { organization_id: mcpOrganizationId(), locale },
       })
       expect(republished.status()).toBe(200)
       expect(mcpData<{ locales: Language[] }>(await republished.json()).locales).toContainEqual(expect.objectContaining({ locale, status: 'published' }))
-      const publicDashboardTranslation = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/about', locale } })
+      const publicDashboardTranslation = await page.request.get(`${tenantBaseURL()}/api/public/pages`, { headers: tenantExtraHeaders(), params: { path: '/about', locale } })
       expect(publicDashboardTranslation.status(), await publicDashboardTranslation.text()).toBe(200)
       expect((await publicDashboardTranslation.json()).page).toMatchObject({
         id: dashboardCreated.id, page_id: dashboardPage!.page_id, locale, path: '/about', title: dashboardUpdatedTitle,
       })
-      const publicDashboardRoute = await openTenantPage(page, `${tenantBaseURL}/${locale}/about`, tenantExtraHeaders)
+      const publicDashboardRoute = await openTenantPage(page, `${tenantBaseURL()}/${locale}/about`, tenantExtraHeaders())
       expect(publicDashboardRoute?.status()).toBe(200)
       await expect(page.locator('html')).toHaveAttribute('lang', locale)
       await expect(page.getByText(translatedText, { exact: true }).first()).toBeVisible()
 
       const disabled = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'disable_organization_language', args: { organization_id: MCP_ORGANIZATION_ID, locale },
+        method: 'tools/call', toolName: 'disable_organization_language', args: { organization_id: mcpOrganizationId(), locale },
       })
       expect(disabled.status()).toBe(200)
       const disabledLanguages = mcpData<{ locales: Language[] }>(await disabled.json()).locales
@@ -319,7 +326,7 @@ test.describe('stateless MCP server', () => {
       const disabledSettings = await request.get(`${editor}/locales`)
       expect(disabledSettings.status()).toBe(200)
       expect((await disabledSettings.json()).languages).toContainEqual(expect.objectContaining({ locale, status: 'disabled' }))
-      const hiddenRoute = await page.request.get(`${tenantBaseURL}/${locale}`, { headers: tenantExtraHeaders, maxRedirects: 0 })
+      const hiddenRoute = await page.request.get(`${tenantBaseURL()}/${locale}`, { headers: tenantExtraHeaders(), maxRedirects: 0 })
       expect(hiddenRoute.status()).toBe(404)
       const retained = await request.get(localizationPath)
       expect(retained.status()).toBe(200)
@@ -327,7 +334,7 @@ test.describe('stateless MCP server', () => {
       const sourceAfter = await request.get(`${editor}/pages/${home!.id}`)
       expect(sourceAfter.status()).toBe(200)
       expect(await sourceAfter.json()).toEqual(originalSource)
-      const publicSourceAfter = await page.request.get(`${tenantBaseURL}/api/public/pages`, { headers: tenantExtraHeaders, params: { path: '/' } })
+      const publicSourceAfter = await page.request.get(`${tenantBaseURL()}/api/public/pages`, { headers: tenantExtraHeaders(), params: { path: '/' } })
       expect(publicSourceAfter.status()).toBe(200)
       expect((await publicSourceAfter.json()).page).toMatchObject({
         id: originalPublicSource.id, page_id: originalPublicSource.page_id, locale: source!.locale, title: originalPublicSource.title,
@@ -342,7 +349,7 @@ test.describe('stateless MCP server', () => {
         expect(cleanup.status(), await cleanup.text()).toBe(200)
         expect(await cleanup.json()).toEqual({ deleted: true, locale })
         const restored = await mcpRequest(request, baseURL!, {
-          method: 'tools/call', toolName: 'list_organization_locales', args: { organization_id: MCP_ORGANIZATION_ID },
+          method: 'tools/call', toolName: 'list_organization_locales', args: { organization_id: mcpOrganizationId() },
         })
         expect(restored.status()).toBe(200)
         expect(mcpData<{ locales: Language[] }>(await restored.json()).locales).toEqual(locales)
@@ -353,7 +360,7 @@ test.describe('stateless MCP server', () => {
 
   test('a post rejects fields that are not part of the contract', async ({ request, baseURL }) => {
     await loginAs(request, baseURL!)
-    const organizationId = MCP_ORGANIZATION_ID
+    const organizationId = mcpOrganizationId()
 
     // Event and offer types are gone: their dates and terms are written in the body.
     const typed = await mcpRequest(request, baseURL!, {
@@ -375,20 +382,23 @@ test.describe('stateless MCP server', () => {
     expect(badActionBody.result?.content?.[0]?.text).toContain('call_to_action.url')
   })
 
-  test('a draft publishes only to its named targets, matches the public API, and plays its video in page blocks, the feed and detail gallery', async ({ request, page, baseURL }) => {
+  test('a draft publishes only to its named targets, matches the public API, and shows its cover in the feed and detail gallery', async ({ request, page, baseURL }) => {
     test.setTimeout(120_000)
     await loginAs(request, baseURL!)
-    const organizationId = MCP_ORGANIZATION_ID
+    const organizationId = mcpOrganizationId()
     let createdPostId: string | undefined
 
     try {
-      // Publish an existing video from this organization's media library.
-      const videoAssetId = 'media-demo-margherita-video'
+      // Publish an existing photo from this organization's media library. Video
+      // playback is checked on real posts in tests/deployed: no environment but
+      // production can store a video's poster.
+      const coverAsset = seededTenant('restaurant').media.margherita!
+      const coverAssetId = coverAsset.id
 
       const now = Date.now()
       const createArgs = {
         organization_id: organizationId,
-        location_id: 'loc-demo',
+        location_id: seededTenant('restaurant').locations.brooklyn!.id,
         idempotency_key: `mcp-explicit-publication-${now}`,
         title: `MCP explicit publication ${now}`,
         body: 'Visible after explicit publication through MCP and the public API.',
@@ -410,7 +420,7 @@ test.describe('stateless MCP server', () => {
       const placement = await mcpRequest(request, baseURL!, {
         method: 'tools/call',
         toolName: 'set_media',
-        args: { organization_id: organizationId, placement: { owner_type: 'content_document', owner_id: created.post.id, slot: 'cover' }, asset_id: videoAssetId },
+        args: { organization_id: organizationId, placement: { owner_type: 'content_document', owner_id: created.post.id, slot: 'cover' }, asset_id: coverAssetId },
       })
       if (placement.status() !== 200) console.error(await placement.text())
       expect(placement.status()).toBe(200)
@@ -427,9 +437,9 @@ test.describe('stateless MCP server', () => {
       expect(draft.published_at).toBeNull()
       expect(draft.public_url).toBeNull()
       expect(draft.preview_url).toContain('preview_token=')
-      expect(draft).toMatchObject({ body: createArgs.body, call_to_action: createArgs.call_to_action, media: [expect.objectContaining({ asset_id: videoAssetId, slot: 'cover' })], publications: [] })
+      expect(draft).toMatchObject({ body: createArgs.body, call_to_action: createArgs.call_to_action, media: [expect.objectContaining({ asset_id: coverAssetId, slot: 'cover' })], publications: [] })
       for (const field of ['created_by', 'metadata_json', 'social_image']) expect(draft).not.toHaveProperty(field)
-      expect((await request.get(`${tenantBaseURL}/api/public/posts/${encodeURIComponent(draft.slug)}`, { headers: tenantExtraHeaders })).status()).toBe(404)
+      expect((await request.get(`${tenantBaseURL()}/api/public/posts/${encodeURIComponent(draft.slug)}`, { headers: tenantExtraHeaders() })).status()).toBe(404)
 
       const postEditorPath = `${baseURL}/api/editor/organizations/${organizationId}/posts/${created.post.id}`
       const beforeRename = await request.get(postEditorPath)
@@ -530,66 +540,41 @@ test.describe('stateless MCP server', () => {
       expect(firstPost.published_at).toEqual(expect.any(String))
       expect(firstPost.updated_at).toBe(publishData.updated_at)
       expect(firstPost.publications).toEqual([])
-      expect(firstPost.media).toContainEqual(expect.objectContaining({ asset_id: videoAssetId, slot: 'cover' }))
+      expect(firstPost.media).toContainEqual(expect.objectContaining({ asset_id: coverAssetId, slot: 'cover' }))
 
-      const publicRead = await request.get(`${tenantBaseURL}/api/public/posts/${encodeURIComponent(firstPost.slug)}`, { headers: tenantExtraHeaders })
+      const publicRead = await request.get(`${tenantBaseURL()}/api/public/posts/${encodeURIComponent(firstPost.slug)}`, { headers: tenantExtraHeaders() })
       expect(publicRead.status()).toBe(200)
       const publicPost = (await publicRead.json() as { post: { id: string, call_to_action: { label: string, url: string } | null, media: Array<{ asset_id: string }> } }).post
       expect(publicPost.id).toBe(created.post.id)
       expect(publicPost.call_to_action).toEqual(createArgs.call_to_action)
       // Visitors get the media in order, cover first; which slot it came from is the editor's concern.
-      expect(publicPost.media.map(item => item.asset_id)).toEqual([videoAssetId])
+      expect(publicPost.media.map(item => item.asset_id)).toEqual([coverAssetId])
 
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 900 })
         for (const path of ['/', '/posts']) {
-          const feed = await openTenantPage(page, `${tenantBaseURL}${path}`, tenantExtraHeaders)
+          const feed = await openTenantPage(page, `${tenantBaseURL()}${path}`, tenantExtraHeaders())
           expect(feed?.status()).toBe(200)
           await waitForNuxtHydration(page)
           const card = page.locator(`[data-social-post=${JSON.stringify(created.post.id)}]`)
           await expect(card).toContainText(createArgs.body)
-          const preview = card.locator('video')
-          await preview.scrollIntoViewIfNeeded()
-          await expect(preview).toHaveJSProperty('muted', true)
-          await expect(preview).toHaveJSProperty('loop', true)
-          await expect(preview).toHaveJSProperty('paused', false)
-          await expect.poll(() => preview.evaluate(element => {
-            const video = element as HTMLVideoElement
-            return video.currentTime > 0 && !video.paused ? 'playing' : {
-              time: video.currentTime, paused: video.paused, readyState: video.readyState,
-              networkState: video.networkState, error: video.error?.message ?? null,
-              source: video.currentSrc, duration: video.duration, playbackRate: video.playbackRate,
-              ended: video.ended, seeking: video.seeking, connected: video.isConnected,
-              size: [video.videoWidth, video.videoHeight],
-              buffered: Array.from({ length: video.buffered.length }, (_, index) => [video.buffered.start(index), video.buffered.end(index)]),
-              seekable: Array.from({ length: video.seekable.length }, (_, index) => [video.seekable.start(index), video.seekable.end(index)]),
-              frames: video.getVideoPlaybackQuality().totalVideoFrames,
-              visibility: document.visibilityState, bounds: video.getBoundingClientRect().toJSON(),
-            }
-          })).toBe('playing')
-          await expect.poll(() => page.locator('[data-social-posts] video').evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1)
+          const cover = card.locator(`img[src=${JSON.stringify(coverAsset.public_url)}]`)
+          await cover.scrollIntoViewIfNeeded()
+          await expect.poll(() => cover.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
           await card.click()
           const viewer = page.getByRole('dialog')
           await expect(viewer).toBeVisible()
-          await expect(preview).toHaveJSProperty('paused', true)
           await viewer.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
-          await expect(preview).toHaveJSProperty('paused', false)
-          await page.locator('footer').first().scrollIntoViewIfNeeded()
-          await expect(preview).toHaveJSProperty('paused', true)
+          await expect(viewer).toHaveCount(0)
         }
 
-        const detail = await openTenantPage(page, `${tenantBaseURL}/posts/${encodeURIComponent(firstPost.slug)}`, tenantExtraHeaders)
+        const detail = await openTenantPage(page, `${tenantBaseURL()}/posts/${encodeURIComponent(firstPost.slug)}`, tenantExtraHeaders())
         expect(detail?.status()).toBe(200)
         await waitForNuxtHydration(page)
         await expect(page.getByRole('heading', { level: 1 })).toHaveText(renamedPost.title)
-        const detailPreview = page.locator('[data-media-gallery] video')
-        await detailPreview.scrollIntoViewIfNeeded()
-        await expect.poll(() => detailPreview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
-        await page.locator('[data-media-gallery]').getByRole('button', { name: /^Play video,/ }).click()
-        await expect(page.getByRole('dialog')).toBeVisible()
-        await expect(detailPreview).toHaveJSProperty('paused', true)
-        await page.getByRole('dialog').getByRole('button', { name: 'Close photos and videos', exact: true }).click()
-        await expect(detailPreview).toHaveJSProperty('paused', false)
+        const detailCover = page.locator(`[data-media-gallery] img[src=${JSON.stringify(coverAsset.public_url)}]`).first()
+        await detailCover.scrollIntoViewIfNeeded()
+        await expect.poll(() => detailCover.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
       }
 
       // A repeat with the old revision returns the receipt and changes nothing.
@@ -618,7 +603,7 @@ test.describe('stateless MCP server', () => {
 
   test('tenant blog tools preserve the canonical block document', async ({ request, page, baseURL }) => {
     await loginAs(request, baseURL!)
-    const organizationId = MCP_ORGANIZATION_ID
+    const organizationId = mcpOrganizationId()
     const discovery = await mcpRequest(request, baseURL!, { method: 'tools/list' })
     expect(discovery.status()).toBe(200)
     const catalog = await discovery.json() as { result: { tools: Array<{ name: string; outputSchema: object }> } }
@@ -861,35 +846,23 @@ test.describe('stateless MCP server', () => {
       expect(unlisted.visibility).toBe('unlisted')
       expect(unlisted.public_url).toBe(published.public_url)
       expect(unlisted.published_at).toBe(published.published_at)
-      // Publish existing library media through the article's native block writer,
-      // then exercise the reader's playback rather than just its saved placement.
-      const videoBlock = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'append_content_block', args: {
-        organization_id: organizationId, document_id: postId, type: 'image', data: { caption: 'Kitchen video' },
-        media: [{ asset_id: 'media-demo-margherita-video', slot: 'media' }],
+      // Publish existing library media through the article's native block writer
+      // and read it back on the article itself.
+      const photo = seededTenant('restaurant').media.margherita!
+      const photoBlock = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'append_content_block', args: {
+        organization_id: organizationId, document_id: postId, type: 'image', data: { caption: 'Kitchen photo' },
+        media: [{ asset_id: photo.id, slot: 'media' }],
       } })
-      expect(videoBlock.status()).toBe(200)
-      expect(mcpData<{ blocks: unknown[] }>(await videoBlock.json()).blocks).toHaveLength(1)
-      const article = await openTenantPage(page, `${tenantBaseURL}${new URL(unlisted.public_url).pathname}`, tenantExtraHeaders)
+      expect(photoBlock.status()).toBe(200)
+      expect(mcpData<{ blocks: unknown[] }>(await photoBlock.json()).blocks).toHaveLength(1)
+      const article = await openTenantPage(page, `${tenantBaseURL()}${new URL(unlisted.public_url).pathname}`, tenantExtraHeaders())
       expect(article?.status()).toBe(200)
       await waitForNuxtHydration(page)
-      const preview = page.locator('.blog-article video')
-      await expect(preview).toHaveCount(1)
-      await preview.scrollIntoViewIfNeeded()
-      const initialTime = await preview.evaluate(element => (element as HTMLVideoElement).currentTime)
-      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(initialTime)
-      await page.emulateMedia({ reducedMotion: 'reduce' })
-      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
-      await expect(preview).toHaveJSProperty('controls', true)
-      await preview.press('Home')
-      const manualTime = await preview.evaluate(element => (element as HTMLVideoElement).currentTime)
-      await preview.press('Space')
-      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(manualTime)
-      await page.setViewportSize({ width: 1280, height: 480 })
-      await page.evaluate(() => scrollTo(0, 0))
-      await expect.poll(() => preview.evaluate(element => element.getBoundingClientRect().top >= innerHeight)).toBe(true)
-      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
-      await expect(preview).toHaveJSProperty('ended', false)
-      await page.emulateMedia({ reducedMotion: 'no-preference' })
+      const picture = page.locator(`.blog-article img[src=${JSON.stringify(photo.public_url)}]`)
+      await expect(picture).toHaveCount(1)
+      await picture.scrollIntoViewIfNeeded()
+      await expect.poll(() => picture.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+      await expect(page.locator('.blog-article')).toContainText('Kitchen photo')
     } finally {
       if (postId) {
         const cleanup = await mcpRequest(request, baseURL!, {

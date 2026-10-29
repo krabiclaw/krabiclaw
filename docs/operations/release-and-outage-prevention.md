@@ -147,7 +147,10 @@ an already deployed migration and ask D1 to replay it under the same filename.
 
 The replacement is prepared while the old Worker stays live. Use the existing
 `scripts/pull-production-snapshot.ts` path for preflight, initial load and final
-delta, specifying the old database with `--source`. The script refuses
+delta, specifying the old database with `--source`. Pull-request E2E runs on a
+synthetic seed and never sees production rows, so the preflight against each
+environment's live source is the required rehearsal of a replacement: run it,
+and keep its report, before any load. The script refuses
 unexpected source tables or columns, validates copied rows, checks foreign keys
 and target schema, and previews rows changed or deleted since the initial
 export. The delta inserts newly created rows only. Remote `--delta-from` sends

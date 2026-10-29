@@ -59,7 +59,6 @@ jobs:
     timeout-minutes: 180
     permissions:
       contents: read
-      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -78,9 +77,6 @@ jobs:
       GOOGLE_PLACES_API_KEY: ""
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}
-      CANARY_LOGIN_PASSWORD: ${{ secrets.CANARY_LOGIN_PASSWORD }}
-      CANARY_ORG_ID: ${{ secrets.CANARY_ORG_ID }}
       # CIMD client metadata must be public HTTPS, which localhost cannot serve.
       # Staging's test-client documents are the ones docs/testing-strategy.md names.
       MCP_CIMD_CLIENT_URL: https://staging.krabiclaw.com/api/auth/oauth2/test-client-metadata
@@ -104,26 +100,9 @@ jobs:
       - run: &install_browsers |
           printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
           corepack yarn playwright install --with-deps chromium webkit
-      # playwright.config.ts runs e2e:local:prepare itself when the worker is not
-      # already prepared: local schema verification and the production build. The explicit
-      # local:setup step copies the shared review credential once.
-      # A pull request never exports live production: it loads the newest
-      # snapshot the Production snapshot workflow published from staging.
-      - name: Download production snapshot
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          run_id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=production-snapshot&per_page=100" \
-            --jq '[.artifacts[] | select(.expired == false and .workflow_run.head_branch == "staging")] | sort_by(.created_at) | last | .workflow_run.id // empty')
-          if [ -z "$run_id" ]; then
-            echo "::error::No unexpired production-snapshot artifact from staging. Run the Production snapshot workflow, then rerun this job."
-            exit 1
-          fi
-          gh run download "$run_id" -R "$GITHUB_REPOSITORY" --name production-snapshot --dir "$RUNNER_TEMP"
-      - run: openssl enc -d -aes-256-cbc -pbkdf2 -pass env:BETTER_AUTH_SECRET -in "$RUNNER_TEMP/source.sqlite.enc" -out "$RUNNER_TEMP/source.sqlite"
-      - run: yarn local:setup
-        env:
-          LOCAL_DATABASE_SOURCE_FILE: ${{ runner.temp }}/source.sqlite
+      # playwright.config.ts prepares an empty local D1 and the build, and its
+      # global setup seeds the synthetic businesses through the app's own
+      # boundaries (tests/e2e/seed). No production data reaches a pull request.
       - run: yarn test:e2e --shard=${{ matrix.shard }}/4
       # Wrangler's own log names why the local Worker stopped serving; run
       # 36298734414 died serving _nuxt chunks with nothing else to read.

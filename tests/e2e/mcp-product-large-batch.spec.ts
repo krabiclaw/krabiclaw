@@ -1,19 +1,20 @@
 import { expect, test } from '@playwright/test'
 import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import { MCP_ORGANIZATION_ID, mcpData, mcpRequest } from './helpers/mcp'
+import { mcpOrganizationId, mcpData, mcpRequest } from './helpers/mcp'
+import { seededTenant } from './seed/manifest'
 import type { Product } from '../../server/types/products'
 
 interface CreatedProduct { id: string; name: string; description: string; active: boolean }
 
 test('Product batches validate and commit atomically for a 100-item catalog', async ({ request, baseURL }, testInfo) => {
-  const organizationId = MCP_ORGANIZATION_ID
+  const organizationId = mcpOrganizationId()
   // Compare the existing catalog before and after this test's batch, so
   // nothing else may write the demo's products meanwhile.
   const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, organizationId)
   try {
     await loginAs(request, baseURL!)
-    const locationId = 'loc-demo'
+    const locationId = seededTenant('restaurant').locations.brooklyn!.id
 
     // The demo's own catalog is part of the tenant this runs on. Its active
     // products are read first so every assertion below names exactly which
