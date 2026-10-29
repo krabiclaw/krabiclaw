@@ -2071,7 +2071,7 @@ export async function deleteProduct(db: DbClient, input: {
     conflict('This home has guest conversations from its channel. Turn it off instead of deleting it.')
   }
   if (await queryFirst(db, "SELECT 1 FROM message_templates t, json_each(t.schedule_json, '$.productIds') home WHERE t.organization_id = ? AND t.schedule_json IS NOT NULL AND home.value = ? LIMIT 1", [input.organizationId, input.productId])) {
-    conflict('A saved reply schedules messages for this home. Remove the home from that schedule before deleting it.')
+    conflict('An automatic message is sent for this home. Remove the home from that message before deleting it.')
   }
   const pages = await Promise.all(bound.map(page => prepareTenantPageDelete(db, page.id, { scope: { organizationId: input.organizationId }, expectedUpdatedAt: page.updated_at })))
   const invalidations = await productCacheInvalidations(db, input.organizationId, input.productId, 'product_deleted')

@@ -410,6 +410,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@block65/webcrypto-web-push@npm:2.0.0":
+  version: 2.0.0
+  resolution: "@block65/webcrypto-web-push@npm:2.0.0"
+  dependencies:
+    uint8array-extras: "npm:^1.5.0"
+  checksum: 10c0/d2d843d1f0177ca9ce6df3e13292eea3b0eeffc1854b027bc5b7fd0c6e08f0698a976b32747890a00fa2239fd223e4a1aeaaf892c1d30dac7343bb84f60d8f1a
+  languageName: node
+  linkType: hard
+
 "@bomb.sh/tab@npm:^0.0.22":
   version: 0.0.22
   resolution: "@bomb.sh/tab@npm:0.0.22"
@@ -10537,6 +10546,7 @@ __metadata:
     "@better-auth/stripe": "npm:1.7.6"
     "@better-auth/utils": "npm:0.4.2"
     "@better-fetch/fetch": "npm:1.3.2"
+    "@block65/webcrypto-web-push": "npm:2.0.0"
     "@cloudflare/workers-types": "npm:5.20260926.1"
     "@fontsource-variable/jost": "npm:^5.3.0"
     "@fontsource/cormorant-garamond": "npm:^5.3.0"
@@ -13045,6 +13055,13 @@ __metadata:
   version: 1.6.4
   resolution: "ufo@npm:1.6.4"
   checksum: 10c0/3a2b29e7e3d772fbf6893d7d23bf442981457adb2fe122828abdbda89bedcb81aafd0dcc080e41b45f9a877db00cb42cbfee9639753a19d9b9bd39b5627039cf
+  languageName: node
+  linkType: hard
+
+"uint8array-extras@npm:^1.5.0":
+  version: 1.6.0
+  resolution: "uint8array-extras@npm:1.6.0"
+  checksum: 10c0/d53177c025ebea31af1e445abd474027b66341a56f207f352a5a486aa1d492e228bbc883dc4a51ea8358bb88d60a019351e20a92dd17c2ef8326e29fbad57127
   languageName: node
   linkType: hard
 

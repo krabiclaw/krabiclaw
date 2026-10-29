@@ -29,6 +29,12 @@ const nullableString = (value: unknown) => value === null || typeof value === 's
 export function isAccountActivityKind(value: unknown): value is AccountActivityKind {
   return value === 'booking' || value === 'reservation' || value === 'stay' || value === 'order' || value === 'payment'
 }
+/** One account detail route for every owned visit and purchase. */
+export function accountActivityPath(kind: AccountActivityKind, id: string): string {
+  if (!isAccountActivityKind(kind) || !id) throw new Error('A valid account activity kind and ID are required')
+  return `/dashboard/account/activity/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`
+}
+
 export function isAccountActivityItem(value: unknown): value is AccountActivityItem {
   return record(value) && isAccountActivityKind(value.kind) && typeof value.id === 'string'
     && typeof value.organizationId === 'string' && typeof value.title === 'string' && !!value.title.trim()

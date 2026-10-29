@@ -97,14 +97,14 @@ export async function notifyBuyerThread(db: DbClient, input: {
   message?: string | null
   conversation?: boolean
 }): Promise<void> {
-  const thread = await queryFirst<{ user_id: string | null; kind: string; current_buyer: number }>(db, `
-    SELECT r.user_id, r.kind, (${REQUEST_CURRENT_BUYER_SQL}) AS current_buyer
+  const thread = await queryFirst<{ user_id: string | null; kind: string; current_buyer: number; event_name: string | null }>(db, `
+    SELECT r.user_id, r.kind, e.event_name, (${REQUEST_CURRENT_BUYER_SQL}) AS current_buyer
     FROM requests r JOIN activity_entries e ON e.request_id = r.id
     WHERE r.id = ? AND e.id = ?`, [input.threadId, input.entryId])
   if (!thread) throw new Error('Buyer notification has no matching conversation event')
   if (!thread.user_id) return
   if (!thread.current_buyer) throw new Error('Buyer notification ownership does not match its booking')
-  const destination = input.conversation || thread.kind === 'contact'
+  const destination = input.conversation || thread.kind === 'contact' || thread.event_name?.startsWith('booking_change.')
     ? 'messages' : `activity/${thread.kind}`
   await createCanonicalNotification(db, {
     scope: 'global', targetUserId: thread.user_id,

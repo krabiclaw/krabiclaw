@@ -2,6 +2,7 @@ import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requ
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
 import type { StayChannel } from '~/shared/bookings'
+import type { BookingChangeView } from './booking-changes'
 
 export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment' | 'resolution'
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
@@ -9,7 +10,7 @@ export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'airbnb' | 'syst
 export type ConversationState = 'needs_attention' | 'waiting_on_guest' | 'resolved'
 export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
-export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'log_only'
+export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'web_push' | 'log_only'
 export type GuestThreadReplyChannel = 'email' | 'airbnb'
 export type GuestThreadDeliveryPurpose = 'owner_alert' | 'guest_acknowledgement' | 'member_reply' | 'scheduled_message' | 'status_update' | 'team_message'
 export type GuestThreadDeliveryStatus = 'pending' | 'sending' | 'uncertain' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped'
@@ -182,6 +183,8 @@ export interface GuestThreadEntryViewModel {
   providerTimestamp: string | null
   deliveries: GuestThreadEntryDeliveryViewModel[]
   attachments: GuestThreadEntryAttachmentViewModel[]
+  /** Canonical consent state and public before/after details for a requested change. */
+  bookingChange: BookingChangeView | null
 }
 
 export interface GuestThreadDeliveryFailureViewModel {

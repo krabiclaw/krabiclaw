@@ -21,7 +21,8 @@
             <UButton :label="t('booking.change_accept')" :loading="sending" @click="respond('accept')" />
           </div>
         </template>
-        <UAlert v-else color="success" :title="t(proposal.status === 'accepted' ? 'booking.change_accepted' : 'booking.change_declined')" :description="t(proposal.status === 'accepted' ? 'booking.change_updated' : 'booking.change_unchanged')" />
+        <UAlert v-else-if="proposal.status === 'accepted' || proposal.status === 'declined'" color="success" :title="t(proposal.status === 'accepted' ? 'booking.change_accepted' : 'booking.change_declined')" :description="t(proposal.status === 'accepted' ? 'booking.change_updated' : 'booking.change_unchanged')" />
+        <UAlert v-else color="warning" :title="t('booking.change_unavailable')" :description="t(proposal.status === 'expired' ? 'booking.change_expired' : 'booking.change_stale')" />
       </template>
     </div>
   </main>
@@ -31,6 +32,7 @@
 import { $fetch } from 'ofetch'
 import { platformLocale } from '~/shared/platform-locales'
 import type { respondToBookingChange } from '~/server/domain/guest-threads/booking-changes'
+import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'standalone' })
 const route = useRoute()
@@ -58,7 +60,7 @@ useHead({ meta: [{ name: 'referrer', content: 'no-referrer' }] })
 type Proposal = Awaited<ReturnType<typeof respondToBookingChange>>
 const endpoint = `/api/public/booking-changes/${encodeURIComponent(String(route.params.threadId))}/${encodeURIComponent(String(route.params.requestId))}`
 const token = computed(() => route.hash.slice(1))
-const { data: proposal, status, error } = await useAsyncData(endpoint, () => $fetch<Proposal>(endpoint, { headers: { authorization: `Bearer ${token.value}` } }), { server: false })
+const { data: proposal, status, error, refresh } = await useAsyncData(endpoint, () => $fetch<Proposal>(endpoint, { headers: { authorization: `Bearer ${token.value}` } }), { server: false })
 watch(() => proposal.value?.locale, value => { if (value) setGuestLocale(value) }, { immediate: true })
 const sending = ref(false)
 const decisionError = ref('')
@@ -67,11 +69,17 @@ const decisionError = ref('')
 const fields = computed(() => {
   if (!proposal.value) return []
   const copy = getVerticalCopy(proposal.value.vertical, locale.value)
-  return [
+  const rows = [
     { label: copy.locationLabel, before: proposal.value.originalLocationTitle, after: proposal.value.locationTitle },
     { label: copy.dateLabel, before: proposal.value.before.whenLabel, after: proposal.value.after.whenLabel },
     { label: copy.guestsLabel, before: String(proposal.value.before.partySize), after: String(proposal.value.after.partySize) },
   ]
+  if (proposal.value.type === 'booking') rows.push({
+    label: copy.assigneeLabel,
+    before: proposal.value.before.assignedMemberName ?? t('booking.change_unassigned'),
+    after: proposal.value.after.assignedMemberName ?? t('booking.change_unassigned'),
+  })
+  return rows
 })
 async function respond(decision: 'accept' | 'decline') {
   if (sending.value) return
@@ -79,8 +87,9 @@ async function respond(decision: 'accept' | 'decline') {
   decisionError.value = ''
   try {
     proposal.value = await $fetch<Proposal>(endpoint, { method: 'POST', headers: { authorization: `Bearer ${token.value}` }, body: { decision } })
-  } catch {
-    decisionError.value = t('booking.change_failed')
+  } catch (cause) {
+    decisionError.value = getErrorMessage(cause, t('booking.change_failed'))
+    await refresh()
   } finally {
     sending.value = false
   }

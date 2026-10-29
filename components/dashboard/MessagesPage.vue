@@ -1,7 +1,7 @@
 <template>
   <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="pastOnly && !teamScope ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
     <template v-if="!personalScope" #right>
-      <UDropdownMenu v-if="canReadGuests" :items="[{ label: 'Saved replies', to: `${listPath}/replies`, icon: 'i-lucide-message-square-text' }, { label: 'Scheduled messages', to: `${listPath}/scheduled`, icon: 'i-lucide-clock' }]">
+      <UDropdownMenu v-if="canReadGuests" :items="[{ label: 'Automatic messages', to: `${listPath}/automatic`, icon: 'i-lucide-message-square-text' }, { label: 'Sent and upcoming', to: `${listPath}/scheduled`, icon: 'i-lucide-clock' }]">
         <UButton icon="i-lucide-settings-2" color="neutral" variant="ghost" aria-label="Guest messaging tools" />
       </UDropdownMenu>
       <UButton v-if="canSendTeam" :to="{ path: `${listPath}/new`, query: { view: 'team' } }" icon="i-lucide-square-pen" color="neutral" variant="ghost" aria-label="New team conversation" />

@@ -1,3 +1,4 @@
+import { guestThreadConversationStateSql } from './booking-change-state'
 import { REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview, parseGuestRequest, participantLabel } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
@@ -248,6 +249,7 @@ async function countUnreadThreadIds(
 }
 
 type GuestThreadListRow = GuestThreadRow & {
+  effective_conversation_state: GuestThreadRow['conversation_state']
   assigned_member_id: string | null
   record_product_id: string | null
   channel_product_id: string | null
@@ -291,6 +293,8 @@ export async function listGuestThreads(
 ): Promise<GuestThreadListItemViewModel[]> {
   if (!organizationId && !opts.buyerAudience) throw new Error('Thread list requires organization scope')
   if (opts.buyerAudience && !opts.userId) throw new Error('Buyer thread list requires authenticated identity')
+  const now = new Date().toISOString()
+  const stateSql = guestThreadConversationStateSql('gt', now)
   const params: Array<string | number> = opts.buyerAudience ? [opts.userId] : [organizationId!]
   let where = opts.buyerAudience ? 'gt.user_id = ?' : 'gt.organization_id = ?'
   if (!opts.buyerAudience) {
@@ -316,13 +320,12 @@ export async function listGuestThreads(
     params.push(opts.type)
   }
   if (opts.conversationState) {
-    where += ' AND gt.conversation_state = ?'
+    where += ` AND ${stateSql} = ?`
     params.push(opts.conversationState)
     if (opts.conversationState === 'needs_attention') where += ` AND ${CANCELLED_ATTENTION_SQL}`
   }
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
-  const now = new Date().toISOString()
   const mailbox = mailboxWhere(opts.mailbox ?? null, now, opts.buyerAudience)
   where += mailbox.sql
   params.push(...mailbox.params)
@@ -344,7 +347,7 @@ export async function listGuestThreads(
 
   const rows = await queryAll<GuestThreadListRow>(db, `
     SELECT
-      gt.*,
+      gt.*, ${stateSql} AS effective_conversation_state,
       ${SOURCE_GUEST_NAME_SQL} AS guest_name, ${REPLY_CHANNEL_SQL} AS reply_channel, o.name AS organization_name, o.vertical AS organization_vertical,
       bl.title AS location_title,
       (
@@ -400,7 +403,7 @@ export async function listGuestThreads(
       occurrenceAt: row.record_starts_at,
       timeZone: row.record_timezone,
       latestMessageFromGuest: row.latest_message_actor_kind === 'guest',
-      conversationState: opts.buyerAudience ? null : row.conversation_state,
+      conversationState: opts.buyerAudience ? null : row.effective_conversation_state,
       operationalStatus: row.operational_status,
       operationalStatusLabel: row.operational_status ? formatOperationalStatusLabel(row.kind, row.operational_status) : null,
       unread,
@@ -409,7 +412,7 @@ export async function listGuestThreads(
         ? { kind: 'message', text: messagePreview(row.latest_message_body, row.latest_message_photos) }
         : (preview ? { kind: 'submission', text: preview } : null),
       lastActivityAt: row.updated_at,
-      needsAttention: opts.buyerAudience ? unread : row.conversation_state === 'needs_attention',
+      needsAttention: opts.buyerAudience ? unread : row.effective_conversation_state === 'needs_attention',
       // Two renditions of one asset, not two sources: a row 60px wide takes the
       // thumbnail, and an asset with no rendition yet is served at full size.
       imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),
@@ -431,6 +434,8 @@ export async function listOrganizationGuestThreads(
     principal: MemberAccessPrincipal
   },
 ): Promise<GuestThreadListItemViewModel[]> {
+  const now = new Date().toISOString()
+  const stateSql = guestThreadConversationStateSql('gt', now)
   const params: Array<string | number> = [opts.organizationId]
   let where = 'gt.organization_id = ?'
 
@@ -451,13 +456,12 @@ export async function listOrganizationGuestThreads(
     params.push(opts.type)
   }
   if (opts.conversationState) {
-    where += ' AND gt.conversation_state = ?'
+    where += ` AND ${stateSql} = ?`
     params.push(opts.conversationState)
     if (opts.conversationState === 'needs_attention') where += ` AND ${CANCELLED_ATTENTION_SQL}`
   }
   // One instant for the filter and for each row's mailbox, so a row cannot be
   // listed as Current and labelled Past.
-  const now = new Date().toISOString()
   const mailbox = mailboxWhere(opts.mailbox ?? null, now)
   where += mailbox.sql
   params.push(...mailbox.params)
@@ -479,7 +483,7 @@ export async function listOrganizationGuestThreads(
 
   const rows = await queryAll<GuestThreadListRow>(db, `
     SELECT
-      gt.*,
+      gt.*, ${stateSql} AS effective_conversation_state,
       ${SOURCE_GUEST_NAME_SQL} AS guest_name, ${REPLY_CHANNEL_SQL} AS reply_channel,
       bl.title AS location_title,
       (
@@ -532,7 +536,7 @@ export async function listOrganizationGuestThreads(
       occurrenceAt: row.record_starts_at,
       timeZone: row.record_timezone,
       latestMessageFromGuest: row.latest_message_actor_kind === 'guest',
-      conversationState: row.conversation_state,
+      conversationState: row.effective_conversation_state,
       operationalStatus: row.operational_status,
       operationalStatusLabel: row.operational_status ? formatOperationalStatusLabel(row.kind, row.operational_status) : null,
       unread,
@@ -541,7 +545,7 @@ export async function listOrganizationGuestThreads(
         ? { kind: 'message', text: messagePreview(row.latest_message_body, row.latest_message_photos) }
         : (preview ? { kind: 'submission', text: preview } : null),
       lastActivityAt: row.updated_at,
-      needsAttention: row.conversation_state === 'needs_attention',
+      needsAttention: row.effective_conversation_state === 'needs_attention',
       // Two renditions of one asset, not two sources: a row 60px wide takes the
       // thumbnail, and an asset with no rendition yet is served at full size.
       imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),

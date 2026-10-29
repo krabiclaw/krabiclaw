@@ -1,10 +1,11 @@
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import type { GuestThreadActorKind, GuestThreadChannel, GuestThreadEntryKind, GuestThreadEntryRow } from './types'
 
 export class GuestThreadEntryDedupeConflictError extends Error {}
 export class GuestThreadEntryOwnershipError extends Error {}
+export class GuestThreadEntryStateConflictError extends Error {}
 
 export interface AppendEntryInput {
   threadId: string
@@ -12,6 +13,8 @@ export interface AppendEntryInput {
   actorKind: GuestThreadActorKind
   actorUserId?: string | null
   buyerUserId?: string
+  /** SQL predicate checked atomically with a new ledger fact. Replays retain the original fact. */
+  writeGuard?: BatchQuery
   channel?: GuestThreadChannel | null
   body?: string | null
   eventName?: string | null
@@ -68,6 +71,7 @@ export async function appendEntry(db: DbClient, input: AppendEntryInput): Promis
   const dedupeKey = input.dedupeKey ?? `entry:${id}`
   const occurredAt = input.occurredAt ?? new Date().toISOString()
   const createdAt = new Date().toISOString()
+  const guards = [input.buyerUserId ? ownerWhere : null, input.writeGuard ? `(${input.writeGuard.query})` : null].filter(Boolean)
 
   try {
     const result = await execute(db, `
@@ -76,7 +80,7 @@ export async function appendEntry(db: DbClient, input: AppendEntryInput): Promis
       SELECT ?, ?, ?, 'request', ?, ?, ?, ?, ?, ?, ?, COALESCE(MAX(sequence), 0) + 1, ?, ?
       FROM activity_entries
       WHERE request_id = ?
-      ${input.buyerUserId?`HAVING ${ownerWhere}`:''}
+      ${guards.length ? `HAVING ${guards.join(' AND ')}` : ''}
       ON CONFLICT DO NOTHING
     `, [
       id,
@@ -93,12 +97,14 @@ export async function appendEntry(db: DbClient, input: AppendEntryInput): Promis
       createdAt,
       input.threadId,
       ...(input.buyerUserId?[input.threadId,input.buyerUserId]:[]),
+      ...(input.writeGuard?.params ?? []),
     ])
 
     if (Number(result?.meta?.changes ?? 0) === 0) {
       if(input.buyerUserId&&!await queryFirst(db,`SELECT 1 WHERE ${ownerWhere}`,[input.threadId,input.buyerUserId]))throw new GuestThreadEntryOwnershipError('Conversation is not owned by this buyer')
       const duplicate = await findEntryByDedupeKey(db, dedupeKey)
       if (duplicate) return matchingDedupeEntry(duplicate, input, payloadJson)
+      if (input.writeGuard) throw new GuestThreadEntryStateConflictError('The conversation or booking changed before the entry could be recorded')
       throw new Error('Guest thread entry conflicted with an existing ledger fact')
     }
   } catch (error) {

@@ -23,17 +23,20 @@ export default defineScheduledTask({
       const entry: Record<string, unknown> = { organization_id: organization.organization_id }
       results.push(entry)
       try {
-        Object.assign(entry, await syncCalendarOrganization(env, organization.organization_id))
-        if(entry.failed)failures.push(`${organization.organization_id}: ${entry.failed} Google Calendar event(s) failed; inspect the integration's last_error`)
-      } catch(error) {
-        failures.push(`${organization.organization_id}: ${describeErrorForTelemetry(error)}`)
-      }
-      try {
         // Google's change list is the replay feed: whatever a push notification missed lands here.
         entry.inbound = await pullCalendarChanges(env, organization.organization_id)
         await ensureCalendarWatch(env, organization.organization_id)
       } catch(error) {
         failures.push(`${organization.organization_id}: calendar changes could not be read; ${describeErrorForTelemetry(error)}`)
+        // A failed pull may leave a newer staff edit unread. Do not overwrite
+        // that edit with an outbound projection before its change is handled.
+        continue
+      }
+      try {
+        Object.assign(entry, await syncCalendarOrganization(env, organization.organization_id))
+        if(entry.failed)failures.push(`${organization.organization_id}: ${entry.failed} Google Calendar event(s) failed; inspect the integration's last_error`)
+      } catch(error) {
+        failures.push(`${organization.organization_id}: ${describeErrorForTelemetry(error)}`)
       }
     }
     if (cleanup.failed) failures.push(`${cleanup.failed} retained Google Calendar cleanup job(s) remain unresolved; inspect google_calendar_cleanup_jobs.last_error`)

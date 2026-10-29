@@ -12,24 +12,30 @@
  *
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --local
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --staging
- *   node --experimental-strip-types scripts/pull-production-snapshot.ts --out <target.sqlite> [--source <database>]
+ *   node --experimental-strip-types scripts/pull-production-snapshot.ts --out <target.sqlite> [--source <database>] [--export <source.sql>]
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source <replaced database> [--delta-from <initial.sqlite>]
  *
  * The default source is the deployed production Worker's `DB` binding unless
  * `--source` names a D1 database. This reads the live database even while the
  * repository configuration points to a prepared replacement.
- * D1's native export owns snapshot consistency. While it creates the export,
- * other requests to that source database are blocked; downloading the finished
- * export does not block queries. Use --source-file for an existing local copy.
+ * The live database is read a page of rows at a time into a SQLite copy: D1
+ * refuses every other query on a database while a native export runs, and
+ * tenant sites answered those requests with 500s. A database `--source` names
+ * is a retired epoch source and keeps D1's native export, which owns snapshot
+ * consistency. Use --source-file for an existing local copy.
  *
  * `--out` alone is the preflight: the transformed target, its data-only payload
  * and its manifest are kept at that path and nothing remote is written. Beside a
- * load, `--out` keeps the loaded target there.
+ * load, `--out` keeps the loaded target there. `--export` keeps the copy read
+ * from the source (`.sqlite` from the live database, `.sql` from a native
+ * export), which a later `--source-file` (or LOCAL_DATABASE_SOURCE_FILE) loads
+ * without reading the source again.
  * `--delta-from <initial target.sqlite>` writes only the rows the initial
  * transfer did not hold, for the final copy after the binding is repointed, and
  * names every row it did hold that has changed or gone since.
  */
 import { execFileSync } from 'node:child_process'
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -51,6 +57,7 @@ const { values } = parseArgs({
     staging: { type: 'boolean', default: false },
     production: { type: 'boolean', default: false },
     out: { type: 'string' },
+    export: { type: 'string' },
     source: { type: 'string', default: 'DB' },
     'source-file': { type: 'string' },
     'delta-from': { type: 'string' },
@@ -68,6 +75,7 @@ try { process.loadEnvFile() } catch (error) {
 if (target === 'local' && !values['source-file']) values['source-file'] = process.env.LOCAL_DATABASE_SOURCE_FILE
 if (values['source-file'] && target !== 'local' && target !== 'out') throw new Error('--source-file is for a local migration or read-only preflight.')
 if (values['source-file'] && values.source !== 'DB') throw new Error('Choose --source or --source-file, not both.')
+if (values['source-file'] && values.export) throw new Error('--export keeps a new export; --source-file has none to keep.')
 const omitJwks = target === 'local' || (target === 'staging' && values.source === 'DB')
 // Production is only ever loaded as a schema replacement: the top-level `DB`
 // binding already names the replacement, and the database it replaces has to
@@ -80,7 +88,9 @@ const deltaFrom = values['delta-from'] ? resolve(values['delta-from']) : null
 const wrangler = resolve('node_modules/wrangler/bin/wrangler.js')
 const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID
 const apiToken = process.env.CLOUDFLARE_API_TOKEN
-if (values.source === 'DB' && !values['source-file']) {
+const live = values.source === 'DB' && !values['source-file']
+if (values.export && !values.export.endsWith(live ? '.sqlite' : '.sql')) throw new Error(`--export keeps ${live ? 'the live database as SQLite: name it .sqlite' : 'a native export: name it .sql'}.`)
+if (live) {
   const workerName = readWranglerConfig({ config: 'wrangler.toml' }).name
   if (!accountId || !apiToken || !workerName) throw new Error('Production snapshot requires a configured Cloudflare account, API token and Worker name.')
   const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${workerName}/settings`, {
@@ -150,17 +160,68 @@ const run = (args: string[], json = false) => {
 
 const identifier = (value: string) => '"' + value.replaceAll('"', '""') + '"'
 
+/**
+ * Copies the live database into a SQLite file through ordinary paged reads, so
+ * it keeps serving throughout. Rows are read in rowid order; one written during
+ * the copy can land on either side of it, and the transfer's foreign-key checks
+ * refuse a copy that came out inconsistent.
+ */
+async function readLiveDatabase(databaseId: string, path: string): Promise<void> {
+  const raw = async (sql: string, params: unknown[] = []) => {
+    const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/raw`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ sql, params }),
+    })
+    if (!response.ok) throw new Error(`D1 read failed: HTTP ${response.status}: ${await response.text()}`)
+    const body = await response.json() as { success?: boolean; result?: Array<{ success?: boolean; results?: { columns: string[]; rows: SQLInputValue[][] } }> }
+    const results = body.result?.[0]?.results
+    if (body.success !== true || body.result?.[0]?.success !== true || !results) throw new Error(`D1 read did not return results: ${sql}`)
+    return results
+  }
+  const schema = (await raw("SELECT type, name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY rowid")).rows as Array<[string, string, string]>
+  writeFileSync(path, '', { flag: 'wx', mode: 0o600 })
+  const copy = new DatabaseSync(path)
+  try {
+    // Tables load one at a time, children before their parents.
+    copy.exec('PRAGMA foreign_keys = OFF')
+    const tables = schema.filter(([type]) => type === 'table')
+    for (const [, , sql] of tables) copy.exec(sql)
+    for (const [, table] of tables) {
+      // Generated columns are computed again by the copy; only stored ones are read.
+      const columns = (copy.prepare(`PRAGMA table_xinfo(${identifier(table)})`).all() as unknown as Array<{ name: string; hidden: number }>)
+        .filter(column => column.hidden === 0).map(column => identifier(column.name))
+      const insert = copy.prepare(`INSERT INTO ${identifier(table)} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
+      let after = Number.MIN_SAFE_INTEGER
+      for (;;) {
+        const page = await raw(`SELECT rowid, ${columns.join(', ')} FROM ${identifier(table)} WHERE rowid > ? ORDER BY rowid LIMIT 500`, [after])
+        if (page.rows.length === 0) break
+        copy.exec('BEGIN')
+        for (const row of page.rows) insert.run(...row.slice(1))
+        copy.exec('COMMIT')
+        after = Number(page.rows.at(-1)![0])
+      }
+    }
+    // Indexes, views and triggers after the rows, so no trigger fires on the copy.
+    for (const [type, , sql] of schema) if (type !== 'table') copy.exec(sql)
+  } finally {
+    copy.close()
+  }
+}
+
 // The baseline this transfer builds must be the one server/db/schema.ts
 // describes, or the payload is written for a schema no deploy will run.
 execFileSync(process.execPath, ['scripts/check-schema-drift.mjs'], { cwd: process.cwd(), stdio: 'inherit' })
 
 const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-snapshot-'))
 try {
-  const dumpPath = join(directory, 'source.sql')
-  if (!values['source-file']) {
-    // D1 streams a consistent native export instead of materializing the whole
-    // database as one query response. The transfer below still owns validation,
-    // destination signing-key preservation, payload generation and load audits.
+  const dumpPath = values.export ? resolve(values.export) : join(directory, live ? 'source.sqlite' : 'source.sql')
+  // The transfer below owns validation, destination signing-key preservation,
+  // payload generation and load audits for either copy.
+  if (live) {
+    await readLiveDatabase(values.source, dumpPath)
+  } else if (!values['source-file']) {
+    // A retired epoch source takes D1's consistent native export.
     writeFileSync(dumpPath, '', { flag: 'wx', mode: 0o600 })
     run(['d1', 'export', values.source, '--remote', '--output', dumpPath, '--skip-confirmation'], true)
   }

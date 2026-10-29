@@ -85,6 +85,43 @@ export const NOTIFICATION_CATEGORY_LABELS = {
   product_news: 'KrabiClaw news',
 } as const satisfies Record<NotificationCategory, string>
 
+/**
+ * What each business calls the requests and the people behind the two
+ * categories that name them. A law practice takes consultation requests from
+ * clients; it never has guests or bookings.
+ */
+const VERTICAL_CATEGORY_WORDS = {
+  restaurant: { requests: 'Reservations', people: 'Guest' },
+  experience: { requests: 'Bookings', people: 'Guest' },
+  lodging: { requests: 'Stays', people: 'Guest' },
+  service: { requests: 'Consultation requests', people: 'Client' },
+} as const
+
+type CategoryVertical = keyof typeof VERTICAL_CATEGORY_WORDS
+
+function joinWords(words: readonly string[]): string {
+  const [first, ...rest] = [...new Set(words)]
+  if (!first) return ''
+  const tail = rest.map(word => word.toLowerCase())
+  return tail.length === 0 ? first : `${[first, ...tail.slice(0, -1)].join(', ')} and ${tail.at(-1)}`
+}
+
+/**
+ * Category names in the words of the businesses this person belongs to, so a
+ * lawyer reads "Consultation requests" and someone with a restaurant and a
+ * practice reads "Reservations and consultation requests". With no business
+ * (or none the table names) the categories keep their general labels.
+ */
+export function notificationCategoryLabels(verticals: readonly string[]): Record<NotificationCategory, string> {
+  const words = (Object.keys(VERTICAL_CATEGORY_WORDS) as CategoryVertical[]).filter(vertical => verticals.includes(vertical)).map(vertical => VERTICAL_CATEGORY_WORDS[vertical])
+  if (!words.length) return { ...NOTIFICATION_CATEGORY_LABELS }
+  return {
+    ...NOTIFICATION_CATEGORY_LABELS,
+    reservations_bookings: joinWords(words.map(word => word.requests)),
+    guest_messages: `${joinWords(words.map(word => word.people))} messages`,
+  }
+}
+
 export const NOTIFICATION_CATEGORY_ICONS = {
   account_security: 'i-lucide-shield-check',
   reservations_bookings: 'i-lucide-calendar-check',

@@ -2,7 +2,7 @@
   <DashboardLeafPanel
     v-if="category"
     id="account-notification-category"
-    :title="NOTIFICATION_CATEGORY_LABELS[category]"
+    :title="labels?.[category] ?? NOTIFICATION_CATEGORY_LABELS[category]"
     :saving="Boolean(editor?.saving)"
     :disabled="!editor?.dirty"
     @cancel="editor?.cancel()"
@@ -14,6 +14,7 @@
 
 <script setup lang="ts">
 import AccountNotificationCategoryPage from '~/components/dashboard/AccountNotificationCategoryPage.vue'
+import { authClient } from '~/lib/auth-client'
 import { NOTIFICATION_CATEGORY_LABELS, isNotificationCategory } from '~/shared/notification-categories'
 
 definePageMeta({ layout: 'dashboard' })
@@ -27,6 +28,9 @@ interface CategoryEditor {
 }
 
 const route = useRoute()
+// The index loaded these; the title reads the same copy in the words of the person's businesses.
+const session = authClient.useSession()
+const { labels } = useNotificationPreferences(() => session.value.data?.user?.id)
 
 // Moving from one category to the next reuses this page, so the category is
 // read from the route every time rather than once at setup — read once, the

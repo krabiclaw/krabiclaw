@@ -347,9 +347,13 @@ and does not imply certification.
 
 `get_guest_messaging_context` reads the home/stay behind a guest conversation.
 `update_stay_arrival_guide` saves private instructions without sending or
-publishing them. Message-template tools configure saved replies and supported
-home schedules; `list_scheduled_guest_messages` exposes pending messages and
-failures, and `cancel_scheduled_guest_message` cancels only a pending message.
+publishing them. Message-template tools configure automatic messages, each
+always sent on a home schedule; every confirmed stay is also sent its home's
+check-in instructions at 10:00 the day before arrival.
+`list_scheduled_guest_messages` exposes pending messages and failures, and
+`cancel_scheduled_guest_message` cancels only a pending message.
+`schedule_guest_reply`, `list_scheduled_replies` and `cancel_scheduled_reply`
+are a member's own send-later replies, visible only to their author.
 Verify actual delivery through the canonical guest conversation's receipts.
 
 These tools share the dashboard and native app's domain operations. New

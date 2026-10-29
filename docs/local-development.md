@@ -155,12 +155,14 @@ each one at a test-mode equivalent at the price Better Auth knows its plan by: a
 offered plan's current price, a retired plan's own contract price.
 
 Local setup copies production through `db:pull:local`.
-Cloudflare's native D1 export captures one consistent database revision and
-streams the SQL file instead of returning the whole database in one query.
-Creating that export temporarily blocks other requests to its source database;
-downloading the finished export does not. Obtain the operator's approval for
-that availability impact before initiating a production export. Use
-`--source-file` for an existing local copy when an export is not authorized.
+The live database is read a page of rows at a time over the D1 API into a
+SQLite copy, never through D1's native export: creating an export blocks every
+other request to its source database, and production served those requests as
+500s. Pages are not one consistent revision; a row written during the copy can
+fall either side of it, and the transfer refuses a copy whose foreign keys
+disagree. An explicit `--source` (a retired epoch database) keeps the native
+export. Use `--source-file` for an existing local copy, such as the CI
+snapshot.
 The transfer validates the schema, rows and integrity of the copy before writing
 the target, and ordinary refreshes retain the destination's signing keys.
 Existing bookings retain their original dates; setup does not manufacture

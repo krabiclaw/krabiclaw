@@ -10,6 +10,7 @@ import type { GuestStay, PublicStayCalendar, StayDetail, StayQuote } from '../..
 import { createReplayableReservationCancelToken } from '../../server/utils/reservation-cancel-token'
 import type { PostalAddress } from '../../utils/postal-address'
 import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
+import { devLoginHeaders } from './test-env'
 import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
@@ -188,7 +189,7 @@ test('a responsible home team sees its stay and conversation until Better Auth r
 })
 
 test('a host creates a stay and its buyer returns to arrival details, messages, notifications and cancellation', async ({ page, browser, baseURL }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(90_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!, true)
   await page.setViewportSize({ width: 390, height: 844 })
@@ -372,7 +373,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     expect(await accountRead.json()).toMatchObject({ organization_id: organizationId, stay: { id: stay.data!.stay.id, status: 'confirmed', user_id: 'user-e2e-buyer', guest_image_url: portraitUrl }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
     const receiptRead = await guest.request.get(receiptApi, { headers: receiptHeaders })
     await expectStatus(receiptRead, 200)
-    expect(await receiptRead.json()).toMatchObject({ stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
+    expect(await receiptRead.json()).toMatchObject({ manage_url: `${baseURL}/dashboard/account/activity/stay/${activityId}`, stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
 
     const receiptPage = await guest.newPage()
     const receiptPageviews: string[] = []
@@ -389,6 +390,8 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     await expect(addressTerm.locator('..').getByRole('definition')).toHaveText(addressText)
     await expect(receiptHome.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveAttribute('href', mapUrl)
     await expect(receiptHome.getByRole('link', { name: 'Message host', exact: true })).toHaveAttribute('href', `${baseURL}/dashboard/account/messages/${activityId}`)
+    await expect(receiptHome.getByRole('link', { name: 'Manage in your account', exact: true })).toHaveAttribute('href', `${baseURL}/dashboard/account/activity/stay/${activityId}`)
+    await expect(receiptHome.getByText('Sign in with the email used for this booking to manage it in your account.', { exact: true })).toBeVisible()
     const accountPage = await guest.newPage()
     const buyerTelemetry: string[] = []
     accountPage.on('request', outgoing => { if (new URL(outgoing.url()).pathname === '/api/dashboard/telemetry') buyerTelemetry.push(outgoing.url()) })
@@ -433,12 +436,32 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     const guideScreenshot = test.info().outputPath('buyer-arrival-guide-mobile.png')
     await accountPage.screenshot({ path: guideScreenshot, fullPage: true })
     await test.info().attach('buyer-arrival-guide-mobile', { path: guideScreenshot, contentType: 'image/png' })
-    await accountHome.getByRole('link', { name: 'Message host', exact: true }).click()
-    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/messages/${activityId}`)
+    const beforeRequest = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+    expect(beforeRequest.error).toBeNull()
+    await accountHome.getByRole('button', { name: 'Manage', exact: true }).click()
+    const manageStay = accountPage.getByRole('dialog', { name: 'Manage', exact: true })
+    await expect(manageStay.getByRole('link', { name: 'Send a change request', exact: true })).toHaveAttribute('href', `/dashboard/account/messages/${activityId}?intent=booking-change`)
+    await manageStay.getByRole('link', { name: 'Send a change request', exact: true }).click()
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/messages/${activityId}?intent=booking-change`)
+    await expect(accountPage.getByText('Describe the dates, time or guest details you would like to change. The business will review your request before anything changes.', { exact: true })).toBeVisible()
     await accountPage.getByRole('textbox', { name: 'Write a message…', exact: true }).fill('Can I arrive at 4 pm?')
-    const [buyerReply] = await Promise.all([accountPage.waitForResponse(response => response.url().includes(`/api/account/messages/${activityId}/reply`) && response.request().method() === 'POST'), accountPage.getByRole('button', { name: 'Send reply', exact: true }).click()])
+    const [buyerReply] = await Promise.all([accountPage.waitForResponse(response => response.url().includes(`/api/account/messages/${activityId}/reply`) && response.request().method() === 'POST'), accountPage.getByRole('button', { name: 'Send a change request', exact: true }).click()])
     await expectStatus(buyerReply, 200)
     await expect(accountPage.locator('#dashboard-panel-account-message-thread').getByText('Can I arrive at 4 pm?', { exact: true })).toBeVisible()
+    await expect(accountPage.getByText('Your change request was sent to the business. Your booking is unchanged while it is reviewed.', { exact: true })).toBeVisible()
+    const afterRequest = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+    expect(afterRequest.error).toBeNull()
+    expect(afterRequest.data!.stay).toEqual(beforeRequest.data!.stay)
+    const requestedThread = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${activityId}`)
+    await expectStatus(requestedThread, 200)
+    const requestedState = await requestedThread.json() as { thread: { conversationState: string; entries: Array<{ id: string; body: string | null; actorKind: string }> } }
+    expect(requestedState.thread.conversationState).toBe('needs_attention')
+    const changeMessages = requestedState.thread.entries.filter(entry => entry.actorKind === 'guest' && entry.body === 'Can I arrive at 4 pm?')
+    expect(changeMessages).toHaveLength(1)
+    const requestDeliveries = await request.get(`${baseURL}/api/dev/notifications`, { headers: devLoginHeaders(), params: { organization_id: organizationId } })
+    await expectStatus(requestDeliveries, 200)
+    const deliveryState = await requestDeliveries.json() as { deliveries: Array<{ entry_id: string; purpose: string; status: string }> }
+    expect(deliveryState.deliveries.some(delivery => delivery.entry_id === changeMessages[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
     await page.goto(`/dashboard/${slug}/messages/${activityId}`)
     await expect(page.locator('#dashboard-panel-organization-messages-thread').getByText('Can I arrive at 4 pm?', { exact: true })).toBeVisible()
     await page.getByRole('textbox', { name: 'Write a message…', exact: true }).fill('Yes, the lockbox is ready at 4 pm.')
@@ -4205,4 +4228,43 @@ test('a stay socket in a service organization closes when Better Auth removes it
   } finally {
     await cleaner.close()
   }
+})
+
+test('a host reads every home on the multi-calendar and opens a night on that home’s own calendar', async ({ page, baseURL }) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, headers, slug, api, productId } = await createStayHome(page, baseURL!)
+  const madeHome = await request.post(api('stay-homes'), { headers, data: { name: 'Bay House', timezone: TIME_ZONE, address: '1 Bay Road', city: 'Krabi', country: 'TH',
+    state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
+    base_price_minor: 320_000, idempotency_key: crypto.randomUUID() } })
+  await expectStatus(madeHome, 201)
+  const bay = (await madeHome.json() as { home: { product_id: string } }).home
+  const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1,
+    guest_name: 'Grid', guest_surname: 'Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
+  await expectStatus(made, 201)
+  const stay = (await made.json() as { stay: { id: string } }).stay
+
+  // The read the grid draws, and the native app reads: every home, its nights, and the stays on them.
+  const window = await request.get(api(`stay-homes/calendar?from=${localDay(0)}&to=${localDay(7)}`))
+  await expectStatus(window, 200)
+  const read = await window.json() as { homes: Array<{ home: { product_id: string; name: string }; nights: Array<{ date: string; stay_id: string | null; price_minor: number | null }> }>; stays: Array<{ id: string; guest_name: string }> }
+  expect(read.homes.map(entry => entry.home.name)).toEqual(['Bay House', 'Cliff Cabin'])
+  expect(read.homes[1]!.nights.map(night => night.stay_id)).toEqual([null, stay.id, stay.id, null, null, null, null])
+  expect(read.homes[0]!.nights.map(night => night.price_minor)).toEqual(Array(7).fill(320_000))
+  expect(read.stays.map(entry => [entry.id, entry.guest_name])).toEqual([[stay.id, 'Grid']])
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/dashboard/${slug}/calendar?view=homes`)
+  const grid = page.getByTestId('stay-homes-grid')
+  await expect(grid.locator(`[data-home="${bay.product_id}"] span`)).toHaveText(['Bay House', '1 Bay Road, Krabi'])
+  await expect(grid.locator(`[data-stay="${stay.id}"]`)).toHaveText('Grid Guest')
+  await expect(grid.locator(`[data-home="${bay.product_id}"] + div [data-night="${localDay(2)}"]`)).toHaveText('3200')
+  // The grid scrolls inside itself; the phone page does not scroll sideways.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await grid.locator(`[data-home="${bay.product_id}"] + div [data-night="${localDay(2)}"]`).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/calendar\\?.*product_id=${bay.product_id}`))
+  expect(new URL(page.url()).searchParams.get('date')).toBe(localDay(2))
+  const calendar = page.locator('#dashboard-panel-stay-night-calendar')
+  await expect(calendar.locator(`[data-reka-calendar-cell-trigger][data-value="${localDay(2)}"]:not([data-outside-view])`)).toHaveAttribute('data-selected')
 })

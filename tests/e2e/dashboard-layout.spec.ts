@@ -576,7 +576,7 @@ test.describe('dashboard pane hierarchy', () => {
     const read = async () => {
       const response = await page.request.get('/api/user/notification-preferences')
       expect(response.status(), await response.text()).toBe(200)
-      return (await response.json() as { preferences: NotificationPreferenceMap }).preferences
+      return (await response.json() as { preferences: NotificationPreferenceMap; labels: Record<string, string> }).preferences
     }
     const before = await read()
     const category = 'reviews'
@@ -613,7 +613,7 @@ test.describe('dashboard pane hierarchy', () => {
       await page.reload()
       await waitForNuxtHydration(page)
       await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(wanted.whatsapp))
-      await leaf.getByRole('switch', { name: 'Push notifications', exact: true }).click()
+      await leaf.getByRole('switch', { name: 'Push', exact: true }).click()
       await expect(save).toBeEnabled()
       const pushSaved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/notification-preferences' && response.request().method() === 'PATCH')
       await save.click()
@@ -628,7 +628,7 @@ test.describe('dashboard pane hierarchy', () => {
       await open(page, path)
       await expect(leaf.getByRole('switch', { name: 'Email', exact: true })).toHaveAttribute('aria-checked', String(before[category].email))
       await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(before[category].whatsapp))
-      await expect(leaf.getByRole('switch', { name: 'Push notifications', exact: true })).toHaveAttribute('aria-checked', String(before[category].push))
+      await expect(leaf.getByRole('switch', { name: 'Push', exact: true })).toHaveAttribute('aria-checked', String(before[category].push))
       await expect(save).toBeDisabled()
     }
   })

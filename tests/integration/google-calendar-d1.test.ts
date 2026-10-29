@@ -34,7 +34,7 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     assert.equal((await calendarSubjects(db, 'other', integration)).length, 0)
     await db.prepare("INSERT INTO organization_integrations(id,organization_id,provider,account_id,target_id,target_name,measurement_id,revision)VALUES('analytics','org','google_analytics','linked-account','property','Analytics','G-123','a')").run()
     const env = { DB: db, BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
-    await db.prepare("INSERT INTO user(id,name,email) VALUES('owner','Owner','owner@example.test'),('foreign','Foreign','foreign@example.test')").run()
+    await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('owner','Owner','owner@example.test',1),('foreign','Foreign','foreign@example.test',1)").run()
     await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope) VALUES('linked-account','google-subject','google','owner',?)").bind(INTEGRATION_SCOPES['google-calendar'].join(',')).run()
     await requireIntegrationAccount(env, 'linked-account', { userId: 'owner', currentAccountId: null, providerId: 'google', scopes: INTEGRATION_SCOPES['google-calendar'] })
     await assert.rejects(requireIntegrationAccount(env, 'linked-account', { userId: 'foreign', currentAccountId: null, providerId: 'google', scopes: INTEGRATION_SCOPES['google-calendar'] }))
@@ -47,9 +47,10 @@ test('committed consultation projection is tenant scoped, private, idempotent an
       assert.equal(url.hostname, 'www.googleapis.com')
       assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer token')
       if (url.pathname.includes('/calendarList/')) return denyCalendar ? new Response(null, { status: 404 }) : Response.json({ accessRole: 'writer' })
-      assert.equal(url.searchParams.get('sendUpdates'), 'none')
       const payload = init?.body ? JSON.parse(String(init.body)) : null
       const id = init?.method === 'POST' ? payload.id : url.pathname.split('/').at(-1)!
+      if (!init?.method || init.method === 'GET') return events.has(id) ? Response.json({ id, etag: `"${id}"`, ...events.get(id) }) : new Response(null, { status: 404 })
+      assert.equal(url.searchParams.get('sendUpdates'), 'all')
       if (init?.method === 'DELETE') { events.delete(id); return new Response(null, { status: 204 }) }
       if (init?.method === 'POST') {
         if (events.has(id)) return new Response(null, { status: 409 })
@@ -72,23 +73,29 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     assert.equal(link?.operational_id, bookingId)
     assert.equal(link?.request_id, 'thread')
     const event = events.get(String(link?.event_id))!
-    assert.equal(event.summary, 'Pending booking — Jane Doe')
+    assert.equal(event.summary, 'Pending consultation')
     assert.deepEqual(event.start, { dateTime: '2099-11-01T14:00:00.000Z', timeZone: 'America/New_York' })
-    assert.equal(event.attendees, undefined)
-    assert.equal(event.description, 'Status: pending\nTeam member: Host\nhttps://krabiclaw.test/dashboard/org/messages/thread')
+    assert.deepEqual(event.attendees, [{ email: 'private@example.test', responseStatus: 'needsAction' }, { email: 'host@example.test', responseStatus: 'needsAction' }])
+    assert.equal(event.description, 'Status: pending\nAttorney: Host')
     assert.ok(!JSON.stringify(event).includes('PRIVATE MATTER'))
-    assert.ok(!JSON.stringify(event).includes('private@example.test'))
+    assert.equal(event.guestsCanModify, false)
+    assert.equal(event.guestsCanInviteOthers, false)
+    assert.equal(event.guestsCanSeeOtherGuests, false)
+    assert.ok(!JSON.stringify(event).includes('Jane Doe'))
     await setBookingStatus(db, { organizationId: 'org', bookingId, status: 'confirmed' })
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 1)
-    assert.equal(events.get(String(link?.event_id))?.summary, 'Booking — Jane Doe')
+    assert.equal(events.get(String(link?.event_id))?.summary, 'Consultation')
     // A booking moved to a team member updates the same event to name them.
     await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES('member-owner','org','owner','owner',?)").bind(Date.now()).run()
     await db.prepare("UPDATE bookings SET assigned_member_id='member-owner',updated_at=? WHERE id=?").bind(new Date().toISOString(), bookingId).run()
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 1)
-    assert.equal(events.get(String(link?.event_id))?.description, 'Status: confirmed\nTeam member: Owner\nhttps://krabiclaw.test/dashboard/org/messages/thread')
+    assert.equal(events.get(String(link?.event_id))?.description, 'Status: confirmed\nAttorney: Owner')
     await db.prepare("UPDATE bookings SET assigned_member_id=NULL,updated_at=? WHERE id=?").bind(new Date().toISOString(), bookingId).run()
+    assert.equal((await syncCalendarOrganization(env, 'org', 25, provider)).failed, 1, 'missing attorney identity is a visible failure, never a fabricated invitation')
+    await db.prepare("UPDATE bookings SET assigned_member_id='host-org',updated_at=? WHERE id=?").bind(new Date().toISOString(), bookingId).run()
+    await db.prepare('UPDATE google_calendar_event_links SET next_attempt_at=NULL').run()
     cancelDuringPut = true
     await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 0, 'late update is compensated after committed cancellation')
@@ -188,16 +195,17 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
       assert.equal((await db.prepare('SELECT count(*) n FROM google_calendar_event_links').first())?.n, expected)
     }
     const oldest = await db.prepare('SELECT operational_id FROM google_calendar_event_links ORDER BY updated_at, operational_id LIMIT 1').first<{ operational_id: string }>()
-    await db.prepare("UPDATE bookings SET updated_at='2099-01-01T00:00:00.000Z' WHERE id=?").bind(oldest!.operational_id).run()
+    await db.prepare("UPDATE member_scheduling SET public_name='Attorney Host' WHERE member_id='host-org'").run()
     const previous = await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE operational_id=?').bind(oldest!.operational_id).first()
     await syncCalendarOrganization(env, 'org', 0, provider)
-    assert.notEqual((await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE operational_id=?').bind(oldest!.operational_id).first())?.booking_revision, previous?.booking_revision, 'changed existing subjects are reconciled without rotating unchanged rows')
+    assert.notEqual((await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE operational_id=?').bind(oldest!.operational_id).first())?.booking_revision, previous?.booking_revision, 'a changed participant name changes the event revision')
     const events = new Map<string, unknown>()
     t.mock.method(globalThis, 'fetch', async (input, init) => {
       const url = new URL(String(input))
       if (url.pathname.includes('/calendarList/')) return Response.json({ accessRole: 'writer' })
       const payload = init?.body ? JSON.parse(String(init.body)) : null
       const id = init?.method === 'POST' ? payload.id : url.pathname.split('/').at(-1)!
+      if (!init?.method || init.method === 'GET') return events.has(id) ? Response.json({ id, etag: `"${id}"`, ...events.get(id) as object }) : new Response(null, { status: 404 })
       if (init?.method === 'DELETE') { events.delete(id); return new Response(null, { status: 204 }) }
       events.set(id, payload)
       return Response.json(payload)
@@ -205,7 +213,9 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
     // Drain the bounded queue through the provider boundary.
     for (let i = 0; i < 3; i++) await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 55)
-    for(const event of events.values())assert.equal((event as {description:string}).description,'Status: pending\nTeam member: Host','a booking without a guest thread has no fabricated dashboard link')
+    for(const event of events.values())assert.equal((event as {description:string}).description,'Status: pending\nAttorney: Attorney Host','a hold without a guest thread has no fabricated dashboard link or attendee')
+    await db.prepare(`INSERT INTO requests(id,kind,organization_id,conversation_state,payload_json) VALUES('thread','booking','org','resolved','{"guest":{"name":"Client","email":"client@example.test","phone":null},"notes":null}')`).run()
+    await db.prepare("UPDATE bookings SET request_id='thread' WHERE id=?").bind(bookings[0]).run()
     await setBookingStatus(db, { organizationId: 'org', bookingId: bookings[0]!, status: 'confirmed' })
     for (let i = 0; i < 3; i++) await syncCalendarOrganization(env, 'org', 25, provider)
     // Imported historical state, independently of the live change workflow.
@@ -229,7 +239,7 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
     await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('actor','Actor','actor@example.test',1)").run()
     const accessToken = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET!, data: 'calendar-task-token' })
     await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope,accessToken) VALUES('linked','google-subject','google','actor',?,?)").bind(INTEGRATION_SCOPES['google-calendar'].join(','), accessToken).run()
-    for (const org of ['a-broken', 'b-failed', 'c-healthy']) {
+    for (const org of ['a-broken', 'b-failed', 'c-healthy', 'd-inbound']) {
       await db.prepare(`INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES(?,?,?, 'USD', 'UTC')`).bind(org, org, org).run()
       // Google Calendar sync is Business; the task reads only entitled organizations.
       await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,periodEnd) VALUES(?,'business',?,'active',4070908800)").bind(`sub-${org}`, org).run()
@@ -238,7 +248,7 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
       await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
       await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,'host','member',1)").bind(`host-${org}`, org).run()
       await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,public_name,public_approved,timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_revision,updated_at,updated_by) VALUES(?,?,'Host',1,'UTC','[]','[]','[{"start":"2099-01-01T00:00:00.000Z","end":"2100-01-01T00:00:00.000Z"}]','2100-01-01T00:00:00.000Z','r1','2099-01-01T00:00:00.000Z','host')`).bind(`host-${org}`, org).run()
-      await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,created_by,updated_by) VALUES(?,?,30,1,'provider',?,'actor','actor')").bind(org, org, `host-${org}`).run()
+      await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES(?,?,30,1,'provider',?,'review','actor','actor')").bind(org, org, `host-${org}`).run()
       await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES(?,?,?,'Consultation','actor','actor')").bind(org, org, org).run()
       await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,?,?,?,'UTC','2099-11-01T10:00:00.000Z','2099-11-01T10:30:00.000Z',1,'actor','actor')").bind(org, org, org, `host-${org}`).run()
       await claimSessionCapacity(db, { organizationId: org, productId: org, sessionId: org, productVariantId: org, partySize: 1 })
@@ -249,11 +259,11 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
     t.mock.method(globalThis, 'fetch', async (input, init) => {
       const url = new URL(String(input))
       assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer calendar-task-token')
-      if (url.pathname.includes('b-failed')) return Response.json({ error: { message: 'Calendar access refused' } }, { status: 403 })
+      if (url.pathname.includes('d-inbound') || url.pathname.includes('/calendarList/b-failed')) return Response.json({ error: { message: 'Calendar access refused' } }, { status: 403 })
       if (url.pathname.includes('/calendarList/')) return Response.json({ accessRole: 'writer' })
       // The inbound side: the channel opens and the change list is empty.
       if (url.pathname.endsWith('/events/watch')) return Response.json({ resourceId: 'resource', expiration: String(Date.now() + 86_400_000 * 7) })
-      if (!init?.method || init.method === 'GET') return Response.json({ items: [], nextSyncToken: 'position' })
+      if (!init?.method || init.method === 'GET') return url.pathname.endsWith('/events') ? Response.json({ items: [], nextSyncToken: 'position' }) : new Response(null, { status: 404 })
       const payload = JSON.parse(String(init?.body))
       events.set(url.pathname, payload)
       return Response.json(payload)
@@ -261,17 +271,17 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
     await assert.rejects(calendarSyncTask.run({ name: 'google-calendar-sync', payload: {}, context: { cloudflare: { env } } }), error => {
       assert.match(String(error), /a-broken:.*projection write rejected/s)
       assert.match(String(error), /b-failed: 1 Google Calendar event\(s\) failed/)
-      assert.match(String(error), /b-failed: calendar changes could not be read/)
+      assert.match(String(error), /d-inbound: calendar changes could not be read/)
       return true
     })
     assert.equal(await db.prepare("SELECT sync_token FROM google_calendar_sync WHERE organization_id='c-healthy'").first('sync_token'), 'position', 'the healthy organization took its change-list position')
     assert.equal((await readCalendarIntegration(db, 'b-failed'))?.status, 'error')
     assert.equal((await readCalendarIntegration(db, 'b-failed'))!.last_error, 'Google Calendar returned 403. Check the account grant and calendar writer access.')
     assert.equal(await db.prepare("SELECT state FROM google_calendar_event_links WHERE organization_id='c-healthy'").first('state'), 'synced')
-    assert.equal(events.size, 2, 'the healthy organization created and updated its event despite other failures')
+    assert.equal(events.size, 1, 'the healthy organization creates one event with one invitation operation despite other failures')
     assert([...events.keys()].every(path => path.includes('/calendars/c-healthy/events')))
     for (const event of events.values()) {
-      assert.equal((event as { summary: string }).summary, 'Booking')
+      assert.equal((event as { summary: string }).summary, 'Pending consultation')
       assert.deepEqual((event as { start: unknown }).start, { dateTime: '2099-11-01T10:00:00.000Z', timeZone: 'UTC' })
     }
   } finally { await mf.dispose() }
@@ -317,4 +327,62 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
   assert.equal((await readCalendarIntegration(db,'org'))?.calendar_id,'created-calendar')
   assert.equal(inserts,1,'disconnect and reconnect use the same calendar')
  } finally {await runtime.dispose()}
+})
+
+test('experience and dining Calendar management links follow canonical buyer ownership without sharing guest capabilities', { timeout: 120_000 }, async t => {
+  const runtime = new Miniflare({ workers: [{ config: { name:'calendar-management-proof', compatibilityDate:'2024-11-01', manifest:{mainModule:'index.mjs',modules:{'index.mjs':{type:'esm',contents:'export default {fetch(){return new Response("ok")}}'}}}, env:{DB:{type:'d1'}} } }] })
+  try {
+    const db=await runtime.getD1Database('DB')
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))).map(sql=>db.prepare(sql)))
+    await db.prepare("INSERT INTO organization(id,name,slug,default_currency,timezone) VALUES('org','Org','org','USD','UTC')").run()
+    await db.prepare("INSERT INTO user(id,name,email,emailVerified) VALUES('buyer','Buyer','buyer@example.test',1),('other-buyer','Other','other@example.test',1)").run()
+    await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,timezone,status,opening_hours) VALUES('dining','org','dining','Dining','UTC','active','{\"periods\":[{\"open\":{\"day\":0,\"hour\":0,\"minute\":0}}]}')").run()
+    await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('experience','experience','org','Pottery class','pottery','actor','actor')").run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,confirmation_mode,created_by,updated_by) VALUES('experience','org',30,0,'legacy','instant','actor','actor')").run()
+    await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES('org','experience','dining',1,1,'actor','actor')").run()
+    await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('variant','org','experience','Seat','actor','actor')").run()
+    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('session','org','experience','dining','UTC','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',8,'actor','actor')").run()
+    for (const [id,kind] of [['experience-thread','booking'],['dining-thread','reservation']]) await db.prepare(`INSERT INTO requests(id,kind,organization_id,user_id,conversation_state,payload_json) VALUES(?,?,'org','buyer','resolved','{"guest":{"name":"Buyer","email":"buyer@example.test","phone":null},"notes":"PRIVATE NOTES","cancellation":{"token_hash":"PRIVATE_CAPABILITY","expires_at":null,"used_at":null}}')`).bind(id,kind).run()
+    await claimSessionCapacity(db,{organizationId:'org',productId:'experience',sessionId:'session',productVariantId:'variant',partySize:1,requestId:'experience-thread',userId:'buyer'})
+    await db.prepare("INSERT INTO reservations(id,organization_id,location_id,user_id,request_id,timezone,starts_at,ends_at,party_size) VALUES('reservation','org','dining','buyer','dining-thread','UTC','2099-11-02T14:00:00.000Z','2099-11-02T15:00:00.000Z',2)").run()
+    await storeCalendarSelection(db,'org',{account_id:'linked',calendar_id:'managed',calendar_name:'Calendar'})
+    const env={DB:db,NUXT_PUBLIC_PLATFORM_DOMAIN:'http://localhost:3113'} as CloudflareEnv
+    const provider={token:async()=> 'token'}
+    const events=new Map<string,Record<string,unknown>>()
+    let inserts=0
+    t.mock.method(globalThis,'fetch',async(input,init)=>{
+      const url=new URL(String(input));const method=init?.method??'GET'
+      if(url.pathname.includes('/calendarList/')) return Response.json({accessRole:'writer'})
+      const payload=init?.body?JSON.parse(String(init.body)):null
+      const id=method==='POST'?payload.id:url.pathname.split('/').at(-1)!
+      if(method==='GET') return events.has(id)?Response.json(events.get(id)):new Response(null,{status:404})
+      assert.equal(url.searchParams.get('sendUpdates'),'all')
+      if(method==='POST') inserts++
+      if(method==='PUT') assert.equal(new Headers(init?.headers).get('If-Match'),events.get(id)?.etag)
+      const event={...payload,id,etag:`"${id}"`}
+      events.set(id,event)
+      return Response.json(event)
+    })
+    assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
+    assert.equal(events.size,2)
+    const links=(await db.prepare('SELECT request_id,event_id FROM google_calendar_event_links ORDER BY request_id').all()).results
+    for(const link of links) {
+      const kind=link.request_id==='dining-thread'?'reservation':'booking'
+      const event=events.get(String(link.event_id))!
+      assert.ok(String(event.description).endsWith(`Manage ${kind}: http://localhost:3113/dashboard/account/activity/${kind}/${link.request_id}`))
+      assert.equal(event.attendees,undefined,'this link does not introduce consultation attendee semantics to other verticals')
+      assert.ok(!JSON.stringify(event).includes('PRIVATE_'))
+      assert.ok(!JSON.stringify(event).includes('PRIVATE NOTES'))
+      assert.ok(!JSON.stringify(event).includes('/dashboard/org/'))
+    }
+    const identities=[...events.keys()]
+    await db.prepare("UPDATE requests SET user_id='other-buyer' WHERE id IN ('experience-thread','dining-thread')").run()
+    assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
+    for(const event of events.values()) assert.ok(!String(event.description).includes('Manage '),'a request/commitment ownership mismatch removes an unusable management link')
+    await db.prepare("UPDATE requests SET user_id='buyer' WHERE id IN ('experience-thread','dining-thread')").run()
+    assert.equal((await syncCalendarOrganization(env,'org',25,provider)).failed,0)
+    assert.deepEqual([...events.keys()],identities,'ownership eligibility reconciles existing event identities')
+    assert.equal(inserts,2,'eligible management links update existing events instead of duplicating them')
+    for(const event of events.values()) assert.ok(String(event.description).includes('/dashboard/account/activity/'))
+  } finally {await runtime.dispose()}
 })

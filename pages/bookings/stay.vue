@@ -24,10 +24,12 @@
         {{ receiptDescription }}
       </template>
       <template #actions>
+        <TenantButton v-if="guestStay.manage_url" :href="guestStay.manage_url" variant="outline">{{ t('booking.manage_account') }}</TenantButton>
         <TenantButton v-if="guestStay.home.location?.maps_url" :href="guestStay.home.location.maps_url" variant="outline" target="_blank" rel="noopener noreferrer">
           {{ t('site.experience_detail.open_in_maps') }}
         </TenantButton>
         <TenantButton v-if="guestStay.stay.request_id" :href="messageHostUrl" variant="outline">{{ t('stay.message_host') }}</TenantButton>
+        <p v-if="guestStay.manage_url" class="w-full text-sm text-muted">{{ t('booking.manage_account_help') }}</p>
       </template>
       <template v-if="guestStay.home.arrival_guide" #details>
         <section class="mt-10 border-t border-default pt-8">
@@ -68,7 +70,8 @@ const { organization } = useTenantOrganization()
 const { template } = organization
 const copy = computed(() => getVerticalCopy(organization.vertical, locale.value))
 
-const guestStay = ref<GuestStay | null>(null)
+type ManagedGuestStay = GuestStay & { manage_url: string | null }
+const guestStay = ref<ManagedGuestStay | null>(null)
 const platformDomain = useRuntimeConfig().public.platformDomain
 const messageHostUrl = computed(() => new URL(`/dashboard/account/messages/${encodeURIComponent(guestStay.value!.stay.request_id!)}`, platformDomain).toString())
 const pending = ref(true)
@@ -78,7 +81,10 @@ onMounted(async () => {
   const id = typeof route.query.id === 'string' ? route.query.id : ''
   try {
     // The link's signature is in the fragment: no server log or referrer sees it.
-    if (id) guestStay.value = await publicApiRequest<GuestStay>(`/api/public/guest-stays/${encodeURIComponent(id)}`, { validate: isGuestStay, headers: { Authorization: `Bearer ${route.hash.slice(1)}` } })
+    if (id) guestStay.value = await publicApiRequest<ManagedGuestStay>(`/api/public/guest-stays/${encodeURIComponent(id)}`, {
+      validate: (value): value is ManagedGuestStay => isGuestStay(value) && 'manage_url' in value && (value.manage_url === null || (typeof value.manage_url === 'string' && URL.canParse(value.manage_url))),
+      headers: { Authorization: `Bearer ${route.hash.slice(1)}` },
+    })
   } catch (cause) {
     loadError.value = getErrorMessage(cause, t('booking.receipt_failed'))
   } finally {

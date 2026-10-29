@@ -23,11 +23,15 @@ export function messageText(value: unknown, field: string, maximum: number): str
   return value.trim()
 }
 
-/** Null deliberately means a quick reply without automatic delivery. */
+/**
+ * An automatic message's schedule. A write must name one; a stored row read
+ * back without one is returned as null for its reader to refuse.
+ */
 export function parseGuestMessageSchedule(value: unknown, stored = false): GuestMessageSchedule | null {
   const invalid = (message: string, field: string): never => messagingError(stored ? 500 : 422, stored ? 'INVALID_MESSAGE_TEMPLATE' : 'INVALID_MESSAGING_FIELD', message, field)
-  if (value === null) return null
-  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('Provide a schedule object, or null for a quick reply', 'schedule')
+  if (value === null && stored) return null
+  if (value === null || value === undefined) messagingError(422, 'MESSAGE_SCHEDULE_REQUIRED', 'An automatic message needs a schedule: when it is sent, and to which homes', 'schedule')
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('Provide a schedule object', 'schedule')
   const schedule = value as Record<string, unknown>
   if (schedule.trigger !== 'booking_received' && schedule.trigger !== 'check_in' && schedule.trigger !== 'check_out') invalid('Choose booking_received, check_in, or check_out', 'schedule.trigger')
   if (!Array.isArray(schedule.productIds) || schedule.productIds.length < 1 || schedule.productIds.length > 100

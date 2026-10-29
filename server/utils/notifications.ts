@@ -1,4 +1,3 @@
-import { MEMBER_NAME_SQL } from '~/shared/member-scheduling'
 import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
 import { z } from 'zod'
@@ -14,7 +13,8 @@ import { buildReplyToAddress } from '~/server/utils/submission-messages'
 import { listOrganizationNotificationMembers } from '~/server/utils/member-access'
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
-import { sendApnsAlert, type ApnsAlert, type ApnsEnv, type ApnsSendResult } from '~/server/utils/apns'
+import { sendApnsAlert, type ApnsAlert, type ApnsEnv } from '~/server/utils/apns'
+import { sendWebPush, type WebPushEnv } from '~/server/utils/web-push'
 import { isRecord } from '~/server/utils/type-guards'
 import { buildUnsubscribeUrls } from '~/server/utils/unsubscribe'
 import type { NotificationCategory, NotificationChannel } from '~/shared/notification-categories'
@@ -32,13 +32,13 @@ import {
   organizationInviteMessage,
   reviewRequestMessage,
 } from '~/server/notifications/guest-events'
+import type { BookingChangeAssignment } from '~/server/notifications/events'
 import type { NotificationMessage } from '~/server/notifications/messages'
 import {
   bookingCancelledMessage,
   calendarSyncMessage,
   bookingChangeMessage,
   bookingCreatedMessage,
-  bookingReassignedMessage,
   contactReceivedMessage,
   guestReplyMessage,
   reservationCancelledMessage,
@@ -49,7 +49,7 @@ import {
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
-import { buildOwnerThreadInboxUrl, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
+import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
 import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload } from '~/server/domain/guest-threads/entries'
@@ -73,7 +73,7 @@ function contactSubjectLabel(subject: string, vertical: string, locale: string) 
   return platformLocale(locale)!.messages[`site.contact_page.${subject}`] ?? subject
 }
 
-interface NotificationEnv extends CloudflareEnv, ApnsEnv {
+interface NotificationEnv extends CloudflareEnv, ApnsEnv, WebPushEnv {
   RESEND_API_KEY?: string
   WHATSAPP_PHONE_NUMBER_ID?: string
   WHATSAPP_ACCESS_TOKEN?: string
@@ -473,46 +473,78 @@ async function sendWhatsAppThreadNotification(
 }
 
 /**
- * One APNs alert to one device, recorded on that device's own delivery.
+ * A push to any device: the app reads `data`, a browser opens `url`. The link is
+ * built only for a browser and inside its send, so a link that cannot be built
+ * is that browser's recorded failure and never stops a phone's alert.
+ */
+type PushAlert = ApnsAlert & { url: () => Promise<string> }
+
+type PushDispatch =
+  | { status: 'sent'; providerMessageId: string | null }
+  | { status: 'failed'; error: string; deviceGone: boolean }
+
+/** The device's own push service: Apple for the app, the browser's push service for a subscription. */
+async function dispatchPush(env: NotificationEnv, device: UserDevice, alert: PushAlert): Promise<PushDispatch> {
+  if (device.kind === 'apns') {
+    const apnsId = crypto.randomUUID()
+    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert })
+    return result.status === 'sent' ? { status: 'sent', providerMessageId: apnsId } : { status: 'failed', error: result.error, deviceGone: result.tokenRetired }
+  }
+  const result = await sendWebPush(env, {
+    subscription: { endpoint: device.token, p256dh: device.p256dh, auth: device.auth },
+    alert: { title: alert.title, body: alert.body, url: await alert.url(), tag: alert.threadId },
+  })
+  return result.status === 'sent' ? { status: 'sent', providerMessageId: result.messageId } : { status: 'failed', error: result.error, deviceGone: result.subscriptionGone }
+}
+
+/**
+ * One push to one device, recorded on that device's own delivery.
  *
- * Every outcome is written before it is raised: missing APNs configuration, a
- * request that never reached Apple, and Apple's own status and reason. A token
- * Apple reports retired is removed, and its delivery still records the failure.
+ * Every outcome is written before it is raised: missing configuration, a
+ * request that never reached the push service, and the service's own answer. A
+ * device its push service reports gone is removed, and its delivery still
+ * records the failure.
  */
 async function sendPushThreadNotification(
   env: NotificationEnv,
   db: DbClient,
-  opts: { userId: string; device: UserDevice; alert: ApnsAlert; delivery: ThreadDeliveryContext },
+  opts: { userId: string; device: UserDevice; alert: PushAlert; delivery: ThreadDeliveryContext },
 ): Promise<void> {
   const delivery = await createDeliveryReceipt(db, {
     entryId: opts.delivery.entryId,
     channel: 'push',
-    provider: 'apns',
+    provider: opts.device.kind === 'apns' ? 'apns' : 'web_push',
     purpose: opts.delivery.purpose,
     idempotencyKey: opts.delivery.idempotencyKey,
   })
   if (isDeliverySent(delivery)) return
 
-  const apnsId = crypto.randomUUID()
-  const record = async (outcome: { status: 'sent'; providerMessageId: string } | { status: 'failed'; error: string }) => {
+  const record = async (outcome: { status: 'sent'; providerMessageId: string | null } | { status: 'failed'; error: string }) => {
     await recordDeliveryOutcome(db, { deliveryId: delivery.id, ...outcome })
     if (opts.delivery.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: opts.delivery.threadId, type: 'delivery.changed' })
   }
-  let result: ApnsSendResult
+  let result: PushDispatch
   try {
-    result = await sendApnsAlert(env, { deviceToken: opts.device.token, environment: opts.device.environment, apnsId, alert: opts.alert })
+    result = await dispatchPush(env, opts.device, opts.alert)
   } catch (error) {
     const code = HTTPError.isError(error) && isRecord(error.data) && typeof error.data.code === 'string' ? `${error.data.code}: ` : ''
     await record({ status: 'failed', error: `${code}${error instanceof Error ? error.message : String(error)}` })
     throw new RecordedDeliveryFailure(`Push delivery failed: ${code}${error instanceof Error ? error.message : String(error)}`, { cause: error })
   }
   if (result.status === 'sent') {
-    await record({ status: 'sent', providerMessageId: apnsId })
+    await record({ status: 'sent', providerMessageId: result.providerMessageId })
     return
   }
-  if (result.tokenRetired) await retireDevice(db, { userId: opts.userId, ...opts.device })
-  await record({ status: 'failed', error: result.tokenRetired ? `${result.error}; device token removed` : result.error })
+  if (result.deviceGone) await retireDevice(db, { userId: opts.userId, device: opts.device })
+  await record({ status: 'failed', error: result.deviceGone ? `${result.error}; device removed` : result.error })
   throw new RecordedDeliveryFailure(`Push delivery failed: ${result.error}`)
+}
+
+/** The org's in-app notifications, where a push with no link of its own opens. */
+async function dashboardPathUrl(env: NotificationEnv, db: DbClient, organizationId: string, path: string): Promise<string> {
+  const slugs = await resolveDashboardSlugs(env, db, { organizationId })
+  if (!slugs) throw new Error(`Organization ${organizationId} has no dashboard to link a push to`)
+  return `${dashboardOrigin(env, slugs)}${path}`
 }
 
 /** One owner alert to each of the recipient's devices, under the same event as their email and WhatsApp. */
@@ -536,6 +568,7 @@ function ownerPushSends(
     alert: {
       title: input.message.title,
       body: input.message.preheader,
+      url: async () => input.message.primaryAction?.url ?? await dashboardPathUrl(env, db, input.organizationId, '/notifications'),
       threadId: input.context.guestThreadId,
       // Every push names what it opens: a guest conversation, or the in-app notification.
       data: {
@@ -684,7 +717,7 @@ export async function notifyOwner(
     idempotencyKey?: string
     /** Native financial event identity, independent of later buyer linking. */
     deliveryEventKey?: string
-    /** Team members told alongside the owners and the booking's assignee, such as the one a booking moved away from. */
+    /** Explicit assignment audience from the event snapshot. When supplied, no later assignee is inferred. */
     memberIds?: string[]
     /** The in-app notification's own text and tone, for an event that states them rather than listing its facts. */
     notification?: { message: string; severity: NotificationSeverity }
@@ -714,7 +747,7 @@ export async function notifyOwner(
   const deliveryContext = threadContext ?? { guestThreadId: null, sourceEntryId: notificationId }
 
   // Owners and admins hear about every booking; the member it is assigned to hears about theirs.
-  const assigned = opts.submissionType === 'booking' && opts.submissionId
+  const assigned = opts.memberIds === undefined && opts.submissionType === 'booking' && opts.submissionId
     ? await queryFirst<{ assigned_member_id: string | null }>(db, 'SELECT assigned_member_id FROM bookings WHERE organization_id = ? AND (request_id = ? OR id = ?) LIMIT 1', [opts.organizationId, opts.submissionId, opts.submissionId])
     : null
   const recipients = await resolveOwnerRecipients(env, db, {
@@ -946,7 +979,7 @@ export async function notifyReservationCreated(
   })
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestReservationReceivedMessage({
-    ...guest,
+    ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.reservationId }),
     guestName: opts.guestName, organizationLogoUrl: logoUrl,
     date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale), partySize: opts.guests, notes: opts.requests,
     contactPhone: opts.contactPhone, contactEmail: opts.contactEmail,
@@ -1025,7 +1058,7 @@ export async function notifyReservationCancelled(
   })
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestReservationCancelledMessage({
-    ...guest,
+    ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.reservationId }),
     guestName: opts.guestName, date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale),
     partySize: opts.guests, notes: opts.requests, wasConfirmed: confirmed,
     organizationLogoUrl: logoUrl,
@@ -1277,7 +1310,7 @@ export async function notifyBookingCreated(
   })
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestBookingReceivedMessage({
-    ...guest,
+    ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.bookingId }),
     guestName: opts.guestName, organizationLogoUrl: logoUrl, status: opts.status,
     productTitle: guest.productTitle!,
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
@@ -1359,6 +1392,7 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
     organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
   })
   const guestMessage = guestStayConfirmedMessage({
+    manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
     locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, homeName: guest.productTitle ?? home.name,
     checkIn: when(stay.check_in_date, home.check_in_time, guest.locale), checkOut: when(stay.check_out_date, home.check_out_time, guest.locale),
     nights: String(nights), guests: String(stay.adults + stay.children), total: formatMinorAmount(paid.amount, paid.currency, guest.locale),
@@ -1418,6 +1452,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
     const day = (date: string, locale: string) => formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
     const guestMessage = guestBookingCancelledMessage({
+      manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: stay.request_id }),
       locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, productTitle: guest.productTitle ?? home.name,
       date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: formatTime(home.check_in_time, guest.locale),
       partySize: String(stay.adults + stay.children), contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null, wasConfirmed: true,
@@ -1520,7 +1555,7 @@ export async function notifyBookingCancelled(
   })
   const guest = await guestPresentation(db, opts)
   const guestMessage = guestBookingCancelledMessage({
-    ...guest,
+    ...guest, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: opts.organizationId, threadId: opts.bookingId }),
     guestName: opts.guestName, productTitle: guest.productTitle!,
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
     time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: String(opts.partySize), notes: opts.notes, wasConfirmed: confirmed,
@@ -1579,6 +1614,8 @@ export async function notifyBookingChangeOwner(
     guestEmail: string
     status: 'requested' | 'accepted' | 'declined'
     noun: string
+    locationId: string | null
+    assignment?: BookingChangeAssignment
     /**
      * The occurrence as the guest sees it, already rendered in the
      * location's own timezone. A split date/time pair here would be a second
@@ -1605,6 +1642,7 @@ export async function notifyBookingChangeOwner(
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, opts)
   const ownerMessage = bookingChangeMessage({
     recordKind: noun,
+    assignment: opts.assignment,
     guestName: opts.guestName,
     status: opts.status,
     location: opts.locationTitle,
@@ -1629,6 +1667,7 @@ export async function notifyBookingChangeOwner(
     },
     notificationSource: { threadId: opts.threadId, entryId: opts.sourceEntryId },
     message: ownerMessage,
+    memberIds: opts.assignment ? [...new Set([opts.assignment.beforeMemberId, ...(opts.status === 'accepted' ? [opts.assignment.afterMemberId] : [])].filter((id): id is string => id !== null))] : opts.submissionType === 'booking' ? [] : undefined,
     whatsappTemplate: 'booking_change_update',
   })
 }
@@ -1662,52 +1701,6 @@ export async function notifyCalendarSyncOwner(
     submissionId: opts.threadId,
     notificationSource: { threadId: opts.threadId, entryId: opts.sourceEntryId },
     message: ownerMessage,
-  })
-}
-
-/** Owners and both team members hear that a booking moved; the guest is told in their thread. */
-export async function notifyBookingReassigned(
-  env: NotificationEnv,
-  db: DbClient,
-  opts: { organizationId: string; bookingId: string; previousMemberId: string | null; memberId: string; sourceEntryId: string },
-) {
-  const row = await queryFirst<{ request_id: string | null; location_id: string | null; title: string; starts_at: string; timezone: string; party_size: number; guest_name: string | null; organization_name: string }>(db, `
-    SELECT b.request_id, r.location_id, p.name title, s.starts_at, s.timezone, b.party_size, json_extract(r.payload_json,'$.guest.name') guest_name, o.name organization_name
-    FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
-      JOIN products p ON p.id=b.product_id AND p.organization_id=b.organization_id
-      JOIN organization o ON o.id=b.organization_id
-      LEFT JOIN requests r ON r.id=b.request_id AND r.organization_id=b.organization_id
-    WHERE b.id=? AND b.organization_id=?`, [opts.bookingId, opts.organizationId])
-  if (!row) throw new Error(`Booking ${opts.bookingId} disappeared before its reassignment was announced`)
-  // A booking's conversation is contact-backed, so its guest name is recorded; only a missing conversation leaves it absent.
-  if (row.request_id === null || row.guest_name === null) throw new HTTPError({ statusCode: 500, message: 'The reassigned booking has no guest conversation', data: { code: 'INVALID_GUEST_THREAD', field: 'request_id', booking_id: opts.bookingId } })
-  const memberName = async (memberId: string) => (await queryFirst<{ name: string }>(db, `SELECT ${MEMBER_NAME_SQL} name FROM member m JOIN user u ON u.id=m.userId
-    LEFT JOIN member_scheduling ms ON ms.member_id=m.id WHERE m.id=? AND m.organizationId=?`, [memberId, opts.organizationId]))?.name ?? null
-  const toName = await memberName(opts.memberId)
-  if (!toName) throw new Error(`Team member ${opts.memberId} is not in this organization`)
-  const fromName = opts.previousMemberId ? await memberName(opts.previousMemberId) : null
-  const replyUrl = await buildOwnerThreadInboxUrl(env, db, { organizationId: opts.organizationId, locationId: row.location_id, threadId: row.request_id })
-  const message = bookingReassignedMessage({
-    guestName: row.guest_name,
-    productTitle: row.title,
-    date: new Intl.DateTimeFormat('en-US', { timeZone: row.timezone, dateStyle: 'medium' }).format(new Date(row.starts_at)),
-    time: new Intl.DateTimeFormat('en-US', { timeZone: row.timezone, timeStyle: 'short' }).format(new Date(row.starts_at)),
-    partySize: String(row.party_size),
-    fromName, toName, replyUrl,
-    organizationName: row.organization_name,
-  })
-  await notifyOwner(env, db, {
-    organizationId: opts.organizationId,
-    organizationName: row.organization_name,
-    locationId: row.location_id,
-    template: 'booking_reassigned',
-    title: message.title,
-    payload: { booking_id: opts.bookingId, request_id: row.request_id, deep_link: replyUrl ?? '' },
-    submissionType: 'booking',
-    submissionId: opts.bookingId,
-    notificationSource: { threadId: row.request_id, entryId: opts.sourceEntryId },
-    message,
-    memberIds: [opts.memberId, ...(opts.previousMemberId ? [opts.previousMemberId] : [])],
   })
 }
 
@@ -1867,6 +1860,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     alert: {
       title: input.senderName,
       body: input.preview,
+      url: () => dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`),
       threadId: `team:${input.threadId}`,
       data: { organizationId: input.organizationId, userId, kind: 'team', threadId: input.threadId },
     },
