@@ -648,6 +648,33 @@ creator, whose transcript then answered 404; a Saltleaf location, a Saltleaf
 home and an Ember & Slice experience were each assigned to a member and
 restored. Staging v21 is retained.
 
+Production, development and E2E bindings moved to v22 with the promotion of
+`909b54024` on 2026-10-29. The final delta from production v21 carried the
+rows created since the initial copy (117 tables, 167,160 rows). It also listed
+source edits it does not carry, and those were applied afterwards in one atomic
+query batch. Each update applied only while the v22 row still held its initial
+value:
+- nine media assets marked deleted;
+- Pottery House's two removed location reservation configurations;
+- three revoked OAuth refresh tokens;
+- one guest request's review-sent marker.
+
+One Google account token and Cedar's calendar busy window and last pull were
+left as they were, because v22 had already refreshed them itself. The other
+changed rows differed only in refresh timestamps, rate-limit counters or
+consumed cache invalidations. Production v22 then read back:
+- the native `0000_baseline.sql` ledger and an empty `foreign_key_check`;
+- the same signing key as v21;
+- identical counts for users, members, organizations, products, bookings,
+  reservations, requests, stays and sessions;
+- 40 location, 32 home and 14 experience assignments.
+
+Cloudflare reports `krabiclaw` bound to `f359de5d-…` and `krabiclaw-staging`
+to `f88d2d02-…`. On production the canary owner exercised a three-person
+Saltleaf group: create, rename, remove and re-add a member, then leave. The
+same account assigned and restored responsibility for a Saltleaf location, a
+Saltleaf home and an Ember & Slice experience. Production v21 is retained.
+
 Browser push is the first v22 forward migration, `0001_web_push_devices.sql`.
 It rebuilds `device_tokens` with a `kind` (every existing row is an APNs
 device, `apns`) and the browser subscription keys, and admits the `web_push`
