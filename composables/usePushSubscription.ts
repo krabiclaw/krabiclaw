@@ -21,7 +21,7 @@ interface PushState {
   availability: PushAvailability
   /** iOS without the Home Screen app is told to add it; any other browser is told it cannot. */
   ios: boolean
-  /** This browser holds a subscription that has been registered. */
+  /** This browser's subscription was registered with the current session on this page load. */
   subscribed: boolean
   /** The browser has not been asked yet, so an ask can open its permission prompt. */
   askable: boolean
@@ -81,14 +81,22 @@ export function usePushSubscription() {
   const config = useRuntimeConfig()
   const state = useState<PushState>('push-subscription', () => ({ availability: 'unsupported', ios: false, subscribed: false, askable: false }))
 
+  /** Reads the browser's permission; registration is only ever set by a registration that succeeded. */
   async function refresh(): Promise<void> {
     const availability = readAvailability()
+    const held = availability === 'available' && Notification.permission === 'granted' && Boolean(await currentSubscription())
     state.value = {
       availability,
       ios: /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1),
-      subscribed: availability === 'available' && Notification.permission === 'granted' && Boolean(await currentSubscription()),
+      subscribed: held && state.value.subscribed,
       askable: availability === 'available' && Notification.permission === 'default',
     }
+  }
+
+  async function register(subscription: PushSubscription): Promise<void> {
+    state.value = { ...state.value, subscribed: false }
+    await registerSubscription(subscription)
+    state.value = { ...state.value, subscribed: true }
   }
 
   /** Runs from a click. Resolves true when this browser now receives push. */
@@ -106,7 +114,7 @@ export function usePushSubscription() {
     const registration = await activeRegistration()
     const subscription = await registration.pushManager.getSubscription()
       ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: applicationServerKey(publicKey) })
-    await registerSubscription(subscription)
+    await register(subscription)
     await refresh()
     return true
   }
@@ -114,9 +122,9 @@ export function usePushSubscription() {
   /** On each dashboard visit: a subscription this browser already holds belongs to the current session. */
   async function resume(): Promise<void> {
     await refresh()
-    if (!state.value.subscribed) return
+    if (state.value.availability !== 'available' || Notification.permission !== 'granted') return
     const subscription = await currentSubscription()
-    if (subscription) await registerSubscription(subscription)
+    if (subscription) await register(subscription)
   }
 
   return { state: readonly(state), refresh, enable, resume }

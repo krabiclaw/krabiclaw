@@ -179,7 +179,8 @@ async function goNext() {
     const created = state.value.created
     const home = created?.orgSlug ? `/dashboard/${created.orgSlug}` : '/dashboard'
     // The site takes requests from here on, so this is when to offer push — once, where the browser can still be asked.
-    await pushSubscription.refresh()
+    // The site exists either way: a browser whose push state cannot be read is reported and not asked.
+    await pushSubscription.refresh().catch(error => globalThis.reportError(error))
     if (pushSubscription.state.value.askable) {
       pushAskHome.value = home
       return

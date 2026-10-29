@@ -64,7 +64,8 @@ async function acceptInvitation() {
     const destination = member && result.data
       ? `/dashboard/account/profile/calendar/${encodeURIComponent(result.data.member.organizationId)}`
       : '/dashboard'
-    await pushSubscription.refresh()
+    // Joining has succeeded: a browser whose push state cannot be read is reported and not asked.
+    await pushSubscription.refresh().catch(error => globalThis.reportError(error))
     // The ask names the organization just joined. Joining has already succeeded, so a name that
     // cannot be read is reported and the ask is left out rather than blocking the dashboard.
     const organization = pushSubscription.state.value.askable && result.data
