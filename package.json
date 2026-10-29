@@ -44,7 +44,7 @@
     "local:cards": "node scripts/generate-local-social-cards.mjs",
     "dev:worker": "yarn build && yarn dev:worker:start",
     "dev:worker:start": "wrangler dev .output/server/index.mjs --env e2e --assets .output/public --port 3000 --live-reload",
-    "e2e:local:prepare": "rm -rf ${E2E_STATE_DIRECTORY:?} && wrangler d1 migrations apply DB --local --env e2e --persist-to ${E2E_STATE_DIRECTORY} && yarn build",
+    "e2e:local:prepare": "rm -rf $E2E_STATE_DIRECTORY && wrangler d1 migrations apply DB --local --env e2e --persist-to ${E2E_STATE_DIRECTORY} && yarn build",
     "postinstall": "nuxt prepare",
     "schema:local": "wrangler d1 migrations apply DB --local",
     "db:generate": "drizzle-kit generate",

@@ -385,7 +385,10 @@ for (const seeded of [
     await loginAs(page.request, baseURL!)
     const editor = `/api/editor/organizations/${target.org}/products`
     const inheritedPriceTerms = { tax_behavior: 'inclusive', compare_at_unit_amount: 200000, valid_from_at: '2020-01-01T00:00:00.000Z', valid_until_at: '2099-01-01T00:00:00.000Z' }
+    // Another spec reads this whole catalog under the tenant's lock; the product exists only while this holds it.
+    const unlock = await acquireTenantMutationLock(testInfo, target.org)
     const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : target.experience ? `Clay & wheel workshop ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: target.currency, ...(target.kind === 'dish' ? inheritedPriceTerms : {}) }] }] } })
+    if (created.status() !== 201) await unlock()
     expect(created.status(), await created.text()).toBe(201)
     const product = (await created.json() as { product: Product }).product
     try {
@@ -576,7 +579,11 @@ for (const seeded of [
       expect(pausedEvent).not.toHaveProperty('properties')
       expect(pausedEvent).not.toHaveProperty('metadata')
     } finally {
-      expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)
+      try {
+        expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)
+      } finally {
+        await unlock()
+      }
     }
   })
 }

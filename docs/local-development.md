@@ -8,6 +8,7 @@ There is one local setup path for humans and agents:
 corepack yarn install
 corepack yarn local:setup
 corepack yarn dev
+corepack yarn playwright install chromium   # once: the seed visits the sites as a guest
 corepack yarn local:seed   # with `yarn dev` serving port 3000
 ```
 
@@ -95,7 +96,8 @@ KrabiClaw platform organization, and Ember & Slice (restaurant), Clayhouse
 Studio (experience) and Harbor Legal Aid (legal services). Every row is written
 through the app's own boundaries — Better Auth, provisioning, MCP tools and the
 editor's uploads — so local data is what the application itself produces. The
-seed runs against an empty database; run `local:setup` again before reseeding.
+seed runs against an empty database; after a failed or finished seed, run
+`local:setup` again before seeding.
 No production data reaches a developer machine or a pull request.
 
 ## Stopping a server

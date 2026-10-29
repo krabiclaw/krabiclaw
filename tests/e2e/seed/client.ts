@@ -8,7 +8,13 @@ import { request, type APIRequestContext } from '@playwright/test'
 // with the server's own message.
 
 export class SeedClient {
-  private constructor(readonly baseURL: string, readonly api: APIRequestContext) {}
+  readonly baseURL: string
+  readonly api: APIRequestContext
+  // Assigned in the body: `node --experimental-strip-types` (local:seed) cannot run parameter properties.
+  private constructor(baseURL: string, api: APIRequestContext) {
+    this.baseURL = baseURL
+    this.api = api
+  }
 
   static async signedIn(baseURL: string, email: string, password: string) {
     const api = await request.newContext({ baseURL, extraHTTPHeaders: { origin: new URL(baseURL).origin } })
