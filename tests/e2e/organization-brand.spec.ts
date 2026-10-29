@@ -1,13 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { expect, test, type APIResponse, type Browser } from '@playwright/test'
 import { ORGANIZATION_FONT_OPTIONS, ORGANIZATION_FONT_PRESETS } from '../../shared/organization-fonts'
-import { openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders } from './helpers'
+import { openTenantPage } from './helpers'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
-import { E2E_KIKUZUKI_ORGANIZATION_ID, blawbyTestBaseUrl, blawbyTestExtraHeaders, kikuzukiTestBaseUrl, kikuzukiTestExtraHeaders, testBaseUrl } from './test-env'
+import { seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
+import { seed, seededTenant } from './seed/manifest'
 
-const NCLS_ORGANIZATION_ID = 'org-ncls-blawby'
-const PLATFORM_ORGANIZATION_ID = 'platform'
+// The seeded Saya restaurant, the Blawby practice and KrabiClaw's own site, read once the seed has run.
+const restaurantId = () => seededTenant('restaurant').organizationId
+const legalId = () => seededTenant('legal').organizationId
+const platformId = () => seed().platformOrganizationId
 
 async function expectStatus(response: APIResponse, status: number) {
   expect(response.status(), await response.text()).toBe(status)
@@ -98,7 +101,7 @@ test('Sarabun saves through Brand and renders for its Saya tenant in English, Th
   // Eight full navigations, fresh guest contexts, font-file checks and restoration
   // share this journey budget; each assertion keeps its own existing deadline.
   test.setTimeout(90_000)
-  const organizationId = E2E_KIKUZUKI_ORGANIZATION_ID
+  const organizationId = restaurantId()
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
@@ -114,7 +117,7 @@ test('Sarabun saves through Brand and renders for its Saya tenant in English, Th
     const cms = await dashboard.newPage()
     // The deployed dashboard serves the Zaraz consent modal, whose overlay
     // intercepts pointer events until it is dismissed; openTenantPage accepts it.
-    await openTenantPage(cms, `${baseURL}/dashboard/${organizationId}/website/brand/font`, {})
+    await openTenantPage(cms, `${baseURL}/dashboard/${seededTenant('restaurant').slug}/website/brand/font`, {})
     // Every wait names what it was waiting for: the config sets no action timeout.
     await cms.getByRole('combobox').click({ timeout: 30_000 })
     await cms.getByRole('option', { name: 'Sarabun', exact: true }).click({ timeout: 30_000 })
@@ -136,7 +139,7 @@ test('Sarabun saves through Brand and renders for its Saya tenant in English, Th
     await expectStatus(await owner.post(`${localePath}/th/add`), 200)
 
     for (const path of ['/', '/menu', '/th/reservations', '/contact', '/ja']) {
-      const rendered = await renderedTypography(browser, `${kikuzukiTestBaseUrl()}${path}`, kikuzukiTestExtraHeaders(), '.tenant-layout', 'sarabun')
+      const rendered = await renderedTypography(browser, `${seededSiteURL('restaurant')}${path}`, seededSiteHeaders('restaurant'), '.tenant-layout', 'sarabun')
       expect(firstFamily(rendered.body), path).toBe('Sarabun')
       expect(firstFamily(rendered.heading), path).toBe('Sarabun')
       if (path === '/ja') {
@@ -151,12 +154,12 @@ test('Sarabun saves through Brand and renders for its Saya tenant in English, Th
     }
 
     // Another tenant keeps its template typography and fetches none of Sarabun.
-    const other = await renderedTypography(browser, `${potteryHouseBaseURL}/`, potteryHouseExtraHeaders, '.tenant-layout', 'default')
+    const other = await renderedTypography(browser, `${seededSiteURL('experience')}/`, seededSiteHeaders('experience'), '.tenant-layout', 'default')
     expect(firstFamily(other.body)).toBe('Poppins')
     expect(other.loaded.some(face => face.family === 'Sarabun')).toBe(false)
 
     await patch({ font_preset: 'default' })
-    const reset = await renderedTypography(browser, `${kikuzukiTestBaseUrl()}/th`, kikuzukiTestExtraHeaders(), '.tenant-layout', 'default')
+    const reset = await renderedTypography(browser, `${seededSiteURL('restaurant')}/th`, seededSiteHeaders('restaurant'), '.tenant-layout', 'default')
     expect(firstFamily(reset.heading)).toBe('Instrument Serif')
     // Poppins has no Thai glyphs: the Thai fallback draws them.
     expect(reset.loaded.some(face => face.family === 'Noto Sans Thai')).toBe(true)
@@ -175,11 +178,11 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
-  const settingsUrl = `/api/organizations/${NCLS_ORGANIZATION_ID}/settings`
+  const settingsUrl = `/api/organizations/${legalId()}/settings`
   const initial = await owner.get(settingsUrl)
   await expectStatus(initial, 200)
   const original = (await initial.json() as { settings: { font_preset: string } }).settings
-  const update = (font_preset: string) => mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'update_organization_settings', args: { organization_id: NCLS_ORGANIZATION_ID, font_preset } })
+  const update = (font_preset: string) => mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'update_organization_settings', args: { organization_id: legalId(), font_preset } })
   try {
     // MCP discovers the supported IDs from the tool schema.
     const listed = await mcpRequest(owner, baseURL, { method: 'tools/list' })
@@ -189,7 +192,7 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
     expect(() => mcpData(rejected)).toThrow()
 
     mcpData(await (await update('default')).json())
-    const defaults = await renderedTypography(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'default')
+    const defaults = await renderedTypography(browser, `${seededSiteURL('legal')}/`, seededSiteHeaders('legal'), '.tenant-layout', 'default')
     // Two presets prove a saved preset replaces the default faces; the catalog itself is one table.
     const presets = ORGANIZATION_FONT_OPTIONS.filter(option => option.value !== 'default')
     for (const option of [presets[0]!, presets.at(-1)!]) {
@@ -197,7 +200,7 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
       const persisted = await owner.get(settingsUrl)
       await expectStatus(persisted, 200)
       expect((await persisted.json() as { settings: { font_preset: string } }).settings.font_preset).toBe(option.value)
-      const rendered = await renderedTypography(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', option.value)
+      const rendered = await renderedTypography(browser, `${seededSiteURL('legal')}/`, seededSiteHeaders('legal'), '.tenant-layout', option.value)
       const heading = firstFamily(rendered.heading)
       const body = firstFamily(rendered.body)
       expect(heading, option.value).not.toBe(firstFamily(defaults.heading))
@@ -208,7 +211,7 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
     }
 
     // KrabiClaw's own site renders the same setting.
-    const platformSettings = `/api/organizations/${PLATFORM_ORGANIZATION_ID}/settings`
+    const platformSettings = `/api/organizations/${platformId()}/settings`
     const platformOriginal = await owner.get(platformSettings)
     await expectStatus(platformOriginal, 200)
     const platformPreset = (await platformOriginal.json() as { settings: { font_preset: string } }).settings.font_preset
@@ -226,7 +229,7 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
     const dashboard = await browser.newContext({ baseURL, storageState: await owner.storageState(), viewport: { width: 1280, height: 900 } })
     try {
       const cms = await dashboard.newPage()
-      await openTenantPage(cms, `${baseURL}/dashboard/north-carolina-legal-services/website/brand/font`, {})
+      await openTenantPage(cms, `${baseURL}/dashboard/${seededTenant('legal').slug}/website/brand/font`, {})
       await expect(cms.getByRole('combobox')).toContainText(last.label, { timeout: 30_000 })
       await expect(cms.getByTestId('site-font-preview').locator('p').first()).toHaveCSS('font-family', new RegExp(`^"?${last.label.split(' with ')[0]}`))
     } finally { await dashboard.close() }
@@ -278,7 +281,7 @@ test('a starter palette saved through Brand colors the Saya site in light and da
   const { starterPalette } = await import('../../shared/site-palette')
   const { getOptimalForeground } = await import('../../utils/color-utils')
   const forest = starterPalette('forest')
-  const organizationId = E2E_KIKUZUKI_ORGANIZATION_ID
+  const organizationId = restaurantId()
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
@@ -290,7 +293,7 @@ test('a starter palette saved through Brand colors the Saya site in light and da
   try {
     await expectStatus(await owner.patch(settingsUrl, { data: { palette: null } }), 200)
     const cms = await dashboard.newPage()
-    await openTenantPage(cms, `${baseURL}/dashboard/${organizationId}/website/brand/color`, {})
+    await openTenantPage(cms, `${baseURL}/dashboard/${seededTenant('restaurant').slug}/website/brand/color`, {})
     await cms.getByRole('button', { name: 'Use the Forest palette' }).click({ timeout: 30_000 })
     await expect(cms.getByTestId('palette-preview-dark')).toHaveCSS('background-color', rgb(forest.dark.ground))
     const saved = await Promise.all([
@@ -306,7 +309,7 @@ test('a starter palette saved through Brand colors the Saya site in light and da
     expect(mcpData<{ settings: { palette_source: string } }>(await mcpRead.json()).settings.palette_source).toBe('custom')
 
     for (const mode of ['light', 'dark'] as const) {
-      const rendered = await renderedPalette(browser, `${kikuzukiTestBaseUrl()}/`, kikuzukiTestExtraHeaders(), '.tenant-layout', mode)
+      const rendered = await renderedPalette(browser, `${seededSiteURL('restaurant')}/`, seededSiteHeaders('restaurant'), '.tenant-layout', mode)
       expect(rendered.dark).toBe(mode === 'dark')
       expect(rendered.primary).toBe(forest[mode].action)
       expect(rendered.onPrimary).toBe(getOptimalForeground(forest[mode].action))
@@ -314,9 +317,9 @@ test('a starter palette saved through Brand colors the Saya site in light and da
     }
 
     // Another tenant keeps its own colors.
-    const pottery = await owner.get('/api/organizations/org-user-pottery-house/settings')
+    const pottery = await owner.get(`/api/organizations/${seededTenant('experience').organizationId}/settings`)
     const potteryPalette = (await pottery.json() as { settings: { palette: { light: { action: string } } } }).settings.palette
-    expect((await renderedPalette(browser, `${potteryHouseBaseURL}/`, potteryHouseExtraHeaders, '.tenant-layout', 'light')).primary).toBe(potteryPalette.light.action)
+    expect((await renderedPalette(browser, `${seededSiteURL('experience')}/`, seededSiteHeaders('experience'), '.tenant-layout', 'light')).primary).toBe(potteryPalette.light.action)
   } finally {
     const assertRestored = await restoreAll([
       ['palette', () => owner.patch(settingsUrl, { data: { palette: original.palette_source === 'custom' ? original.palette : null } })],
@@ -332,11 +335,11 @@ test('palette changes through MCP reach the CMS and the legal site, and invalid 
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
-  const settingsUrl = `/api/organizations/${NCLS_ORGANIZATION_ID}/settings`
+  const settingsUrl = `/api/organizations/${legalId()}/settings`
   const initial = await owner.get(settingsUrl)
   await expectStatus(initial, 200)
   const original = (await initial.json() as { settings: { palette: unknown; palette_source: string } }).settings
-  const update = (palette: unknown) => mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'update_organization_settings', args: { organization_id: NCLS_ORGANIZATION_ID, palette } })
+  const update = (palette: unknown) => mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'update_organization_settings', args: { organization_id: legalId(), palette } })
   const readPalette = async () => (await (await owner.get(settingsUrl)).json() as { settings: { palette: typeof DEFAULT_SITE_PALETTE } }).settings.palette
   try {
     await expectStatus(await owner.patch(settingsUrl, { data: { palette: null } }), 200)
@@ -356,16 +359,16 @@ test('palette changes through MCP reach the CMS and the legal site, and invalid 
     const dashboard = await browser.newContext({ baseURL, storageState: await owner.storageState(), viewport: { width: 1280, height: 900 } })
     try {
       const cms = await dashboard.newPage()
-      await openTenantPage(cms, `${baseURL}/dashboard/north-carolina-legal-services/website/brand/color`, {})
+      await openTenantPage(cms, `${baseURL}/dashboard/${seededTenant('legal').slug}/website/brand/color`, {})
       await expect(cms.getByRole('textbox', { name: 'Action light hex color' })).toHaveValue('#0F4C5C', { timeout: 30_000 })
     } finally { await dashboard.close() }
 
     // Blawby renders the palette, and its dark mode.
-    const light = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'light')
+    const light = await renderedPalette(browser, `${seededSiteURL('legal')}/`, seededSiteHeaders('legal'), '.tenant-layout', 'light')
     expect(light.primary).toBe('#0F4C5C')
-    // NCLS keeps its former accent buttons as its own button_color setting (migration 0012).
+    // The practice's buttons use its accent colour, its own button_color setting.
     expect(light.accentButton).toEqual({ color: 'rgb(0, 0, 0)', background: 'rgb(248, 250, 252)' })
-    const dark = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'dark')
+    const dark = await renderedPalette(browser, `${seededSiteURL('legal')}/`, seededSiteHeaders('legal'), '.tenant-layout', 'dark')
     expect(dark.dark).toBe(true)
     expect(dark.background).toBe(rgb(DEFAULT_SITE_PALETTE.dark.ground))
   } finally {
@@ -378,21 +381,21 @@ test('palette changes through MCP reach the CMS and the legal site, and invalid 
 })
 
 test('a logo presentation set through MCP reads back and crops the header logo around its focus', async ({ browser, playwright }) => {
-  const organizationId = E2E_KIKUZUKI_ORGANIZATION_ID
+  const organizationId = restaurantId()
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL)
   const settingsUrl = `/api/organizations/${organizationId}/settings`
   const logoOf = async () => (await (await owner.get(settingsUrl)).json() as { settings: { media: Array<{ asset_id: string; slot: string; presentation: unknown }> } }).settings.media.find(item => item.slot === 'logo')!
   const original = await logoOf()
-  expect((await (await owner.get(settingsUrl)).json() as { settings: { media: Array<{ slot: string }> } }).settings.media.some(item => item.slot === 'logo_dark'), 'Kikuzuki starts without a dark-ground logo').toBe(false)
+  expect((await (await owner.get(settingsUrl)).json() as { settings: { media: Array<{ slot: string }> } }).settings.media.some(item => item.slot === 'logo_dark'), 'The restaurant starts without a dark-ground logo').toBe(false)
   const setDarkLogo = (assetId: string | null) => mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'set_media', args: { organization_id: organizationId, placement: { owner_type: 'organization', owner_id: organizationId, slot: 'logo_dark' }, asset_id: assetId } })
   const setLogo = (presentation: unknown) => mcpRequest(owner, baseURL, { method: 'tools/call', toolName: 'set_media', args: { organization_id: organizationId, placement: { owner_type: 'organization', owner_id: organizationId, slot: 'logo' }, asset_id: original.asset_id, presentation } })
   try {
     const square = { shape: 'square', focus: { x: 0.2, y: 0.5 } }
     mcpData(await (await setLogo(square)).json())
     expect((await logoOf()).presentation).toEqual(square)
-    const rendered = await renderedPalette(browser, `${kikuzukiTestBaseUrl()}/`, kikuzukiTestExtraHeaders(), '.tenant-layout', 'light')
+    const rendered = await renderedPalette(browser, `${seededSiteURL('restaurant')}/`, seededSiteHeaders('restaurant'), '.tenant-layout', 'light')
     expect(rendered.logoSlots).toEqual(['logo'])
     expect(rendered.logoShape).toBe('square')
     expect(rendered.logoPosition).toBe('20% 50%')
@@ -400,7 +403,7 @@ test('a logo presentation set through MCP reads back and crops the header logo a
     // A dark-ground logo replaces the logo in dark mode only; each mode shows one.
     mcpData(await (await setDarkLogo(original.asset_id)).json())
     for (const mode of ['light', 'dark'] as const) {
-      const shown = await renderedPalette(browser, `${kikuzukiTestBaseUrl()}/`, kikuzukiTestExtraHeaders(), '.tenant-layout', mode)
+      const shown = await renderedPalette(browser, `${seededSiteURL('restaurant')}/`, seededSiteHeaders('restaurant'), '.tenant-layout', mode)
       expect(shown.logoSlots, mode).toEqual([mode === 'dark' ? 'logo_dark' : 'logo'])
     }
     // A focus outside the image is refused, and the stored presentation stands.

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // A copy of production carries production's billing: Better Auth subscription
-// rows naming live-mode Stripe customers and subscriptions. Local, CI and
-// staging run on a test-mode key, which cannot read those, so any billing read
+// rows naming live-mode Stripe customers and subscriptions. Staging runs on a
+// test-mode key, which cannot read those, so any billing read
 // that asks Stripe (a Business plan's items, saved payment methods) fails there.
 //
 // This gives every current subscription in the copy its test-mode equivalent in
@@ -11,23 +11,20 @@
 // invoice so no card is needed. The rows are then pointed at those objects. A rerun finds the
 // objects it made before by the live IDs they carry, so nothing is duplicated.
 //
-//   node --env-file-if-exists=.env --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/provision-test-mode-billing.ts --local
-//   node --env-file-if-exists=.env --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/provision-test-mode-billing.ts --staging
+//   corepack yarn billing:test-mode
 
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
-import { parseArgs } from 'node:util'
 import Stripe from 'stripe'
 import { getBetterAuthStripePlans } from '../server/utils/better-auth-stripe.ts'
 
-const { values } = parseArgs({ options: { local: { type: 'boolean', default: false }, staging: { type: 'boolean', default: false } }, strict: true })
-if (values.local === values.staging) throw new Error('Choose --local or --staging.')
-// The platform key the target runs with: CI's and local's in the environment, staging's in .env.
+// Staging's platform key, from .env.
 const key = process.env.STRIPE_SECRET_KEY
 if (!key?.startsWith('sk_test_') && !key?.startsWith('rk_test_')) throw new Error('Test-mode billing needs the target\'s test-mode Stripe secret key.')
 const stripe = new Stripe(key)
 
-const target = values.staging ? ['krabiclaw-staging-v19', '--remote', '--env', 'staging'] : ['DB', '--local']
+// The binding names whichever database staging is bound to in wrangler.toml.
+const target = ['DB', '--remote', '--env', 'staging']
 const d1 = <T>(sql: string): T[] => {
   const output = execFileSync(process.execPath, [resolve('node_modules/wrangler/bin/wrangler.js'), 'd1', 'execute', ...target, '--command', sql, '--json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
   const executions = JSON.parse(output) as Array<{ success: boolean; results: T[] }>

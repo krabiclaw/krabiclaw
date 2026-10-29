@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:4b30a8919207ce0a9d2209f56952c5a7b203f1450f6dd8029ea618f36c804d2b",
-  "documentationFingerprint": "sha256:9671bed5ee0aa1ef4613d1fa15e80bd8fb3cc6f69b4ee29d4dbe438fcf4bea1e",
+  "fingerprint": "sha256:6a1183acb502e1c567b69d0527ac40a3f8a5231629f4a4047b3e6b3fa9f77ac6",
+  "documentationFingerprint": "sha256:468ee301750ace0208a3756b24454891e26a91d1eeb71a2503aed0e45366cc4b",
   "tools": [
     {
       "name": "add_organization_language",
@@ -107125,7 +107125,6 @@
           "public_photo_url": {
             "format": "uri",
             "maxLength": 2048,
-            "pattern": "^https://[\\s\\S]*$",
             "type": [
               "string",
               "null"

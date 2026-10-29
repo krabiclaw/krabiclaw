@@ -1,12 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
-import {
-  blawbyBaseURL, blawbyExtraHeaders,
-  openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
-} from '../e2e/helpers'
+import { openTenantPage, waitForNuxtHydration } from '../e2e/helpers'
 import { testBaseUrl } from '../e2e/test-env'
 import { loginAs } from '../e2e/helpers/auth'
 import { mcpData, mcpRequest } from '../e2e/helpers/mcp'
 import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
+import { blawbyBaseURL, blawbyExtraHeaders, potteryHouseBaseURL, potteryHouseExtraHeaders } from './real-tenants'
 
 // Two tenants stand in for the two verticals' routes this renderer serves:
 // Pottery House a venue and NCLS a legal practice, both on .tenant-layout.
@@ -120,7 +118,6 @@ async function expectTenantDocument(page: Page, tenant: Tenant) {
     (document.querySelector('#__nuxt') as (Element & { __vue_app__?: unknown }) | null)?.__vue_app__,
   ))
 }
-
 
 test('Pottery fullscreen gallery leaves native video controls usable', async ({ page }) => {
   const response = await openTenantPage(page, `${potteryHouseBaseURL}/experiences/ceramics-painting-class`, potteryHouseExtraHeaders)

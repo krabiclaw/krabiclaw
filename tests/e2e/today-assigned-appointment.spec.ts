@@ -2,15 +2,14 @@ import { expect, test, type APIResponse } from '@playwright/test'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import { blawbyTestExtraHeaders } from './test-env'
+import { seededSiteHeaders } from './test-env'
+import { seededTenant } from './seed/manifest'
 import type { Product } from '../../server/types/products'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import type { DashboardBookingDetails } from '../../server/utils/dashboard-booking-details'
 
-const ORGANIZATION = 'org-ncls-blawby'
-const SLUG = 'north-carolina-legal-services'
+const SLUG = 'harbor-legal-aid'
 const DASHBOARD = `/dashboard/${SLUG}`
-const EDITOR = `/api/editor/organizations/${ORGANIZATION}`
 const ACTOR = 'user-e2e-ncls-consultation-owner'
 
 async function body<T>(response: APIResponse, status: number): Promise<T> {
@@ -21,6 +20,8 @@ async function body<T>(response: APIResponse, status: number): Promise<T> {
 test('an assigned staff member can review a future online consultation from Today and find it in Upcoming', async ({ page, browser, request, baseURL }, testInfo) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Provider hours and roles use disposable local data only')
+  const ORGANIZATION = seededTenant('legal').organizationId
+  const EDITOR = `/api/editor/organizations/${ORGANIZATION}`
   const release = await acquireTenantMutationLock(testInfo, ORGANIZATION)
   const memberContext = await browser.newContext()
   let product: Product | null = null
@@ -34,7 +35,7 @@ test('an assigned staff member can review a future online consultation from Toda
   const members = await body<{ members: Array<{ id: string; userId: string; role: string }> }>(
     await page.request.get('/api/dashboard/members', { params: { org: SLUG } }), 200)
   const actor = members.members.find(member => member.userId === ACTOR)
-  expect(actor, 'The canonical actor fixture already belongs to NCLS').toBeTruthy()
+  expect(actor, 'The canonical actor fixture already belongs to Harbor Legal Aid').toBeTruthy()
   if (!actor) throw new Error('The assigned-staff actor fixture is missing')
   const schedulePath = `/api/organizations/${ORGANIZATION}/members/${actor.id}/scheduling`
   type Schedule = { timezone: string; weekly: Array<{ weekday: number; start: string; end: string }>; time_off: Array<{ start: string; end: string }>; public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number; updated_at: string }
@@ -58,7 +59,7 @@ test('an assigned staff member can review a future online consultation from Toda
       confirmation_mode: 'review', online_payment_required: false, scheduling_mode: 'provider', assigned_member_id: actor.id, held_online: true } }), 200)
     await body(await page.request.put(`${EDITOR}/products/${product.id}/publication`, { data: { published: true } }), 200)
     await body(await page.request.put(`${EDITOR}/consultation`, { data: { mode: 'native' } }), 200)
-    const headers = blawbyTestExtraHeaders()
+    const headers = seededSiteHeaders('legal')
     const availability = await body<{ sessions: Array<{ id: string; starts_at: string; ends_at: string; timezone: string }> }>(
       await request.get(`/api/public/products/${product.slug}/sessions`, { headers, params: { location_id: 'online', from: day, to: day } }), 200)
     const session = availability.sessions.find(slot => slot.starts_at === `${day}T14:00:00.000Z`)

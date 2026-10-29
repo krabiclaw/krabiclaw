@@ -2,7 +2,8 @@ import { expect, request as playwrightRequest, test, type APIRequestContext } fr
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { mcpData, mcpRequest } from './helpers/mcp'
-import { blawbyTestExtraHeaders } from './test-env'
+import { seededTenant } from './seed/manifest'
+import { seededSiteHeaders } from './test-env'
 import type { Product } from '../../server/types/products'
 import type { PublicTenantPage } from '../../server/utils/public-tenant-pages'
 import type { PublicShellPayload } from '../../utils/public-resource-contracts'
@@ -112,7 +113,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     if (/\/api\/(analytics\/track|public\/conversion-events)$/.test(new URL(response.url()).pathname) && response.status() >= 400) analyticsFailures.push(`${response.status()} ${response.url()}`)
   })
   await loginAs(page.request, baseURL!, 'user-e2e-ncls-consultation-owner')
-  const org = 'org-ncls-blawby'
+  const legal = seededTenant('legal')
+  const org = legal.organizationId
+  const dashboard = `/dashboard/${legal.slug}`
   const editor = `/api/editor/organizations/${org}`
   const previousResponse = await page.request.get(`${editor}/consultation`)
   expect(previousResponse.status(), await previousResponse.text()).toBe(200)
@@ -128,7 +131,7 @@ test('native online review uses canonical Products, holds capacity, and releases
   const products: Product[] = []
   const tomorrow = new Date(Date.now() + 86400000)
   const day = tomorrow.toISOString().slice(0, 10)
-  const headers = blawbyTestExtraHeaders()
+  const headers = seededSiteHeaders('legal')
   // Online consultations are held by a provider and booked in their hours. The
   // dedicated test member has none yet; removing its membership restores that
   // state through Better Auth without changing the review owner's hours.
@@ -180,13 +183,13 @@ test('native online review uses canonical Products, holds capacity, and releases
     const removedPage = await page.request.delete(`${editor}/pages/${product.page.id}`, { data: { expectedUpdatedAt: (await automaticPage.json()).page.document.updated_at } })
     expect(removedPage.status(), await removedPage.text()).toBe(200)
     if (index === 0) {
-      await page.goto(`/dashboard/north-carolina-legal-services/products/${product.id}/booking/enabled`)
+      await page.goto(`${dashboard}/products/${product.id}/booking/enabled`)
       const setup = page.locator('#dashboard-panel-booking-enabled')
       await expect(setup.getByRole('switch', { name: 'Use a consultation calendar', exact: true })).not.toBeChecked()
       await setup.getByRole('switch', { name: 'Use a consultation calendar', exact: true }).check()
       await expect(setup.getByRole('radio', { name: 'Unassigned No person or team is assigned.', exact: true })).toBeChecked()
       await expect(setup.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
-      await setup.getByRole('radio', { name: `${self.name} Profile published`, exact: true }).check()
+      await setup.getByRole('radio', { name: `${host.name} Profile published`, exact: true }).check()
       const enabled = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products/${product.id}/booking` && response.request().method() === 'PUT')
       await setup.getByRole('button', { name: 'Save', exact: true }).click()
       const saved = await enabled
@@ -206,36 +209,36 @@ test('native online review uses canonical Products, holds capacity, and releases
   expect(activate.status(), await activate.text()).toBe(200)
   expect(mcpData<{ settings: { mode: string } }>(await activate.json()).settings.mode).toBe('native')
   expect((await (await page.request.get(`${editor}/consultation`)).json()).mode).toBe('native')
-    await page.goto(`/dashboard/north-carolina-legal-services/calendar?product_id=${products[0]!.id}`)
+    await page.goto(`${dashboard}/calendar?product_id=${products[0]!.id}`)
     const onlineCalendar = page.locator('#dashboard-panel-org-calendar')
     await expect(onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${products[0]!.name}`)
-    await expect(onlineCalendar.getByRole('link', { name: 'Bookable times', exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
+    await expect(onlineCalendar.getByRole('link', { name: 'Bookable times', exact: true })).toHaveAttribute('href', `${dashboard}/team/${self.id}/hours`)
     await expect(onlineCalendar.getByRole('button', { name: 'Add availability', exact: true })).toHaveCount(0)
     await onlineCalendar.getByRole('combobox', { name: 'Location', exact: true }).click()
     await page.getByRole('option', { name: 'Online', exact: true }).click()
     await expect(page).toHaveURL(url => url.searchParams.get('locationId') === 'online')
     await onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true }).click()
     await page.getByRole('option', { name: `Availability: ${products[1]!.name}`, exact: true }).click()
-    await expect(page).toHaveURL(url => url.pathname === '/dashboard/north-carolina-legal-services/calendar' && url.searchParams.get('product_id') === products[1]!.id && !url.searchParams.has('locationId'))
+    await expect(page).toHaveURL(url => url.pathname === `${dashboard}/calendar` && url.searchParams.get('product_id') === products[1]!.id && !url.searchParams.has('locationId'))
     await expect(onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText(`Availability: ${products[1]!.name}`)
-    await expect(onlineCalendar.getByRole('link', { name: 'Bookable times', exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
+    await expect(onlineCalendar.getByRole('link', { name: 'Bookable times', exact: true })).toHaveAttribute('href', `${dashboard}/team/${self.id}/hours`)
     await expect(onlineCalendar.getByRole('button', { name: 'Add availability', exact: true })).toHaveCount(0)
     await onlineCalendar.getByRole('combobox', { name: 'Location', exact: true }).click()
     await page.getByRole('option', { name: 'Online', exact: true }).click()
     await expect(page).toHaveURL(url => url.searchParams.get('product_id') === products[1]!.id && url.searchParams.get('locationId') === 'online')
     await onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true }).click()
     await page.getByRole('option', { name: 'All activity', exact: true }).click()
-    await expect(page).toHaveURL(url => url.pathname === '/dashboard/north-carolina-legal-services/calendar' && !url.searchParams.has('locationId') && !url.searchParams.has('product_id'))
+    await expect(page).toHaveURL(url => url.pathname === `${dashboard}/calendar` && !url.searchParams.has('locationId') && !url.searchParams.has('product_id'))
     await expect(onlineCalendar.getByRole('combobox', { name: 'Calendar', exact: true })).toContainText('All activity')
     await expect(page.getByRole('button', { name: 'Filter activity', exact: true })).toBeVisible()
-    await page.goto(`/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`)
-    const bookingPath = `/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`
+    await page.goto(`${dashboard}/products/${products[0]!.id}/booking`)
+    const bookingPath = `${dashboard}/products/${products[0]!.id}/booking`
     const bookingPanel = page.locator('#dashboard-panel-product-booking')
     await expect(bookingPanel.getByRole('link', { name: 'Client limit One client per consultation', exact: true })).toBeVisible()
-    await expect(bookingPanel.getByRole('link', { name: `Attorney or legal team ${self.name}`, exact: true })).toBeVisible()
+    await expect(bookingPanel.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true })).toBeVisible()
     await expect(bookingPanel.getByRole('link', { name: 'Meeting format Online consultations available', exact: true })).toBeVisible()
     // Online, the times are the provider's own hours; the offering has no weekly list of its own.
-    await expect(bookingPanel.getByRole('link', { name: "Bookable times The attorney's working hours", exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
+    await expect(bookingPanel.getByRole('link', { name: "Bookable times The attorney's working hours", exact: true })).toHaveAttribute('href', `${dashboard}/team/${self.id}/hours`)
     await expect(bookingPanel.getByRole('link', { name: /^Weekly schedule/ })).toHaveCount(0)
     const assigned = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: org, product_id: products[0]!.id } })
     expect(assigned.status(), await assigned.text()).toBe(200)
@@ -257,19 +260,19 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(await readConfig()).toMatchObject({ held_online: false, assigned_member_id: self.id })
     await expect(bookingPanel.getByRole('link', { name: 'Meeting format No offices assigned', exact: true })).toBeVisible()
     await expect(page).toHaveURL(`${baseURL}${bookingPath}/duration`)
-    await page.goto(`/dashboard/north-carolina-legal-services/calendar?product_id=${products[0]!.id}&month=${day.slice(0, 7)}`)
+    await page.goto(`${dashboard}/calendar?product_id=${products[0]!.id}&month=${day.slice(0, 7)}`)
     const missingOffice = onlineCalendar.getByTestId('calendar-availability-state')
     await expect(missingOffice).toContainText('No active office is assigned to this consultation.')
-    await expect(missingOffice.getByRole('link', { name: 'Edit offices', exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/products/${products[0]!.id}/locations`)
+    await expect(missingOffice.getByRole('link', { name: 'Edit offices', exact: true })).toHaveAttribute('href', `${dashboard}/products/${products[0]!.id}/locations`)
     await expect(onlineCalendar.getByRole('link', { name: 'Add availability', exact: true })).toHaveCount(0)
     await expect(onlineCalendar.getByRole('button', { name: 'Add availability', exact: true })).toHaveCount(0)
-    await page.goto(`/dashboard/north-carolina-legal-services/calendar/${day}?product_id=${products[0]!.id}&month=${day.slice(0, 7)}`)
+    await page.goto(`${dashboard}/calendar/${day}?product_id=${products[0]!.id}&month=${day.slice(0, 7)}`)
     const missingOfficeDay = page.locator('#dashboard-panel-calendar-day').getByTestId('calendar-availability-state')
     await expect(missingOfficeDay).toContainText('No active office is assigned to this consultation.')
     await expect(page.getByRole('link', { name: 'Add availability', exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Add availability', exact: true })).toHaveCount(0)
     await missingOfficeDay.getByRole('link', { name: 'Edit offices', exact: true }).click()
-    await expect(page).toHaveURL(`/dashboard/north-carolina-legal-services/products/${products[0]!.id}/locations`)
+    await expect(page).toHaveURL(`${dashboard}/products/${products[0]!.id}/locations`)
     await page.goto(`${bookingPath}/location`)
     await meetingFormat.getByRole('switch', { name: 'Held online', exact: true }).check()
     const onlineSaved = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products/${products[0]!.id}/booking` && response.request().method() === 'PUT')
@@ -349,7 +352,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(preserved.summary).toBe(service.summary)
     // The saved Page address is the preview destination, even when its bound
     // consultation has a different Product slug.
-    await page.goto(`/dashboard/north-carolina-legal-services/products/${products[0]!.id}/description`)
+    await page.goto(`${dashboard}/products/${products[0]!.id}/description`)
     const legalCards = page.getByTestId('legal-editor-cards')
     await expect(legalCards.getByTestId('editor-card-page')).toContainText(service.title)
     await page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true }).click()
@@ -373,11 +376,11 @@ test('native online review uses canonical Products, holds capacity, and releases
     await productPreview.getByRole('button', { name: 'Close', exact: true }).click()
     await expect(productPreview).toHaveCount(0)
     // A bound page is edited where every page is: it is a row of Pages, and opens the one page editor.
-    await page.goto('/dashboard/north-carolina-legal-services/website/pages')
+    await page.goto(`${dashboard}/website/pages`)
     const pagesList = page.locator('#dashboard-panel-organization-pages')
     await expect(pagesList.getByText('About', { exact: true })).toBeVisible()
     await expect(pagesList.getByText(service.title, { exact: true })).toBeVisible()
-    await page.goto(`/dashboard/north-carolina-legal-services/website/pages/${service.id}`)
+    await page.goto(`${dashboard}/website/pages/${service.id}`)
     await expect(page.locator('#dashboard-panel-organization-page')).toContainText(service.title)
     await page.setExtraHTTPHeaders(headers)
     const wrongRoute = await request.get(`/experiences/${products[0]!.slug}`, { headers })
@@ -485,7 +488,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect((await failedProvider).status()).toBe(503)
     await page.getByRole('button',{name:'Close booking form',exact:true}).click()
     await expect(providerSection.getByText('Profile could not be loaded',{exact:true})).toBeVisible()
-    await expect(providerSection.getByText('North Carolina Legal Services',{exact:true})).toHaveCount(0)
+    await expect(providerSection.getByText(legal.name,{exact:true})).toHaveCount(0)
     await page.unroute(providerRoute)
     const providerRetry=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
     await providerSection.getByRole('button',{name:'Try again',exact:true}).click()
@@ -526,9 +529,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     await lightbox.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
     const placement = await page.locator('#consultations, [data-tenant-page]').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top))
     expect(placement[0]).toBeLessThan(placement[1]!)
-    const externalUrl = 'https://example.com/?booking=ncls'
+    const externalUrl = 'https://example.com/?booking=harbor-legal'
     await page.setExtraHTTPHeaders({})
-    await page.goto(`/dashboard/north-carolina-legal-services/products/${products[0]!.id}/order-url`)
+    await page.goto(`${dashboard}/products/${products[0]!.id}/order-url`)
     await page.getByLabel('Website address', { exact: true }).fill(externalUrl)
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     const nativeConfigBeforeHandoff = await readConfig()
@@ -632,12 +635,12 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(pending).toMatchObject({ status: 'pending', booking_id: pending.request_id })
     expect(pending.operational_booking_id).not.toBe(pending.request_id)
     expect(pending.policy_summary.additional_notes_html).toBe('Contact us at least one day before your appointment to cancel.')
-    const details = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=north-carolina-legal-services`)
+    const details = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=${legal.slug}`)
     expect(details.status(), await details.text()).toBe(200)
     expect((await details.json()).booking).toMatchObject({ locationId: null, locationTitle: 'Online', status: 'pending', operationalBookingId: pending.operational_booking_id, assignedMemberId: self.id, assignedMemberName: host.name, policy: pending.policy_summary })
-    const invalidReassignment = await page.request.post(`/api/dashboard/bookings/booking/${pending.operational_booking_id}/provider?org=north-carolina-legal-services`, { data: { member_id: 42, expected_updated_at: new Date().toISOString(), idempotency_key: `invalid-${stamp}` } })
+    const invalidReassignment = await page.request.post(`/api/dashboard/bookings/booking/${pending.operational_booking_id}/provider?org=${legal.slug}`, { data: { member_id: 42, expected_updated_at: new Date().toISOString(), idempotency_key: `invalid-${stamp}` } })
     expect(invalidReassignment.status(), await invalidReassignment.text()).toBe(400)
-    const unchangedBooking = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=north-carolina-legal-services`)
+    const unchangedBooking = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=${legal.slug}`)
     expect(unchangedBooking.status(), await unchangedBooking.text()).toBe(200)
     expect((await unchangedBooking.json()).booking).toMatchObject({ status: 'pending', operationalBookingId: pending.operational_booking_id, assignedMemberId: self.id, assignedMemberName: host.name })
     const key = `reject-${stamp}`
@@ -668,9 +671,9 @@ test('native online review uses canonical Products, holds capacity, and releases
       const confirm = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${browserBooking.request_id}/operations/confirm`, { data: { idempotencyKey: `confirm-${stamp}` } })
       expect(confirm.status(), await confirm.text()).toBe(200)
     }
-    const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=north-carolina-legal-services`)
+    const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
     expect((await confirmedDetails.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
-    await page.goto(`/dashboard/north-carolina-legal-services/bookings/booking/${browserBooking.request_id}`)
+    await page.goto(`${dashboard}/bookings/booking/${browserBooking.request_id}`)
     await page.getByRole('button', { name: `Cancellation policy ${browserBooking.policy_summary.additional_notes_html}`, exact: true }).click()
     const policyDialog = page.getByRole('dialog', { name: browserBooking.policy_summary.heading, exact: true })
     await expect(policyDialog.getByText(browserBooking.policy_summary.additional_notes_html, { exact: true })).toBeVisible()
@@ -681,7 +684,8 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByRole('radio', { name: `${host.name} Current`, exact: true })).toBeChecked()
     await expect(page.getByText('Current', { exact: true })).toBeVisible()
     await expect(page.getByText('Add working hours before moving this consultation to another attorney.', { exact: true })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    // A change of attorney is a request the client accepts; with the current attorney chosen there is nothing to send.
+    await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeDisabled()
     for (const mode of ['external_url', 'native_disabled', 'native'] as const) {
       const switchMode = await page.request.put(`${editor}/consultation`, { data: { mode } })
       expect(switchMode.status(), await switchMode.text()).toBe(200)
@@ -718,7 +722,7 @@ test('native online review uses canonical Products, holds capacity, and releases
       const binding = (await (await page.request.get(`${editor}/pages/${service.id}`)).json()).page
       expect(binding.product_id).toBe(products[0]!.id)
       expect(content(binding.blocks)).toEqual(content(service.blocks))
-      const retained = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=north-carolina-legal-services`)
+      const retained = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
       expect((await retained.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
     }
     const pause = await page.request.patch(`${editor}/products/${products[0]!.id}`, { data: { active: false } })
@@ -737,16 +741,16 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.locator('[data-media-gallery]')).toHaveCount(1)
     const browserCancel = await request.post(`/api/public/booking-requests/${browserBooking.request_id}/cancel`, { headers: { ...headers, authorization: `Bearer ${browserBooking.cancellation_token}` } })
     expect(browserCancel.status(), await browserCancel.text()).toBe(200)
-    const cancelledBrowserDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=north-carolina-legal-services`)
+    const cancelledBrowserDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=${legal.slug}`)
     expect((await cancelledBrowserDetails.json()).booking.status).toBe('cancelled')
-    await page.goto(`/dashboard/north-carolina-legal-services/bookings/booking/${browserBooking.request_id}`)
+    await page.goto(`${dashboard}/bookings/booking/${browserBooking.request_id}`)
     await expect(page.getByRole('link', { name: `Attorney or legal team ${host.name}`, exact: true })).toHaveCount(0)
     await page.getByRole('button', { name: 'Manage consultation', exact: true }).click()
     const cancelledActions = page.getByRole('dialog', { name: 'Manage consultation', exact: true })
     await expect(cancelledActions.getByRole('link', { name: 'Change consultation', exact: true })).toHaveCount(0)
     await cancelledActions.getByRole('button', { name: 'Close Manage consultation', exact: true }).click()
     await page.getByRole('link', { name: 'Message client', exact: true }).click()
-    await expect(page).toHaveURL(`/dashboard/north-carolina-legal-services/messages/${browserBooking.request_id}`)
+    await expect(page).toHaveURL(`${dashboard}/messages/${browserBooking.request_id}`)
     await expect(page.getByRole('heading', { name: 'Browser review guest', exact: true })).toBeVisible()
     const currentProductResponse = await page.request.get(`${editor}/products/${products[0]!.id}`)
     expect(currentProductResponse.status(), await currentProductResponse.text()).toBe(200)
@@ -760,7 +764,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(paid.status(), await paid.text()).toBe(200)
     const blocked = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { online_payment_required: true } })
     expect(blocked.status(), await blocked.text()).toBe(503)
-    expect(await blocked.json()).toMatchObject({ data: { code: 'financial_action_required', dashboard_url: '/dashboard/north-carolina-legal-services/payments', missing: ['payments.entitlement', 'payments.configuration', 'payments.account'] } })
+    expect(await blocked.json()).toMatchObject({ data: { code: 'financial_action_required', dashboard_url: `${dashboard}/payments`, missing: ['payments.entitlement', 'payments.configuration', 'payments.account'] } })
     expect(await readConfig()).toMatchObject({ online_payment_required: false })
     const instantPolicy = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, confirmation_mode: 'instant', online_payment_required: false } })
     expect(instantPolicy.status(), await instantPolicy.text()).toBe(200)
@@ -772,7 +776,7 @@ test('native online review uses canonical Products, holds capacity, and releases
       const cancel = await request.post(`/api/public/booking-requests/${instant.request_id}/cancel`, { headers: { ...headers, authorization: `Bearer ${instant.cancellation_token}` } })
       expect(cancel.status(), await cancel.text()).toBe(200)
       expect(await cancel.json()).toEqual({ success: true, kind: 'booking' })
-      const cancelledDetails = await page.request.get(`/api/dashboard/bookings/booking/${instant.request_id}?org=north-carolina-legal-services`)
+      const cancelledDetails = await page.request.get(`/api/dashboard/bookings/booking/${instant.request_id}?org=${legal.slug}`)
       expect((await cancelledDetails.json()).booking.status).toBe('cancelled')
       const released = await request.get(`/api/public/products/${products[0]!.slug}/sessions?location_id=online`, { headers })
       expect((await released.json()).sessions.find((session: { id: string }) => session.id === sessions[0].id).remaining).toBe(1)

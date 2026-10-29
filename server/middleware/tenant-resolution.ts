@@ -265,6 +265,10 @@ export default defineHandler(async (event) => {
   // Diagnostics must still reach operational logs when tenant/D1 resolution fails.
   if (tenantPath === BROWSER_ERROR_PATH) return;
   if (tenantPath === "/api/auth" || tenantPath.startsWith("/api/auth/")) return;
+  // The health check pings D1 and reads no tenant; local E2E routes assert their
+  // own access and never read one either. A fresh database has no platform
+  // organization until the E2E seed's bootstrap creates it.
+  if (tenantPath === "/api/health" || tenantPath.startsWith("/api/dev/")) return;
   // The dashboard, organization, MCP and invite-link APIs are scoped by the session and the
   // organization the request names, never by the host. Resolving the platform
   // site for them cost every call its tenant row, its redirect lookups and the

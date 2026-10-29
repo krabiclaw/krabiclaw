@@ -4,6 +4,7 @@ import type { BusinessOutcomePage, BusinessProgressReference } from '../../share
 import type { BusinessGoal, RecommendationFeedback, RecommendationFeedbackView } from '../../shared/business-progress'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
+import { seededTenant } from './seed/manifest'
 
 type Progress = BusinessOutcomePage & { goals: BusinessGoal[]; feedback: RecommendationFeedbackView[] }
 
@@ -251,7 +252,7 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
     expect(progress.goals).toEqual([archived.goal, archivedMixedGoal])
     expect(progress.feedback.find(item => item.id === newFeedback.feedback.id)?.applicability).toEqual({ current: false, reasons: ['evidence_changed', 'goal_changed', 'goal_archived'] })
 
-    await responseBody(await request.get('/api/organizations/org-demo/progress'), 404)
+    await responseBody(await request.get(`/api/organizations/${seededTenant('restaurant').organizationId}/progress`), 404)
     await responseBody(await request.get(`${api}/progress/reference`, { params: { operation: 'article.update', subjectId: crypto.randomUUID() } }), 404)
     const { token } = await responseBody<{ token: string }>(await request.post(`${api}/invite-links`, { data: { role: 'member' } }), 201)
     await loginAs(member, baseURL!, 'user-e2e-demo-role-owner')
@@ -272,9 +273,8 @@ test('authored goals and evidence-bound feedback follow persisted work', async (
   }
 })
 
-test('business progress read-only contract uses the explicitly configured canary organization', async ({ request, baseURL }) => {
-  const organizationId = process.env.CANARY_ORG_ID
-  if (!organizationId) throw new Error('CANARY_ORG_ID must explicitly identify the tenant for the read-only progress check')
+test('business progress read-only contract holds on an established business', async ({ request, baseURL }) => {
+  const organizationId = seededTenant('restaurant').organizationId
   await loginAs(request, baseURL!)
   const api = `/api/organizations/${encodeURIComponent(organizationId)}`
   const first = await responseBody<Progress>(await request.get(`${api}/progress`))

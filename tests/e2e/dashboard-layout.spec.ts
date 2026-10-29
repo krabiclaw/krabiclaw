@@ -17,6 +17,7 @@ import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
 import { countCatalog, type CatalogCounts } from '../../utils/product-presentation'
+import { seededTenant } from './seed/manifest'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
@@ -116,7 +117,7 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('Team changes member roles through Better Auth, and self-demotion refreshes context before leaving Team', async ({ page, baseURL, browser, playwright }, testInfo) => {
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Role writes use local D1 only.')
-    const organizationId = 'org-demo'
+    const organizationId = seededTenant('restaurant').organizationId
     const release = await acquireTenantMutationLock(testInfo, organizationId)
     let cleanupRequest: APIRequestContext | undefined
     try {
@@ -163,9 +164,9 @@ test.describe('dashboard pane hierarchy', () => {
       const refreshed = await contextRefresh
       expect(refreshed.status(), await refreshed.text()).toBe(200)
       expect(await refreshed.json()).toMatchObject({ organization: { id: organizationId, role: 'member' } })
-      await expect(ownerPage).toHaveURL('/dashboard/account/profile/calendar/org-demo')
+      await expect(ownerPage).toHaveURL(`/dashboard/account/profile/calendar/${organizationId}`)
       await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('heading', { name: 'Profile & availability', exact: true })).toBeVisible()
-      await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('link', { name: /^Hours/ })).toHaveAttribute('href', '/dashboard/account/profile/calendar/org-demo/hours')
+      await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('link', { name: /^Hours/ })).toHaveAttribute('href', `/dashboard/account/profile/calendar/${organizationId}/hours`)
       await expect(ownerPage.locator('#dashboard-panel-organization-members')).toHaveCount(0)
       await ownerPage.getByRole('button', { name: 'Open menu', exact: true }).click()
       const refreshedMenu = ownerPage.getByRole('dialog', { name: 'Menu', exact: true })
@@ -195,7 +196,7 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('Booking team forms create, rename and change native Better Auth membership', async ({ page, baseURL, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Team writes require isolated local D1.')
-    const organizationId = 'org-demo'
+    const organizationId = seededTenant('restaurant').organizationId
     const release = await acquireTenantMutationLock(testInfo, organizationId)
     try {
     const membersResponse = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
@@ -289,9 +290,9 @@ test.describe('dashboard pane hierarchy', () => {
   test('location assignments survive reload and let assigned staff discover and edit their branch', async ({ page, baseURL, browser }, testInfo) => {
     test.setTimeout(120_000)
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location assignments and role changes use disposable local data only.')
-    const organizationId = 'org-demo'
+    const organizationId = seededTenant('restaurant').organizationId
     const org = 'ember-slice-demo'
-    const locationId = 'loc-demo'
+    const locationId = seededTenant('restaurant').locations.brooklyn.id
     const endpoint = `/api/dashboard/locations/${locationId}`
     const independentEndpoint = `/api/organizations/${organizationId}/locations/${locationId}`
     const release = await acquireTenantMutationLock(testInfo, organizationId)
@@ -314,9 +315,9 @@ test.describe('dashboard pane hierarchy', () => {
       memberContext = await browser.newContext({ baseURL, viewport: PHONE })
       original = await readLocation()
       expect(original).toMatchObject({ id: locationId, assigned_team_id: null })
-      const otherTenant = await page.request.get('/api/dashboard/locations/loc-pottery-house', { params: { org: 'pottery-house' } })
+      const otherTenant = await page.request.get(`/api/dashboard/locations/${seededTenant('experience').locations['ao-nang'].id}`, { params: { org: 'clayhouse-studio' } })
       expect(otherTenant.status(), await otherTenant.text()).toBe(200)
-      expect(await otherTenant.json()).toMatchObject({ location: { id: 'loc-pottery-house', organization_id: 'org-user-pottery-house' } })
+      expect(await otherTenant.json()).toMatchObject({ location: { id: seededTenant('experience').locations['ao-nang'].id, organization_id: seededTenant('experience').organizationId } })
       const memberRead = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
       expect(memberRead.status(), await memberRead.text()).toBe(200)
       const members = (await memberRead.json() as { members: Member[] }).members
@@ -380,7 +381,7 @@ test.describe('dashboard pane hierarchy', () => {
       const forbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: null, assigned_team_id: null } })
       expect(forbidden.status(), await forbidden.text()).toBe(403)
       expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
-      const wrongTenant = await memberContext.request.get(`/api/organizations/${organizationId}/locations/loc-pottery-house`)
+      const wrongTenant = await memberContext.request.get(`/api/organizations/${organizationId}/locations/${seededTenant('experience').locations['ao-nang'].id}`)
       expect(wrongTenant.status(), await wrongTenant.text()).toBe(404)
 
       const name = `E2E Location Team ${Date.now().toString(36)}`
@@ -430,7 +431,7 @@ test.describe('dashboard pane hierarchy', () => {
       const mediaRead = await page.request.get(`/api/editor/organizations/${organizationId}/media`, { params: { kind: 'image', limit: 100 } })
       expect(mediaRead.status(), await mediaRead.text()).toBe(200)
       const media = (await mediaRead.json() as { media: Array<{ id: string; kind: string; public_url?: string; alt_text?: string; file_name?: string }> }).media
-      const availablePhotos = media.filter(asset => asset.kind === 'image' && asset.public_url?.startsWith('https://')
+      const availablePhotos = media.filter(asset => asset.kind === 'image' && asset.public_url
         && asset.public_url !== originalProfile?.public_photo_url
         && media.filter(other => (other.alt_text || other.file_name || other.kind) === (asset.alt_text || asset.file_name || asset.kind)).length === 1)
       const photo = availablePhotos[0]
@@ -636,20 +637,20 @@ test.describe('dashboard pane hierarchy', () => {
   test('Category form retries a failed write and persists each named field through MCP', async ({ page, baseURL }) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Category writes require isolated local D1.')
     const read = async () => {
-      const response = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'list_article_categories', args: { organization_id: 'org-demo', collection: 'blog' } })
+      const response = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'list_article_categories', args: { organization_id: seededTenant('restaurant').organizationId, collection: 'blog' } })
       expect(response.status(), await response.text()).toBe(200)
       return mcpData<{ categories: DashboardArticleCategory[] }>(await response.json()).categories
     }
     const before = await read()
-    const category = before.find(row => row.id === 'ad2dd862-18ec-46f5-a601-d653fe223542')
-    const parent = before.find(row => row.id === 'acat_9b2495848c41ed0acff635bb')
+    const category = before.find(row => row.id === seededTenant('restaurant').categories.specials?.id)
+    const parent = before.find(row => row.id === seededTenant('restaurant').categories.kitchen?.id)
     expect(category).toBeDefined()
     expect(parent).toBeDefined()
     expect(category!.parent_id).toBeNull()
     expect(parent!.parent_id).toBeNull()
     expect(category!.child_count).toBe(0)
     expect(category!.sort_order).toBe(Math.max(...before.filter(row => row.parent_id === null).map(row => row.sort_order)))
-    const endpoint = `/api/editor/organizations/org-demo/blog/categories/${category!.id}`
+    const endpoint = `/api/editor/organizations/${seededTenant('restaurant').organizationId}/blog/categories/${category!.id}`
     const path = `${ORG}/website/blog/categories/${category!.id}`
     const leaf = page.locator('#dashboard-panel-organization-blog-category')
     const save = leaf.getByRole('button', { name: 'Save', exact: true })
@@ -720,7 +721,7 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(save).toBeDisabled()
     } finally {
       await page.unroute(interceptCategory)
-      const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_article_category', args: { organization_id: 'org-demo', category_id: category!.id, name: category!.name, description: category!.description, parent_id: category!.parent_id } })
+      const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_article_category', args: { organization_id: seededTenant('restaurant').organizationId, category_id: category!.id, name: category!.name, description: category!.description, parent_id: category!.parent_id } })
       expect(restored.status(), await restored.text()).toBe(200)
       expect(mcpData<{ category: DashboardArticleCategory }>(await restored.json()).category).toMatchObject(category!)
       expect((await read()).find(row => row.id === category!.id)).toEqual(category)
@@ -734,6 +735,7 @@ test.describe('dashboard pane hierarchy', () => {
     owner: APIRequestContext | null
     baseURL: string
     organizationId: string
+    slug: string
     productId: string
     original: SessionAvailability | null
     release: (() => Promise<void>) | null
@@ -770,7 +772,7 @@ test.describe('dashboard pane hierarchy', () => {
         if (!page.isClosed()) {
           const starts = localNow(original.timezone, new Date(original.starts_at))
           const ends = localNow(original.timezone, new Date(original.ends_at))
-          await open(page, `/dashboard/${restore.organizationId}/calendar/sessions/${original.id}?product_id=${restore.productId}&locationId=${original.location_id}&month=${starts.date.slice(0, 7)}&date=${starts.date}`)
+          await open(page, `/dashboard/${restore.slug}/calendar/sessions/${original.id}?product_id=${restore.productId}&locationId=${original.location_id}&month=${starts.date.slice(0, 7)}&date=${starts.date}`)
           const leaf = page.locator('#dashboard-panel-product-session')
           await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(`${starts.date}T${starts.time}`)
           await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(`${ends.date}T${ends.time}`)
@@ -791,12 +793,12 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('Availability calendar keeps month, date and creation drafts consistent without changing saved sessions', async ({ page, baseURL }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Availability draft verification uses isolated local fixtures.')
-    const organizationId = 'org-user-pottery-house'
-    const productId = 'exp-ph-wheel'
+    const organizationId = seededTenant('experience').organizationId
+    const productId = seededTenant('experience').products['wheel-class'].id
     const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
     const endpoint = `${productEndpoint}/sessions`
-    const calendarPath = `/dashboard/${organizationId}/calendar`
-    const schedulePath = `/dashboard/${organizationId}/products/${productId}/booking/schedule`
+    const calendarPath = `/dashboard/${seededTenant('experience').slug}/calendar`
+    const schedulePath = `/dashboard/${seededTenant('experience').slug}/products/${productId}/booking/schedule`
     const release = await acquireTenantMutationLock(testInfo, organizationId)
     try {
       await page.context().clearCookies()
@@ -806,12 +808,12 @@ test.describe('dashboard pane hierarchy', () => {
       const [sessionResponse, productResponse, locationResponse, offeringsResponse] = await Promise.all([
         page.request.get(endpoint, { params: { from, to } }),
         page.request.get(productEndpoint),
-        page.request.get('/api/dashboard/locations', { params: { org: organizationId, organization: 'true', status: 'all' } }),
+        page.request.get('/api/dashboard/locations', { params: { org: seededTenant('experience').slug, organization: 'true', status: 'all' } }),
         page.request.get(`/api/editor/organizations/${organizationId}/products`),
       ])
       for (const response of [sessionResponse, productResponse, locationResponse, offeringsResponse]) expect(response.status(), await response.text()).toBe(200)
       const originalSessions = (await sessionResponse.json() as { sessions: SessionAvailability[] }).sessions
-      const original = originalSessions.find(session => session.location_id === 'loc-pottery-house' && session.status === 'scheduled' && session.claimed === 0 && localNow(session.timezone, new Date(session.starts_at)).time === '11:00')
+      const original = originalSessions.find(session => session.location_id === seededTenant('experience').locations['ao-nang'].id && session.status === 'scheduled' && session.claimed === 0 && localNow(session.timezone, new Date(session.starts_at)).time === '11:00')
       expect(original, 'the seeded Experience has a saved daytime occurrence to select').toBeDefined()
       const { product } = await productResponse.json() as { product: Product }
       const { locations } = await locationResponse.json() as { locations: DashboardLocation[] }
@@ -1014,10 +1016,10 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('Availability calendar saves times, capacity and status and restores the occurrence', async ({ page, baseURL, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Session writes require isolated local D1.')
-    const organizationId = 'org-user-pottery-house'
-    const productId = 'exp-ph-wheel'
+    const organizationId = seededTenant('experience').organizationId
+    const productId = seededTenant('experience').products['wheel-class'].id
     const restore = {
-      owner: null as APIRequestContext | null, baseURL: baseURL!, organizationId, productId,
+      owner: null as APIRequestContext | null, baseURL: baseURL!, organizationId, slug: seededTenant('experience').slug, productId,
       original: null as SessionAvailability | null, release: null as (() => Promise<void>) | null,
     }
     datedSessionRestore = restore
@@ -1034,7 +1036,7 @@ test.describe('dashboard pane hierarchy', () => {
       expect(response.status(), await response.text()).toBe(200)
       return (await response.json() as { sessions: SessionAvailability[] }).sessions
     }
-    const original = (await list()).find(row => row.location_id === 'loc-pottery-house' && row.status === 'scheduled' && row.claimed === 0 && localNow(row.timezone, new Date(row.starts_at)).time === '11:00')
+    const original = (await list()).find(row => row.location_id === seededTenant('experience').locations['ao-nang'].id && row.status === 'scheduled' && row.claimed === 0 && localNow(row.timezone, new Date(row.starts_at)).time === '11:00')
     restore.original = original ?? null
     expect(original, 'the seeded product has an unclaimed daytime occurrence in its own location').toBeDefined()
     expect(original!.capacity).toBe(8)
@@ -1044,7 +1046,7 @@ test.describe('dashboard pane hierarchy', () => {
     }
     const startsAt = new Date(Date.parse(original!.starts_at) + 15 * 60_000).toISOString()
     const endsAt = new Date(Date.parse(original!.ends_at) + 15 * 60_000).toISOString()
-    const calendarPath = `/dashboard/org-user-pottery-house/calendar`
+    const calendarPath = `/dashboard/${seededTenant('experience').slug}/calendar`
     const sessionDay = localNow(original!.timezone, new Date(original!.starts_at)).date
     const path = `${calendarPath}/sessions/${original!.id}?product_id=${productId}&locationId=${original!.location_id}&month=${sessionDay.slice(0, 7)}&date=${sessionDay}`
     const leaf = page.locator('#dashboard-panel-product-session')
@@ -1158,9 +1160,9 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('An assigned Experience host edits its saved product without gaining website preview access', async ({ page, baseURL, browser, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Assignment and role changes require isolated local D1.')
-    const organizationId = 'org-user-pottery-house'
-    const org = 'org-user-pottery-house'
-    const productId = 'exp-ph-wheel'
+    const organizationId = seededTenant('experience').organizationId
+    const org = seededTenant('experience').slug
+    const productId = seededTenant('experience').products['wheel-class'].id
     const endpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
     const bookingEndpoint = `${endpoint}/booking`
     const productPath = `/dashboard/${org}/products/${productId}`
@@ -1187,8 +1189,8 @@ test.describe('dashboard pane hierarchy', () => {
       expect(original.booking, 'the seeded Experience already owns its booking configuration').not.toBeNull()
       if (!original.booking) throw new Error('The seeded Experience booking configuration is missing')
       actor = (await memberResponse.json() as OrganizationMembersData).members.find(member => member.userId === 'user-e2e-pottery-location-owner')
-      expect(actor, 'the canonical Pottery role actor already belongs to this organization').toBeDefined()
-      if (!actor) throw new Error('The canonical Pottery role actor is missing')
+      expect(actor, 'the canonical Clayhouse role actor already belongs to this organization').toBeDefined()
+      if (!actor) throw new Error('The canonical Clayhouse role actor is missing')
       bookingAttempted = true
       const assigned = await page.request.put(bookingEndpoint, { data: {
         scheduling_mode: original.booking.scheduling_mode, assigned_member_id: actor.id, assigned_team_id: null,
@@ -1320,8 +1322,8 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('Catalog opens one menu per location and every other offering as cards, filtered by kind pills', async ({ page }) => {
     const [productResponse, collectionResponse, locationResponse] = await Promise.all([
-      page.request.get('/api/editor/organizations/org-demo/products'),
-      page.request.get('/api/editor/organizations/org-demo/collections'),
+      page.request.get(`/api/editor/organizations/${seededTenant('restaurant').organizationId}/products`),
+      page.request.get(`/api/editor/organizations/${seededTenant('restaurant').organizationId}/collections`),
       page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true', status: 'all' } }),
     ])
     for (const response of [productResponse, collectionResponse, locationResponse]) expect(response.status(), await response.text()).toBe(200)
@@ -1407,8 +1409,8 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('mobile scroll keeps real Catalog and menu rows reachable inside their panel', async ({ page }) => {
     const [productsRead, sectionsRead] = await Promise.all([
-      page.request.get('/api/editor/organizations/org-demo/products'),
-      page.request.get('/api/editor/organizations/org-demo/collections'),
+      page.request.get(`/api/editor/organizations/${seededTenant('restaurant').organizationId}/products`),
+      page.request.get(`/api/editor/organizations/${seededTenant('restaurant').organizationId}/collections`),
     ])
     expect(productsRead.status(), await productsRead.text()).toBe(200)
     expect(sectionsRead.status(), await sectionsRead.text()).toBe(200)
@@ -1477,8 +1479,8 @@ test.describe('dashboard pane hierarchy', () => {
   })
 
   test('mobile scroll confines a growing Experience description to its drawer body and pins its controls', async ({ page, baseURL }) => {
-    const organizationId = 'org-user-pottery-house'
-    const productId = 'exp-ph-wheel'
+    const organizationId = seededTenant('experience').organizationId
+    const productId = seededTenant('experience').products['wheel-class'].id
     const pageErrors: string[] = []
     page.on('pageerror', error => pageErrors.push(error.message))
     await page.context().clearCookies()
@@ -1487,8 +1489,8 @@ test.describe('dashboard pane hierarchy', () => {
     expect(productRead.status(), await productRead.text()).toBe(200)
     const { product } = await productRead.json() as { product: Product }
     expect(product.kind).toBe('experience')
-    expect(product.description, 'The seeded Pottery class has its authored description').not.toBe('')
-    const productPath = `/dashboard/${organizationId}/products/${product.id}`
+    expect(product.description, 'The seeded Clayhouse wheel class has its authored description').not.toBe('')
+    const productPath = `/dashboard/${seededTenant('experience').slug}/products/${product.id}`
     await page.setViewportSize(WIDE)
     await open(page, `${productPath}/description`)
     const dialog = page.getByRole('dialog', { name: 'What you’ll do', exact: true })
@@ -1550,12 +1552,12 @@ test.describe('dashboard pane hierarchy', () => {
   })
 
   test('mobile scroll ends Today after its real final card and one panel padding', async ({ page }) => {
-    const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: 'loc-demo' } })
+    const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: seededTenant('restaurant').locations.brooklyn.id } })
     expect(feedRead.status(), await feedRead.text()).toBe(200)
     const feed = await feedRead.json() as TodayFeedPayload
     expect(feed.cards.length, 'The demo owner has real Today cards').toBeGreaterThan(0)
     await page.setViewportSize(SHORT_PHONE)
-    await open(page, `${ORG}?locationId=loc-demo`)
+    await open(page, `${ORG}?locationId=${seededTenant('restaurant').locations.brooklyn.id}`)
     const panel = page.locator('#dashboard-panel-org-today')
     const body = panel.locator(':scope > [data-slot="body"]')
     const cards = panel.getByTestId('today-card')
@@ -1743,7 +1745,7 @@ test.describe('dashboard pane hierarchy', () => {
 
     // A service organization has the same five destinations: its services are
     // in Catalog, a root with no Back, and Menu carries no second entry for them.
-    const services = '/dashboard/north-carolina-legal-services'
+    const services = '/dashboard/harbor-legal-aid'
     await open(page, `${services}/menu`)
     await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
     await expect(page.locator('#dashboard-panel-organization-settings').getByRole('link', { name: 'Website', exact: true })).toBeVisible()
@@ -1883,11 +1885,11 @@ test.describe('dashboard pane hierarchy', () => {
       await page.setViewportSize(WIDE)
       await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages'])
     } finally {
-      const restored = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo' } })
+      const restored = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: seededTenant('restaurant').organizationId } })
       expect(restored.status(), await restored.text()).toBe(200)
       const restoredSession = await page.request.get('/api/auth/get-session')
       expect(restoredSession.status(), await restoredSession.text()).toBe(200)
-      expect((await restoredSession.json()).session.activeOrganizationId).toBe('org-demo')
+      expect((await restoredSession.json()).session.activeOrganizationId).toBe(seededTenant('restaurant').organizationId)
     }
   })
 
@@ -1967,7 +1969,7 @@ test.describe('dashboard pane hierarchy', () => {
   })
 
   test('Calendar can filter by a host and return to everyone', async ({ page }) => {
-    const membersResponse = await page.request.get('/api/organizations/org-demo/members/scheduling')
+    const membersResponse = await page.request.get(`/api/organizations/${seededTenant('restaurant').organizationId}/members/scheduling`)
     expect(membersResponse.status()).toBe(200)
     const { members } = await membersResponse.json() as { members: Array<{ id: string; name: string }> }
     expect(members.length).toBeGreaterThan(0)
@@ -2004,7 +2006,7 @@ test.describe('dashboard pane hierarchy', () => {
   test('mobile leaf drawers retain their parent and discard drafts on Close and Cancel', async ({ page }) => {
     test.setTimeout(90_000)
     const links = `${ORG}/website/pages/links`
-    const endpoint = '/api/editor/organizations/org-demo/links-page'
+    const endpoint = `/api/editor/organizations/${seededTenant('restaurant').organizationId}/links-page`
     const beforeResponse = await page.request.get(endpoint)
     expect(beforeResponse.status(), await beforeResponse.text()).toBe(200)
     const before = await beforeResponse.json() as { page: { title: string }; items: unknown[] }
@@ -2073,7 +2075,7 @@ test.describe('dashboard pane hierarchy', () => {
   })
 
   test('a photo library dialog stays above its leaf drawer and Escape dismisses only the top level', async ({ page }) => {
-    const endpoint = '/api/editor/organizations/org-demo/products'
+    const endpoint = `/api/editor/organizations/${seededTenant('restaurant').organizationId}/products`
     const productsRead = await page.request.get(endpoint)
     expect(productsRead.status(), await productsRead.text()).toBe(200)
     const product = (await productsRead.json() as { products: Product[] }).products.find(row => row.kind === 'dish' && row.image)
@@ -2082,7 +2084,7 @@ test.describe('dashboard pane hierarchy', () => {
     const leafPath = `${parentPath}/photo`
     const writes: string[] = []
     page.on('request', request => {
-      if (new URL(request.url()).pathname.startsWith('/api/editor/organizations/org-demo/') && request.method() !== 'GET') writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
+      if (new URL(request.url()).pathname.startsWith(`/api/editor/organizations/${seededTenant('restaurant').organizationId}/`) && request.method() !== 'GET') writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
     })
     await page.setViewportSize(PHONE)
     await open(page, leafPath)
@@ -2092,7 +2094,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(leaf.getByTestId('product-photo').locator('img')).toHaveAttribute('src', product!.image!.public_url)
     const libraryRead = page.waitForResponse(response => {
       const url = new URL(response.url())
-      return url.pathname === '/api/editor/organizations/org-demo/media' && url.searchParams.get('limit') === '100'
+      return url.pathname === `/api/editor/organizations/${seededTenant('restaurant').organizationId}/media` && url.searchParams.get('limit') === '100'
     })
     await leaf.getByTestId('product-photo').click()
     const library = await libraryRead
@@ -2132,7 +2134,7 @@ test.describe('dashboard pane hierarchy', () => {
   test('a timezone menu scrolls above its leaf and preserves its draft until the drawer is dismissed', async ({ page }) => {
     const locationsRead = await page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true' } })
     expect(locationsRead.status(), await locationsRead.text()).toBe(200)
-    const location = (await locationsRead.json() as { locations: DashboardLocation[] }).locations.find(row => row.id === 'loc-demo')
+    const location = (await locationsRead.json() as { locations: DashboardLocation[] }).locations.find(row => row.id === seededTenant('restaurant').locations.brooklyn.id)
     expect(location, 'The demo carries its existing location and timezone').toBeDefined()
     const parentPath = `${ORG}/locations/${location!.slug}/hours`
     const leafPath = `${parentPath}/timezone`
@@ -2186,7 +2188,7 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('a leaf URL reloads its drawer and resizing keeps one editor with its draft', async ({ page }) => {
     const links = `${ORG}/website/pages/links`
-    const query = '?location_id=loc-demo'
+    const query = `?location_id=${seededTenant('restaurant').locations.brooklyn.id}`
     const leafUrl = `${links}/title${query}`
     const parent = page.locator('#dashboard-panel-organization-links')
     const leaf = page.locator('#dashboard-panel-organization-links-title')
@@ -2262,7 +2264,7 @@ test.describe('dashboard pane hierarchy', () => {
 
   test('a dish creation retains its photo, price and menu context when a placement is retried', async ({ page, baseURL }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creation and media writes require isolated local D1.')
-    const organizationId = 'org-demo'
+    const organizationId = seededTenant('restaurant').organizationId
     const endpoint = `/api/editor/organizations/${organizationId}`
     const release = await acquireTenantMutationLock(testInfo, organizationId)
     let productId: string | null = null
@@ -2388,8 +2390,8 @@ test.describe('dashboard pane hierarchy', () => {
   // A service is a Product and the page that shows it: Catalog's Add opens the
   // shared creation form, and Create writes both, bound, through one request.
   test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL, playwright }) => {
-    const services = '/dashboard/north-carolina-legal-services'
-    const editor = '/api/editor/organizations/org-ncls-blawby'
+    const services = '/dashboard/harbor-legal-aid'
+    const editor = `/api/editor/organizations/${seededTenant('legal').organizationId}`
     await page.setViewportSize(WIDE)
     await page.context().clearCookies()
     await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
@@ -2461,7 +2463,7 @@ test.describe('dashboard pane hierarchy', () => {
       expect(renameSaved.status()).toBe(200)
       expect(renameSaved.request().postDataJSON()).toMatchObject({ name: renamed })
       await expect(cards.getByTestId('editor-card-name')).toContainText(renamed)
-      const renamedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: 'org-ncls-blawby', product_id: productId } })
+      const renamedRead = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: seededTenant('legal').organizationId, product_id: productId } })
       expect(renamedRead.status(), await renamedRead.text()).toBe(200)
       expect(mcpData<{ product: Product }>(await renamedRead.json()).product).toMatchObject({ name: renamed, slug: product.slug, page: { id: pageId, path: product.page!.path, title: name } })
 
@@ -2473,7 +2475,7 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(consultationSetup.getByRole('switch', { name: 'Use a consultation calendar', exact: true })).not.toBeChecked()
       await expect(consultationSetup.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
 
-      const officesRead = await page.request.get('/api/dashboard/locations', { params: { org: 'north-carolina-legal-services', organization: 'true', status: 'all' } })
+      const officesRead = await page.request.get('/api/dashboard/locations', { params: { org: 'harbor-legal-aid', organization: 'true', status: 'all' } })
       expect(officesRead.status(), await officesRead.text()).toBe(200)
       const office = (await officesRead.json() as { locations: DashboardLocation[] }).locations.find(location => location.status === 'active')
       expect(office, 'the firm has an authored active office').toBeDefined()
@@ -2499,7 +2501,7 @@ test.describe('dashboard pane hierarchy', () => {
       expect(catalogRead.status(), await catalogRead.text()).toBe(200)
       const officeProducts = (await catalogRead.json() as { products: Product[] }).products.filter(product => product.locations.some(location => location.location_id === office!.id))
       expect(officeProducts.some(product => product.id === productId)).toBe(true)
-      const overviewPath = `/api/dashboard/organizations/org-ncls-blawby/locations/${office!.id}/overview`
+      const overviewPath = `/api/dashboard/organizations/${seededTenant('legal').organizationId}/locations/${office!.id}/overview`
       const officeOverview = page.waitForResponse(response => new URL(response.url()).pathname === overviewPath)
       await open(page, `${services}/locations/${office!.slug}`)
       const overviewResponse = await officeOverview
@@ -2540,7 +2542,7 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(catalogService).toContainText(office!.title)
       // MCP reads the same pair, and the editor URL it hands an agent opens this record.
       const viaMcp = mcpData<{ product: { page: { id: string; path: string } | null; admin_edit_url: string | null } }>(await (await mcpRequest(page.request, baseURL!, {
-        method: 'tools/call', toolName: 'get_product', args: { organization_id: 'org-ncls-blawby', product_id: productId },
+        method: 'tools/call', toolName: 'get_product', args: { organization_id: seededTenant('legal').organizationId, product_id: productId },
       })).json()).product
       expect(viaMcp.page).toMatchObject({ id: pageId, path: product.page!.path })
       expect(viaMcp.admin_edit_url).toBe(`${services}/products/${productId}`)
@@ -2581,7 +2583,7 @@ test.describe('dashboard pane hierarchy', () => {
   // KrabiClaw runs on KrabiClaw: the row and its page exist only inside
   // KrabiClaw's own organization, and only for a Better Auth admin.
   test('Platform accounts opens only inside KrabiClaw, and only for a Better Auth admin', async ({ page, baseURL, playwright }) => {
-    const services = '/dashboard/north-carolina-legal-services'
+    const services = '/dashboard/harbor-legal-aid'
     const krabiclaw = '/dashboard/platform'
     const menu = page.locator('#dashboard-panel-organization-settings')
     const admin = await playwright.request.newContext({ baseURL })
@@ -2634,10 +2636,10 @@ test.describe('dashboard pane hierarchy', () => {
   // where Google Calendar connects — is that organization's page.
   test('Account settings keeps the active organization\'s shell', async ({ page, baseURL, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Account writes and the unconfigured image-provider response use isolated local data only.')
-    const organizationId = 'org-ncls-blawby'
+    const organizationId = seededTenant('legal').organizationId
     const release = await acquireTenantMutationLock(testInfo, organizationId)
-    const services = '/dashboard/north-carolina-legal-services'
-    const availability = '/dashboard/account/profile/calendar/org-ncls-blawby'
+    const services = '/dashboard/harbor-legal-aid'
+    const availability = `/dashboard/account/profile/calendar/${organizationId}`
     let originalUser: { id: string; name: string; image: string | null } | null = null
     let memberId: string | null = null
     type PublicProfile = Pick<NonNullable<MemberSchedule>, 'member_id' | 'updated_at' | 'public_name' | 'public_photo_url' | 'public_bio' | 'public_approved'>
@@ -2850,7 +2852,7 @@ test.describe('dashboard pane hierarchy', () => {
     const payments = page.locator('#dashboard-panel-account-payments')
     const paymentsRead = await page.request.get('/api/account/payments')
     expect(paymentsRead.status(), await paymentsRead.text()).toBe(200)
-    expect(await paymentsRead.json(), 'the fictional NCLS owner has no owned payments or refunds').toEqual({ entries: [] })
+    expect(await paymentsRead.json(), 'the seeded Harbor Legal Aid attorney has no owned payments or refunds').toEqual({ entries: [] })
     await expect(payments.locator('[data-testid^="account-payment-"]')).toHaveCount(0)
     await expect(payments.getByText('No payments yet', { exact: true })).toBeVisible()
     await page.setViewportSize(WIDE)

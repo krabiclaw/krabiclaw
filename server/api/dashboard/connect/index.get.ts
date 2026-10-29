@@ -2,7 +2,7 @@ import { defineHandler } from 'nitro'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { jsonResponse } from '~/server/utils/api-response'
-import { getStripeConnectedAccount, organizationPaymentsLivemode, paymentsStripe } from '~/server/utils/stripe-connect'
+import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 
 /** The payout method as Airbnb shows it: the bank on file and when Stripe sends, read live from the connected account. */
 export interface ConnectPayoutMethod {
@@ -18,10 +18,6 @@ export default defineHandler(async (event) => {
   // owner and admin, per utils/organization-access.ts.
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['integration'] } })
   const account = await getStripeConnectedAccount(db, organization.id)
-  let countries: string[] = []
-  if (!account?.stripeAccountId) {
-    countries = (await paymentsStripe(env, organizationPaymentsLivemode(env, organization)).countrySpecs.list({ limit: 100 }).autoPagingToArray({ limit: 250 })).map(country => country.id)
-  }
   let payout: ConnectPayoutMethod | null = null
   if (account?.stripeAccountId && account.status === 'ready') {
     const stripe = paymentsStripe(env, account.livemode)
@@ -35,5 +31,5 @@ export default defineHandler(async (event) => {
       payout = { bankName: bank.bank_name ?? null, last4: bank.last4, currency: bank.currency.toUpperCase(), schedule: { interval: schedule.interval, delayDays: schedule.delay_days } }
     }
   }
-  return jsonResponse({ success: true, account, payout, countries })
+  return jsonResponse({ success: true, account, payout })
 })
