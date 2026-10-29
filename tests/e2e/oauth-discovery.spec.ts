@@ -4,6 +4,7 @@ import { decodeProtectedHeader, importJWK, SignJWT } from 'jose'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { loginAs } from './helpers/auth'
 import { mcpJson } from './helpers/mcp'
+import { seededTenant } from './seed/manifest'
 
 const PRIVATE_CLIENT_TEST_KEY_ID = 'krabiclaw-cimd-e2e-rs256'
 const PRIVATE_CLIENT_TEST_JWK = {
@@ -43,8 +44,9 @@ test.describe('OAuth discovery endpoints', () => {
   // read each other's consent state. In order, in one worker, they cannot.
   test.describe.configure({ mode: 'default' })
 
-  test('the Kikuzuki publisher can exchange its loopback PKCE code for tenant access', async ({ request, baseURL }) => {
+  test('the localization publisher can exchange its loopback PKCE code for tenant access', async ({ request, baseURL }) => {
     await loginAs(request, baseURL!, 'user-e2e-kikuzuki-owner')
+    const organizationId = seededTenant('restaurant').organizationId
     expect(process.env.MCP_CIMD_CLIENT_URL, 'MCP_CIMD_CLIENT_URL must name a public HTTPS metadata document').toBeTruthy()
     const clientId = new URL('/oauth-clients/client-localization.json', process.env.MCP_CIMD_CLIENT_URL!).toString()
     const metadata = await request.get(clientId)
@@ -93,17 +95,17 @@ test.describe('OAuth discovery endpoints', () => {
     expect(workspace.status()).toBe(200)
     const result = await mcpJson<{ result: { isError: boolean; structuredContent: { organizations: Array<{ id: string }> } } }>(workspace)
     expect(result.result.isError).toBe(false)
-    expect(result.result.structuredContent.organizations.map(organization => organization.id)).toContain('org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX')
+    expect(result.result.structuredContent.organizations.map(organization => organization.id)).toContain(organizationId)
     const organizationRead = await request.post(`${baseURL}/api/mcp`, {
       headers: { Authorization: `Bearer ${authorizationResult.access_token}`, Accept: 'application/json, text/event-stream' },
       data: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: {
-        name: 'get_organization', arguments: { organization_id: 'org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX' },
+        name: 'get_organization', arguments: { organization_id: organizationId },
       } },
     })
     expect(organizationRead.status()).toBe(200)
     const organizationResult = await mcpJson<{ result: { isError: boolean; structuredContent: { context: { organization_id: string } } } }>(organizationRead)
     expect(organizationResult.result.isError).toBe(false)
-    expect(organizationResult.result.structuredContent.context.organization_id).toBe('org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX')
+    expect(organizationResult.result.structuredContent.context.organization_id).toBe(organizationId)
   })
 
   // One discovery pass: a client reads all three documents back to back, and

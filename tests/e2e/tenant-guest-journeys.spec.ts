@@ -1,8 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-import {
-  openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
-} from './helpers'
-import { E2E_KIKUZUKI_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHeaders, kikuzukiTestBaseUrl, kikuzukiTestExtraHeaders, testBaseUrl } from './test-env'
+import { openTenantPage, waitForNuxtHydration } from './helpers'
+import { seededTenant } from './seed/manifest'
+import { devLoginHeaders, seededSiteHeaders, seededSiteURL, testBaseUrl } from './test-env'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -15,6 +14,13 @@ type DeliveryRow = { channel: 'email' | 'whatsapp'; purpose: string; status: str
 type NotificationState = { notifications: NotificationRow[]; deliveries: DeliveryRow[] }
 const executionHost = new URL(testBaseUrl()).hostname
 const writableEnvironment = ['localhost', '127.0.0.1'].includes(executionHost)
+
+// The seeded wheel class at Clayhouse Studio's Ao Nang studio, as a guest reaches it.
+function wheelClass() {
+  const studio = seededTenant('experience')
+  const product = studio.products['wheel-class']!
+  return { organizationId: studio.organizationId, slug: studio.slug, product, pagePath: `/locations/${studio.locations['ao-nang']!.slug}/products/${product.slug}` }
+}
 
 function notificationUrl(baseURL: string, organizationId: string, since: string) {
   const url = new URL(`${baseURL}/api/dev/notifications`)
@@ -70,7 +76,7 @@ async function chooseFirstAvailableTime(page: Page) {
 test.describe('tenant guest journeys (disposable local/preview data only)', () => {
   test.skip(!writableEnvironment, 'guest writes are forbidden outside local and preview')
 
-  test('Pottery House Product booking persists and creates log-only owner dispatch', async ({ page, request }) => {
+  test('Clayhouse Studio Product booking persists and creates log-only owner dispatch', async ({ page, request }) => {
     // Guest submission, persisted readback and dispatch share this whole-journey budget.
     test.slow()
     const since = new Date().toISOString()
@@ -78,13 +84,14 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     // A guest books an occurrence, and occurrences are materialized from the
     // product's rules. Generation is idempotent, so the journey makes sure
     // there is something on the calendar to book before it tries.
+    const wheel = wheelClass()
     await loginAs(request, testBaseUrl(), 'user-e2e-pottery-owner')
-    const generated = await request.post(`${testBaseUrl()}/api/editor/organizations/${E2E_POTTERY_ORGANIZATION_ID}/products/exp-ph-wheel/sessions/generate`, {
-      headers: { 'x-preview-tenant': 'pottery-house' },
+    const generated = await request.post(`${testBaseUrl()}/api/editor/organizations/${wheel.organizationId}/products/${wheel.product.id}/sessions/generate`, {
+      headers: seededSiteHeaders('experience'),
       data: { through: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10) },
     })
     expect(generated.status(), await generated.text()).toBe(200)
-    await openTenantPage(page, `${potteryHouseBaseURL}/locations/krabi/products/pottery-wheel-class`, potteryHouseExtraHeaders)
+    await openTenantPage(page, `${seededSiteURL('experience')}${wheel.pagePath}`, seededSiteHeaders('experience'))
     await waitForNuxtHydration(page)
     // What a guest presses is the labelled control; the checkbox behind it is
     // screen-reader-only and has no clickable box of its own.
@@ -145,7 +152,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await phone.fill('+66812345678')
     await expect(country).toContainText('+66')
     await expect(phone).toHaveValue('081 234 5678')
-    const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/products/pottery-wheel-class/book'))
+    const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes(`/products/${wheel.product.slug}/book`))
     await page.getByRole('button', { name: 'Confirm booking' }).click()
     const response = await submission
     expect(response.status()).toBe(201)
@@ -153,7 +160,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const booked = await response.json() as { booking_id: string }
     expect(booked.booking_id).toEqual(expect.any(String))
     const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.booking_id}`, {
-      params: { org: E2E_POTTERY_ORGANIZATION_ID },
+      params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
     expect((await persisted.json()).booking).toMatchObject({
@@ -161,7 +168,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     })
     await expect(page).toHaveURL(/\/bookings\/confirmed/)
     await expect(page.locator('main')).toContainText(/booking|received|confirmed/i)
-    const state = await waitForNotifications(request, potteryHouseBaseURL, E2E_POTTERY_ORGANIZATION_ID, since, state =>
+    const state = await waitForNotifications(request, seededSiteURL('experience'), wheel.organizationId, since, state =>
       state.notifications.some(row => row.template === 'new_booking')
       && ownerAlertSent(state)
       && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
@@ -169,12 +176,14 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expectOwnerDispatch(state)
   })
 
-  test('Kikuzuki restaurant reservation persists and creates log-only owner dispatch', async ({ page, request }, testInfo) => {
-    const baseURL = kikuzukiTestBaseUrl()
+  test('Ember & Slice restaurant reservation persists and creates log-only owner dispatch', async ({ page, request }, testInfo) => {
+    const restaurant = seededTenant('restaurant')
+    const brooklyn = restaurant.locations.brooklyn!
+    const baseURL = seededSiteURL('restaurant')
     const since = new Date().toISOString()
-    const email = `kikuzuki-reservation-${Date.now()}@playwright.example`
-    const unlock = await acquireTenantMutationLock(testInfo, E2E_KIKUZUKI_ORGANIZATION_ID)
-    const policyUrl = `${testBaseUrl()}/api/editor/organizations/${E2E_KIKUZUKI_ORGANIZATION_ID}/locations/loc-kikuzuki/reservation-config`
+    const email = `restaurant-reservation-${Date.now()}@playwright.example`
+    const unlock = await acquireTenantMutationLock(testInfo, restaurant.organizationId)
+    const policyUrl = `${testBaseUrl()}/api/editor/organizations/${restaurant.organizationId}/locations/${brooklyn.id}/reservation-config`
     let original: { duration_minutes: number | null; updated_at: string | null } | null | undefined
     try {
       await loginAs(request, testBaseUrl(), 'user-e2e-kikuzuki-owner')
@@ -183,13 +192,13 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       original = (await read.json()).config
       const configured = await request.put(policyUrl, { data: { duration_minutes: 60, expected_updated_at: original?.updated_at ?? null } })
       expect(configured.status(), await configured.text()).toBe(200)
-      await openTenantPage(page, `${baseURL}/reservations`, kikuzukiTestExtraHeaders())
+      await openTenantPage(page, `${baseURL}/reservations`, seededSiteHeaders('restaurant'))
       await waitForNuxtHydration(page)
-      await page.locator('article').filter({ has: page.getByRole('heading', { name: 'Kikuzuki Japanese Robatayaki & Izakaya', exact: true }) }).getByRole('button', { name: 'Request Reservation', exact: true }).click()
+      await page.locator('article').filter({ has: page.getByRole('heading', { name: brooklyn.title, exact: true }) }).getByRole('button', { name: 'Request Reservation', exact: true }).click()
       await chooseFirstAvailableTime(page)
-      await page.getByLabel('Full name').fill('Kikuzuki Journey Test')
+      await page.getByLabel('Full name').fill('Restaurant Journey Test')
       await page.getByLabel('Email address').fill(email)
-      await page.getByLabel(/Phone number/i).fill('+66812345679')
+      await page.getByLabel(/Phone number/i).fill('+12025550123')
       const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/public/reservations'))
       await page.getByLabel('Your details').getByRole('button', { name: /request reservation|ขอจองโต๊ะ/i }).click()
       const response = await submission
@@ -204,7 +213,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       // A booking and a reservation are read back through one route: what holds
       // the seats differs, what the guest is shown does not.
       const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.id}`, {
-        headers: { ...kikuzukiTestExtraHeaders(), Authorization: `Bearer ${reservation.cancellationToken}` },
+        headers: { ...seededSiteHeaders('restaurant'), Authorization: `Bearer ${reservation.cancellationToken}` },
       })
       expect(persisted.status(), await persisted.text()).toBe(200)
       const persistedBody: { booking?: { kind?: unknown; status?: unknown } } = await persisted.json()
@@ -213,7 +222,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
       await expect(page).toHaveURL(/\/reservations\/confirmed/)
       await expect(page.locator('main')).toContainText('Reservation confirmed')
       await expect(page.locator('main')).not.toContainText(/confirm your .* shortly/i)
-      const state = await waitForNotifications(request, baseURL, E2E_KIKUZUKI_ORGANIZATION_ID, since, state =>
+      const state = await waitForNotifications(request, baseURL, restaurant.organizationId, since, state =>
         state.notifications.some(row => row.template === 'new_reservation')
         && state.deliveries.some(row => row.purpose === 'owner_alert' && row.channel === 'whatsapp' && row.status === 'sent')
         && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
@@ -237,10 +246,10 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     }
   })
 
-  test('Pottery House contact persists and creates an owner notification', async ({ page, request }) => {
+  test('Clayhouse Studio contact persists and creates an owner notification', async ({ page, request }) => {
     const since = new Date().toISOString()
     const email = `pottery-contact-${Date.now()}@playwright.example`
-    await openTenantPage(page, `${potteryHouseBaseURL}/contact`, potteryHouseExtraHeaders)
+    await openTenantPage(page, `${seededSiteURL('experience')}/contact`, seededSiteHeaders('experience'))
     await expect(page.locator('[data-hydrated]')).toHaveAttribute('data-hydrated', 'true')
     await page.getByLabel(/your name/i).fill('Pottery Contact Journey')
     await page.getByLabel(/email/i).fill(email)
@@ -249,7 +258,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await page.getByRole('button', { name: /send a message/i }).click()
     expect((await submission).status()).toBe(201)
     await expect(page).toHaveURL(/\/contact\/confirmed/)
-    const state = await waitForNotifications(request, potteryHouseBaseURL, E2E_POTTERY_ORGANIZATION_ID, since, state =>
+    const state = await waitForNotifications(request, seededSiteURL('experience'), seededTenant('experience').organizationId, since, state =>
       state.notifications.some(row => row.template === 'new_contact_msg')
       && ownerAlertSent(state)
       && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
@@ -259,17 +268,18 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
 
   test('guest validation rejects invalid input and cancellation retries preserve the existing outcome', async ({ page, request }) => {
     const baseURL = testBaseUrl()
-    const headers = { ...devLoginHeaders(), 'x-preview-tenant': 'pottery-house' }
+    const wheel = wheelClass()
+    const headers = { ...devLoginHeaders(), ...seededSiteHeaders('experience') }
     // A guest names a SESSION, not a date and a time: the occurrence is a real
     // row, so there is nothing to re-derive and no slot to invent.
-    const book = (name: string, email: string, sessionId: string) => request.post(`${baseURL}/api/public/products/pottery-wheel-class/book`, {
+    const book = (name: string, email: string, sessionId: string) => request.post(`${baseURL}/api/public/products/${wheel.product.slug}/book`, {
       headers, data: { guest_name: name, guest_email: email, party_size: 1, session_id: sessionId, idempotency_key: crypto.randomUUID() },
     })
     expect((await book('Missing Session', 'past@playwright.example', '')).status()).toBe(400)
     expect((await book('Unknown Session', 'slot@playwright.example', 'session-that-does-not-exist')).status()).toBe(404)
     expect((await request.post(`${baseURL}/api/public/contact`, { headers, data: {} })).status()).toBe(400)
     expect((await request.post(`${baseURL}/api/public/reservations`, { headers, data: {} })).status()).toBe(400)
-    await openTenantPage(page, `${potteryHouseBaseURL}/locations/krabi/products/pottery-wheel-class`, potteryHouseExtraHeaders)
+    await openTenantPage(page, `${seededSiteURL('experience')}${wheel.pagePath}`, seededSiteHeaders('experience'))
     await waitForNuxtHydration(page)
     await page.getByRole('button', { name: 'Book now' }).first().click()
     await chooseFirstAvailableTime(page)
@@ -298,7 +308,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await page.getByLabel('Email address').fill('cancel-once@playwright.example')
     await phone.focus()
     await page.getByLabel(/Special requests/i).focus()
-    const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/products/pottery-wheel-class/book'))
+    const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes(`/products/${wheel.product.slug}/book`))
     await page.getByRole('button', { name: 'Confirm booking' }).click()
     const created = await submission
     expect(created.status()).toBe(201)
@@ -307,15 +317,15 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(JSON.stringify(body)).not.toContain('cancel-once@playwright.example')
     await loginAs(request, baseURL, 'user-e2e-pottery-owner')
     const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.booking_id}`, {
-      params: { org: E2E_POTTERY_ORGANIZATION_ID },
+      params: { org: wheel.slug },
     })
     expect(persisted.status(), await persisted.text()).toBe(200)
     expect((await persisted.json()).booking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
-    const threadURL = `${baseURL}/api/dashboard/organizations/${E2E_POTTERY_ORGANIZATION_ID}/guest-threads/${body.booking_id}`
+    const threadURL = `${baseURL}/api/dashboard/organizations/${wheel.organizationId}/guest-threads/${body.booking_id}`
     const pendingThread = await request.get(threadURL)
     expect(pendingThread.status(), await pendingThread.text()).toBe(200)
     expect((await pendingThread.json() as { thread: GuestThreadDetailViewModel }).thread).toMatchObject({ id: body.booking_id, conversationState: 'needs_attention', resolvedAt: null })
-    const attentionBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: E2E_POTTERY_ORGANIZATION_ID } })
+    const attentionBefore = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(attentionBefore.status(), await attentionBefore.text()).toBe(200)
     expect((await attentionBefore.json() as TodayFeedPayload).cards.map(card => card.id)).toContain(`attention:${body.booking_id}`)
     const cancelURL = `${baseURL}/api/public/booking-requests/${body.booking_id}/cancel`
@@ -338,7 +348,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(thread).toMatchObject({ id: body.booking_id, conversationState: 'resolved', source: { operationalStatus: 'cancelled' } })
     expect(thread.resolvedAt).toEqual(expect.any(String))
     expect(thread.entries.filter(entry => entry.eventName === 'booking.cancel')).toHaveLength(1)
-    const attentionAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: E2E_POTTERY_ORGANIZATION_ID } })
+    const attentionAfter = await request.get(`${baseURL}/api/dashboard/today`, { params: { org: wheel.slug } })
     expect(attentionAfter.status(), await attentionAfter.text()).toBe(200)
     expect((await attentionAfter.json() as TodayFeedPayload).cards.some(card => card.id === `attention:${body.booking_id}`)).toBe(false)
     expect((await request.post(cancelURL, {
@@ -350,7 +360,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(await after.json()).toEqual({ ...receipt, booking: { ...receipt.booking, status: 'cancelled' } })
     for (const deniedHeaders of [
       { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
-      { ...authHeaders, 'x-preview-tenant': 'demo' },
+      { ...authHeaders, ...seededSiteHeaders('restaurant') },
     ]) {
       const denied = await request.get(receiptURL, { headers: deniedHeaders })
       expect(denied.status()).toBe(404)
@@ -359,17 +369,23 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
   })
 })
 
-for (const target of [
-  { name: 'Kikuzuki', owner: 'user-e2e-kikuzuki-owner', org: E2E_KIKUZUKI_ORGANIZATION_ID, slug: E2E_KIKUZUKI_ORGANIZATION_ID, location: 'loc-kikuzuki', locationSlug: 'kikuzuki-japanese-robatayaki-izakaya', base: kikuzukiTestBaseUrl(), headers: kikuzukiTestExtraHeaders(), experience: false, kind: 'dish' },
-  { name: 'Pottery House', owner: 'user-e2e-pottery-owner', org: E2E_POTTERY_ORGANIZATION_ID, slug: E2E_POTTERY_ORGANIZATION_ID, location: 'loc-pottery-house', locationSlug: 'krabi', base: potteryHouseBaseURL, headers: potteryHouseExtraHeaders, experience: true, kind: 'experience' },
-]) {
-  test(`${target.name} external checkout uses the shared CMS and public template`, async ({ page, request, baseURL }, testInfo) => {
+for (const seeded of [
+  { name: 'Ember & Slice', key: 'restaurant', location: 'brooklyn', experience: false, kind: 'dish' },
+  { name: 'Clayhouse Studio', key: 'experience', location: 'ao-nang', experience: true, kind: 'experience' },
+] as const) {
+  test(`${seeded.name} external checkout uses the shared CMS and public template`, async ({ page, request, baseURL }, testInfo) => {
     test.slow()
     test.skip(!writableEnvironment, 'External checkout verification writes only local disposable products')
+    const tenant = seededTenant(seeded.key)
+    const place = tenant.locations[seeded.location]!
+    const target = {
+      ...seeded, org: tenant.organizationId, slug: tenant.slug, currency: tenant.currency,
+      location: place.id, locationSlug: place.slug, base: seededSiteURL(seeded.key), headers: seededSiteHeaders(seeded.key),
+    }
     await loginAs(page.request, baseURL!)
     const editor = `/api/editor/organizations/${target.org}/products`
     const inheritedPriceTerms = { tax_behavior: 'inclusive', compare_at_unit_amount: 200000, valid_from_at: '2020-01-01T00:00:00.000Z', valid_until_at: '2099-01-01T00:00:00.000Z' }
-    const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : target.experience ? `Clay & wheel workshop ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: 'THB', ...(target.kind === 'dish' ? inheritedPriceTerms : {}) }] }] } })
+    const created = await page.request.post(editor, { data: { kind: target.kind, name: target.kind === 'dish' ? `Sesame mushroom udon ${Date.now().toString(36)}` : target.experience ? `Clay & wheel workshop ${Date.now().toString(36)}` : `External checkout ${Date.now()}`, variants: [{ name: 'Standard', prices: [{ unit_amount: 120000, currency: target.currency, ...(target.kind === 'dish' ? inheritedPriceTerms : {}) }] }] } })
     expect(created.status(), await created.text()).toBe(201)
     const product = (await created.json() as { product: Product }).product
     try {
@@ -481,8 +497,8 @@ for (const target of [
         expect(viaMcp.variants).toHaveLength(1)
         expect(viaMcp.variants[0]!.id).toBe(product.variants[0]!.id)
         expect(viaMcp.variants[0]!.prices).toHaveLength(2)
-        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: 'THB', location_id: null }))
-        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, unit_amount: 135000, currency: 'THB', location_id: target.location }))
+        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: target.currency, location_id: null }))
+        expect(viaMcp.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, unit_amount: 135000, currency: target.currency, location_id: target.location }))
         expect(viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id).not.toBe(product.variants[0]!.prices[0]!.id)
       }
       const publicPath = target.experience ? `/experiences/${product.slug}` : `/locations/${target.locationSlug}/${target.kind === 'dish' ? 'menu' : 'products'}/${product.slug}`
@@ -493,7 +509,7 @@ for (const target of [
       if (target.kind === 'dish') {
         await expect(page.getByText(description, { exact: true })).toBeVisible()
         await expect(productArticle.getByRole('term')).toHaveText(product.name)
-        await expect(productArticle.getByRole('definition')).toHaveText('THB 2,000.00 THB 1,350.00')
+        await expect(productArticle.getByRole('definition')).toHaveText('$2,000.00 $1,350.00')
         await expect(productArticle.getByRole('definition')).toBeVisible()
       }
       for (const width of [1280, 390]) {
@@ -526,8 +542,8 @@ for (const target of [
       if (target.kind === 'dish') {
         expect(savedProduct.variants[0]!.id).toBe(product.variants[0]!.id)
         expect(savedProduct.variants[0]!.prices).toHaveLength(2)
-        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id, unit_amount: 135000, currency: 'THB', location_id: target.location }))
-        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: 'THB', location_id: null }))
+        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: viaMcp.variants[0]!.prices.find(price => price.location_id === target.location)!.id, unit_amount: 135000, currency: target.currency, location_id: target.location }))
+        expect(savedProduct.variants[0]!.prices).toContainEqual(expect.objectContaining({ ...inheritedPriceTerms, id: product.variants[0]!.prices[0]!.id, unit_amount: 120000, currency: target.currency, location_id: null }))
       }
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/publication/availability`)
       const availability = page.getByRole('switch', { name: target.experience ? 'Accept bookings' : 'Accept orders', exact: true })

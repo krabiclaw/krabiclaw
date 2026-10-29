@@ -3,6 +3,7 @@ import { dismissPreviewToolbar } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { seededTenant } from './seed/manifest'
 import { tenantHostIsAddressable, testBaseUrl } from './test-env'
 import { environmentTenantAliasSlug } from '../../server/utils/tenant-hosts'
 import { formatMinorAmount } from '../../shared/prices'
@@ -39,7 +40,8 @@ function organizationSubdomain(origin: string): string {
 // file in order, and share its actor lock with the account organization journey.
 test.describe.configure({ mode: 'default' })
 
-const otherTenantId = 'org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX'
+// Ember & Slice holds the organization-wide collection the new site's section shares a slug with.
+const otherTenantId = () => seededTenant('restaurant').organizationId
 let otherTenant: { owner: APIRequestContext; collectionId: string } | null = null
 let releaseWizardMutationLock: (() => Promise<void>) | undefined
 
@@ -52,7 +54,7 @@ test.afterEach(async () => {
     if (!otherTenant) return
     const { owner, collectionId } = otherTenant
     otherTenant = null
-    const removed = await owner.delete(`/api/editor/organizations/${otherTenantId}/collections/${collectionId}`)
+    const removed = await owner.delete(`/api/editor/organizations/${otherTenantId()}/collections/${collectionId}`)
     expect(removed.status(), await removed.text()).toBe(200)
     await owner.dispose()
   } finally {
@@ -66,7 +68,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   test.setTimeout(60_000)
   const owner = await playwright.request.newContext({ baseURL })
   await loginAs(owner, baseURL!, 'user-e2e-kikuzuki-owner')
-  const held = await owner.post(`/api/editor/organizations/${otherTenantId}/collections`, { data: { name: 'Small plates' } })
+  const held = await owner.post(`/api/editor/organizations/${otherTenantId()}/collections`, { data: { name: 'Small plates' } })
   expect(held.status(), await held.text()).toBe(201)
   const heldCollection = (await held.json() as { collection: { id: string; slug: string; location_id: string | null } }).collection
   otherTenant = { owner, collectionId: heldCollection.id }
@@ -645,11 +647,12 @@ test('the business search API refuses what the picker would never send', async (
 // usage reports homes only.
 test('a paid plan adds a third location without counting it', async ({ page, baseURL }, testInfo) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'This local fixture journey creates and deletes a location.')
-  const release = await acquireTenantMutationLock(testInfo, 'org-demo')
+  const restaurant = seededTenant('restaurant')
+  const release = await acquireTenantMutationLock(testInfo, restaurant.organizationId)
   const failures: unknown[] = []
   let createdLocationId: string | undefined
   const status = async () => {
-    const response = await page.request.get('/api/billing/status?organizationId=org-demo')
+    const response = await page.request.get('/api/billing/status', { params: { organizationId: restaurant.organizationId } })
     expect(response.status(), await response.text()).toBe(200)
     return (await response.json() as { billing: { plan: string; usage: Record<string, number> } }).billing
   }
@@ -660,10 +663,10 @@ test('a paid plan adds a third location without counting it', async ({ page, bas
     expect(before.usage).toEqual({ plan: 'business', homes: 0 })
 
     // The new location's own level walks its sections.
-    await page.goto('/dashboard/ember-slice-demo/locations/new')
-    await expect(page).toHaveURL(/\/dashboard\/ember-slice-demo\/locations\/new\/name$/)
+    await page.goto(`/dashboard/${restaurant.slug}/locations/new`)
+    await expect(page).toHaveURL(new RegExp(`/dashboard/${restaurant.slug}/locations/new/name$`))
 
-    const args = { organization_id: 'org-demo', title: 'Third branch', timezone: 'America/New_York', idempotency_key: crypto.randomUUID() }
+    const args = { organization_id: restaurant.organizationId, title: 'Third branch', timezone: 'America/New_York', idempotency_key: crypto.randomUUID() }
     const created = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'create_location', args })
     expect(created.status(), await created.text()).toBe(200)
     const receipt = mcpData<{ organization_id: string; location: { id: string; title: string; status: string } }>(await created.json())
@@ -672,7 +675,7 @@ test('a paid plan adds a third location without counting it', async ({ page, bas
     expect(Object.keys(receipt.location).sort()).toEqual(['id', 'status', 'title'])
     expect(receipt.location).toEqual({ id: createdLocationId, title: args.title, status: 'active' })
     expect(receipt.organization_id).toBe(args.organization_id)
-    const nativeRead = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
+    const nativeRead = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=${restaurant.slug}`)
     expect(nativeRead.status(), await nativeRead.text()).toBe(200)
     const saved = await nativeRead.json()
     expect(saved.location).toMatchObject(receipt.location)
@@ -682,7 +685,7 @@ test('a paid plan adds a third location without counting it', async ({ page, bas
     const replay = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'create_location', args })
     expect(replay.status(), await replay.text()).toBe(200)
     expect(mcpData(await replay.json())).toEqual(receipt)
-    const nativeReplayRead = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
+    const nativeReplayRead = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=${restaurant.slug}`)
     expect(nativeReplayRead.status(), await nativeReplayRead.text()).toBe(200)
     expect(await nativeReplayRead.json()).toEqual(saved)
     expect((await status()).usage).toEqual(before.usage)
@@ -690,9 +693,9 @@ test('a paid plan adds a third location without counting it', async ({ page, bas
   finally {
     if (createdLocationId) {
       try {
-        const deleted = await page.request.delete(`/api/organizations/org-demo/locations/${createdLocationId}`)
+        const deleted = await page.request.delete(`/api/organizations/${restaurant.organizationId}/locations/${createdLocationId}`)
         expect(deleted.status(), await deleted.text()).toBe(200)
-        const absent = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=ember-slice-demo`)
+        const absent = await page.request.get(`/api/dashboard/locations/${createdLocationId}?org=${restaurant.slug}`)
         expect(absent.status(), await absent.text()).toBe(404)
         expect((await status()).usage).toEqual({ plan: 'business', homes: 0 })
       } catch (error) { failures.push(error) }
@@ -703,13 +706,14 @@ test('a paid plan adds a third location without counting it', async ({ page, bas
   if (failures.length) throw new AggregateError(failures, 'Location creation or cleanup failed')
 })
 
-// NCLS has one location. Adding one walks the
+// Harbor Legal Aid has one office. Adding one walks the
 // location record's own create level: Name, then Hours, then Create location,
 // which opens the new location's first Photos section on a desktop.
 test('a location is created by walking its own record', async ({ page, baseURL, playwright }) => {
   await dismissPreviewToolbar(page)
   await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
-  const org = 'north-carolina-legal-services'
+  const legal = seededTenant('legal')
+  const org = legal.slug
   const cleanupRequest = await playwright.request.newContext({ baseURL, storageState: await page.request.storageState() })
   let createdLocationId: string | undefined
   try {
@@ -745,7 +749,7 @@ test('a location is created by walking its own record', async ({ page, baseURL, 
   } finally {
     try {
       if (createdLocationId) {
-        const deleted = await cleanupRequest.delete(`/api/organizations/org-ncls-blawby/locations/${createdLocationId}`)
+        const deleted = await cleanupRequest.delete(`/api/organizations/${legal.organizationId}/locations/${createdLocationId}`)
         expect(deleted.status(), await deleted.text()).toBe(200)
         const removed = await cleanupRequest.get(`/api/dashboard/locations/${createdLocationId}`)
         expect(removed.status(), await removed.text()).toBe(404)
@@ -758,12 +762,12 @@ test('a location is created by walking its own record', async ({ page, baseURL, 
 
 // A location made by its own record has no place yet; Settings → Google Maps
 // connects it through the business picker, and connects another the same way.
-// Runs against the NCLS tenant's local copy; the location is deactivated at the end.
+// Runs against the seeded Harbor Legal Aid tenant; the location is deactivated at the end.
 test('Settings connects a new location to Google Maps through the business picker', async ({ page, baseURL }) => {
   test.skip(process.env.E2E_GOOGLE_PLACES !== 'true', 'Live Google Places qualification requires E2E_GOOGLE_PLACES=true')
   await dismissPreviewToolbar(page)
   await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
-  const org = 'north-carolina-legal-services'
+  const org = seededTenant('legal').slug
   const connected = async () => {
     const settings = await page.request.get(`/api/dashboard/settings?org=${org}`)
     expect(settings.status(), await settings.text()).toBe(200)
