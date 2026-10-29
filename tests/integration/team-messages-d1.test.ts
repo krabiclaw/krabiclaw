@@ -441,11 +441,13 @@ test('members talk in team conversations, see unread state and receive recorded 
     const assignee = async () => (await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id
     await reconcileResponsibilities(env, db, { organizationId: ORG })
     assert.equal(await assignee(), 'm-cook')
+    await db.prepare("DELETE FROM member WHERE id = 'm-cook'").run()
     await Promise.all([
-      reconcileResponsibilities(env, db, { organizationId: ORG, departingUserId: 'cook' }),
+      reconcileResponsibilities(env, db, { organizationId: ORG }),
       updateStayHome(env, db, manager, cabin.id, { max_guests: 3 }),
     ])
     assert.equal(await assignee(), null)
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-cook', ?, 'cook', 'member', 0)").bind(ORG).run()
     assert.deepEqual(await db.prepare('SELECT assigned_member_id, max_guests, check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
       assigned_member_id: null, max_guests: 3, check_in_time: '17:00', check_out_time: '11:00',
     })
