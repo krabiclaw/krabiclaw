@@ -84,13 +84,16 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     const { pages } = await tool<{ pages: Array<{ id: string; page_id: string; path: string }> }>('list_site_pages', { locale: 'en' })
     const home = pages.find(page => page.path === '/')
     if (!home) throw new Error('Ember & Slice has no home page')
-    const { page } = await tool<{ page: { blocks: Array<{ id: string; type: string; updated_at: string; data: { title?: string } }> } }>('get_site_page', { variant_id: home.id })
+    const { page } = await tool<{ page: { document: { id: string }; blocks: Array<{ id: string; type: string; updated_at: string; data: { title?: string } }> } }>('get_site_page', { variant_id: home.id })
     const hero = page.blocks.find(block => block.type === 'hero')
     if (!hero) throw new Error('Ember & Slice\'s home page has no hero')
     await tool('replace_content_block', {
       block_id: hero.id, expected_updated_at: hero.updated_at,
       data: { title: hero.data.title ?? 'Ember & Slice', subtitle: 'Wood-fired pizza in Brooklyn and Williamsburg.', cta_label: 'Reserve a table', cta_url: '/reservations', secondary_label: 'View menu', secondary_url: '/menu' },
     })
+
+    // Its posts appear on the home page as they are published.
+    await tool('append_content_block', { document_id: page.document.id, type: 'social_posts', data: { title: 'From the kitchen', limit: 6 } })
 
     // The site is also published in Japanese and Thai for visitors, each starting with its homepage.
     const translations = {

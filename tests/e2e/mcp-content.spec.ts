@@ -382,15 +382,18 @@ test.describe('stateless MCP server', () => {
     expect(badActionBody.result?.content?.[0]?.text).toContain('call_to_action.url')
   })
 
-  test('a draft publishes only to its named targets, matches the public API, and plays its video in page blocks, the feed and detail gallery', async ({ request, page, baseURL }) => {
+  test('a draft publishes only to its named targets, matches the public API, and shows its cover in the feed and detail gallery', async ({ request, page, baseURL }) => {
     test.setTimeout(120_000)
     await loginAs(request, baseURL!)
     const organizationId = mcpOrganizationId()
     let createdPostId: string | undefined
 
     try {
-      // Publish an existing video from this organization's media library.
-      const videoAssetId = seededTenant('restaurant').media['margherita-video']!.id
+      // Publish an existing photo from this organization's media library. Video
+      // playback is checked on real posts in tests/deployed: no environment but
+      // production can store a video's poster.
+      const coverAsset = seededTenant('restaurant').media.margherita!
+      const coverAssetId = coverAsset.id
 
       const now = Date.now()
       const createArgs = {
@@ -417,7 +420,7 @@ test.describe('stateless MCP server', () => {
       const placement = await mcpRequest(request, baseURL!, {
         method: 'tools/call',
         toolName: 'set_media',
-        args: { organization_id: organizationId, placement: { owner_type: 'content_document', owner_id: created.post.id, slot: 'cover' }, asset_id: videoAssetId },
+        args: { organization_id: organizationId, placement: { owner_type: 'content_document', owner_id: created.post.id, slot: 'cover' }, asset_id: coverAssetId },
       })
       if (placement.status() !== 200) console.error(await placement.text())
       expect(placement.status()).toBe(200)
@@ -434,7 +437,7 @@ test.describe('stateless MCP server', () => {
       expect(draft.published_at).toBeNull()
       expect(draft.public_url).toBeNull()
       expect(draft.preview_url).toContain('preview_token=')
-      expect(draft).toMatchObject({ body: createArgs.body, call_to_action: createArgs.call_to_action, media: [expect.objectContaining({ asset_id: videoAssetId, slot: 'cover' })], publications: [] })
+      expect(draft).toMatchObject({ body: createArgs.body, call_to_action: createArgs.call_to_action, media: [expect.objectContaining({ asset_id: coverAssetId, slot: 'cover' })], publications: [] })
       for (const field of ['created_by', 'metadata_json', 'social_image']) expect(draft).not.toHaveProperty(field)
       expect((await request.get(`${tenantBaseURL()}/api/public/posts/${encodeURIComponent(draft.slug)}`, { headers: tenantExtraHeaders() })).status()).toBe(404)
 
@@ -537,7 +540,7 @@ test.describe('stateless MCP server', () => {
       expect(firstPost.published_at).toEqual(expect.any(String))
       expect(firstPost.updated_at).toBe(publishData.updated_at)
       expect(firstPost.publications).toEqual([])
-      expect(firstPost.media).toContainEqual(expect.objectContaining({ asset_id: videoAssetId, slot: 'cover' }))
+      expect(firstPost.media).toContainEqual(expect.objectContaining({ asset_id: coverAssetId, slot: 'cover' }))
 
       const publicRead = await request.get(`${tenantBaseURL()}/api/public/posts/${encodeURIComponent(firstPost.slug)}`, { headers: tenantExtraHeaders() })
       expect(publicRead.status()).toBe(200)
@@ -545,7 +548,7 @@ test.describe('stateless MCP server', () => {
       expect(publicPost.id).toBe(created.post.id)
       expect(publicPost.call_to_action).toEqual(createArgs.call_to_action)
       // Visitors get the media in order, cover first; which slot it came from is the editor's concern.
-      expect(publicPost.media.map(item => item.asset_id)).toEqual([videoAssetId])
+      expect(publicPost.media.map(item => item.asset_id)).toEqual([coverAssetId])
 
       for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 900 })
@@ -555,48 +558,23 @@ test.describe('stateless MCP server', () => {
           await waitForNuxtHydration(page)
           const card = page.locator(`[data-social-post=${JSON.stringify(created.post.id)}]`)
           await expect(card).toContainText(createArgs.body)
-          const preview = card.locator('video')
-          await preview.scrollIntoViewIfNeeded()
-          await expect(preview).toHaveJSProperty('muted', true)
-          await expect(preview).toHaveJSProperty('loop', true)
-          await expect(preview).toHaveJSProperty('paused', false)
-          await expect.poll(() => preview.evaluate(element => {
-            const video = element as HTMLVideoElement
-            return video.currentTime > 0 && !video.paused ? 'playing' : {
-              time: video.currentTime, paused: video.paused, readyState: video.readyState,
-              networkState: video.networkState, error: video.error?.message ?? null,
-              source: video.currentSrc, duration: video.duration, playbackRate: video.playbackRate,
-              ended: video.ended, seeking: video.seeking, connected: video.isConnected,
-              size: [video.videoWidth, video.videoHeight],
-              buffered: Array.from({ length: video.buffered.length }, (_, index) => [video.buffered.start(index), video.buffered.end(index)]),
-              seekable: Array.from({ length: video.seekable.length }, (_, index) => [video.seekable.start(index), video.seekable.end(index)]),
-              frames: video.getVideoPlaybackQuality().totalVideoFrames,
-              visibility: document.visibilityState, bounds: video.getBoundingClientRect().toJSON(),
-            }
-          })).toBe('playing')
-          await expect.poll(() => page.locator('[data-social-posts] video').evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1)
+          const cover = card.locator(`img[src=${JSON.stringify(coverAsset.public_url)}]`)
+          await cover.scrollIntoViewIfNeeded()
+          await expect.poll(() => cover.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
           await card.click()
           const viewer = page.getByRole('dialog')
           await expect(viewer).toBeVisible()
-          await expect(preview).toHaveJSProperty('paused', true)
           await viewer.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
-          await expect(preview).toHaveJSProperty('paused', false)
-          await page.locator('footer').first().scrollIntoViewIfNeeded()
-          await expect(preview).toHaveJSProperty('paused', true)
+          await expect(viewer).toHaveCount(0)
         }
 
         const detail = await openTenantPage(page, `${tenantBaseURL()}/posts/${encodeURIComponent(firstPost.slug)}`, tenantExtraHeaders())
         expect(detail?.status()).toBe(200)
         await waitForNuxtHydration(page)
         await expect(page.getByRole('heading', { level: 1 })).toHaveText(renamedPost.title)
-        const detailPreview = page.locator('[data-media-gallery] video')
-        await detailPreview.scrollIntoViewIfNeeded()
-        await expect.poll(() => detailPreview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
-        await page.locator('[data-media-gallery]').getByRole('button', { name: /^Play video,/ }).click()
-        await expect(page.getByRole('dialog')).toBeVisible()
-        await expect(detailPreview).toHaveJSProperty('paused', true)
-        await page.getByRole('dialog').getByRole('button', { name: 'Close photos and videos', exact: true }).click()
-        await expect(detailPreview).toHaveJSProperty('paused', false)
+        const detailCover = page.locator(`[data-media-gallery] img[src=${JSON.stringify(coverAsset.public_url)}]`).first()
+        await detailCover.scrollIntoViewIfNeeded()
+        await expect.poll(() => detailCover.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
       }
 
       // A repeat with the old revision returns the receipt and changes nothing.
@@ -868,35 +846,23 @@ test.describe('stateless MCP server', () => {
       expect(unlisted.visibility).toBe('unlisted')
       expect(unlisted.public_url).toBe(published.public_url)
       expect(unlisted.published_at).toBe(published.published_at)
-      // Publish existing library media through the article's native block writer,
-      // then exercise the reader's playback rather than just its saved placement.
-      const videoBlock = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'append_content_block', args: {
-        organization_id: organizationId, document_id: postId, type: 'image', data: { caption: 'Kitchen video' },
-        media: [{ asset_id: seededTenant('restaurant').media['margherita-video']!.id, slot: 'media' }],
+      // Publish existing library media through the article's native block writer
+      // and read it back on the article itself.
+      const photo = seededTenant('restaurant').media.margherita!
+      const photoBlock = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'append_content_block', args: {
+        organization_id: organizationId, document_id: postId, type: 'image', data: { caption: 'Kitchen photo' },
+        media: [{ asset_id: photo.id, slot: 'media' }],
       } })
-      expect(videoBlock.status()).toBe(200)
-      expect(mcpData<{ blocks: unknown[] }>(await videoBlock.json()).blocks).toHaveLength(1)
+      expect(photoBlock.status()).toBe(200)
+      expect(mcpData<{ blocks: unknown[] }>(await photoBlock.json()).blocks).toHaveLength(1)
       const article = await openTenantPage(page, `${tenantBaseURL()}${new URL(unlisted.public_url).pathname}`, tenantExtraHeaders())
       expect(article?.status()).toBe(200)
       await waitForNuxtHydration(page)
-      const preview = page.locator('.blog-article video')
-      await expect(preview).toHaveCount(1)
-      await preview.scrollIntoViewIfNeeded()
-      const initialTime = await preview.evaluate(element => (element as HTMLVideoElement).currentTime)
-      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(initialTime)
-      await page.emulateMedia({ reducedMotion: 'reduce' })
-      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
-      await expect(preview).toHaveJSProperty('controls', true)
-      await preview.press('Home')
-      const manualTime = await preview.evaluate(element => (element as HTMLVideoElement).currentTime)
-      await preview.press('Space')
-      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(manualTime)
-      await page.setViewportSize({ width: 1280, height: 480 })
-      await page.evaluate(() => scrollTo(0, 0))
-      await expect.poll(() => preview.evaluate(element => element.getBoundingClientRect().top >= innerHeight)).toBe(true)
-      await expect.poll(() => preview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
-      await expect(preview).toHaveJSProperty('ended', false)
-      await page.emulateMedia({ reducedMotion: 'no-preference' })
+      const picture = page.locator(`.blog-article img[src=${JSON.stringify(photo.public_url)}]`)
+      await expect(picture).toHaveCount(1)
+      await picture.scrollIntoViewIfNeeded()
+      await expect.poll(() => picture.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+      await expect(page.locator('.blog-article')).toContainText('Kitchen photo')
     } finally {
       if (postId) {
         const cleanup = await mcpRequest(request, baseURL!, {

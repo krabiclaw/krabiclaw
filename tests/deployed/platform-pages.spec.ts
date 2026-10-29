@@ -183,3 +183,56 @@ test('KrabiClaw social viewer keyboard navigation changes the visible media', as
   expect(next!.y).toBeGreaterThan(top!.y + top!.height)
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
+
+// Video cannot be stored outside production (posters live in Cloudflare Images),
+// so playback is read here, on KrabiClaw's own published video posts.
+test('KrabiClaw video posts play in the feed and the post gallery and yield to the viewer', async ({ page, request }) => {
+  const listed = await request.get(`${testBaseUrl()}/api/public/posts`, { params: { limit: 50 } })
+  expect(listed.status()).toBe(200)
+  const { posts } = await listed.json() as { posts: Array<{ id: string; slug: string; media: Array<{ kind: string }> }> }
+  const post = posts.find(row => row.media[0]?.kind === 'video')
+  expect(post, 'KrabiClaw has a published post whose first media is a video').toBeDefined()
+  const playing = (element: Element) => {
+    const video = element as HTMLVideoElement
+    return video.currentTime > 0 && !video.paused ? 'playing' : {
+      time: video.currentTime, paused: video.paused, readyState: video.readyState,
+      networkState: video.networkState, error: video.error?.message ?? null, source: video.currentSrc,
+    }
+  }
+
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    expect((await openTenantPage(page, `${testBaseUrl()}/posts`, {}))?.status()).toBe(200)
+    await waitForNuxtHydration(page)
+    const card = page.locator(`[data-social-post=${JSON.stringify(post!.id)}]`)
+    const preview = card.locator('video')
+    await preview.scrollIntoViewIfNeeded()
+    await expect(preview).toHaveJSProperty('muted', true)
+    await expect(preview).toHaveJSProperty('loop', true)
+    await expect.poll(() => preview.evaluate(playing)).toBe('playing')
+    await expect.poll(() => page.locator('[data-social-posts] video').evaluateAll(elements => elements.filter(element => !(element as HTMLVideoElement).paused).length)).toBe(1)
+    await card.click()
+    const viewer = page.getByRole('dialog')
+    await expect(viewer).toBeVisible()
+    await expect(preview).toHaveJSProperty('paused', true)
+    await viewer.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+    await expect(preview).toHaveJSProperty('paused', false)
+    await page.locator('footer').first().scrollIntoViewIfNeeded()
+    await expect(preview).toHaveJSProperty('paused', true)
+
+    expect((await openTenantPage(page, `${testBaseUrl()}/posts/${encodeURIComponent(post!.slug)}`, {}))?.status()).toBe(200)
+    await waitForNuxtHydration(page)
+    const detailPreview = page.locator('[data-media-gallery] video').first()
+    await detailPreview.scrollIntoViewIfNeeded()
+    await expect.poll(() => detailPreview.evaluate(element => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0)
+    await page.locator('[data-media-gallery]').getByRole('button', { name: /^Play video,/ }).first().click()
+    await expect(page.getByRole('dialog')).toBeVisible()
+    await expect(detailPreview).toHaveJSProperty('paused', true)
+    await page.getByRole('dialog').getByRole('button', { name: 'Close photos and videos', exact: true }).click()
+    await expect(detailPreview).toHaveJSProperty('paused', false)
+    // Reduced motion stops the preview; it stays a usable control.
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await expect.poll(() => detailPreview.evaluate(element => (element as HTMLVideoElement).paused)).toBe(true)
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+  }
+})
