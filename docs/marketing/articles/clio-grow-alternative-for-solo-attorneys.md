@@ -1,79 +1,142 @@
 ---
-title: "Clio Grow Alternative for Solo Attorneys: Website, Booking and Payments in One Place"
-summary: "KrabiClaw Business brings a law firm's website, consultation scheduling, and online payments together. At $149 per month, Business adds a 1.4% fee on payment volume, plus Stripe fees, billed separately at the end of the monthly period."
+title: "Clio Grow Alternative for Solo Lawyers: Simplify Client Booking"
+summary: "Looking for a Clio Grow alternative for your solo law practice? See how KrabiClaw Business combines your website, consultation scheduling, online payments, and client inquiries."
 category: "Legal Services"
 ---
 
-# Clio Grow Alternative for Solo Attorneys: Website, Booking and Payments in One Place
+# Looking for a Clio Grow Alternative? Simplify Client Booking
 
-A solo attorney or small law firm looking for a Clio Grow alternative may be trying to solve a bigger problem than intake alone: the website is one subscription, consultation scheduling is another, and payments run through a third service. KrabiClaw Business brings the firm's website, named-attorney booking and online consultation payments into one subscription for $149 per month, plus a 1.4% fee on payment volume and Stripe fees. Those usage fees are billed separately at the end of each monthly period; they are not deducted from the client's payment.
+**Your law firm’s website should do more than send people somewhere else.**
 
-## Four tools can mean four separate handoffs
+If you’re a solo lawyer or run a small firm, you may be paying for a website, client intake, appointment scheduling, and consultation payments through separate services. You still have to make those pieces work together.
 
-A prospective client usually does not care which vendor runs a firm's intake form, calendar, checkout page or website. They want to understand whether the firm handles their matter, choose a time and know what the consultation costs.
+You’ve invested in your website. You’ve made it possible for potential clients to contact you. But if booking a consultation means sending people through multiple tools, your process may be more complicated than it needs to be.
 
-When those steps live in separate products, the journey can feel stitched together. The website points to an intake form. The form points to a scheduling link. The appointment confirmation sends a payment link. The firm then reconciles the tools and their separate bills.
+**KrabiClaw Business brings your website, consultation booking, online payments, and client inquiries together** for $149 per month, plus a 1.4% fee on payment volume and Stripe fees. These fees are billed separately rather than deducted from your clients’ payments.
 
-KrabiClaw is designed to keep that path on the firm's own website. A visitor selects a practice area, checks the availability of the attorney offering that consultation, submits the booking details and pays through Stripe's embedded payment form on the firm's own domain. The confirmed booking and inquiry appear in the KrabiClaw dashboard inbox.
+If you’re comparing Clio Grow alternatives, here’s what to know about how KrabiClaw works, what it costs, and whether it fits your practice.
 
-## What the client sees
+## Why Solo Lawyers Look for a Clio Grow Alternative
 
-The journey starts with the firm's practice areas. Each consultation can have its own public page and assigned attorney, with a public profile showing the attorney's name, photo and biography. Working hours, time zone and time off are set for the assigned attorney, so the availability shown to a prospective client is based on the schedule configured for that attorney.
+Consider the steps a prospective client might face when trying to book a consultation:
 
-The client selects an open time and provides the details requested by the firm. They then continue to the firm's own payment page, where Stripe's embedded form collects the consultation fee. On a custom domain, the booking and payment journey stays on that domain; the client does not have to follow an externally hosted scheduling link to another product.
+- They visit your website to find out whether you handle their matter.
+- They follow a link to an intake form.
+- They open a separate calendar to choose an appointment.
+- They navigate to another service to pay for a consultation.
 
-After the payment is confirmed, the booking appears in the dashboard. The team can review the inquiry and reply from the same inbox. The reply is emailed to the client, and the client's email reply can thread back into that conversation.
+Each step may work on its own. The challenge is coordinating them—and keeping track of the services behind them.
 
-## A walkthrough with Cedar Legal
+If you want to simplify the journey from your law firm’s website to a booked consultation, look for a solution that connects those steps instead of adding another tool to the mix.
 
-Cedar Legal is KrabiClaw's legal-services showcase site. It demonstrates the flow with two named attorneys, Elena Vance and Marcus Thorne, and separate practice-area consultation pages.
+## How KrabiClaw Business Handles Consultation Booking
 
-For example, a prospective client can choose Estate Planning, Wills & Trusts, review Elena's profile and select an available consultation time. The page then collects the client details and takes the client to the firm's payment page. In the showcase, the booking is confirmed after the test payment, and the dashboard shows the consultation and payment status.
+KrabiClaw Business brings together the main parts of your online consultation process.
 
-The calendar step matters as well. When an attorney connects a personal Google Calendar for conflict checking, busy intervals block matching times from being offered for new bookings. Personal event titles and descriptions are not imported into KrabiClaw. Business-plan Google Calendar sync also projects bookings to the firm's KrabiClaw calendar; that connection is separate from the attorney's personal busy-time check.
+You can set up:
 
-Cedar Legal uses Stripe test mode. The card number 4242 is a Stripe test card in this demo and does not take a real payment. It is an example of the workflow, not a representation that a live legal consultation has been purchased.
+- **Practice-area and consultation pages** to help prospective clients find the service they need.
+- **Attorney profiles** with names, photos, and biographies.
+- **Attorney-specific availability** based on configured working hours, time zones, and time off.
+- **Online consultation booking and payments** through your firm’s website.
+- **A dashboard inbox** for reviewing inquiries and replying to clients.
 
-## What does KrabiClaw Business cost?
+The booking process works like this:
 
-KrabiClaw Business costs **$149 per month**. The plan's payment-fee wording is **“1.4% of payment volume, plus Stripe fees.”** KrabiClaw's fee and Stripe fees are metered on the firm's subscription and invoiced separately at the end of each monthly period.
+1. A prospective client selects a practice area and consultation.
+2. They review the attorney’s profile and choose an available time.
+3. They enter the information your firm requests.
+4. They pay through Stripe’s embedded payment form on your firm’s website.
+5. Once payment is confirmed, the booking and inquiry appear in your KrabiClaw dashboard inbox.
 
-Stripe's published standard pricing for domestic cards is **“2.9% + 30¢ per successful transaction for domestic cards”**; Stripe lists an additional 1.5% for international cards and 1% when currency conversion is required. These are Stripe's published standard rates, checked October 26, 2026. Actual Stripe fees depend on the payment methods and transactions involved, so firms should verify the applicable Stripe pricing for their account.
+Your team can reply from the inbox. Replies are emailed to the client, and the client’s email response can thread back into the conversation.
 
-The distinction is important: the client payment is captured on the firm's connected Stripe account. KrabiClaw's 1.4% usage charge and the Stripe fees are billed separately to the firm's KrabiClaw subscription; they are not taken out of the client's payment before it reaches the connected account. The 1.4% usage charge remains billable after a refund or dispute.
+## Google Calendar Conflict Checking for Attorney Availability
 
-For firms that need clear handling of client funds, the approved product wording is: **“IOLTA & trust-accounting friendly: 100% of client funds deposit intact; fees are billed separately on your monthly subscription.”** Firms remain responsible for their own trust-accounting policies and professional obligations; they should confirm that their particular setup meets the rules that apply to them.
+You don’t want a prospective client booking a time when you’re already busy.
 
-Online consultation payments require the Business plan and a Stripe connected account in ready status. Basic (free) and Growth ($49 per month) can collect consultation requests but do not include online payments. Growth and Business include two business locations; additional locations are $49 per month each, billed at the end of the period.
+When you connect a personal Google Calendar and enable conflict checking, busy intervals block matching times from being offered for new bookings. Personal event titles and descriptions aren’t imported into KrabiClaw.
 
-## Is this a replacement for Clio Grow?
+On the Business plan, Google Calendar sync also projects bookings to your firm’s KrabiClaw calendar. This booking sync is separate from checking your personal calendar for conflicts.
 
-The useful question is which parts of the current setup a firm wants to consolidate. KrabiClaw combines a public website, practice-area pages, attorney profiles and availability, consultation booking, online payment collection and the inquiry inbox. That can reduce the number of separate products involved in a firm's website-to-consultation path.
+## KrabiClaw Pricing and Consultation Payment Fees
 
-It is not a claim that every legal practice-management function is interchangeable. Firms should evaluate their own requirements for matter management, document workflows, trust accounting, billing and compliance before replacing any existing system. This article addresses the specific workflow of getting a prospective client from the firm's website to a booked and paid consultation.
+Here’s how the plans compare for consultation intake and online payment collection.
 
-## Start with Business and connect Stripe
+| Plan | Monthly price | Consultation requests | Online consultation payments |
+|---|---:|---|---|
+| Basic | Free | Yes | No |
+| Growth | $49 | Yes | No |
+| Business | $149 | Yes | Yes, with a connected Stripe account in ready status |
 
-To offer paid consultation booking, choose KrabiClaw Business and connect the firm's Stripe account. Set up the practice areas and attorney profiles, configure each attorney's hours and time zone, and test the client journey on the firm's site before sharing it publicly.
+Growth and Business include two business locations. Additional locations cost $49 per month each, billed at the end of the period.
 
-Explore the [KrabiClaw pricing page](https://krabiclaw.com/pricing), read the [fees and invoices guide](https://krabiclaw.com/docs/fees-and-invoices), or visit [Cedar Legal](https://cedar-legal.krabiclaw.com) to see the showcase flow.
+### What does Business charge for payments?
+
+The Business plan has a payment usage fee of **1.4% of payment volume, plus Stripe fees**.
+
+Here’s how the charges work:
+
+- **KrabiClaw usage fee:** Metered and invoiced separately on your subscription at the end of each monthly period.
+- **Stripe processing fees:** Charged according to the payment methods and transactions involved.
+- **Client payments:** Captured on your connected Stripe account. KrabiClaw’s usage fee and Stripe fees are billed separately rather than deducted from the client’s payment.
+
+Stripe’s published standard pricing for domestic cards is 2.9% plus 30¢ per successful transaction. Additional charges may apply to international cards and currency conversion. Check [Stripe’s pricing](https://stripe.com/pricing) for the rates that apply to your account.
+
+KrabiClaw’s 1.4% usage charge remains billable after a refund or dispute.
+
+### What about IOLTA and trust accounting?
+
+Our payment setup is designed so that 100% of client funds deposit intact, with KrabiClaw’s fees billed separately on your monthly subscription. This is the basis of our IOLTA and trust-accounting-friendly approach.
+
+Your firm remains responsible for complying with the trust-accounting rules and professional obligations that apply to your practice. Confirm that your specific configuration meets those requirements before using it to handle client funds.
+
+For more information, see our [pricing page](https://krabiclaw.com/pricing) and [fees and invoices guide](https://krabiclaw.com/docs/fees-and-invoices).
+
+## Is KrabiClaw the Right Clio Grow Alternative for Your Firm?
+
+KrabiClaw Business focuses on your website-to-consultation workflow: practice-area pages, attorney profiles and availability, booking, online payments, and client inquiries.
+
+It isn’t a claim that every legal practice-management function is interchangeable. If your firm also relies on matter management, document workflows, specialized billing, or other legal software features, check those requirements separately before replacing your existing systems.
+
+The right comparison is between the capabilities your firm actually needs and what each product provides.
+
+## Try the Booking Experience on Cedar Legal
+
+Want to see the process in action?
+
+**Try Cedar Legal, our legal-services showcase.** Explore practice-area pages, browse attorney profiles, choose a consultation time, and follow the booking journey through to the payment step.
+
+[Explore the Cedar Legal demo](https://cedar-legal.krabiclaw.com).
+
+## Compare Plans for Your Practice
+
+If you’re looking to simplify how prospective clients book consultations with your firm, start with the details:
+
+- [Compare KrabiClaw plans and pricing](https://krabiclaw.com/pricing)
+- [Read the fees and invoices guide](https://krabiclaw.com/docs/fees-and-invoices)
+- [Try the Cedar Legal demo](https://cedar-legal.krabiclaw.com)
 
 ---
 
-## Visible FAQ
+## Frequently Asked Questions
 
-### Are fees taken out of the client's consultation payment?
+### Is KrabiClaw Business suitable for solo lawyers?
 
-No. The client's payment is captured on the firm's connected Stripe account. KrabiClaw's 1.4% fee and Stripe fees are billed separately on the firm's KrabiClaw subscription at the end of each monthly period.
+It can suit solo lawyers and small firms that want to manage their website, consultation scheduling, online payments, and client inquiries in one workflow. Suitability depends on the other legal and operational features your practice needs.
 
-### Can a client pay for a consultation when booking?
+### Can clients pay when they book a consultation?
 
-Yes. Online consultation payments require KrabiClaw Business and a ready connected Stripe account. Basic and Growth can collect consultation requests without online payment.
+Yes. Online consultation payments require the Business plan and a connected Stripe account in ready status. Basic and Growth support consultation requests but don’t include online consultation payments.
 
-### Does the attorney's personal calendar block unavailable times?
+### Are KrabiClaw fees deducted from client payments?
 
-When the attorney connects Google Calendar and enables conflict checking, busy intervals from the primary calendar block matching booking times. KrabiClaw does not import personal event titles or descriptions.
+No. Payments are captured on your connected Stripe account. KrabiClaw’s 1.4% usage fee and Stripe fees are billed separately on your subscription.
 
-### Is the Cedar Legal payment real?
+### Can my personal calendar block unavailable booking times?
 
-No. Cedar Legal is a showcase organization configured for Stripe test mode. Its test card flow demonstrates the booking process without charging a real card.
+Yes. When you connect Google Calendar and enable conflict checking, busy intervals from your primary calendar block matching booking times. Personal event titles and descriptions aren’t imported into KrabiClaw.
+
+### Does KrabiClaw replace every legal practice-management tool?
+
+Not necessarily. Evaluate your needs for matter management, document workflows, specialized billing, and other legal software features before replacing existing systems.
