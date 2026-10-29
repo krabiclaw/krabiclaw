@@ -782,10 +782,14 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
  * address, with the same ledger entry and delivery receipt as a reply. It has
  * no member actor; the key makes a repeated run find its first attempt.
  */
-export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: ReplyOutcome; entryId: string | null }> {
+/**
+ * A reply nobody is sending right now: an automatic message (no author), or a
+ * member's send-later message, sent as that member's own reply.
+ */
+export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; actorUserId?: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: ReplyOutcome; entryId: string | null }> {
   const context = await loadThreadContext(db, input.threadId, input.organizationId)
   if ('ok' in context) return { outcome: context, entryId: null }
-  const outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: null })
+  const outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: input.actorUserId ?? null })
   const entry = await findEntryByDedupeKey(db, operationDedupeKey(input))
   return { outcome, entryId: entry?.id ?? null }
 }
