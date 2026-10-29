@@ -43,8 +43,8 @@ async function sendDue(db: D1Database, env: ApiRecord): Promise<{ sent: number; 
        WHERE r.kind IN ('reservation', 'booking', 'stay') AND record.status = 'confirmed' AND record.no_show_at IS NULL
          AND datetime(record.ends_at) <= datetime('now', '-${REVIEW_REQUEST_DELAY_HOURS} hours')
          AND datetime(record.ends_at) > datetime('now', '-${REVIEW_REQUEST_TTL_DAYS + 2} days')
-         AND json_extract(r.payload_json, '$.review.submitted_at') IS NULL AND r.review_id IS NULL
-         AND json_extract(r.payload_json, '$.review.request_sent_at') IS NULL
+         AND r.review_id IS NULL
+         AND NOT EXISTS (SELECT 1 FROM review_requests rr WHERE rr.booking_type = r.kind AND rr.booking_id = r.id AND rr.first_sent_at IS NOT NULL)
          AND r.user_id IS NOT NULL
          AND ${wantsReviewRequests.sql}
        ORDER BY booking_type, r.id
