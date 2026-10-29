@@ -30,6 +30,7 @@ const stayProperties = {
   guest_email: nullableText, guest_phone: nullableText, user_id: nullableText, total_minor: { type: 'integer' }, currency: text, notes: nullableText,
   provider: nullableText, external_booking_id: nullableText, channel_booking_id: nullableText, request_id: { ...nullableText, description: 'The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.' }, cancelled_at: nullableText, cancellation_reason: nullableText,
   cancellation_policy: { type: ['string', 'null'], enum: [...STAY_BOOKED_POLICIES, null], description: 'The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.' },
+  no_show_at: { ...nullableText, description: 'When the host recorded that the guest never arrived; null otherwise.' },
   version: { type: 'integer' }, created_at: text, updated_at: text,
 }
 const channelPush = { ...CHANNEL_PUSH_SCHEMA, description: "What the home's connected channel took from this change: null when no channel push is needed; pushed when delivery completed; pending, with the reason, while it waits out Channex's rate limit or an unconfirmed attempt it sends again. A refused channel update returns a committed error." }

@@ -50,7 +50,7 @@ import {
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, buildBuyerRequestActivityUrl, dashboardOrigin, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
-import { reviewEditorPath } from '~/server/utils/dashboard-links'
+import { insightsPath, reviewEditorPath } from '~/server/utils/dashboard-links'
 import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
@@ -166,22 +166,30 @@ interface ReviewNotificationInput extends OrganizationContext {
   authorName: string
   rating: number
   content?: string | null
+  hasPrivateFeedback?: boolean
+  /**
+   * The conversation of the visit an invited guest reviewed. Its responsible
+   * members hear about the review beside the owners and admins, and read it
+   * in Insights; a review with no visit goes to its moderation record.
+   */
+  visitRequestId?: string
 }
 
 interface ReviewRequestNotificationInput extends OrganizationContext {
   locationId?: string | null
   requestId: string
-  bookingType: 'reservation' | 'booking'
+  bookingType: 'reservation' | 'booking' | 'stay'
   bookingId: string
   guestName: string
   email: string
   locationName?: string | null
-  bookingPhrase: string
   visitAt: string
   partySize: string
   reviewUrl: string
   /** Whose review_requests preference governs this email and its unsubscribe link. */
   userId: string
+  /** The invitation's entry in the visit's conversation, which this email is the receipt of. */
+  delivery: { guestThreadId: string; sourceEntryId: string; eventKey: string }
 }
 
 interface EmailTemplate extends RenderedNotificationEmail {
@@ -288,13 +296,14 @@ async function buildOwnerInboxUrl(
 async function buildOwnerReviewsUrl(
   env: NotificationEnv,
   db: DbClient,
-  opts: { organizationId: string; locationId?: string | null; reviewId: string }
+  opts: { organizationId: string; locationId?: string | null; reviewId: string; visit: boolean }
 ): Promise<string | null> {
   const slugs = await resolveDashboardSlugs(env, db, opts)
   if (!slugs) return null
 
-  // The review's own level, beside the Reviews tab it is a row of.
-  return `${platformOrigin(env)}${reviewEditorPath(slugs.orgSlug, opts.reviewId, opts.locationId)}`
+  // A visit's review is read in Insights, where its responsible members may
+  // read it too; any other review opens its own level beside the Reviews tab.
+  return `${platformOrigin(env)}${opts.visit ? insightsPath(slugs.orgSlug, { tab: 'reviews', review: opts.reviewId }) : reviewEditorPath(slugs.orgSlug, opts.reviewId, opts.locationId)}`
 }
 
 /**
@@ -723,6 +732,8 @@ export async function notifyOwner(
     notification?: { message: string; severity: NotificationSeverity }
     /** KrabiClaw operator addresses copied on operational mail: routing, not a person's preference, so no opt-out link. */
     operatorEmails?: string[]
+    /** A conversation whose responsible members are recipients, without the event being a fact on it. */
+    responsibleRequestId?: string
   }
 ) {
   const threadContext = opts.notificationSource
@@ -756,7 +767,7 @@ export async function notifyOwner(
     emailPurpose: opts.message.emailPurpose,
     assignedMemberId: assigned?.assigned_member_id ?? null,
     memberIds: opts.memberIds ?? [],
-    requestId: threadContext?.guestThreadId ?? undefined,
+    requestId: threadContext?.guestThreadId ?? opts.responsibleRequestId,
   })
 
   // The owner reads mail sent for their business, framed by its own mark.
@@ -1185,12 +1196,14 @@ export async function notifyReviewReceived(
     organizationId: opts.organizationId,
     locationId: opts.locationId,
     reviewId: opts.reviewId,
+    visit: opts.visitRequestId !== undefined,
   })
 
   const ownerMessage = reviewReceivedMessage({
     authorName: opts.authorName,
     rating: opts.rating,
     content: opts.content ?? '',
+    hasPrivateFeedback: opts.hasPrivateFeedback,
     organizationName: restaurant,
     reviewsUrl,
   })
@@ -1212,6 +1225,7 @@ export async function notifyReviewReceived(
     },
     message: ownerMessage,
     whatsappTemplate: 'new_review',
+    responsibleRequestId: opts.visitRequestId,
   })
 }
 
@@ -1239,14 +1253,15 @@ export async function notifyReviewRequest(
   await sendEmailNotification(env, db, {
     ...opts,
     to: opts.email,
+    replyTo: await buildReplyToAddress(env, opts.bookingType, opts.bookingId),
     template: 'booking_thank_you_review_request',
-    title: `Review request for ${opts.bookingPhrase}`,
+    title: `How was your visit to ${restaurant}?`,
+    delivery: threadDelivery(opts.delivery, 'status_update', 'email', 'booking_thank_you_review_request', opts.email, opts.delivery.eventKey),
     payload: {
       request_id: opts.requestId,
       booking_type: opts.bookingType,
       booking_id: opts.bookingId,
       guest_name: opts.guestName,
-      booking_phrase: opts.bookingPhrase,
       visit_at: opts.visitAt,
       party_size: opts.partySize,
       review_url: opts.reviewUrl,

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6f430bae3049d6c323b3ddf36631dc980dfa80b86aebd0e6cbb97a8d60698f8b",
-  "documentationFingerprint": "sha256:c9c75abaa7b483c96002a9c129d41d9719b6eea6710d8138cc5ca709f71a53cc",
+  "fingerprint": "sha256:4c67e5ae58159a164f5b02026fada5fd347bb92567bbc9933948a5e5014439e4",
+  "documentationFingerprint": "sha256:53d13d2f3d4e7628cb6060773ebc69a9c8e49b4a86c7c3e686ca2acc1cb043d0",
   "tools": [
     {
       "name": "add_organization_language",
@@ -62633,6 +62633,13 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "no_show_at": {
+                    "description": "When the host recorded that the guest never arrived; null otherwise.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "notes": {
                     "type": [
                       "string",
@@ -62865,6 +62872,7 @@
                   "cancelled_at",
                   "cancellation_reason",
                   "cancellation_policy",
+                  "no_show_at",
                   "version",
                   "created_at",
                   "updated_at",
@@ -62918,6 +62926,13 @@
                     "minLength": 1,
                     "type": "string"
                   },
+                  "no_show_at": {
+                    "description": "When the host recorded that the guest never arrived; null otherwise.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "product_id": {
                     "minLength": 1,
                     "type": "string"
@@ -62947,7 +62962,8 @@
                   "adults",
                   "children",
                   "infants",
-                  "guest_name"
+                  "guest_name",
+                  "no_show_at"
                 ],
                 "type": "object"
               }
@@ -63432,6 +63448,13 @@
                       "minLength": 1,
                       "type": "string"
                     },
+                    "no_show_at": {
+                      "description": "When the host recorded that the guest never arrived; null otherwise.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "product_id": {
                       "minLength": 1,
                       "type": "string"
@@ -63461,7 +63484,8 @@
                     "adults",
                     "children",
                     "infants",
-                    "guest_name"
+                    "guest_name",
+                    "no_show_at"
                   ],
                   "type": "object"
                 }
@@ -65763,6 +65787,25 @@
                     "null"
                   ]
                 },
+                "category_ratings": {
+                  "description": "The guest's optional 1-5 scores for the visit's fixed questions; a skipped question has no entry.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "type": "string"
+                      },
+                      "rating": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "rating"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "collection_method": {
                   "type": [
                     "string",
@@ -65803,6 +65846,13 @@
                   ]
                 },
                 "owner_reply": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "private_feedback": {
+                  "description": "What the guest told the business privately. Never published.",
                   "type": [
                     "string",
                     "null"
@@ -66864,6 +66914,25 @@
                     "null"
                   ]
                 },
+                "category_ratings": {
+                  "description": "The guest's optional 1-5 scores for the visit's fixed questions; a skipped question has no entry.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "type": "string"
+                      },
+                      "rating": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "rating"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "collection_method": {
                   "type": [
                     "string",
@@ -66904,6 +66973,13 @@
                   ]
                 },
                 "owner_reply": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "private_feedback": {
+                  "description": "What the guest told the business privately. Never published.",
                   "type": [
                     "string",
                     "null"
@@ -69194,6 +69270,13 @@
                       "minLength": 1,
                       "type": "string"
                     },
+                    "no_show_at": {
+                      "description": "When the host recorded that the guest never arrived; null otherwise.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "product_id": {
                       "minLength": 1,
                       "type": "string"
@@ -69223,7 +69306,8 @@
                     "adults",
                     "children",
                     "infants",
-                    "guest_name"
+                    "guest_name",
+                    "no_show_at"
                   ],
                   "type": "object"
                 }
@@ -98909,6 +98993,13 @@
                       "minLength": 1,
                       "type": "string"
                     },
+                    "no_show_at": {
+                      "description": "When the host recorded that the guest never arrived; null otherwise.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "product_id": {
                       "minLength": 1,
                       "type": "string"
@@ -98938,7 +99029,8 @@
                     "adults",
                     "children",
                     "infants",
-                    "guest_name"
+                    "guest_name",
+                    "no_show_at"
                   ],
                   "type": "object"
                 }
@@ -123259,7 +123351,7 @@
         "get_team_conversation": "sha256:fb0eae689fdfa8508658a4477f7fec885ba4b044d464772e4d6182d918c11532",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
-        "list_location_reviews": "sha256:346fe43967ce2b4471bc28305e8c70fd33357d1b53a4b1dcb10bfecf9551474d",
+        "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
         "list_team_conversations": "sha256:7d0d80ed5a7b2c7b2d46ce8cac3aadddf63040756dafc586723b6bf623914283",

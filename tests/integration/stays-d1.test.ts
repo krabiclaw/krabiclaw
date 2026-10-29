@@ -1212,7 +1212,7 @@ test('a member reads a stay at a home they look after as its turnover on every r
     await recordStayPayment(db, env, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'turnover-pay' })
     assert(stay.request_id)
     const turnover = { id: stay.id, product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', status: 'confirmed', check_in_date: '2026-11-01', check_out_date: '2026-11-03',
-      arrival_time: '15:30', adults: 2, children: 1, infants: 1, guest_name: 'Ana' }
+      arrival_time: '15:30', adults: 2, children: 1, infants: 1, guest_name: 'Ana', no_show_at: null }
     const window = { from: '2026-11-01', to: '2026-11-04' }
 
     assert.deepEqual(await getStay(db, cleaner, stay.id), turnover)

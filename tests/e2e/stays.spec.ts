@@ -153,7 +153,7 @@ test('a responsible home team reads its stays as turnovers on every surface unti
     expect(stay.request_id).toBeTruthy()
     // Exactly the Turnovers fields, with the values the host saved.
     const turnover = { id: stay.id, product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, check_in_date: localDay(0), check_out_date: localDay(2),
-      arrival_time: '15:30', adults: 2, children: 1, infants: 0, guest_name: guestName }
+      arrival_time: '15:30', adults: 2, children: 1, infants: 0, guest_name: guestName, no_show_at: null }
     const leaks = (body: unknown) => [surname, guestEmail, notes, stay.request_id!].filter(secret => JSON.stringify(body).includes(secret))
     const stayPath = api(`stays/${stay.id}`)
     const memberStay = await memberContext.request.get(stayPath)

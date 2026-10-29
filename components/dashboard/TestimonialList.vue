@@ -15,7 +15,7 @@
         <UBadge v-if="item.row.collection_method !== null && item.row.collection_method !== 'migration'" color="neutral" variant="subtle">{{ COLLECTION_METHOD_LABELS[item.row.collection_method] }}</UBadge>
       </div>
       <p v-if="item.row.title" class="mt-2 text-sm font-semibold text-highlighted">{{ item.row.title }}</p>
-      <p class="mt-1 line-clamp-2 text-sm text-muted">{{ item.row.content }}</p>
+      <p class="mt-1 line-clamp-2 text-sm text-muted">{{ item.row.content ?? (item.row.private_feedback ? 'Private feedback' : 'Rating only') }}</p>
     </template>
   </DashboardListEditor>
 </template>
@@ -37,7 +37,7 @@ const locationScope = useLocationScope()
 const route = useRoute()
 const router = useRouter()
 
-const STATUS_COLORS: Record<TestimonialStatus, 'warning' | 'success' | 'neutral'> = { pending: 'warning', approved: 'success', rejected: 'neutral' }
+const STATUS_COLORS: Record<TestimonialStatus, 'warning' | 'success' | 'neutral'> = { pending: 'warning', approved: 'success', rejected: 'neutral', private: 'neutral' }
 
 const dashboardApi = useDashboardApi()
 const level = useRouteLevel()

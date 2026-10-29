@@ -168,6 +168,8 @@
           <UButton type="submit" label="Record payment" :loading="busy === 'record'" :disabled="!draft.amount.trim() || !draft.paid_on" />
         </UForm>
         <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
+        <p v-if="!personalScope && detail.no_show_at" class="mt-6 text-sm text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(detail.no_show_at.slice(0, 10), 'en') }}. No review invitation is sent.</p>
+        <UButton v-else-if="canMarkNoShow" class="mt-4 ms-2" color="neutral" variant="soft" label="Mark as a no-show" :loading="busy === 'no_show'" @click="markNoShow" />
       </template>
       </UCard>
       <UCard v-if="personalScope" as="button" type="button" variant="record" class="w-full text-left" @click="manageOpen = true">
@@ -242,6 +244,7 @@ const { t } = useI18n()
 const route = useRoute()
 const realtime = useDashboardInvalidations()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
+const dashboardOrganization = useDashboardOrganization()
 const manageOpen = ref(false)
 
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
@@ -397,6 +400,35 @@ async function deletePayment(paymentId: string) {
 }
 
 // A stay paid on the site returns the guest's whole payment, as Airbnb's host cancellation does; the host approves that refund next.
+// A stay booked here that has begun, before its guest reviewed it. The thread
+// operation is the writer; it refuses a stay that no longer qualifies.
+const canMarkNoShow = computed(() => !props.personalScope && manage.value && detail.value?.channel === 'direct' && detail.value.status === 'confirmed'
+  && !detail.value.no_show_at && Boolean(detail.value.request_id) && detail.value.check_in_date <= localDateAt(new Date(), detail.value.timezone))
+
+async function markNoShow() {
+  const value = detail.value
+  if (!value?.request_id) return
+  if (!await confirmDialog.open({
+    title: 'Mark as a no-show',
+    description: `${guest.value.state === 'named' ? guest.value.name : 'The guest'} won’t be asked to review this stay, and a review link already sent stops working. The stay itself stays as it is. This cannot be undone.`,
+    confirmLabel: 'Mark as a no-show', cancelLabel: 'Keep as is',
+  })) return
+  busy.value = 'no_show'
+  actionError.value = null
+  try {
+    await dashboardApi(`/api/dashboard/organizations/${encodeURIComponent(dashboardOrganization.organizationId.value ?? '')}/guest-threads/${encodeURIComponent(value.request_id)}/operations/no_show`, {
+      method: 'POST',
+      body: { idempotencyKey: `no-show:${value.id}` },
+      validate: (response: unknown): response is { thread: Record<string, unknown> } => isRecord(response) && isRecord(response.thread),
+    })
+    await refresh()
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, 'The stay could not be marked as a no-show')
+  } finally {
+    busy.value = null
+  }
+}
+
 async function cancel() {
   const value = detail.value
   if (!value) return

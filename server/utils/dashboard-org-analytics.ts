@@ -12,18 +12,17 @@ import { organizationAnalyticsSchema, type OrganizationAnalyticsReport } from '~
 type OrganizationReviewsSummary = OrganizationAnalyticsReport['reviews']
 
 /**
- * Approved reviews across the sites in scope.
- *
- * Only an overall rating exists on a review, so this reports the average, the
- * per-star distribution and the most recent few. There are no per-category
- * scores to break down; the schema has one `rating` column.
+ * The published reviews: what the website shows, imported Google reviews
+ * included and named by their source. This is the overall rating's average,
+ * its per-star distribution and the most recent few; the category scores
+ * invited guests give are internal feedback (review-feedback.ts).
  */
 async function loadReviewsSummary(db: DbClient, organizationIds: readonly string[]): Promise<OrganizationReviewsSummary> {
   if (!organizationIds.length) return { total: 0, average: null, distribution: [], recent: [] }
   const placeholders = organizationIds.map(() => '?').join(', ')
-  const rows = await queryAll<{ id: string; author_name: string | null; rating: number; title: string | null; content: string | null; created_at: string }>(
+  const rows = await queryAll<{ id: string; author_name: string | null; rating: number; title: string | null; content: string | null; source: string; created_at: string }>(
     db,
-    `SELECT id, author_name, rating, title, content, created_at
+    `SELECT id, author_name, rating, title, content, source, created_at
        FROM reviews
       WHERE organization_id IN (${placeholders}) AND status = 'approved'
       ORDER BY created_at DESC`,
@@ -50,6 +49,7 @@ async function loadReviewsSummary(db: DbClient, organizationIds: readonly string
       rating: row.rating,
       title: row.title,
       content: row.content,
+      source: row.source,
       createdAt: row.created_at,
       }
     }),
