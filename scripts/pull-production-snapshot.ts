@@ -35,7 +35,7 @@
  * names every row it did hold that has changed or gone since.
  */
 import { execFileSync } from 'node:child_process'
-import Database from 'better-sqlite3'
+import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -174,29 +174,31 @@ async function readLiveDatabase(databaseId: string, path: string): Promise<void>
       body: JSON.stringify({ sql, params }),
     })
     if (!response.ok) throw new Error(`D1 read failed: HTTP ${response.status}: ${await response.text()}`)
-    const body = await response.json() as { success?: boolean; result?: Array<{ success?: boolean; results?: { columns: string[]; rows: unknown[][] } }> }
+    const body = await response.json() as { success?: boolean; result?: Array<{ success?: boolean; results?: { columns: string[]; rows: SQLInputValue[][] } }> }
     const results = body.result?.[0]?.results
     if (body.success !== true || body.result?.[0]?.success !== true || !results) throw new Error(`D1 read did not return results: ${sql}`)
     return results
   }
   const schema = (await raw("SELECT type, name, sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY rowid")).rows as Array<[string, string, string]>
   writeFileSync(path, '', { flag: 'wx', mode: 0o600 })
-  const copy = new Database(path)
+  const copy = new DatabaseSync(path)
   try {
     // Tables load one at a time, children before their parents.
-    copy.pragma('foreign_keys = OFF')
+    copy.exec('PRAGMA foreign_keys = OFF')
     const tables = schema.filter(([type]) => type === 'table')
     for (const [, , sql] of tables) copy.exec(sql)
     for (const [, table] of tables) {
       // Generated columns are computed again by the copy; only stored ones are read.
-      const columns = (copy.prepare(`PRAGMA table_xinfo(${identifier(table)})`).all() as Array<{ name: string; hidden: number }>)
+      const columns = (copy.prepare(`PRAGMA table_xinfo(${identifier(table)})`).all() as unknown as Array<{ name: string; hidden: number }>)
         .filter(column => column.hidden === 0).map(column => identifier(column.name))
       const insert = copy.prepare(`INSERT INTO ${identifier(table)} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
       let after = Number.MIN_SAFE_INTEGER
       for (;;) {
         const page = await raw(`SELECT rowid, ${columns.join(', ')} FROM ${identifier(table)} WHERE rowid > ? ORDER BY rowid LIMIT 500`, [after])
         if (page.rows.length === 0) break
-        copy.transaction(() => { for (const row of page.rows) insert.run(row.slice(1)) })()
+        copy.exec('BEGIN')
+        for (const row of page.rows) insert.run(...row.slice(1))
+        copy.exec('COMMIT')
         after = Number(page.rows.at(-1)![0])
       }
     }
