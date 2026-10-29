@@ -16,8 +16,10 @@ export async function seedLocation(tool: Tool, tenant: SeedTenant, key: string, 
 }) {
   const { location } = await tool<{ location: Location }>('create_location', { title: input.title, timezone: tenant.timezone, idempotency_key: `seed-${tenant.key}-${key}` })
   await tool('update_location', { location_id: location.id, status: 'active', email: input.email, phone: input.phone, address: input.address, opening_hours: input.hours })
-  tenant.locations[key] = { id: location.id, slug: location.slug, title: location.title, timezone: tenant.timezone }
-  return location
+  const { location: saved } = await tool<{ location: Location }>('get_location', { location_id: location.id })
+  if (!saved.slug) throw new Error(`Location ${input.title} has no slug`)
+  tenant.locations[key] = { id: saved.id, slug: saved.slug, title: saved.title, timezone: tenant.timezone }
+  return saved
 }
 
 export async function seedMedia(owner: SeedClient, tenant: SeedTenant, key: string, file: string, altText: string) {
