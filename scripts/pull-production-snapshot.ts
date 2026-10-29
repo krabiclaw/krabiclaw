@@ -12,7 +12,7 @@
  *
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --local
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --staging
- *   node --experimental-strip-types scripts/pull-production-snapshot.ts --out <target.sqlite> [--source <database>]
+ *   node --experimental-strip-types scripts/pull-production-snapshot.ts --out <target.sqlite> [--source <database>] [--export <source.sql>]
  *   node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source <replaced database> [--delta-from <initial.sqlite>]
  *
  * The default source is the deployed production Worker's `DB` binding unless
@@ -24,7 +24,9 @@
  *
  * `--out` alone is the preflight: the transformed target, its data-only payload
  * and its manifest are kept at that path and nothing remote is written. Beside a
- * load, `--out` keeps the loaded target there.
+ * load, `--out` keeps the loaded target there. `--export` keeps D1's native
+ * export, which a later `--source-file` (or LOCAL_DATABASE_SOURCE_FILE) loads
+ * without exporting again: D1 runs one export per database at a time.
  * `--delta-from <initial target.sqlite>` writes only the rows the initial
  * transfer did not hold, for the final copy after the binding is repointed, and
  * names every row it did hold that has changed or gone since.
@@ -51,6 +53,7 @@ const { values } = parseArgs({
     staging: { type: 'boolean', default: false },
     production: { type: 'boolean', default: false },
     out: { type: 'string' },
+    export: { type: 'string' },
     source: { type: 'string', default: 'DB' },
     'source-file': { type: 'string' },
     'delta-from': { type: 'string' },
@@ -68,6 +71,7 @@ try { process.loadEnvFile() } catch (error) {
 if (target === 'local' && !values['source-file']) values['source-file'] = process.env.LOCAL_DATABASE_SOURCE_FILE
 if (values['source-file'] && target !== 'local' && target !== 'out') throw new Error('--source-file is for a local migration or read-only preflight.')
 if (values['source-file'] && values.source !== 'DB') throw new Error('Choose --source or --source-file, not both.')
+if (values['source-file'] && values.export) throw new Error('--export keeps a new export; --source-file has none to keep.')
 const omitJwks = target === 'local' || (target === 'staging' && values.source === 'DB')
 // Production is only ever loaded as a schema replacement: the top-level `DB`
 // binding already names the replacement, and the database it replaces has to
@@ -156,7 +160,7 @@ execFileSync(process.execPath, ['scripts/check-schema-drift.mjs'], { cwd: proces
 
 const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-snapshot-'))
 try {
-  const dumpPath = join(directory, 'source.sql')
+  const dumpPath = values.export ? resolve(values.export) : join(directory, 'source.sql')
   if (!values['source-file']) {
     // D1 streams a consistent native export instead of materializing the whole
     // database as one query response. The transfer below still owns validation,

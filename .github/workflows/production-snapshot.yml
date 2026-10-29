@@ -1,0 +1,53 @@
+name: Production snapshot
+
+# The production data every pull request's E2E loads. D1 refuses the source
+# database's queries while an export runs, which tenant sites served as 500s
+# when each pull request exported live production, so it is exported here
+# every six hours and nowhere else. The repository is public: the export is
+# kept encrypted, for a day.
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    name: Export production
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SNAPSHOT_KEY: ${{ secrets.BETTER_AUTH_SECRET }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24.18.1"
+      - run: corepack enable
+      - name: Restore Yarn package cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+        with:
+          path: ~/.yarn/berry/cache
+          key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
+          restore-keys: yarn-${{ runner.os }}-
+      - run: corepack yarn install --immutable
+      # The preflight beside the export proves this snapshot transfers before
+      # any pull request loads it.
+      - run: node --experimental-strip-types scripts/pull-production-snapshot.ts --out "$RUNNER_TEMP/target.sqlite" --export "$RUNNER_TEMP/source.sql"
+      - run: openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SNAPSHOT_KEY -in "$RUNNER_TEMP/source.sql" -out "$RUNNER_TEMP/source.sql.enc"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: production-snapshot
+          path: ${{ runner.temp }}/source.sql.enc
+          retention-days: 1
+          if-no-files-found: error
