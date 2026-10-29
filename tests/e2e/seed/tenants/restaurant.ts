@@ -1,6 +1,6 @@
 import type { CreateTenant } from '../seed.ts'
 import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
-import { everyDay, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
+import { everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
 
 // Ember & Slice is KrabiClaw's fictional pizzeria: two New York locations with
 // table reservations, a menu and a kitchen blog.
@@ -19,6 +19,12 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     for (const place of [brooklyn, williamsburg]) {
       await tool('update_reservation_policy', { location_id: place.id, expected_updated_at: null, duration_minutes: 90, slot_capacity: 40, cancellation_policy: 'flexible' })
     }
+    // A party of four booked by phone for dinner a week from today in Brooklyn.
+    const nextWeek = new Intl.DateTimeFormat('en-CA', { timeZone: tenant.timezone }).format(Date.now() + 7 * 86_400_000)
+    await tool('create_table_reservation', {
+      location_id: brooklyn.id, date: nextWeek, time: '19:00', party_size: 4, guest_name: 'Maya Chen', guest_email: 'maya.chen@playwright.example',
+      guest_phone: '+12025550188', idempotency_key: 'seed-restaurant-reservation', source: 'phone', guest_acknowledgement: false,
+    })
 
     const margherita = await seedMedia(owner, tenant, 'margherita', 'dish.avif', 'Margherita pizza with basil')
     const burrata = await seedMedia(owner, tenant, 'burrata', 'venue.avif', 'Burrata with tomatoes')
@@ -59,6 +65,21 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     await collection('starters', 'Starters', starters)
     await collection('brooklyn-specials', 'Brooklyn Specials', [special], brooklyn.id)
 
+    // Besides its menu, Brooklyn teaches a pizza class on Saturdays at opening, hosted by its chef.
+    const chefMemberId = tenant.memberIds['user-e2e-demo-owner']
+    if (!chefMemberId) throw new Error('The Ember & Slice chef is not a member')
+    await publishProfile(tool, chefMemberId, 'Rosa, head chef', 'Rosa has run the Brooklyn wood oven since it was lit.')
+    const { product: pizzaClass } = await tool<{ product: { id: string; slug: string; name: string; kind: string } }>('create_product', {
+      kind: 'experience', name: 'Pizza-Making Class', active: true, idempotency_key: 'seed-pizza-class',
+      description: 'Stretch, top and fire your own pie in our wood oven with the Brooklyn kitchen team.',
+      variants: [{ name: 'One guest', prices: [{ unit_amount: 6500, currency: 'USD' }] }],
+      booking: { location_id: brooklyn.id, duration_minutes: 120, default_capacity: 12, confirmation_mode: 'instant', scheduling_mode: 'legacy', assigned_member_id: chefMemberId, weekly_slots: [{ weekday: 6, start_time: '11:00' }] },
+    })
+    await tool('set_media', { placement: { owner_type: 'product', owner_id: pizzaClass.id, slot: 'image' }, asset_id: diningRoom.id })
+    await tool('set_product_location', { product_id: pizzaClass.id, location_id: brooklyn.id, active: true, published: true })
+    await tool('set_product_publication', { product_id: pizzaClass.id, published: true })
+    recordProduct(tenant, 'pizza-class', pizzaClass)
+
     // The home page's hero sends guests to the menu.
     const { pages } = await tool<{ pages: Array<{ id: string; page_id: string; path: string }> }>('list_site_pages', { locale: 'en' })
     const home = pages.find(page => page.path === '/')
@@ -91,6 +112,8 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
 
     const { category } = await tool<{ category: { id: string; name: string } }>('create_article_category', { collection: 'blog', name: 'Kitchen', description: 'Notes from the kitchen' })
     tenant.categories.kitchen = { id: category.id, name: category.name }
+    const { category: specials } = await tool<{ category: { id: string; name: string } }>('create_article_category', { collection: 'blog', name: 'Specials', description: 'This week\'s specials' })
+    tenant.categories.specials = { id: specials.id, name: specials.name }
     return tenant
   } finally { await owner.dispose() }
 }

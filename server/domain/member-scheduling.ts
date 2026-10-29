@@ -7,6 +7,7 @@ import { BUSY_FRESHNESS_MS, MEMBER_BUSY_SCOPES, MEMBER_NAME_SQL, type WorkingHou
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getOrganizationTeamsData } from '~/server/utils/dashboard-members'
+import { getR2KeyFromPublicUrl } from '~/server/utils/cloudflare-r2'
 
 export interface SchedulingActor { env: CloudflareEnv; userId: string; organizationId: string }
 export interface MemberScheduling {
@@ -108,7 +109,7 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
  const changedTimeOff=JSON.stringify(timeOff)!==JSON.stringify(currentTimeOff)
  const windows=changedHours?workingWindows(timezone!,weekly!):null
  for(const [key,max] of [['public_name',100],['public_bio',2000],['public_photo_url',2048]] as const) if(input[key]!==undefined && input[key]!==null && (typeof input[key]!=='string' || input[key]!.length>max)) throw new HTTPError({statusCode:400,message:`Invalid ${key}`})
- if(input.public_photo_url) { if(!URL.canParse(input.public_photo_url))throw new HTTPError({statusCode:400,message:'Public photo must be a valid HTTPS URL'});const url=new URL(input.public_photo_url); if(url.protocol!=='https:' || url.username || url.password) throw new HTTPError({statusCode:400,message:'Public photo must use HTTPS'}) }
+ if(input.public_photo_url) { if(!URL.canParse(input.public_photo_url))throw new HTTPError({statusCode:400,message:'Public photo must be a valid HTTPS URL'});const url=new URL(input.public_photo_url); if((url.protocol!=='https:' && getR2KeyFromPublicUrl(actor.env,input.public_photo_url)===null) || url.username || url.password) throw new HTTPError({statusCode:400,message:'Public photo must use HTTPS'}) }
  const changedProfile=['public_name','public_photo_url','public_bio'].some(key=>input[key as keyof typeof input]!==undefined && input[key as keyof typeof input]!==current?.[key as keyof typeof current])
  const approved=input.public_approved??(changedProfile?false:Boolean(current?.public_approved))
  const publicName=input.public_name===undefined?current?.public_name??null:input.public_name

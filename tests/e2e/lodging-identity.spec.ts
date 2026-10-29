@@ -2,7 +2,8 @@ import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import { expect, request as playwrightRequest, test, type WebSocket } from '@playwright/test'
 import sharp from 'sharp'
-import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
+import { E2E_PASSWORD, findE2eAuthFixture } from '../../config/development-auth-fixtures'
+import { seededTenant } from './seed/manifest'
 import { devLoginHeaders } from './test-env'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
@@ -26,8 +27,6 @@ const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')
 
 test.describe('lodging identity boundary', () => {
   const session = (baseURL: string | undefined) => {
-    const password = process.env.CANARY_LOGIN_PASSWORD
-    if (!password) throw new Error('CANARY_LOGIN_PASSWORD is not configured.')
     const call = (method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, init: { headers?: Record<string, string>; data?: unknown } = {}) => new Promise<{
       status: number
       headers: { get: (name: string) => string | null }
@@ -67,7 +66,7 @@ test.describe('lodging identity boundary', () => {
     const signInBearer = async (email: string) => {
       const signIn = await api.post('/api/auth/sign-in/email', {
         headers: devLoginHeaders() ?? {},
-        data: { email, password, rememberMe: false },
+        data: { email, password: E2E_PASSWORD, rememberMe: false },
       })
       expect(signIn.status, await signIn.text()).toBe(200)
       const token = signIn.headers.get('set-auth-token')
@@ -330,7 +329,7 @@ test.describe('lodging identity boundary', () => {
       expect(gone.status).toBe(404)
       expect(await gone.json()).toMatchObject({ data: { code: 'INVITE_LINK_NOT_FOUND', field: 'token' } })
       expect((await api.post(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}/accept`, { headers: inviteeBearer })).status).toBe(404)
-      expect((await api.post(`/api/organizations/org-demo/invite-links`, { headers: inviteeBearer, data: { role: 'member' } })).status).toBe(404)
+      expect((await api.post(`/api/organizations/${seededTenant('restaurant').organizationId}/invite-links`, { headers: inviteeBearer, data: { role: 'member' } })).status).toBe(404)
       const inviteeLeft = await api.post('/api/auth/organization/leave', { headers: inviteeBearer, data: { organizationId: organization.id } })
       expect(inviteeLeft.status, await inviteeLeft.text()).toBe(200)
       expect(await members()).toEqual([expect.objectContaining({ userId: fixture.id, role: 'owner' })])
