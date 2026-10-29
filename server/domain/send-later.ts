@@ -65,11 +65,11 @@ export async function createSendLaterMessage(db: DbClient, principal: MemberAcce
   return sendLaterMessage(await ownMessage(db, principal, id))
 }
 
-/** The author's messages, pending first, optionally for one conversation. */
-export async function listSendLaterMessages(db: DbClient, principal: MemberAccessPrincipal, threadId: string | null) {
+/** The author's messages still to send, then those that failed in the last week, optionally for one conversation. */
+export async function listSendLaterMessages(db: DbClient, principal: MemberAccessPrincipal, threadId: string | null, now = new Date().toISOString()) {
   const rows = await queryAll<SendLaterMessageRow>(db, `SELECT * FROM send_later_messages WHERE organization_id = ? AND user_id = ?
-    AND (? IS NULL OR request_id = ?) AND status IN ('pending', 'sending', 'failed', 'needs_review')
-    ORDER BY due_at, id LIMIT 200`, [principal.organizationId, principal.userId, threadId, threadId])
+    AND (? IS NULL OR request_id = ?) AND (status IN ('pending', 'sending') OR (status IN ('failed', 'needs_review') AND updated_at >= strftime('%Y-%m-%dT%H:%M:%fZ', ?, '-7 days')))
+    ORDER BY status NOT IN ('pending', 'sending'), due_at, id LIMIT 200`, [principal.organizationId, principal.userId, threadId, threadId, now])
   return rows.map(sendLaterMessage)
 }
 
@@ -129,12 +129,16 @@ async function sendOne(db: DbClient, env: SendEnv, row: SendLaterMessageRow, now
   const claim = await execute(db, `UPDATE send_later_messages SET status = 'sending', started_at = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND version = ? AND due_at <= ?`,
     [now, now, row.id, row.version, now])
   if (claim.meta.changes !== 1) return 'not_due'
-  const membership = await resolveMembership(env, { organizationId: row.organization_id, userId: row.user_id })
   try {
+    const membership = await resolveMembership(env, { organizationId: row.organization_id, userId: row.user_id })
     if (!membership) messagingError(403, 'SEND_LATER_AUTHOR_NOT_MEMBER', 'Its author is no longer a member of this workspace', 'userId')
     await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(membership, { env }), requestId: row.request_id })
   } catch (error) {
-    if (!(error instanceof HTTPError)) throw error
+    if (!(error instanceof HTTPError)) {
+      // Nothing was sent: the message goes back to pending for the next run, and this run fails.
+      await execute(db, `UPDATE send_later_messages SET status = 'pending', started_at = NULL, updated_at = ? WHERE id = ? AND status = 'sending'`, [new Date().toISOString(), row.id])
+      throw error
+    }
     await finish(db, row.id, { status: 'failed', reason: error.message, error_code: 'SEND_LATER_ACCESS_REVOKED', error_field: 'userId', entry_id: null, sent_at: null })
     return 'failed'
   }

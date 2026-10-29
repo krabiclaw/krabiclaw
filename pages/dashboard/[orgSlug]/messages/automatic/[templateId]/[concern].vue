@@ -1,5 +1,5 @@
 <template>
-  <DashboardLeafPanel :id="`saved-reply-${concern}`" :title="concern === 'content' ? 'Reply' : 'Automatic schedule'" :lead="concern === 'content' ? 'Save words you reuse, then insert them into a conversation before sending.' : 'Send this reply automatically for the homes you select, using each home’s time zone.'" :saving="editor.saving.value" :disabled="editor.disabled.value" :save-label="editor.saveLabel.value" :error="editor.error.value" @cancel="editor.revert" @save="editor.save">
+  <DashboardLeafPanel :id="`automatic-message-${concern}`" :title="concern === 'content' ? 'Message' : 'When it is sent'" :lead="concern === 'content' ? 'The words every guest at the selected homes receives, sent on its own at its scheduled time.' : 'Send this message automatically for the homes you select, using each home’s time zone.'" :saving="editor.saving.value" :disabled="editor.disabled.value" :save-label="editor.saveLabel.value" :error="editor.error.value" @cancel="editor.revert" @save="editor.save">
     <AutomaticMessageFields :concern="concern" />
   </DashboardLeafPanel>
 </template>

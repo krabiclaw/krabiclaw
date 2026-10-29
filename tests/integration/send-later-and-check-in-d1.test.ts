@@ -63,6 +63,14 @@ test('check-in instructions reach every confirmed stay, and send-later replies g
     await sendDueScheduledGuestMessages(db, env, minutes(2))
     assert.equal((await checkIn(ana.id))?.body, 'The lockbox code is 4821.')
 
+    // Removing the instructions cancels the plan; bringing them back plans it again.
+    await updateStayHome(env, db, manager, cabin.id, { check_in_instructions: null })
+    await sendDueScheduledGuestMessages(db, env, minutes(3))
+    assert.deepEqual([(await checkIn(ana.id))?.status, (await checkIn(ana.id))?.reason], ['cancelled', 'The home has no check-in instructions.'])
+    await updateStayHome(env, db, manager, cabin.id, { check_in_instructions: 'The lockbox code is 4821.' })
+    await sendDueScheduledGuestMessages(db, env, minutes(4))
+    assert.deepEqual([(await checkIn(ana.id))?.status, (await checkIn(ana.id))?.body], ['pending', 'The lockbox code is 4821.'])
+
     // Booked after that time, Bo is sent them at once: arriving today before
     // 16:00 in Denver, or tomorrow once today's 10:00 there has passed.
     const boArrives = new Date().getUTCHours() < 21 ? 0 : 1

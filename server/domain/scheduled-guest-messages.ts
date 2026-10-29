@@ -106,6 +106,11 @@ async function savePlan(db: DbClient, template: MessageTemplateRow, stay: Planni
 }
 
 export const CHECK_IN_MESSAGE_TITLE = 'Check-in instructions'
+// The reasons the planner itself cancels a check-in message. Only these come
+// back when the stay or instructions become eligible again; a manager's
+// cancellation stays cancelled.
+const CHECK_IN_NOT_CONFIRMED = 'The stay is not confirmed.'
+const CHECK_IN_NO_INSTRUCTIONS = 'The home has no check-in instructions.'
 
 /**
  * Every confirmed stay is sent its home's check-in instructions at 10:00 the day
@@ -117,7 +122,8 @@ export const CHECK_IN_MESSAGE_TITLE = 'Check-in instructions'
 async function planCheckInMessage(db: DbClient, stay: PlanningStay, now: string): Promise<void> {
   const existing = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE stay_id = ? AND template_id IS NULL AND template_title = ?',
     [stay.id, CHECK_IN_MESSAGE_TITLE])
-  if (existing && existing.status !== 'pending') return
+  const plannerCancelled = existing?.status === 'cancelled' && (existing.reason === CHECK_IN_NOT_CONFIRMED || existing.reason === CHECK_IN_NO_INSTRUCTIONS)
+  if (existing && existing.status !== 'pending' && !plannerCancelled) return
   const instructions = stay.check_in_instructions?.trim() ? stay.check_in_instructions : null
   const scope = `EXISTS (SELECT 1 FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
     JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
@@ -125,20 +131,20 @@ async function planCheckInMessage(db: DbClient, stay: PlanningStay, now: string)
   const guards = [stay.id, stay.organization_id, stay.version, stay.request_id, stay.timezone, stay.check_in_instructions]
   const arrival = localDateTimeToInstant(stay.check_in_date, stay.check_in_time, stay.timezone, 'earlier').toISOString()
   if (stay.status !== 'confirmed' || instructions === null || arrival <= now) {
-    if (existing) await execute(db, `UPDATE scheduled_guest_messages SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
+    if (existing?.status === 'pending') await execute(db, `UPDATE scheduled_guest_messages SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
       [arrival <= now && stay.status === 'confirmed' && instructions !== null ? 'skipped' : 'cancelled',
-        stay.status !== 'confirmed' ? 'The stay is not confirmed.' : instructions === null ? 'The home has no check-in instructions.' : 'Check-in had already passed.',
+        stay.status !== 'confirmed' ? CHECK_IN_NOT_CONFIRMED : instructions === null ? CHECK_IN_NO_INSTRUCTIONS : 'Check-in had already passed.',
         now, existing.id, existing.updated_at])
     return
   }
   const planned = guestMessageDueAt({ trigger: 'check_in', offsetDays: -1, localTime: '10:00', productIds: [] }, stay, stay.timezone)
-  const due = planned > now ? planned : existing?.due_at && existing.due_at <= now ? existing.due_at : now
-  if (existing && existing.body === instructions && existing.due_at === due && existing.stay_version === stay.version
+  const due = planned > now ? planned : existing?.status === 'pending' && existing.due_at && existing.due_at <= now ? existing.due_at : now
+  if (existing?.status === 'pending' && existing.body === instructions && existing.due_at === due && existing.stay_version === stay.version
     && existing.timezone === stay.timezone && existing.request_id === stay.request_id) return
   if (existing) {
-    await execute(db, `UPDATE scheduled_guest_messages SET request_id = ?, stay_version = ?, body = ?, due_at = ?, timezone = ?, updated_at = ?
-      WHERE id = ? AND status = 'pending' AND updated_at = ? AND ${scope}`,
-    [stay.request_id, stay.version, instructions, due, stay.timezone, now, existing.id, existing.updated_at, ...guards])
+    await execute(db, `UPDATE scheduled_guest_messages SET request_id = ?, stay_version = ?, body = ?, due_at = ?, timezone = ?, status = 'pending', reason = NULL, updated_at = ?
+      WHERE id = ? AND status = ? AND updated_at = ? AND ${scope}`,
+    [stay.request_id, stay.version, instructions, due, stay.timezone, now, existing.id, existing.status, existing.updated_at, ...guards])
   } else {
     await execute(db, `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, stay_id, request_id, template_id, template_title, template_version, stay_version,
       body, due_at, timezone, status, created_at, updated_at)
