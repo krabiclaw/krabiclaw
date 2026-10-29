@@ -75,6 +75,13 @@ export default defineComponent({
               .email-body .email-cta-primary { background-color: ${light.surface} !important; }
               .email-body .email-cta-primary, .email-body .email-cta-primary span { color: ${light.text} !important; }
             }
+            /* Gmail's apps ignore the query above and recolour on their own:
+               the primary label turns dark while its navy fill stays, so the
+               button reads blank. Gmail puts a u element before the body, and
+               only there do these blends restore the label — black is the
+               blend's identity, never a visible colour. */
+            u + .email-bg .gmail-screen { background: black; mix-blend-mode: screen; }
+            u + .email-bg .gmail-difference { background: black; mix-blend-mode: difference; }
             @media only screen and (max-width: 600px) {
               .email-gutter { padding-left: 20px !important; padding-right: 20px !important; }
               .email-title { font-size: 26px !important; }

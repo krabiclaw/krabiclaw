@@ -111,18 +111,19 @@ export const CHECK_IN_MESSAGE_TITLE = 'Check-in instructions'
 // cancellation stays cancelled.
 const CHECK_IN_NOT_CONFIRMED = 'The stay is not confirmed.'
 const CHECK_IN_NO_INSTRUCTIONS = 'The home has no check-in instructions.'
+const CHECK_IN_NO_CONVERSATION = 'The stay has no guest conversation to send through.'
 
 /**
  * Every confirmed stay is sent its home's check-in instructions at 10:00 the day
  * before arrival in the home's timezone, or at once when it was booked after
  * that. Airbnb guests never see KrabiClaw's instructions otherwise. The body is
- * refreshed from the home until it is sent; a home without instructions sends
- * nothing.
+ * refreshed from the home until it is sent; a home without instructions, or a
+ * stay with no guest conversation, sends nothing.
  */
 async function planCheckInMessage(db: DbClient, stay: PlanningStay, now: string): Promise<void> {
   const existing = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE stay_id = ? AND template_id IS NULL AND template_title = ?',
     [stay.id, CHECK_IN_MESSAGE_TITLE])
-  const plannerCancelled = existing?.status === 'cancelled' && (existing.reason === CHECK_IN_NOT_CONFIRMED || existing.reason === CHECK_IN_NO_INSTRUCTIONS)
+  const plannerCancelled = existing?.status === 'cancelled' && [CHECK_IN_NOT_CONFIRMED, CHECK_IN_NO_INSTRUCTIONS, CHECK_IN_NO_CONVERSATION].includes(existing.reason ?? '')
   if (existing && existing.status !== 'pending' && !plannerCancelled) return
   const instructions = stay.check_in_instructions?.trim() ? stay.check_in_instructions : null
   const scope = `EXISTS (SELECT 1 FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
@@ -130,10 +131,11 @@ async function planCheckInMessage(db: DbClient, stay: PlanningStay, now: string)
     WHERE s.id = ? AND s.organization_id = ? AND s.version = ? AND s.request_id IS ? AND l.timezone = ? AND c.check_in_instructions IS ?)`
   const guards = [stay.id, stay.organization_id, stay.version, stay.request_id, stay.timezone, stay.check_in_instructions]
   const arrival = localDateTimeToInstant(stay.check_in_date, stay.check_in_time, stay.timezone, 'earlier').toISOString()
-  if (stay.status !== 'confirmed' || instructions === null || arrival <= now) {
+  if (stay.status !== 'confirmed' || instructions === null || stay.request_id === null || arrival <= now) {
     if (existing?.status === 'pending') await execute(db, `UPDATE scheduled_guest_messages SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
-      [arrival <= now && stay.status === 'confirmed' && instructions !== null ? 'skipped' : 'cancelled',
-        stay.status !== 'confirmed' ? CHECK_IN_NOT_CONFIRMED : instructions === null ? CHECK_IN_NO_INSTRUCTIONS : 'Check-in had already passed.',
+      [arrival <= now && stay.status === 'confirmed' && instructions !== null && stay.request_id !== null ? 'skipped' : 'cancelled',
+        stay.status !== 'confirmed' ? CHECK_IN_NOT_CONFIRMED : instructions === null ? CHECK_IN_NO_INSTRUCTIONS
+          : stay.request_id === null ? CHECK_IN_NO_CONVERSATION : 'Check-in had already passed.',
         now, existing.id, existing.updated_at])
     return
   }

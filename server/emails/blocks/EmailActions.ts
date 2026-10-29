@@ -27,7 +27,7 @@ export default defineComponent({
               class: 'email-cta-primary',
               href: primary.url,
               style: `${BASE};background:${light.text};color:${light.surface};border:none`,
-            }, () => primary.label)
+            }, () => h('span', { class: 'gmail-screen' }, [h('span', { class: 'gmail-difference' }, primary.label)]))
           : null,
         secondary
           ? h(EButton, {
