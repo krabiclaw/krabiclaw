@@ -24,7 +24,7 @@ import { listDashboardLocations } from '../../server/utils/dashboard-context.ts'
 import { getProduct, removeProductLocation } from '../../server/utils/product-management.ts'
 import { occurrenceKey } from '../../shared/bookings.ts'
 import { addLocalDays, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
-import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import { assertAssignedBookingAccess, memberAccessPrincipal } from '../../server/utils/member-access.ts'
 
 const ORG = 'org-sessions'
@@ -714,6 +714,21 @@ test('new legal consultations require an eligible named attorney while experienc
     assert.equal(await db.prepare("SELECT assigned_member_id FROM bookings WHERE id='historical-consultation'").first('assigned_member_id'), null, 'new attorney configuration does not backfill historical attribution')
     await db.prepare("DELETE FROM teamMember WHERE id='morgan-legal'").run()
     assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(booked.bookingId).first('assigned_member_id'), 'morgan', 'staffing changes retain the booked attorney')
+
+    await setProductBookingConfig(db, { ...scope, patch: { assigned_member_id: 'morgan', assigned_team_id: null, held_online: true } })
+    const onlineOffering = await getProduct(db, ORG, consultation)
+    assert.equal(onlineOffering.booking?.held_online, true)
+    const bookedBeforeDeparture = await db.prepare('SELECT * FROM bookings WHERE id=?').bind(booked.bookingId).first()
+    const sessionBeforeDeparture = await db.prepare("SELECT * FROM product_sessions WHERE id='consultation-morgan'").first()
+    await db.prepare("INSERT INTO session (id,expiresAt,token,userId) VALUES ('owner-session',unixepoch()+3600,'owner-session-token',?)").bind(ACTOR).run()
+    const removed = await createAuth(env).api.removeMember({ headers: new Headers({ authorization: 'Bearer owner-session-token' }), body: { organizationId: ORG, memberIdOrEmail: 'morgan' } })
+    assert.equal(removed.member.id, 'morgan')
+    assert.deepEqual((await getProduct(db, ORG, consultation)).booking, { ...onlineOffering.booking, assigned_member_id: null, assigned_team_id: null }, 'departure clears current responsibility while preserving the online offering and its authored booking facts')
+    assert.deepEqual(await db.prepare('SELECT * FROM bookings WHERE id=?').bind(booked.bookingId).first(), bookedBeforeDeparture, 'membership removal retains every booked attorney fact')
+    assert.deepEqual(await db.prepare("SELECT * FROM product_sessions WHERE id='consultation-morgan'").first(), sessionBeforeDeparture, 'membership removal retains the booked session and its provider')
+    const attorneyDeparted = (error: unknown) => { const failure = error as { status: number; data: unknown }; assert.equal(failure.status, 409); assert.deepEqual(failure.data, { code: 'ATTORNEY_REQUIRED', field: 'host' }); return true }
+    await assert.rejects(listSessions(db, { organizationId: ORG, productId: consultation, fromInstant: startsAt, toInstant: `${day}T23:59:59.999Z` }), attorneyDeparted)
+    await assert.rejects(claimSessionCapacity(db, { ...scope, sessionId: 'consultation-morgan', productVariantId: 'consultation-variant', partySize: 1 }), attorneyDeparted)
   } finally { await runtime.dispose() }
 })
 

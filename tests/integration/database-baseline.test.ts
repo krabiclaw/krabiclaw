@@ -341,7 +341,7 @@ test('interleaved branch migration ledgers preserve location privacy and authore
         assert.deepEqual(target.pragma('foreign_key_check'), [])
       } finally { target.close() }
       if (history === 'v19-draft-pending') {
-        // A v19 source reaches the current chain through v20's archived forward migrations.
+        // A v19 source reaches the current chain through the archived forward migrations.
         const currentJournal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
         assert.deepEqual(manifest.target_migrations, currentJournal.entries.map(entry => `${entry.tag}.sql`))
       }
@@ -894,7 +894,7 @@ test('a v18 export preserves its conversations and receipts unchanged in the cha
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
 
-test('a v20 export transfers into the v21 baseline unchanged, which admits Booking.com stays, and a final delta carries later stays', async () => {
+test('a v20 export transfers into the current baseline unchanged, which admits Booking.com stays, and a final delta carries later stays', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v20-transfer-'))
   const v20 = JSON.parse(readFileSync('migrations-history/v20/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
@@ -923,12 +923,12 @@ test('a v20 export transfers into the v21 baseline unchanged, which admits Booki
     const recorded = Object.fromEntries(['stays', 'stay_nights'].map(table => [table, source.prepare(`SELECT * FROM ${table} ORDER BY 1, 2`).all()]))
     source.close()
 
-    const targetPath = join(directory, 'v21.sqlite')
+    const targetPath = join(directory, 'current.sqlite')
     const manifest = await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
-    // The target takes v21's whole chain: its baseline and every forward migration since.
-    const v21 = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
-    assert.equal(v21[0], '0000_baseline.sql')
-    assert.deepEqual(manifest.target_migrations, v21)
+    // The target takes the current whole chain: its baseline and every forward migration since.
+    const current = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+    assert.equal(current[0], '0000_baseline.sql')
+    assert.deepEqual(manifest.target_migrations, current)
     const target = new Database(targetPath)
     try {
       target.pragma('foreign_keys = ON')
@@ -942,7 +942,7 @@ test('a v20 export transfers into the v21 baseline unchanged, which admits Booki
     } finally { target.close() }
 
     // The final delta brings what the source took after the initial transfer, and nothing it already held.
-    const initialPath = join(directory, 'v21-initial.sqlite')
+    const initialPath = join(directory, 'current-initial.sqlite')
     copyFileSync(targetPath, initialPath)
     writeFileSync(`${initialPath}.manifest.json`, JSON.stringify({ baseline_sha256: manifest.baseline_sha256, target_migrations: manifest.target_migrations }))
     const initial = new Database(initialPath)
@@ -951,10 +951,111 @@ test('a v20 export transfers into the v21 baseline unchanged, which admits Booki
     const later = new Database(sourcePath)
     stayRow('later-stay', 'vrbo', '2026-11-10', '2026-11-12')(later)
     later.close()
-    const delta = await transferDatabaseExport(sourcePath, join(directory, 'v21-final.sqlite'), { payloadPath: join(directory, 'delta.sql'), deltaFrom: initialPath })
+    const delta = await transferDatabaseExport(sourcePath, join(directory, 'current-final.sqlite'), { payloadPath: join(directory, 'delta.sql'), deltaFrom: initialPath })
     assert.deepEqual(Object.fromEntries(Object.entries(delta.payload!.delta!).filter(([, rows]) => rows)), { stays: 1 })
     assert.deepEqual(delta.payload!.left_behind, {})
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
+})
+
+test('a v21 replacement preserves booked descendants and auth, completes manual group metadata, and carries later conversation and booking rows without overwriting replacement edits', async () => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v21-transfer-'))
+  const v21 = JSON.parse(readFileSync('migrations-history/v21/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+  const current = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+  const groupMigration = v21.indexOf('0008_team_group_management.sql')
+  assert.notEqual(groupMigration, -1)
+  const applied = v21.slice(0, groupMigration)
+  const sourcePath = join(directory, 'v21.sqlite')
+  const unchangedTables = ['account', 'session', 'jwks', 'member', 'product_booking_configs', 'product_availability_rules', 'product_sessions', 'bookings', 'team_thread_members', 'team_messages']
+  const recorded: Record<string, unknown[]> = {}
+  try {
+    const source = new Database(sourcePath)
+    try {
+      source.pragma('foreign_keys = ON')
+      for (const file of applied) source.exec(readFileSync(`migrations-history/v21/${file}`, 'utf8'))
+      source.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+        ${applied.map(file => `INSERT INTO d1_migrations (name) VALUES ('${file}');`).join('\n')}`)
+      source.prepare("INSERT INTO organization (id, name, slug, subdomain, vertical, default_currency, timezone) VALUES ('practice', 'Recorded Legal Practice', 'practice', 'practice', 'service', 'USD', 'America/New_York')").run()
+      source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('practice-en', 'practice', 'en', 1, 'published')").run()
+      for (const [id, name, role] of [['attorney', 'Attorney Rivera', 'owner'], ['colleague', 'Bea Chen', 'member'], ['assistant', 'Lee Patel', 'member']]) {
+        source.prepare('INSERT INTO user (id, name, email, emailVerified) VALUES (?, ?, ?, 1)').run(id, name, `${id}@proof.example`)
+        source.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES (?, 'practice', ?, ?)").run(`member-${id}`, id, role)
+      }
+      source.prepare("INSERT INTO account (id, accountId, providerId, userId, password) VALUES ('credential', 'attorney', 'credential', 'attorney', 'recorded-fixture-hash')").run()
+      source.prepare("INSERT INTO session (id, expiresAt, token, activeOrganizationId, userId) VALUES ('retained-session', 9999999999, 'recorded-fixture-session', 'practice', 'attorney')").run()
+      source.prepare("INSERT INTO jwks (id, publicKey, privateKey, createdAt) VALUES ('retained-key', 'recorded-fixture-public-key', 'recorded-fixture-private-key', 1)").run()
+      source.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('office', 'practice', 'office', 'Recorded office', 'America/New_York')").run()
+      source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('consultation', 'practice', 'service', 'Initial Legal Consultation', 'initial-legal-consultation', 'attorney', 'attorney')").run()
+      source.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('consultation-default', 'practice', 'consultation', 'Initial Legal Consultation', 'attorney', 'attorney')").run()
+      source.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, held_online, scheduling_mode, assigned_member_id, created_by, updated_by) VALUES ('consultation', 'practice', 30, 1, 1, 'provider', 'member-attorney', 'attorney', 'attorney')").run()
+      source.prepare("INSERT INTO product_availability_rules (id, organization_id, product_id, location_id, timezone, weekday, start_time, created_by, updated_by) VALUES ('recorded-office-rule', 'practice', 'consultation', 'office', 'America/New_York', 1, '09:00', 'attorney', 'attorney')").run()
+      source.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, assigned_member_id, source_occurrence_key, timezone, starts_at, ends_at, capacity, created_at, updated_at, created_by, updated_by)
+        VALUES ('recorded-appointment', 'practice', 'consultation', 'member-attorney', 'hours:member-attorney:2027-01-04T14:00:00.000Z', 'America/New_York', '2027-01-04T14:00:00.000Z', '2027-01-04T14:30:00.000Z', 1, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'attorney', 'attorney')`).run()
+      source.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, assigned_member_id, party_size, status) VALUES ('recorded-booking', 'practice', 'consultation', 'recorded-appointment', 'consultation-default', 'member-attorney', 1, 'confirmed')").run()
+      for (const [id, location] of [['manual', null], ['location', 'office']]) {
+        source.prepare(`INSERT INTO team_threads (id, organization_id, location_id, created_by_user_id, participants_key, last_message_at, created_at)
+          VALUES (?, 'practice', ?, 'attorney', ?, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')`).run(id, location, `recorded-${id}`)
+        for (const member of ['attorney', 'colleague', 'assistant']) source.prepare("INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at) VALUES (?, 'practice', ?, '2026-10-01T00:00:00.000Z')").run(id, `member-${member}`)
+        source.prepare(`INSERT INTO team_messages (id, organization_id, thread_id, sender_user_id, body, idempotency_key, request_hash, created_at)
+          VALUES (?, 'practice', ?, 'attorney', 'Recorded conversation', ?, 'recorded-hash', '2026-10-01T00:00:00.000Z')`).run(`message-${id}`, id, `message-${id}`)
+      }
+      for (const table of unchangedTables) recorded[table] = source.prepare(`SELECT * FROM ${table} ORDER BY 1`).all()
+      assert.throws(() => source.prepare("UPDATE product_booking_configs SET assigned_member_id = NULL WHERE product_id = 'consultation'").run(), /product_booking_configs_held_online_check/)
+      assert.deepEqual(source.pragma('foreign_key_check'), [])
+    } finally { source.close() }
+
+    const initialPath = join(directory, 'v22-initial.sqlite')
+    const initial = await transferDatabaseExport(sourcePath, initialPath, { payloadPath: join(directory, 'initial.sql') })
+    assert.deepEqual(initial.source_migrations, applied)
+    assert.deepEqual(initial.transforms, [])
+    assert.deepEqual(initial.provider_hours_session_ids, [])
+    assert.deepEqual(initial.target_migrations, current)
+    const target = new Database(initialPath, { readonly: true })
+    try {
+      for (const table of unchangedTables) assert.deepEqual(target.prepare(`SELECT * FROM ${table} ORDER BY 1`).all(), recorded[table], `${table} preserves every recorded value`)
+      assert.deepEqual(target.prepare('SELECT id, name, is_group FROM team_threads ORDER BY id').all(), [
+        { id: 'location', name: null, is_group: 0 }, { id: 'manual', name: null, is_group: 1 },
+      ])
+      assert.deepEqual(target.pragma('foreign_key_check'), [])
+    } finally { target.close() }
+
+    const livePath = join(directory, 'v22-live.sqlite')
+    copyFileSync(initialPath, livePath)
+    const live = new Database(livePath)
+    try {
+      live.pragma('foreign_keys = ON')
+      live.prepare("UPDATE product_booking_configs SET assigned_member_id = NULL WHERE product_id = 'consultation'").run()
+      live.prepare("UPDATE team_threads SET name = 'Authored on replacement' WHERE id = 'manual'").run()
+      assert.deepEqual(live.prepare("SELECT held_online, scheduling_mode, assigned_member_id FROM product_booking_configs WHERE product_id = 'consultation'").get(), { held_online: 1, scheduling_mode: 'provider', assigned_member_id: null })
+      assert.throws(() => live.prepare("UPDATE product_booking_configs SET scheduling_mode = 'legacy' WHERE product_id = 'consultation'").run(), /product_booking_configs_held_online_check/)
+
+      const later = new Database(sourcePath)
+      try {
+        later.pragma('foreign_keys = ON')
+        later.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, assigned_member_id, source_occurrence_key, timezone, starts_at, ends_at, capacity, created_by, updated_by)
+          VALUES ('later-appointment', 'practice', 'consultation', 'member-attorney', 'hours:member-attorney:2027-01-05T14:00:00.000Z', 'America/New_York', '2027-01-05T14:00:00.000Z', '2027-01-05T14:30:00.000Z', 1, 'attorney', 'attorney')`).run()
+        later.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, assigned_member_id, party_size, status) VALUES ('later-booking', 'practice', 'consultation', 'later-appointment', 'consultation-default', 'member-attorney', 1, 'confirmed')").run()
+        later.prepare(`INSERT INTO team_messages (id, organization_id, thread_id, sender_user_id, body, idempotency_key, request_hash, created_at)
+          VALUES ('later-message', 'practice', 'manual', 'colleague', 'Later conversation', 'later-message', 'later-hash', '2026-10-02T00:00:00.000Z')`).run()
+        later.prepare("UPDATE team_threads SET last_message_at = '2026-10-02T00:00:00.000Z' WHERE id = 'manual'").run()
+      } finally { later.close() }
+      const payloadPath = join(directory, 'delta.sql')
+      const delta = await transferDatabaseExport(sourcePath, join(directory, 'v22-final.sqlite'), { payloadPath, deltaFrom: initialPath })
+      assert.deepEqual(Object.fromEntries(Object.entries(delta.payload!.delta!).filter(([, count]) => count)), { bookings: 1, product_sessions: 1, team_messages: 1 })
+      assert.deepEqual(delta.payload!.left_behind, { team_threads: { changed: ['["manual"]'], deleted: [] } })
+      live.exec(readFileSync(payloadPath, 'utf8'))
+      assert.deepEqual(live.prepare("SELECT held_online, scheduling_mode, assigned_member_id FROM product_booking_configs WHERE product_id = 'consultation'").get(), { held_online: 1, scheduling_mode: 'provider', assigned_member_id: null })
+      assert.equal(live.prepare("SELECT name FROM team_threads WHERE id = 'manual'").get()!.name, 'Authored on replacement')
+      assert.deepEqual(live.prepare('SELECT id, assigned_member_id FROM bookings ORDER BY id').all(), [
+        { id: 'later-booking', assigned_member_id: 'member-attorney' }, { id: 'recorded-booking', assigned_member_id: 'member-attorney' },
+      ])
+      assert.deepEqual(live.prepare('SELECT id, body FROM team_messages ORDER BY id').all(), [
+        { id: 'later-message', body: 'Later conversation' }, { id: 'message-location', body: 'Recorded conversation' }, { id: 'message-manual', body: 'Recorded conversation' },
+      ])
+      for (const table of ['account', 'session', 'jwks']) assert.deepEqual(live.prepare(`SELECT * FROM ${table} ORDER BY 1`).all(), recorded[table])
+      assert.deepEqual(live.pragma('foreign_key_check'), [])
+    } finally { live.close() }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

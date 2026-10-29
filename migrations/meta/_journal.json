@@ -5,64 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1792827524840,
+      "when": 1793251880861,
       "tag": "0000_baseline",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1792829421411,
-      "tag": "0001_channex_delivery_lease_reservation_code",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1792836768306,
-      "tag": "0002_content_reports",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1792890037520,
-      "tag": "0003_channex_ari_task_id",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1792917501465,
-      "tag": "0004_member_user_organization_unique",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1793008494956,
-      "tag": "0005_business_progress",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1793012004588,
-      "tag": "0006_email_threading",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1793015173995,
-      "tag": "0007_google_calendar_sync",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1793245104778,
-      "tag": "0008_team_group_management",
       "breakpoints": true
     }
   ]

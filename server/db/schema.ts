@@ -831,7 +831,8 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	check("product_booking_configs_capacity_check", sql`default_capacity IS NULL OR default_capacity >= 0`),
 	check("product_booking_configs_confirmation_check", sql`confirmation_mode IN ('instant', 'review')`),
 	check("product_booking_configs_payment_check", sql`online_payment_required IN (0, 1)`),
-	check("product_booking_configs_held_online_check", sql`held_online IN (0, 1) AND (held_online = 0 OR (scheduling_mode = 'provider' AND (assigned_member_id IS NOT NULL OR assigned_team_id IS NOT NULL)))`),
+	// A provider's departure may clear responsibility without changing online delivery.
+	check("product_booking_configs_held_online_check", sql`held_online IN (0, 1) AND (held_online = 0 OR scheduling_mode = 'provider')`),
 ]);
 
 // Typed weekly recurrence. This replaces the `recurring_slots` JSON map; it is

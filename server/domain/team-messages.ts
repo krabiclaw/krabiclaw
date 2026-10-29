@@ -205,9 +205,10 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
       WHERE organization_id = ? AND thread_id IN (SELECT value FROM json_each(?)) ORDER BY thread_id, created_at, member_id`, [access.organizationId, ids]),
     queryAll<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string }>(db, `
       SELECT m.id, m.thread_id, m.sender_user_id, m.body, m.created_at FROM team_messages m
+        JOIN team_thread_members s ON s.organization_id = m.organization_id AND s.thread_id = m.thread_id AND s.member_id = ?
        WHERE m.organization_id = ? AND m.thread_id IN (SELECT value FROM json_each(?))
          AND NOT EXISTS (SELECT 1 FROM team_messages n WHERE n.thread_id = m.thread_id
-           AND (n.created_at > m.created_at OR (n.created_at = m.created_at AND n.id > m.id)))`, [access.organizationId, ids]),
+           AND (n.created_at > m.created_at OR (n.created_at = m.created_at AND n.id > m.id)))`, [access.memberId, access.organizationId, ids]),
     stayIds.length ? queryAll<{ id: string; product_id: string; home_name: string; check_in_date: string; check_out_date: string; status: TeamStaySummary['status'] }>(db, `
       SELECT s.id, s.product_id, p.name AS home_name, s.check_in_date, s.check_out_date, s.status FROM stays s
         JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
@@ -219,7 +220,10 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
   ])
   const photos = await listMessagePhotos(db, 'team_message', lastMessages.map(message => message.id))
   const managesGroups = await canManageGroups(access)
-  return threads.map((thread) => {
+  const currentSeats = await queryAll<{ thread_id: string }>(db, `SELECT thread_id FROM team_thread_members
+    WHERE organization_id = ? AND member_id = ? AND thread_id IN (SELECT value FROM json_each(?))`, [access.organizationId, access.memberId, ids])
+  const visibleIds = new Set(currentSeats.map(seat => seat.thread_id))
+  return threads.filter(thread => visibleIds.has(thread.id)).map((thread) => {
     const participants = seats.filter(seat => seat.thread_id === thread.id).map((seat) => {
       const member = members.get(seat.member_id)
       if (!member) throw new Error(`Team conversation ${thread.id} seats member ${seat.member_id}, which Better Auth does not hold`)
@@ -514,12 +518,14 @@ export async function listTeamMessages(db: DbClient, access: TeamAccess, threadI
   if (!Number.isInteger(limit) || limit < 1 || limit > 100) fail(422, 'INVALID_LIMIT', 'limit must be a whole number from 1 to 100', 'limit')
   if ((query.before === undefined) !== (query.beforeId === undefined)) fail(422, 'INVALID_CURSOR', 'before and beforeId are sent together', query.before === undefined ? 'before' : 'beforeId')
   if (query.before !== undefined && (typeof query.before !== 'string' || !query.before || typeof query.beforeId !== 'string' || !query.beforeId)) fail(422, 'INVALID_CURSOR', 'before and beforeId must name a loaded message', 'before')
-  const cursor = typeof query.before === 'string' ? 'AND (created_at < ? OR (created_at = ? AND id < ?))' : ''
+  const cursor = typeof query.before === 'string' ? 'AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))' : ''
   const rows = await queryAll<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string }>(db, `
-    SELECT id, thread_id, sender_user_id, body, created_at FROM team_messages
-     WHERE organization_id = ? AND thread_id = ? ${cursor}
-     ORDER BY created_at DESC, id DESC LIMIT ?`,
-  [access.organizationId, threadId, ...(cursor ? [query.before, query.before, query.beforeId] : []), limit + 1])
+    SELECT m.id, m.thread_id, m.sender_user_id, m.body, m.created_at FROM team_messages m
+      JOIN team_thread_members s ON s.organization_id = m.organization_id AND s.thread_id = m.thread_id
+     WHERE m.organization_id = ? AND m.thread_id = ? AND s.member_id = ? ${cursor}
+     ORDER BY m.created_at DESC, m.id DESC LIMIT ?`,
+  [access.organizationId, threadId, access.memberId, ...(cursor ? [query.before, query.before, query.beforeId] : []), limit + 1])
+  if (!rows.length) await requireSeat(db, access, threadId)
   return { messages: await readMessages(db, access.organizationId, rows.slice(0, limit)), hasMore: rows.length > limit }
 }
 
@@ -585,8 +591,10 @@ export async function sendTeamMessage(
         organizationEventQuery({ organizationId: access.organizationId, actorId: access.userId, eventType: 'team.message_sent', entityType: 'team_message', entityId: id,
           metadata: { team_thread_id: threadId }, dedupeKey: messageEventKey(id), onlyIfPreviousChangedOneRow: true }),
         ...messagePhotoPlacements(access.organizationId, 'team_message', id, assetIds, now),
-        { query: 'UPDATE team_threads SET last_message_at = ? WHERE organization_id = ? AND id = ? AND last_message_at < ?', params: [now, access.organizationId, threadId, now] },
-        { query: 'UPDATE team_thread_members SET last_read_at = ? WHERE organization_id = ? AND thread_id = ? AND member_id = ?', params: [now, access.organizationId, threadId, access.memberId] },
+        { query: `UPDATE team_threads SET last_message_at = ? WHERE organization_id = ? AND id = ? AND last_message_at < ?
+            AND EXISTS (SELECT 1 FROM team_messages m WHERE m.id = ? AND m.organization_id = team_threads.organization_id AND m.thread_id = team_threads.id)`, params: [now, access.organizationId, threadId, now, id] },
+        { query: `UPDATE team_thread_members SET last_read_at = ? WHERE organization_id = ? AND thread_id = ? AND member_id = ?
+            AND EXISTS (SELECT 1 FROM team_messages m WHERE m.id = ? AND m.organization_id = team_thread_members.organization_id AND m.thread_id = team_thread_members.thread_id)`, params: [now, access.organizationId, threadId, access.memberId, id] },
       ], { operation: 'Send a team message' })
     } catch (error) {
       let concurrent: Awaited<ReturnType<typeof findByKey>>

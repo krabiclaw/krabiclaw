@@ -4,6 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
+import { createDb } from '../../server/db/index.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { assertAssignedBookingAccess, listOrganizationNotificationMembers, memberAccessPrincipal, reconcileResponsibilities } from '../../server/utils/member-access.ts'
@@ -20,7 +21,7 @@ const ORG = 'org'
 const OTHER = 'other-org'
 const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
 
-test('members talk in team conversations, see unread state and receive recorded pushes', { timeout: 120000 }, async () => {
+test('members talk in team conversations, see unread state and receive recorded pushes', { timeout: 120000 }, async (context) => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'team-messages-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: `export class Hub {
@@ -287,6 +288,84 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(operateTeamGroup(env, db, cleaner, group.id, { action: 'rename', name: ' ', idempotencyKey: 'blank-name' }), refused(422, 'INVALID_GROUP_NAME', 'name'))
     const groupMessage = await sendTeamMessage(env, db, cook, group.id, { body: 'The three of us can see this', photos: [], idempotencyKey: 'group-message', senderName: 'cook' })
     assert.equal((await listTeamMessages(db, cleaner, group.id, {})).messages[0]?.id, groupMessage.message.id)
+    const readingDb = createDb(db)
+    await context.test('revocation between a seat check and its transcript read exposes no later message', async () => {
+      let interleaved = false
+      const revokingDb = new Proxy(readingDb, { get(target, key) {
+        if (key === 'get') return async (query: Parameters<typeof readingDb.get>[0]) => {
+          const row = await target.get(query)
+          if (!interleaved) {
+            interleaved = true
+            await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'remove', userId: 'cook', idempotencyKey: 'transcript-race-remove' })
+            await sendTeamMessage(env, db, owner, separateGroup.id, { body: 'After transcript access ended', photos: [], idempotencyKey: 'transcript-race-message', senderName: 'owner' })
+          }
+          return row
+        }
+        const value = Reflect.get(target, key, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      } })
+      try {
+        await assert.rejects(listTeamMessages(revokingDb, cook, separateGroup.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
+        assert.equal(interleaved, true)
+        assert.equal((await listTeamMessages(db, owner, separateGroup.id, {})).messages[0]?.body, 'After transcript access ended')
+      } finally {
+        await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', memberIds: ['cook'], idempotencyKey: 'transcript-race-readd' })
+      }
+    })
+    await context.test('revocation after listing thread IDs exposes neither the thread nor its later preview', async () => {
+      let interleaved = false
+      const revokingDb = new Proxy(readingDb, { get(target, key) {
+        if (key === 'all') return async (query: Parameters<typeof readingDb.all>[0]) => {
+          const rows = await target.all(query)
+          if (!interleaved) {
+            interleaved = true
+            await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'remove', userId: 'cook', idempotencyKey: 'list-race-remove' })
+            await sendTeamMessage(env, db, owner, separateGroup.id, { body: 'After preview access ended', photos: [], idempotencyKey: 'list-race-message', senderName: 'owner' })
+          }
+          return rows
+        }
+        const value = Reflect.get(target, key, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      } })
+      try {
+        const threads = await listTeamThreads(env, revokingDb, cook)
+        assert.equal(interleaved, true)
+        assert.equal(threads.some(thread => thread.id === separateGroup.id), false)
+        assert.equal(JSON.stringify(threads).includes('After preview access ended'), false)
+        assert.equal((await listTeamMessages(db, owner, separateGroup.id, {})).messages[0]?.body, 'After preview access ended')
+      } finally {
+        await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', memberIds: ['cook'], idempotencyKey: 'list-race-readd' })
+      }
+    })
+    await context.test('a text send losing its seat before commit changes no message, receipt, activity or read state', async () => {
+      let interleaved = false
+      let afterRemoval: Record<string, unknown> | undefined
+      let readsAfterRemoval: unknown
+      let receiptsAfterRemoval: unknown
+      const revokingDb = new Proxy(db, { get(target, key) {
+        if (key === 'batch') return async (statements: D1PreparedStatement[]) => {
+          assert.equal(interleaved, false)
+          interleaved = true
+          await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'remove', userId: 'cook', idempotencyKey: 'send-race-remove' })
+          afterRemoval = await db.prepare('SELECT id, last_message_at FROM team_threads WHERE id = ?').bind(separateGroup.id).first<Record<string, unknown>>() ?? undefined
+          readsAfterRemoval = (await db.prepare('SELECT member_id, last_read_at FROM team_thread_members WHERE thread_id = ? ORDER BY member_id').bind(separateGroup.id).all()).results
+          receiptsAfterRemoval = await db.prepare("SELECT COUNT(*) AS n FROM activity_entries WHERE organization_id = ? AND event_name = 'team.message_sent'").bind(ORG).first('n')
+          return target.batch(statements)
+        }
+        const value = Reflect.get(target, key, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      } })
+      try {
+        await assert.rejects(sendTeamMessage(env, revokingDb, cook, separateGroup.id, { body: 'Must never be sent', photos: [], idempotencyKey: 'send-race-message', senderName: 'cook' }), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
+        assert.equal(interleaved, true)
+        assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_messages WHERE thread_id = ? AND idempotency_key = ?').bind(separateGroup.id, 'send-race-message').first('n'), 0)
+        assert.deepEqual(await db.prepare('SELECT id, last_message_at FROM team_threads WHERE id = ?').bind(separateGroup.id).first(), afterRemoval)
+        assert.deepEqual((await db.prepare('SELECT member_id, last_read_at FROM team_thread_members WHERE thread_id = ? ORDER BY member_id').bind(separateGroup.id).all()).results, readsAfterRemoval)
+        assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM activity_entries WHERE organization_id = ? AND event_name = 'team.message_sent'").bind(ORG).first('n'), receiptsAfterRemoval)
+      } finally {
+        await operateTeamGroup(env, db, owner, separateGroup.id, { action: 'add', memberIds: ['cook'], idempotencyKey: 'send-race-readd' })
+      }
+    })
     await operateTeamGroup(env, db, cleaner, group.id, { action: 'rename', name: 'Turnover crew', idempotencyKey: 'rename-crew' })
     assert.equal((await groupView())?.name, 'Turnover crew')
     // Reusing one key with different concurrent mutations writes only the
