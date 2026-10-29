@@ -9,7 +9,9 @@
          the hydrating client see it pending, so this branch is what both
          render until it is known. The sign-in buttons wait for a resolved
          signed-out session rather than flashing at a signed-in owner. -->
-    <div v-if="sessionLoading || accepting" class="text-sm text-muted">
+    <PushAsk v-if="joined" :title="`You've joined ${joined.organizationName}`" :lede="joined.lede" @done="navigateTo(joined.destination)" />
+
+    <div v-else-if="sessionLoading || accepting" class="text-sm text-muted">
       {{ accepting ? 'Accepting invitation…' : 'Checking your session…' }}
     </div>
 
@@ -31,6 +33,8 @@
 <script setup lang="ts">
 import { authClient } from '~/lib/auth-client'
 import { buildLoginUrl } from '~/shared/auth/return-target'
+import PushAsk from '~/components/dashboard/PushAsk.vue'
+import { NOTIFICATION_CATEGORY_LABELS } from '~/shared/notification-categories'
 
 definePageMeta({ layout: 'access' })
 
@@ -45,6 +49,10 @@ const authOperation = useAuthOperation()
 const accepting = ref(false)
 const acceptError = ref<string | null>(null)
 const attempted = ref(false)
+const pushSubscription = usePushSubscription()
+const preferences = useNotificationPreferences(() => session.value.data?.user?.id)
+// Set once the invitation is accepted and this browser can still be asked for push.
+const joined = ref<{ organizationName: string; lede: string; destination: string } | null>(null)
 
 async function acceptInvitation() {
   accepting.value = true
@@ -52,9 +60,32 @@ async function acceptInvitation() {
   try {
     const result = await authClient.organization.acceptInvitation({ invitationId })
     if (result.error) throw new Error(result.error.message || 'Failed to accept invitation')
-    await navigateTo(result.data?.member.role === 'member'
+    const member = result.data?.member.role === 'member'
+    const destination = member && result.data
       ? `/dashboard/account/profile/calendar/${encodeURIComponent(result.data.member.organizationId)}`
-      : '/dashboard')
+      : '/dashboard'
+    // Joining has succeeded: a browser whose push state cannot be read is reported and not asked.
+    await pushSubscription.refresh().catch(error => globalThis.reportError(error))
+    // The ask names the organization just joined. Joining has already succeeded, so a name that
+    // cannot be read is reported and the ask is left out rather than blocking the dashboard.
+    const organization = pushSubscription.state.value.askable && result.data
+      ? await authClient.organization.getFullOrganization({ query: { organizationId: result.data.member.organizationId } })
+      : null
+    if (organization?.error) globalThis.reportError(new Error(organization.error.message || 'Could not read the organization just joined'))
+    if (!organization?.data) {
+      await navigateTo(destination)
+      return
+    }
+    // Members hear only what is assigned to them and their team conversations, which reach them by push alone.
+    await preferences.load(true)
+    const labels = preferences.labels.value ?? NOTIFICATION_CATEGORY_LABELS
+    joined.value = {
+      organizationName: organization.data.name,
+      destination,
+      lede: member
+        ? `Get the ${labels.reservations_bookings.toLowerCase()} assigned to you and team messages. Team messages only arrive as notifications.`
+        : `Get new ${labels.reservations_bookings.toLowerCase()} and ${labels.guest_messages.toLowerCase()} as they arrive.`,
+    }
   } catch (error) {
     acceptError.value = error instanceof Error ? error.message : 'Failed to accept invitation'
   } finally {

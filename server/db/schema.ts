@@ -212,7 +212,7 @@ export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	check("guest_thread_deliveries_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 	uniqueIndex("guest_thread_deliveries_provider_message_unique").on(table.provider, table.provider_message_id).where(sql`provider_message_id IS NOT NULL`),
 	index("guest_thread_deliveries_entry_status_idx").on(table.entry_id, table.status),
-	check("guest_thread_deliveries_provider_check", sql`(channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only')) OR (channel = 'airbnb' AND provider = 'channex') OR (channel = 'push' AND provider = 'apns')`),
+	check("guest_thread_deliveries_provider_check", sql`(channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only')) OR (channel = 'airbnb' AND provider = 'channex') OR (channel = 'push' AND provider IN ('apns', 'web_push'))`),
 ]);
 
 // A host's single-use link that hands one guest conversation to whoever opens it
@@ -2399,18 +2399,23 @@ export const session = sqliteTable("session", {
 	index("session_userId_idx").on(table.userId),
 ]);
 
+// One push destination per row. An `apns` row is an Apple device token (hex)
+// with its APNs environment; a `web` row is a browser's push subscription: the
+// token is its endpoint and p256dh/auth are the keys its payloads are encrypted to.
 export const device_tokens = sqliteTable("device_tokens", {
 	token: text().primaryKey(),
+	kind: text().$type<'apns' | 'web'>().notNull(),
 	user_id: text().notNull().references(() => user.id, { onDelete: "cascade" }),
 	session_id: text().notNull().references(() => session.id, { onDelete: "cascade" }),
-	environment: text().$type<'sandbox' | 'production'>().notNull(),
+	environment: text().$type<'sandbox' | 'production'>(),
+	p256dh: text(),
+	auth: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	index("device_tokens_user_idx").on(table.user_id),
 	index("device_tokens_session_idx").on(table.session_id),
-	check("device_tokens_token_check", sql`length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*'`),
-	check("device_tokens_environment_check", sql`environment IN ('sandbox', 'production')`),
+	check("device_tokens_kind_check", sql`(kind = 'apns' AND length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*' AND environment IN ('sandbox', 'production') AND p256dh IS NULL AND auth IS NULL) OR (kind = 'web' AND token LIKE 'https://%' AND environment IS NULL AND length(p256dh) > 0 AND length(auth) > 0)`),
 	check("device_tokens_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 	check("device_tokens_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
@@ -3158,8 +3163,8 @@ export const analytics_summaries = sqliteTable("analytics_summaries", {
 // wants WhatsApp; isAuthorizedWhatsAppRecipient still decides whether that
 // number may receive the message at all.
 //
-// `push_enabled` reaches every APNs device token the person registered from a
-// signed-in KrabiClaw app session (device_tokens).
+// `push_enabled` reaches every device the person registered from a signed-in
+// session (device_tokens): KrabiClaw app phones and subscribed browsers.
 //
 // account_security email is not stored here as a switchable value: the API
 // refuses to disable it, because losing a password reset locks a person out of

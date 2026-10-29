@@ -70,7 +70,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     // device, routed to that token's APNs environment, every outcome recorded.
     await db.prepare("INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-proof', unixepoch() + 3600, 'session-token-proof', 'user-proof')").run()
     const deviceToken = 'ab'.repeat(32)
-    await registerDevice(db, { token: deviceToken, environment: 'sandbox', userId: 'user-proof', sessionId: 'session-proof' })
+    await registerDevice(db, { kind: 'apns', deviceToken, environment: 'sandbox', userId: 'user-proof', sessionId: 'session-proof' })
     const notifyPushContact = async (contactEnv: typeof env, id: string) => {
       const writes = requestInsertQueries({ id, kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Proof Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
       await db.batch(writes.map(write => db.prepare(write.query).bind(...write.params)))
@@ -99,11 +99,62 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       assert.deepEqual({ ...delivered, provider_message_id: typeof delivered?.provider_message_id }, { provider: 'apns', status: 'sent', error: null, provider_message_id: 'string' })
       // Apple's 410 retires the token, and the delivery to that device still records the failure.
       await notifyPushContact(apnsEnv, 'push-retired')
-      assert.deepEqual(await pushDelivery('push-retired'), [{ provider: 'apns', status: 'failed', error: 'APNs sandbox 410 Unregistered; device token removed', provider_message_id: null }])
+      assert.deepEqual(await pushDelivery('push-retired'), [{ provider: 'apns', status: 'failed', error: 'APNs sandbox 410 Unregistered; device removed', provider_message_id: null }])
       assert.equal(await db.prepare('SELECT count(*) AS count FROM device_tokens').first('count'), 0)
       assert.equal(apnsRequests.length, 2)
     } finally {
       fetchMock.mock.restore()
+    }
+
+    // A browser is a device of the same alert: the payload is encrypted to its
+    // subscription (RFC 8291) under the dashboard's VAPID key (RFC 8292), and the
+    // push service's 410 removes the subscription.
+    const base64url = (bytes: ArrayBuffer | Uint8Array) => Buffer.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).toString('base64url')
+    const vapid = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+    const webEnv = { ...env, NUXT_PUBLIC_VAPID_PUBLIC_KEY: base64url(await crypto.subtle.exportKey('raw', vapid.publicKey)), VAPID_PRIVATE_KEY: (await crypto.subtle.exportKey('jwk', vapid.privateKey)).d! }
+    const browserKeys = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits'])
+    const browserPublic = new Uint8Array(await crypto.subtle.exportKey('raw', browserKeys.publicKey))
+    const authSecret = crypto.getRandomValues(new Uint8Array(16))
+    const endpoint = 'https://fcm.googleapis.com/fcm/send/browser-proof'
+    await registerDevice(db, { kind: 'web', endpoint, p256dh: base64url(browserPublic), auth: base64url(authSecret), userId: 'user-proof', sessionId: 'session-proof' })
+    // What the browser does with a push: RFC 8291 §3.4 key derivation over the RFC 8188 record.
+    const decrypt = async (body: Uint8Array) => {
+      const salt = body.slice(0, 16), serverPublic = body.slice(21, 21 + body[20]!), record = body.slice(21 + body[20]!)
+      const hkdf = async (keyMaterial: ArrayBuffer | Uint8Array, saltBytes: Uint8Array, info: Uint8Array, length: number) => crypto.subtle.deriveBits(
+        { name: 'HKDF', hash: 'SHA-256', salt: saltBytes, info }, await crypto.subtle.importKey('raw', keyMaterial, 'HKDF', false, ['deriveBits']), length * 8)
+      const shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: await crypto.subtle.importKey('raw', serverPublic, { name: 'ECDH', namedCurve: 'P-256' }, false, []) }, browserKeys.privateKey, 256)
+      const ikm = await hkdf(shared, authSecret, new Uint8Array([...new TextEncoder().encode('WebPush: info\0'), ...browserPublic, ...serverPublic]), 32)
+      const cek = await hkdf(ikm, salt, new TextEncoder().encode('Content-Encoding: aes128gcm\0'), 16)
+      const nonce = await hkdf(ikm, salt, new TextEncoder().encode('Content-Encoding: nonce\0'), 12)
+      const padded = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(nonce) }, await crypto.subtle.importKey('raw', cek, 'AES-GCM', false, ['decrypt']), record))
+      return JSON.parse(new TextDecoder().decode(padded.slice(0, padded.lastIndexOf(2)))) as Record<string, unknown>
+    }
+    const webRequests: Array<{ url: string; encoding: string | null; authorization: string | null; payload: Record<string, unknown> }> = []
+    const webAnswers = [new Response(null, { status: 201, headers: { location: 'https://fcm.googleapis.com/message/proof-1' } }), new Response('gone', { status: 410 })]
+    const webFetch = mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers)
+      webRequests.push({ url, encoding: headers.get('content-encoding'), authorization: headers.get('authorization'), payload: await decrypt(new Uint8Array(init.body as ArrayBuffer)) })
+      const answer = webAnswers.shift()
+      assert(answer, `unexpected request to ${url}`)
+      return answer
+    })
+    try {
+      await notifyPushContact(webEnv, 'web-delivered')
+      assert.deepEqual(await pushDelivery('web-delivered'), [{ provider: 'web_push', status: 'sent', error: null, provider_message_id: 'https://fcm.googleapis.com/message/proof-1' }])
+      const [sent] = webRequests
+      assert.equal(sent?.url, endpoint)
+      assert.equal(sent?.encoding, 'aes128gcm')
+      assert.match(sent?.authorization ?? '', new RegExp(`^vapid t=[\\w-]+\\.[\\w-]+\\.[\\w-]+, k=${webEnv.NUXT_PUBLIC_VAPID_PUBLIC_KEY}$`))
+      // The alert's own title and its reply link: the conversation in the organization's inbox.
+      assert.equal(sent?.payload.title, 'New website message from Proof Guest')
+      assert.equal(sent?.payload.url, 'https://proof.example/dashboard/proof/messages/web-delivered')
+      assert.equal(sent?.payload.tag, 'web-delivered')
+      await notifyPushContact(webEnv, 'web-gone')
+      assert.deepEqual(await pushDelivery('web-gone'), [{ provider: 'web_push', status: 'failed', error: 'Web push fcm.googleapis.com 410 gone; device removed', provider_message_id: null }])
+      assert.equal(await db.prepare("SELECT count(*) AS count FROM device_tokens WHERE kind = 'web'").first('count'), 0)
+      assert.equal(webRequests.length, 2)
+    } finally {
+      webFetch.mock.restore()
     }
 
     await db.prepare("INSERT INTO business_locations (id,organization_id,slug,title,timezone,max_capacity,opening_hours) VALUES ('booking-location','org-proof','booking','Booking','Asia/Bangkok',10,?)")

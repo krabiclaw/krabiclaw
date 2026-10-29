@@ -14,7 +14,8 @@ import { buildReplyToAddress } from '~/server/utils/submission-messages'
 import { listOrganizationNotificationMembers } from '~/server/utils/member-access'
 import { wantsNotification } from '~/server/domain/notification-preferences'
 import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
-import { sendApnsAlert, type ApnsAlert, type ApnsEnv, type ApnsSendResult } from '~/server/utils/apns'
+import { sendApnsAlert, type ApnsAlert, type ApnsEnv } from '~/server/utils/apns'
+import { sendWebPush, type WebPushEnv } from '~/server/utils/web-push'
 import { isRecord } from '~/server/utils/type-guards'
 import { buildUnsubscribeUrls } from '~/server/utils/unsubscribe'
 import type { NotificationCategory, NotificationChannel } from '~/shared/notification-categories'
@@ -49,7 +50,7 @@ import {
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, notifyBuyerThread, type NotificationSeverity } from '~/server/utils/notification-center'
-import { buildOwnerThreadInboxUrl, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
+import { buildOwnerThreadInboxUrl, dashboardOrigin, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
 import { createDeliveryReceipt, deliverReceiptEmail, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
 import { appendEntry, findEntryByDedupeKey, parseEntryPayload } from '~/server/domain/guest-threads/entries'
@@ -73,7 +74,7 @@ function contactSubjectLabel(subject: string, vertical: string, locale: string) 
   return platformLocale(locale)!.messages[`site.contact_page.${subject}`] ?? subject
 }
 
-interface NotificationEnv extends CloudflareEnv, ApnsEnv {
+interface NotificationEnv extends CloudflareEnv, ApnsEnv, WebPushEnv {
   RESEND_API_KEY?: string
   WHATSAPP_PHONE_NUMBER_ID?: string
   WHATSAPP_ACCESS_TOKEN?: string
@@ -473,46 +474,78 @@ async function sendWhatsAppThreadNotification(
 }
 
 /**
- * One APNs alert to one device, recorded on that device's own delivery.
+ * A push to any device: the app reads `data`, a browser opens `url`. The link is
+ * built only for a browser and inside its send, so a link that cannot be built
+ * is that browser's recorded failure and never stops a phone's alert.
+ */
+type PushAlert = ApnsAlert & { url: () => Promise<string> }
+
+type PushDispatch =
+  | { status: 'sent'; providerMessageId: string | null }
+  | { status: 'failed'; error: string; deviceGone: boolean }
+
+/** The device's own push service: Apple for the app, the browser's push service for a subscription. */
+async function dispatchPush(env: NotificationEnv, device: UserDevice, alert: PushAlert): Promise<PushDispatch> {
+  if (device.kind === 'apns') {
+    const apnsId = crypto.randomUUID()
+    const result = await sendApnsAlert(env, { deviceToken: device.token, environment: device.environment, apnsId, alert })
+    return result.status === 'sent' ? { status: 'sent', providerMessageId: apnsId } : { status: 'failed', error: result.error, deviceGone: result.tokenRetired }
+  }
+  const result = await sendWebPush(env, {
+    subscription: { endpoint: device.token, p256dh: device.p256dh, auth: device.auth },
+    alert: { title: alert.title, body: alert.body, url: await alert.url(), tag: alert.threadId },
+  })
+  return result.status === 'sent' ? { status: 'sent', providerMessageId: result.messageId } : { status: 'failed', error: result.error, deviceGone: result.subscriptionGone }
+}
+
+/**
+ * One push to one device, recorded on that device's own delivery.
  *
- * Every outcome is written before it is raised: missing APNs configuration, a
- * request that never reached Apple, and Apple's own status and reason. A token
- * Apple reports retired is removed, and its delivery still records the failure.
+ * Every outcome is written before it is raised: missing configuration, a
+ * request that never reached the push service, and the service's own answer. A
+ * device its push service reports gone is removed, and its delivery still
+ * records the failure.
  */
 async function sendPushThreadNotification(
   env: NotificationEnv,
   db: DbClient,
-  opts: { userId: string; device: UserDevice; alert: ApnsAlert; delivery: ThreadDeliveryContext },
+  opts: { userId: string; device: UserDevice; alert: PushAlert; delivery: ThreadDeliveryContext },
 ): Promise<void> {
   const delivery = await createDeliveryReceipt(db, {
     entryId: opts.delivery.entryId,
     channel: 'push',
-    provider: 'apns',
+    provider: opts.device.kind === 'apns' ? 'apns' : 'web_push',
     purpose: opts.delivery.purpose,
     idempotencyKey: opts.delivery.idempotencyKey,
   })
   if (isDeliverySent(delivery)) return
 
-  const apnsId = crypto.randomUUID()
-  const record = async (outcome: { status: 'sent'; providerMessageId: string } | { status: 'failed'; error: string }) => {
+  const record = async (outcome: { status: 'sent'; providerMessageId: string | null } | { status: 'failed'; error: string }) => {
     await recordDeliveryOutcome(db, { deliveryId: delivery.id, ...outcome })
     if (opts.delivery.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: opts.delivery.threadId, type: 'delivery.changed' })
   }
-  let result: ApnsSendResult
+  let result: PushDispatch
   try {
-    result = await sendApnsAlert(env, { deviceToken: opts.device.token, environment: opts.device.environment, apnsId, alert: opts.alert })
+    result = await dispatchPush(env, opts.device, opts.alert)
   } catch (error) {
     const code = HTTPError.isError(error) && isRecord(error.data) && typeof error.data.code === 'string' ? `${error.data.code}: ` : ''
     await record({ status: 'failed', error: `${code}${error instanceof Error ? error.message : String(error)}` })
     throw new RecordedDeliveryFailure(`Push delivery failed: ${code}${error instanceof Error ? error.message : String(error)}`, { cause: error })
   }
   if (result.status === 'sent') {
-    await record({ status: 'sent', providerMessageId: apnsId })
+    await record({ status: 'sent', providerMessageId: result.providerMessageId })
     return
   }
-  if (result.tokenRetired) await retireDevice(db, { userId: opts.userId, ...opts.device })
-  await record({ status: 'failed', error: result.tokenRetired ? `${result.error}; device token removed` : result.error })
+  if (result.deviceGone) await retireDevice(db, { userId: opts.userId, device: opts.device })
+  await record({ status: 'failed', error: result.deviceGone ? `${result.error}; device removed` : result.error })
   throw new RecordedDeliveryFailure(`Push delivery failed: ${result.error}`)
+}
+
+/** The org's in-app notifications, where a push with no link of its own opens. */
+async function dashboardPathUrl(env: NotificationEnv, db: DbClient, organizationId: string, path: string): Promise<string> {
+  const slugs = await resolveDashboardSlugs(env, db, { organizationId })
+  if (!slugs) throw new Error(`Organization ${organizationId} has no dashboard to link a push to`)
+  return `${dashboardOrigin(env, slugs)}${path}`
 }
 
 /** One owner alert to each of the recipient's devices, under the same event as their email and WhatsApp. */
@@ -536,6 +569,7 @@ function ownerPushSends(
     alert: {
       title: input.message.title,
       body: input.message.preheader,
+      url: async () => input.message.primaryAction?.url ?? await dashboardPathUrl(env, db, input.organizationId, '/notifications'),
       threadId: input.context.guestThreadId,
       // Every push names what it opens: a guest conversation, or the in-app notification.
       data: {
@@ -1867,6 +1901,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     alert: {
       title: input.senderName,
       body: input.preview,
+      url: () => dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`),
       threadId: `team:${input.threadId}`,
       data: { organizationId: input.organizationId, userId, kind: 'team', threadId: input.threadId },
     },

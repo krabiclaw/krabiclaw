@@ -184,9 +184,12 @@ const dashboardSearchOpen = ref(false)
 // Below the top nav the palette is the screen, like every other sheet here; with it, a card.
 const navigationWidth = useDashboardBreakpoint('md')
 const nuxtApp = useNuxtApp()
+const pushSubscription = usePushSubscription()
 onMounted(() => {
   // Billing resumes signed in: honor the analytics choice made while signed out.
   void reconcileAnalyticsConsent().catch(error => nuxtApp.callHook('vue:error', error, null, 'analytics-consent-reconciliation'))
+  // Like the app on launch: a browser already receiving push registers with this session.
+  void pushSubscription.resume().catch(error => nuxtApp.callHook('vue:error', error, null, 'push-subscription-resume'))
 })
 // The dashboard-context middleware has loaded the route's organization context
 // before the route arrives here, so a scope change keeps the previous screen
