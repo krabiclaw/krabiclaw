@@ -52,7 +52,21 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
     }
     await practiceArea('family-law', 'Family Law', '/services/family', 'Custody, child support, divorce and protective orders.')
     await practiceArea('housing', 'Housing Law', '/services/housing', 'Eviction defense and tenant rights.')
+    // The practice once booked through an outside scheduler; its link stays saved after moving to native consultations.
+    await tool('set_consultation_mode', { mode: 'external_url', external_url: 'https://scheduler.example/harbor-legal-aid' })
     await tool('set_consultation_mode', { mode: 'native' })
+
+    // The family-law page opens with a cover photo and a gallery of seven more.
+    const family = await tool<{ pages: Array<{ id: string; path: string }> }>('list_site_pages', { locale: 'en' })
+    const familyPage = family.pages.find(page => page.path === '/services/family')
+    if (!familyPage) throw new Error('Harbor Legal Aid has no family-law page')
+    const { page: familyDocument } = await tool<{ page: { document: { id: string } } }>('get_site_page', { variant_id: familyPage.id })
+    await tool('set_media', { placement: { owner_type: 'content_document', owner_id: familyDocument.document.id, slot: 'cover' }, asset_id: officeImage.id })
+    const galleryFiles: Array<[string, string]> = [['class.avif', 'A client meeting'], ['dish.avif', 'The waiting room'], ['room.avif', 'The conference room'], ['venue.avif', 'The library'], ['social.avif', 'Our community clinic'], ['poster.avif', 'The front desk'], ['portrait.avif', 'An attorney at work']]
+    for (const [index, [file, altText]] of galleryFiles.entries()) {
+      const asset = await seedMedia(owner, tenant, `family-gallery-${index + 1}`, file, altText)
+      await tool('attach_media', { placement: { owner_type: 'content_document', owner_id: familyDocument.document.id, slot: 'gallery' }, asset_id: asset.id })
+    }
 
     // What consultations cost, with the questions clients ask on that page.
     await tool('create_site_page', {

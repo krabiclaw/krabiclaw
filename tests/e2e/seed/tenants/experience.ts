@@ -1,11 +1,12 @@
 import type { CreateTenant } from '../seed.ts'
 import { SEED_SUBDOMAINS, type SeedTenant } from '../manifest.ts'
-import { everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
+import { alwaysOpen, everyDay, publishProfile, recordProduct, seedLocation, seedMedia, toolFor } from './common.ts'
 
 const HOST_ID = 'user-e2e-pottery-location-owner'
 
 // Clayhouse Studio is a fictional pottery school in Krabi: two studios, a
 // daily wheel class hosted by one teacher and a glazing session at the river.
+// The Ao Nang studio never closes, so the class it seeds now is always in hours.
 export async function seedExperience(createTenant: CreateTenant): Promise<SeedTenant> {
   const { owner, tenant } = await createTenant({
     key: 'experience', name: 'Clayhouse Studio', slug: 'clayhouse-studio', subdomain: SEED_SUBDOMAINS.experience,
@@ -14,7 +15,7 @@ export async function seedExperience(createTenant: CreateTenant): Promise<SeedTe
   try {
     const tool = toolFor(owner, tenant)
     const address = (street: string) => ({ regionCode: 'TH', addressLines: [street], locality: 'Krabi', administrativeArea: 'Krabi', postalCode: '81000' })
-    const aoNang = await seedLocation(tool, tenant, 'ao-nang', { title: 'Ao Nang Studio', email: 'aonang@clayhouse.example', phone: '+66812345678', hours: everyDay(9, 18), address: address('12 Ao Nang Road') })
+    const aoNang = await seedLocation(tool, tenant, 'ao-nang', { title: 'Ao Nang Studio', email: 'aonang@clayhouse.example', phone: '+66812345678', hours: alwaysOpen(), address: address('12 Ao Nang Road') })
     const riverside = await seedLocation(tool, tenant, 'riverside', { title: 'Riverside Studio', email: 'riverside@clayhouse.example', phone: '+66812345679', hours: everyDay(10, 17), address: address('5 River Walk') })
 
     const hostMemberId = tenant.memberIds[HOST_ID]
@@ -52,6 +53,19 @@ export async function seedExperience(createTenant: CreateTenant): Promise<SeedTe
       name: 'Glaze Painting Session', location: riverside, start: '14:00', capacity: 10, amount: 90000, image: studioImage,
       description: 'Paint a bisque-fired cup or plate with our glazes by the river, then collect it after the kiln firing.',
     })
+    // A guest who already came: a short class booked now that ends while the
+    // seed finishes, so the studio has a conversation in its past mailbox.
+    const wheel = tenant.products['wheel-class']!
+    const startsAt = new Date(Date.now() + 15_000)
+    const endsAt = new Date(startsAt.getTime() + 60_000)
+    const { sessions: [session] } = await tool<{ sessions: Array<{ id: string }> }>('create_product_session', {
+      product_id: wheel.id, location_id: aoNang.id, starts_at: startsAt.toISOString(), ends_at: endsAt.toISOString(), capacity: 4, idempotency_key: 'seed-experience-ended-class',
+    })
+    await tool('create_product_booking', {
+      product_slug: wheel.slug, session_id: session!.id, party_size: 1, guest_name: 'Past Guest', guest_email: 'past-guest@playwright.example',
+      source: 'phone', guest_acknowledgement: false, idempotency_key: 'seed-experience-ended-booking',
+    })
+    tenant.endedSessionEndsAt = endsAt.toISOString()
     return tenant
   } finally { await owner.dispose() }
 }

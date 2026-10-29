@@ -23,6 +23,8 @@ export interface SeedTenant {
   media: Record<string, { id: string; public_url: string }>
   collections: Record<string, { id: string; name: string; location_id: string | null }>
   categories: Record<string, { id: string; name: string }>
+  /** When a seeded booking's session ended; the seed waits for it before tests run. */
+  endedSessionEndsAt?: string
 }
 
 export interface SeedManifest {

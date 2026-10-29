@@ -684,7 +684,8 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(page.getByRole('radio', { name: `${host.name} Current`, exact: true })).toBeChecked()
     await expect(page.getByText('Current', { exact: true })).toBeVisible()
     await expect(page.getByText('Add working hours before moving this consultation to another attorney.', { exact: true })).toHaveCount(0)
-    await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+    // A change of attorney is a request the client accepts; with the current attorney chosen there is nothing to send.
+    await expect(page.getByRole('button', { name: 'Send request', exact: true })).toBeDisabled()
     for (const mode of ['external_url', 'native_disabled', 'native'] as const) {
       const switchMode = await page.request.put(`${editor}/consultation`, { data: { mode } })
       expect(switchMode.status(), await switchMode.text()).toBe(200)

@@ -10,8 +10,11 @@ export const everyDay = (open: number, close: number, days = [0, 1, 2, 3, 4, 5, 
   periods: days.map(day => ({ open: { day, hour: open, minute: 0 }, close: { day, hour: close, minute: 0 } })),
 })
 
+/** Sunday 00:00 with no close: open at every hour, so a seeded time is never outside the hours. */
+export const alwaysOpen = () => ({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })
+
 export async function seedLocation(tool: Tool, tenant: SeedTenant, key: string, input: {
-  title: string; email: string; phone: string; hours: ReturnType<typeof everyDay>
+  title: string; email: string; phone: string; hours: ReturnType<typeof everyDay> | ReturnType<typeof alwaysOpen>
   address: { regionCode: string; addressLines: string[]; locality: string; administrativeArea?: string; postalCode?: string }
 }) {
   const { location } = await tool<{ location: Location }>('create_location', { title: input.title, timezone: tenant.timezone, idempotency_key: `seed-${tenant.key}-${key}` })

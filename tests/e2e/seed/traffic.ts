@@ -40,7 +40,9 @@ export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
           const slug = tenant.products['wheel-class']!.slug
           const listed = await context.request.get(`/api/public/products/${slug}/sessions`)
           if (listed.status() !== 200) throw new Error(`${tenant.name}'s class times answered ${listed.status()} ${await listed.text()}`)
-          const open = (await listed.json() as { sessions: Array<{ id: string; is_full: boolean }> }).sessions.filter(session => !session.is_full)
+          const tomorrow = new Date(Date.now() + 86_400_000).toISOString()
+          const open = (await listed.json() as { sessions: Array<{ id: string; is_full: boolean; starts_at: string }> }).sessions
+            .filter(session => !session.is_full && session.starts_at > tomorrow)
           if (open.length < 2) throw new Error(`${tenant.name} has fewer than two bookable class times`)
           for (const [index, session] of open.slice(0, 2).entries()) {
             const booked = await context.request.post(`/api/public/products/${slug}/book`, {

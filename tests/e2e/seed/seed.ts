@@ -21,7 +21,8 @@ async function bootstrapAdministrator(baseURL: string) {
     body: JSON.stringify({ admin: { id: admin.id, email: admin.email, name: admin.name, password: E2E_PASSWORD } }),
   })
   if (response.status !== 201) throw new Error(`Bootstrapping the administrator and platform site failed: ${response.status} ${await response.text()}`)
-  return SeedClient.signedIn(baseURL, admin.email, E2E_PASSWORD)
+  const { platformOrganizationId } = await response.json() as { platformOrganizationId: string }
+  return { admin: await SeedClient.signedIn(baseURL, admin.email, E2E_PASSWORD), platformOrganizationId }
 }
 
 async function createActors(admin: SeedClient) {
@@ -116,7 +117,7 @@ async function createTenant(baseURL: string, plan: TenantPlan): Promise<{ owner:
 }
 
 export async function seedE2e(baseURL: string) {
-  const admin = await bootstrapAdministrator(baseURL)
+  const { admin, platformOrganizationId } = await bootstrapAdministrator(baseURL)
   try {
     await createActors(admin)
     const manifest: SeedManifest = { baseURL, adminUserId: E2E_ADMIN_ID, tenants: {} as SeedManifest['tenants'] }
@@ -129,6 +130,11 @@ export async function seedE2e(baseURL: string) {
     manifest.tenants.legal = await seedLegal(create)
     const { seedTraffic } = await import('./traffic.ts')
     await seedTraffic(baseURL, manifest)
+    const { seedPlatform } = await import('./tenants/platform.ts')
+    await seedPlatform(admin, platformOrganizationId)
+    // A booking made during the seed has to have ended before any test reads it as past.
+    const ended = Math.max(0, ...Object.values(manifest.tenants).map(tenant => tenant.endedSessionEndsAt ? Date.parse(tenant.endedSessionEndsAt) : 0))
+    if (ended > Date.now()) await new Promise(resolve => setTimeout(resolve, ended - Date.now() + 1_000))
     mkdirSync(new URL('.', SEED_MANIFEST_PATH), { recursive: true })
     writeFileSync(SEED_MANIFEST_PATH, JSON.stringify(manifest, null, 2))
     return manifest
