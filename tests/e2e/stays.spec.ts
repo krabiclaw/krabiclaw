@@ -262,9 +262,16 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
   const beforeInvalidCalendarResponse = await request.get(calendarPath)
   expect(beforeInvalidCalendarResponse.status()).toBe(200)
   const beforeInvalidCalendar = await beforeInvalidCalendarResponse.json()
-  for (const fields of [{}, { reset: false }, { reset: true, closed: true }, { reset: true, price_minor: null }]) {
+  // The schema asks for at least one change; the stay domain refuses the combinations a client's schema rendering may let through.
+  const stayField = (message: string) => JSON.stringify({ status: 422, message, code: 'INVALID_STAY_FIELD' })
+  for (const [fields, refusal] of [
+    [{}, 'Invalid arguments for tool set_stay_nights'],
+    [{ reset: false }, stayField('Name at least one night setting to change, or reset')],
+    [{ reset: true, closed: true }, stayField('reset cannot be combined with night settings')],
+    [{ reset: true, price_minor: null }, stayField('reset cannot be combined with night settings')],
+  ] as const) {
     const refused = await call('set_stay_nights', { product_id: productId, from: checkIn, to: checkOut, ...fields })
-    expect(refused.error).toContain('Invalid arguments for tool set_stay_nights')
+    expect(refused.error).toContain(refusal)
     const unchanged = await request.get(calendarPath)
     expect(unchanged.status()).toBe(200)
     expect(await unchanged.json()).toEqual(beforeInvalidCalendar)
