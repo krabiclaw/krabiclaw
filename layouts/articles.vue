@@ -7,7 +7,7 @@
     second drawer beside the hamburger.
   -->
   <NuxtLayout :name="template.layout">
-    <div class="mx-auto px-5 py-8 sm:px-8 lg:px-10" :class="[split.grid, isDocs ? 'docs-shell max-w-360' : 'max-w-7xl']">
+    <div class="py-8" :class="[split.container, split.grid, { 'docs-shell': isDocs }]">
       <aside class="hidden" :class="split.aside">
         <!-- Desktop search leads the sidebar; collapsed, it leads the header's menu. -->
         <PlatformCommandSearchTrigger
@@ -46,10 +46,11 @@ provide(articleNavKey, nav)
 const searchLabel = computed(() => t('site.search.dialog_title', { surface: nav.value.indexLabel }))
 
 // The sidebar shows exactly where the template's header stops collapsing:
-// KrabiClaw's header at `nav` (1080px), the tenant templates' at `lg`.
+// KrabiClaw's header at `nav` (1080px), the tenant templates' at `lg`. The
+// container is the one the template's header sits in.
 const split = computed(() => template.slug === 'platform'
-  ? { grid: isDocs.value ? 'nav:grid nav:grid-cols-[280px_minmax(0,1fr)] nav:gap-10' : 'nav:grid nav:grid-cols-[220px_minmax(0,1fr)] nav:gap-12', aside: 'nav:sticky nav:top-28 nav:block nav:h-fit nav:max-h-[calc(100vh-8rem)] nav:overflow-y-auto' }
-  : { grid: isDocs.value ? 'lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-10' : 'lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10', aside: 'lg:sticky lg:top-28 lg:block lg:h-fit lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto' })
+  ? { container: isDocs.value ? 'mx-auto max-w-360 px-5 sm:px-8 lg:px-10' : 'mx-auto max-w-7xl px-5 sm:px-8 lg:px-10', grid: isDocs.value ? 'nav:grid nav:grid-cols-[280px_minmax(0,1fr)] nav:gap-10' : 'nav:grid nav:grid-cols-[220px_minmax(0,1fr)] nav:gap-12', aside: 'nav:sticky nav:top-28 nav:block nav:h-fit nav:max-h-[calc(100vh-8rem)] nav:overflow-y-auto' }
+  : { container: 'tenant-container', grid: isDocs.value ? 'lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-10' : 'lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10', aside: 'lg:sticky lg:top-28 lg:block lg:h-fit lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto' })
 </script>
 
 <style>

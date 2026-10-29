@@ -100,40 +100,6 @@
   border-top: var(--tenant-shield-height) solid transparent;
 }
 
-/* Container */
-.tenant-container {
-  margin-inline: auto;
-  max-width: 80rem;
-  padding-inline: 1rem;
-  width: 100%;
-}
-
-@media (min-width: 640px) {
-  .tenant-container {
-    padding-inline: 1.5rem;
-  }
-}
-
-@media (min-width: 1024px) {
-  .tenant-container {
-    padding-inline: 2rem;
-  }
-}
-
-@media (min-width: 1920px) {
-  .tenant-container {
-    max-width: 88rem;
-    padding-inline: 3rem;
-  }
-}
-
-@media (min-width: 2560px) {
-  .tenant-container {
-    max-width: 96rem;
-    padding-inline: 4rem;
-  }
-}
-
 /* Typography */
 /* Every display heading follows the site's heading casing. */
 .tenant-display, .tenant-display-lg, .tenant-display-md, .tenant-display-sm {

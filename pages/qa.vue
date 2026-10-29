@@ -1,6 +1,6 @@
 <template>
   <div class="min-h-screen bg-default text-default">
-    <header class="mx-auto max-w-7xl px-4 pt-16 pb-12 sm:px-6 lg:px-8">
+    <header class="tenant-container pt-16 pb-12">
       <p class="tenant-kicker mb-6">{{ t('site.qa.title') }}</p>
       <h1 class="tenant-display-md text-default"><em class="tenant-italic">{{ t('site.qa_page.title') }}</em></h1>
       <p class="mt-5 max-w-xl text-sm leading-relaxed text-muted">{{ t('site.qa_page.intro') }}</p>

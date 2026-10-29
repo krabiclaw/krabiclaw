@@ -1,6 +1,6 @@
 <template>
   <section v-if="view.posts.length || !block" class="bg-default text-default" :data-social-posts="block ? 'block' : 'feed'">
-    <div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+    <div class="tenant-container py-16 sm:py-20">
       <div v-if="view.title || view.description || view.callToAction" class="mb-10 flex flex-wrap items-end justify-between gap-6">
         <div class="max-w-3xl">
           <h2 v-if="view.title" class="font-[family-name:var(--font-heading)] [font-weight:var(--font-heading-weight)] text-3xl leading-tight text-highlighted sm:text-5xl">{{ view.title }}</h2>

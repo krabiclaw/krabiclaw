@@ -1,12 +1,12 @@
 <template>
   <div class="min-h-screen bg-default text-default">
-    <div v-if="pending" class="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
+    <div v-if="pending" class="tenant-container py-20">
       <div class="h-64 w-full animate-pulse rounded bg-elevated" />
     </div>
 
     <template v-else>
       <!-- Page header -->
-      <header class="mx-auto max-w-7xl px-4 pt-16 pb-12 sm:px-6 lg:px-8 text-center">
+      <header class="tenant-container pt-16 pb-12 text-center">
         <p class="tenant-kicker mb-6">{{ t('site.footer.gallery') }}</p>
         <h1 class="tenant-display-md tenant-italic text-default">{{ t('site.photos.title') }}</h1>
 
@@ -35,7 +35,7 @@
         <TenantFilterTabs v-model="activeCategory" :tabs="cats" />
 
         <!-- Gallery -->
-        <div class="mx-auto max-w-7xl px-4 pt-12 pb-24 sm:px-6 lg:px-8">
+        <div class="tenant-container pt-12 pb-24">
           <div class="tenant-masonry">
             <button
               v-for="(photo, i) in sorted"

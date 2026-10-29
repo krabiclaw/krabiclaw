@@ -5,7 +5,7 @@
     action, and where else it was posted. A text-only post is one readable
     column. The template's tokens give it its colours, heading face and radius.
   -->
-  <article class="mx-auto w-full max-w-7xl px-4 pb-16 pt-[calc(1.5rem+var(--header-overlap,0px))] sm:px-6 sm:pt-[calc(2.5rem+var(--header-overlap,0px))] lg:px-8">
+  <article class="tenant-container pb-16 pt-[calc(1.5rem+var(--header-overlap,0px))] sm:pt-[calc(2.5rem+var(--header-overlap,0px))]">
     <div class="mb-5 flex items-center justify-between gap-4">
       <NuxtLink :to="localePath(backTo)" class="inline-flex items-center gap-2 text-sm font-medium text-muted no-underline transition hover:text-default">
         <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" aria-hidden="true"><path d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>

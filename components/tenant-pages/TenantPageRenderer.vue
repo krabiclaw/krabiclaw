@@ -18,7 +18,7 @@
     <HeroSection v-for="group in blockGroups" :key="group.key" :section="group.heroSection">
     <section v-for="block in group.blocks" :key="block.id" :data-block-type="block.type" :data-parity-section="presentationOf(block) ? undefined : sectionKey(block)"
       class="tenant-page-block"
-      :class="!presentationOf(block) ? 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8' : undefined"
+      :class="!presentationOf(block) ? 'tenant-container' : undefined"
       :aria-hidden="group.heroSection && block.type === 'divider' ? 'true' : undefined"
     >
       <!--
