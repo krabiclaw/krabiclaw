@@ -473,8 +473,12 @@ async function sendWhatsAppThreadNotification(
   return result.success
 }
 
-/** A push to any device: the app reads `data`, a browser opens `url`. */
-type PushAlert = ApnsAlert & { url: string }
+/**
+ * A push to any device: the app reads `data`, a browser opens `url`. The link is
+ * built only for a browser and inside its send, so a link that cannot be built
+ * is that browser's recorded failure and never stops a phone's alert.
+ */
+type PushAlert = ApnsAlert & { url: () => Promise<string> }
 
 type PushDispatch =
   | { status: 'sent'; providerMessageId: string | null }
@@ -489,7 +493,7 @@ async function dispatchPush(env: NotificationEnv, device: UserDevice, alert: Pus
   }
   const result = await sendWebPush(env, {
     subscription: { endpoint: device.token, p256dh: device.p256dh, auth: device.auth },
-    alert: { title: alert.title, body: alert.body, url: alert.url, tag: alert.threadId },
+    alert: { title: alert.title, body: alert.body, url: await alert.url(), tag: alert.threadId },
   })
   return result.status === 'sent' ? { status: 'sent', providerMessageId: result.messageId } : { status: 'failed', error: result.error, deviceGone: result.subscriptionGone }
 }
@@ -558,14 +562,14 @@ function ownerPushSends(
     message: NotificationMessage
   },
 ): Array<Promise<void>> {
-  return recipient.pushDevices.map(async device => sendPushThreadNotification(env, db, {
+  return recipient.pushDevices.map(device => sendPushThreadNotification(env, db, {
     userId: recipient.userId,
     device,
     delivery: threadDelivery(input.context, 'owner_alert', 'push', input.template, device.token, input.eventKey),
     alert: {
       title: input.message.title,
       body: input.message.preheader,
-      url: input.message.primaryAction?.url ?? await dashboardPathUrl(env, db, input.organizationId, '/notifications'),
+      url: async () => input.message.primaryAction?.url ?? await dashboardPathUrl(env, db, input.organizationId, '/notifications'),
       threadId: input.context.guestThreadId,
       // Every push names what it opens: a guest conversation, or the in-app notification.
       data: {
@@ -1885,7 +1889,6 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     await wantsNotification(db, userId, 'team_messages', 'push')
       ? (await listUserDevices(db, userId)).map(device => ({ userId, device }))
       : []))).flat()
-  const url = targets.length ? await dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`) : ''
   const results = await Promise.allSettled(targets.map(({ userId, device }) => sendPushThreadNotification(env, db, {
     userId,
     device,
@@ -1898,7 +1901,7 @@ export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, inpu
     alert: {
       title: input.senderName,
       body: input.preview,
-      url,
+      url: () => dashboardPathUrl(env, db, input.organizationId, `/messages/team/${encodeURIComponent(input.threadId)}?view=team`),
       threadId: `team:${input.threadId}`,
       data: { organizationId: input.organizationId, userId, kind: 'team', threadId: input.threadId },
     },
