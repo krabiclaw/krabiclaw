@@ -933,7 +933,11 @@ test('a v20 export transfers into the current baseline unchanged, which admits B
     try {
       target.pragma('foreign_keys = ON')
       assert.deepEqual(target.pragma('foreign_key_check'), [])
-      for (const [table, rows] of Object.entries(recorded)) assert.deepEqual(target.prepare(`SELECT * FROM ${table} ORDER BY 1, 2`).all(), rows, `${table} is unchanged`)
+      // Columns a later forward migration added (stays.no_show_at) are new; every recorded value is unchanged.
+      for (const [table, rows] of Object.entries(recorded)) {
+        const columns = Object.keys(rows[0] as Record<string, unknown>).map(column => `"${column}"`).join(', ')
+        assert.deepEqual(target.prepare(`SELECT ${columns} FROM ${table} ORDER BY 1, 2`).all(), rows, `${table} is unchanged`)
+      }
       // v20's pending outbox migration ran: the refusal keeps its reason and has never been confirmed.
       assert.deepEqual(target.prepare('SELECT date, state, detail, sent_json, attempts, retry_at FROM channel_night_pushes').all(),
         [{ date: '2026-11-01', state: 'needs_review', detail: 'Recorded refusal', sent_json: null, attempts: 0, retry_at: null }])
@@ -1014,7 +1018,11 @@ test('a v21 replacement preserves booked descendants and auth, completes manual 
     assert.deepEqual(initial.target_migrations, current)
     const target = new Database(initialPath, { readonly: true })
     try {
-      for (const table of unchangedTables) assert.deepEqual(target.prepare(`SELECT * FROM ${table} ORDER BY 1`).all(), recorded[table], `${table} preserves every recorded value`)
+      // A later forward migration may add a column (bookings.no_show_at); every value the v21 row held is still the same.
+      for (const table of unchangedTables) {
+        const columns = Object.keys(recorded[table]![0] as Record<string, unknown>).map(column => `"${column}"`).join(', ')
+        assert.deepEqual(target.prepare(`SELECT ${columns} FROM ${table} ORDER BY 1`).all(), recorded[table], `${table} preserves every recorded value`)
+      }
       assert.deepEqual(target.prepare('SELECT id, name, is_group FROM team_threads ORDER BY id').all(), [
         { id: 'location', name: null, is_group: 0 }, { id: 'manual', name: null, is_group: 1 },
       ])

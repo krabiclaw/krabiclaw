@@ -252,53 +252,133 @@
 
       </div>
 
-      <div v-else-if="tab === 'reviews' && reviews && !loadError" class="space-y-6">
-        <div class="space-y-6">
-          <section class="border-b border-default pb-8 last:border-b-0">
-            <div class="flex items-baseline gap-2">
-              <UIcon name="i-lucide-star" class="size-6 text-primary" />
-              <span class="text-4xl font-semibold tabular-nums text-highlighted">{{ reviews.average ?? '—' }}</span>
-            </div>
-            <p class="mt-1 text-sm text-muted">
-              {{ reviews.total === 1 ? '1 approved review' : `${formatCount(reviews.total)} approved reviews` }}
-            </p>
-
-            <!-- A review carries one overall rating, so this is its distribution.
-                 There are no per-category scores in the schema to break down. -->
-            <div class="mt-6 space-y-2">
-              <div v-for="bucket in reviews.distribution" :key="bucket.rating" class="flex items-center gap-3">
-                <span class="w-10 shrink-0 text-sm tabular-nums text-muted">{{ bucket.rating }}★</span>
-                <span class="h-2 flex-1 overflow-hidden rounded-full bg-elevated">
-                  <span
-                    class="block h-full rounded-full bg-primary"
-                    :style="{ width: `${reviews.total ? (bucket.count / reviews.total) * 100 : 0}%` }"
-                  />
-                </span>
-                <span class="w-8 shrink-0 text-right text-sm tabular-nums text-muted">{{ bucket.count }}</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4">
-              <h2 class="font-semibold text-highlighted">Recent reviews</h2>
-            </header>
-            <div v-if="reviews.recent.length" class="divide-y divide-default">
-              <article v-for="review in reviews.recent" :key="review.id" class="py-4 first:pt-0 last:pb-0">
-                <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span class="font-medium text-highlighted">{{ review.author }}</span>
-                  <span class="text-sm tabular-nums text-primary">{{ '★'.repeat(review.rating) }}</span>
-                  <span class="text-xs text-muted">{{ formatDate(review.createdAt.slice(0, 10)) }}</span>
-                </div>
-                <p v-if="review.title" class="mt-1 font-medium text-highlighted">{{ review.title }}</p>
-                <p v-if="review.content" class="mt-1 line-clamp-3 text-sm leading-6 text-muted">{{ review.content }}</p>
-              </article>
-            </div>
-            <p v-else class="py-8 text-center text-sm text-muted">No approved reviews yet.</p>
-          </section>
+      <div v-else-if="tab === 'reviews'" class="space-y-6">
+        <!--
+          Two things, kept apart: what invited guests told the business
+          (internal, public or private, published or not) and the published
+          reviews the website shows. A member reads the first alone, for the
+          visits they are responsible for.
+        -->
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <p v-if="feedback" class="text-sm text-muted" data-testid="feedback-period">
+            <time :datetime="feedback.period.startDate">{{ formatDate(feedback.period.startDate) }}</time> – <time :datetime="feedback.period.endDate">{{ formatDate(feedback.period.endDate) }}</time>
+          </p>
+          <div class="flex items-center gap-2" role="group" aria-label="Feedback range">
+            <UButton
+              v-for="days in FEEDBACK_RANGES"
+              :key="days"
+              :label="`${days}d`"
+              color="neutral"
+              :variant="feedbackDays === days ? 'solid' : 'outline'"
+              class="h-10 rounded-full px-4 text-sm font-normal"
+              :aria-pressed="feedbackDays === days"
+              :disabled="feedbackPending"
+              @click="feedbackDays = days"
+            />
+          </div>
         </div>
-      </div>
+        <UAlert v-if="feedbackError" color="error" variant="soft" title="Guest feedback could not be loaded" :description="feedbackError.message" />
+        <section v-else-if="feedback" class="border-b border-default pb-8" data-testid="insights-feedback">
+          <header class="mb-4">
+            <h2 class="font-semibold text-highlighted">Guest feedback</h2>
+            <p class="mt-1 text-sm text-muted">{{ feedback.organizationWide ? 'Everything invited guests told you, published or not.' : 'What guests said about the visits you’re responsible for.' }}</p>
+          </header>
+          <div class="grid grid-cols-2 gap-x-6 gap-y-6">
+            <div>
+              <p class="text-sm text-muted">Overall</p>
+              <p class="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-highlighted" data-testid="feedback-overall">{{ feedback.overall.average ?? '—' }}</p>
+              <p class="mt-2 text-xs text-muted">{{ feedback.responses === 1 ? '1 response' : `${formatCount(feedback.responses)} responses` }}</p>
+            </div>
+            <div>
+              <p class="text-sm text-muted">Private feedback</p>
+              <p class="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-highlighted">{{ formatCount(feedback.privateFeedbackCount) }}</p>
+              <p class="mt-2 text-xs text-muted">Read only by your team</p>
+            </div>
+          </div>
+          <div v-for="subject in feedback.subjects" :key="subject.subject" class="mt-8" :data-testid="`feedback-subject-${subject.subject}`">
+            <h3 class="text-sm font-semibold text-highlighted">{{ subject.label }} · {{ subject.responses === 1 ? '1 response' : `${formatCount(subject.responses)} responses` }}</h3>
+            <div class="mt-3 space-y-3">
+              <!-- Each average is of the guests who answered that question; the count says how many did. -->
+              <DashboardAnalyticsRow
+                v-for="category in subject.categories"
+                :key="category.key"
+                :label="category.label"
+                :value="category.average === null ? '—' : `${category.average} · ${category.count === 1 ? '1 rating' : `${category.count} ratings`}`"
+                :percent="category.average === null ? 0 : (category.average / 5) * 100"
+                :data-testid="`feedback-category-${category.key}`"
+              />
+            </div>
+          </div>
+          <div v-if="feedback.months.length > 1" class="mt-8">
+            <h3 class="text-sm font-semibold text-highlighted">By month</h3>
+            <table class="mt-3 w-full text-left text-sm">
+              <thead class="text-xs text-muted"><tr><th scope="col" class="pb-2 font-medium">Month</th><th scope="col" class="pb-2 text-right font-medium">Responses</th><th scope="col" class="pb-2 text-right font-medium">Overall</th></tr></thead>
+              <tbody class="divide-y divide-default">
+                <tr v-for="month in feedback.months" :key="month.month"><td class="py-2">{{ formatMonth(month.month) }}</td><td class="py-2 text-right tabular-nums">{{ month.responses }}</td><td class="py-2 text-right tabular-nums">{{ month.average ?? '—' }}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="mt-8 divide-y divide-default">
+            <article v-for="entry in feedback.recent" :id="`review-${entry.id}`" :key="entry.id" class="py-4 first:pt-0 last:pb-0" :class="focusedReview === entry.id ? 'rounded-lg bg-elevated px-3' : ''" :data-testid="`feedback-review-${entry.id}`">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span class="font-medium text-highlighted">{{ entry.author }}</span>
+                <span class="text-sm tabular-nums text-primary" :aria-label="`${entry.rating} out of 5`">{{ '★'.repeat(entry.rating) }}</span>
+                <UBadge :color="entry.status === 'private' ? 'neutral' : entry.status === 'approved' ? 'success' : 'warning'" variant="soft" :label="FEEDBACK_STATUS_LABELS[entry.status]" />
+                <span class="text-xs text-muted">{{ [entry.visitTitle, formatDate(entry.createdAt.slice(0, 10))].filter(Boolean).join(' · ') }}</span>
+              </div>
+              <p v-if="entry.categories.length" class="mt-1 text-xs text-muted">{{ entry.categories.map(category => `${category.label} ${category.rating}`).join(' · ') }}</p>
+              <p v-if="entry.title" class="mt-2 font-medium text-highlighted">{{ entry.title }}</p>
+              <p v-if="entry.content" class="mt-1 text-sm leading-6 text-muted">{{ entry.content }}</p>
+              <div v-if="entry.privateFeedback" class="mt-2 rounded-md bg-muted px-3 py-2">
+                <p class="text-xs font-medium text-highlighted">Private feedback</p>
+                <p class="mt-1 whitespace-pre-line text-sm text-muted">{{ entry.privateFeedback }}</p>
+              </div>
+              <!-- Publishing stays the owners' and admins' decision, on the review's own record. -->
+              <NuxtLink v-if="canReadAnalytics && entry.status !== 'private'" :to="`/dashboard/${scope?.orgSlug}/website/qa/reviews/${entry.id}`" class="mt-2 inline-block text-sm font-medium text-highlighted underline-offset-4 hover:underline">{{ entry.status === 'pending' ? 'Review and publish' : 'Open review' }}</NuxtLink>
+            </article>
+            <p v-if="!feedback.recent.length" class="py-8 text-center text-sm text-muted">No guest feedback in this period.</p>
+          </div>
+        </section>
 
+        <section v-if="canReadAnalytics && reviews && !loadError" class="border-b border-default pb-8 last:border-b-0" data-testid="insights-published-reviews">
+          <header class="mb-4">
+            <h2 class="font-semibold text-highlighted">Published reviews</h2>
+            <p class="mt-1 text-sm text-muted">What your website shows, imported Google reviews included.</p>
+          </header>
+          <div class="flex items-baseline gap-2">
+            <UIcon name="i-lucide-star" class="size-6 text-primary" />
+            <span class="text-4xl font-semibold tabular-nums text-highlighted">{{ reviews.average ?? '—' }}</span>
+          </div>
+          <p class="mt-1 text-sm text-muted">
+            {{ reviews.total === 1 ? '1 published review' : `${formatCount(reviews.total)} published reviews` }}
+          </p>
+          <div class="mt-6 space-y-2">
+            <div v-for="bucket in reviews.distribution" :key="bucket.rating" class="flex items-center gap-3">
+              <span class="w-10 shrink-0 text-sm tabular-nums text-muted">{{ bucket.rating }}★</span>
+              <span class="h-2 flex-1 overflow-hidden rounded-full bg-elevated">
+                <span
+                  class="block h-full rounded-full bg-primary"
+                  :style="{ width: `${reviews.total ? (bucket.count / reviews.total) * 100 : 0}%` }"
+                />
+              </span>
+              <span class="w-8 shrink-0 text-right text-sm tabular-nums text-muted">{{ bucket.count }}</span>
+            </div>
+          </div>
+          <div v-if="reviews.recent.length" class="mt-8 divide-y divide-default">
+            <article v-for="review in reviews.recent" :key="review.id" class="py-4 first:pt-0 last:pb-0">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span class="font-medium text-highlighted">{{ review.author }}</span>
+                <span class="text-sm tabular-nums text-primary">{{ '★'.repeat(review.rating) }}</span>
+                <UBadge v-if="review.source === 'google_places'" color="neutral" variant="subtle" label="Google" />
+                <span class="text-xs text-muted">{{ formatDate(review.createdAt.slice(0, 10)) }}</span>
+              </div>
+              <p v-if="review.title" class="mt-1 font-medium text-highlighted">{{ review.title }}</p>
+              <p v-if="review.content" class="mt-1 line-clamp-3 text-sm leading-6 text-muted">{{ review.content }}</p>
+            </article>
+          </div>
+          <p v-else class="py-8 text-center text-sm text-muted">No published reviews yet.</p>
+        </section>
+      </div>
 
       <div v-else-if="tab === 'instagram'" class="space-y-8">
         <UAlert
@@ -417,33 +497,52 @@ import { organizationAnalyticsSchema, type AnalyticsReport, type OrganizationAna
 import { instagramInsightsSchema, type InstagramInsights } from '~/shared/instagram-insights'
 import { googleAdsInsightsSchema, type GoogleAdsInsights } from '~/shared/google-ads-insights'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
+import { reviewFeedbackSchema, type ReviewFeedback } from '~/shared/review-feedback'
+import { authClient } from '~/lib/auth-client'
 
 const route = useRoute()
 const scope = useDashboardRouteScope()
+const dashboardOrganization = useDashboardOrganization()
 
-// Reviews reads what we actually hold. There is no Superhost
-// equivalent, and a review carries one overall rating rather than per-category
-// scores, so neither is invented here.
+// Website, Instagram and Ads numbers are the organization's analytics, which
+// owners and admins read. A member reaches Insights for the guest feedback on
+// their own visits, and nothing else here.
+const { data: analyticsPermission } = await useAsyncData(
+  () => `insights-analytics-permission:${dashboardOrganization.organizationId.value ?? ''}`,
+  async () => {
+    const organizationId = dashboardOrganization.organizationId.value
+    if (!organizationId) throw createError({ statusCode: 404, statusMessage: 'Organization not found' })
+    const permission = await authClient.organization.hasPermission({ organizationId, permissions: { analytics: ['read'] } })
+    if (permission.error) throw new Error(permission.error.message || 'Your permissions could not be checked.')
+    return permission.data!.success
+  },
+)
+const canReadAnalytics = computed(() => analyticsPermission.value === true)
+
+// Reviews reads what we actually hold. There is no Superhost equivalent.
+// Category scores exist only where an invited guest gave them.
 const TAB_VALUES = ['views', 'instagram', 'ads', 'reviews'] as const
 type InsightsTab = typeof TAB_VALUES[number]
 const isTab = (value: unknown): value is InsightsTab => TAB_VALUES.some(candidate => candidate === value)
-const tab = ref<InsightsTab>(isTab(route.query.tab) ? route.query.tab : 'views')
+const defaultTab = computed<InsightsTab>(() => canReadAnalytics.value ? 'views' : 'reviews')
+const tab = ref<InsightsTab>(isTab(route.query.tab) && (canReadAnalytics.value || route.query.tab === 'reviews') ? route.query.tab : defaultTab.value)
 // Back and forward change the query without touching the ref, so the URL is
 // read as well as written or the rendered tab drifts from the address bar.
 watch(() => route.query.tab, (value) => {
-  const next = isTab(value) ? value : 'views'
+  const next = isTab(value) && (canReadAnalytics.value || value === 'reviews') ? value : defaultTab.value
   if (tab.value !== next) tab.value = next
 })
 watch(tab, (next) => {
   void navigateTo({ query: next === 'views' ? { ...route.query, tab: undefined } : { ...route.query, tab: next } }, { replace: true })
 })
-const tabItems = [
-  { label: 'Views', value: 'views' as const },
-  { label: 'Instagram', value: 'instagram' as const },
-  { label: 'Google Ads', value: 'ads' as const },
-  { label: 'Reviews', value: 'reviews' as const },
-
-]
+const tabItems = computed(() => canReadAnalytics.value
+  ? [
+      { label: 'Views', value: 'views' as const },
+      { label: 'Instagram', value: 'instagram' as const },
+      { label: 'Google Ads', value: 'ads' as const },
+      { label: 'Reviews', value: 'reviews' as const },
+    ]
+  : [{ label: 'Reviews', value: 'reviews' as const }])
 
 // The report's dates are URL state: a Today card, reload and Back all reopen
 // the same period. Range validation remains the analytics API's operation.
@@ -456,7 +555,7 @@ const isNumberField = (row: unknown, ...fields: string[]): boolean =>
 
 const { data: insightsResource, pending: loading, error: resourceError, refresh } = await useAsyncData(
   () => `dashboard-org-insights:${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}`,
-  () => dashboardApi<OrganizationAnalyticsReport>('/api/dashboard/analytics', {
+  async () => !canReadAnalytics.value ? null : await dashboardApi<OrganizationAnalyticsReport>('/api/dashboard/analytics', {
     query: requestedRange.value,
     validate: (value): value is OrganizationAnalyticsReport => {
       const result = organizationAnalyticsSchema.safeParse(value)
@@ -536,6 +635,35 @@ const instagramMetricCards = computed(() => instagram.value?.status === 'connect
   ? INSTAGRAM_ACCOUNT_FIELDS.map(field => ({ label: field.label, value: (instagram.value as Extract<InstagramInsights, { status: 'connected' }>).account[field.key] }))
   : [])
 const reviews = computed(() => insightsResource.value?.reviews)
+
+// Guest feedback over its own range, read when the Reviews tab is open.
+const FEEDBACK_RANGES = [30, 90, 365] as const
+const feedbackDays = ref<typeof FEEDBACK_RANGES[number]>(90)
+const focusedReview = computed(() => typeof route.query.review === 'string' ? route.query.review : null)
+const { data: feedback, pending: feedbackPending, error: feedbackError, execute: loadFeedback } = await useAsyncData(
+  () => `dashboard-review-feedback:${scope.value?.orgSlug}:${feedbackDays.value}`,
+  () => {
+    return dashboardApi<ReviewFeedback>('/api/dashboard/review-feedback', {
+      query: { days: feedbackDays.value },
+      validate: (value): value is ReviewFeedback => {
+        const result = reviewFeedbackSchema.safeParse(value)
+        if (!result.success) throw new ApiClientError('Invalid guest feedback response', 502, 'INVALID_REVIEW_FEEDBACK_RESPONSE', null)
+        return true
+      },
+    })
+  },
+  { lazy: true, immediate: false },
+)
+watch(() => tab.value === 'reviews' ? `${scope.value?.orgSlug}:${feedbackDays.value}` : null, (key) => { if (key) void loadFeedback() }, { immediate: true })
+// A notification opens the review it is about.
+watch([feedback, focusedReview], ([loaded, reviewId]) => {
+  if (!import.meta.client || !loaded || !reviewId) return
+  void nextTick(() => document.getElementById(`review-${reviewId}`)?.scrollIntoView({ block: 'center' }))
+})
+const FEEDBACK_STATUS_LABELS = { pending: 'Awaiting review', approved: 'Published', rejected: 'Not published', private: 'Private' } as const
+function formatMonth(month: string) {
+  return formatCalendarDate(`${month}-01`, 'en', { month: 'long', year: 'numeric' })
+}
 const loadError = computed(() => resourceError.value?.message ?? null)
 // The same native query MCP exposes (query_organization_analytics), asked for the pageviews of the
 // selected range grouped by language. Every group is reachable: "Show more" follows the cursor.

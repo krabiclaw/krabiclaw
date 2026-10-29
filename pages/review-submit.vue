@@ -1,115 +1,114 @@
 <template>
   <div class="min-h-screen bg-default text-default">
-    <section class="mx-auto max-w-2xl px-4 py-16 sm:px-6 lg:px-8">
-      <NuxtLink :to="localePath(`/locations/${slug}`)" class="tenant-kicker text-muted no-underline hover:text-default">
-        Back to {{ requestData?.location?.title || 'location' }}
-      </NuxtLink>
-
-      <div v-if="pending" class="mt-12 rounded-lg border border-default p-8">
+    <section class="tenant-container max-w-2xl py-16">
+      <div v-if="pending" class="rounded-lg border border-default p-8">
         <div class="h-5 w-40 animate-pulse rounded bg-elevated" />
         <div class="mt-4 h-20 animate-pulse rounded bg-elevated" />
       </div>
 
-      <div v-else-if="loadError" class="mt-12 rounded-lg border border-default p-8">
+      <div v-else-if="loadError" class="rounded-lg border border-default p-8">
         <h1 class="text-2xl font-semibold">This review link is not available</h1>
         <p class="mt-3 text-sm text-muted">{{ loadError }}</p>
       </div>
 
-      <div v-else-if="optedOut" class="mt-12 rounded-lg border border-default p-8">
+      <div v-else-if="optedOut" class="rounded-lg border border-default p-8">
         <h1 class="text-2xl font-semibold">You are opted out</h1>
         <p class="mt-3 text-sm text-muted">You will not receive more review request emails.</p>
       </div>
 
-      <div v-else-if="submitted" class="mt-12 rounded-lg border border-default p-8">
-        <h1 class="text-3xl font-semibold">Thank you</h1>
-        <p class="mt-3 text-sm text-muted">Your review is pending moderation.</p>
-        <div class="mt-8 flex flex-wrap gap-3">
-          <button v-if="requestData?.location?.googleReviewUrl" type="button" class="inline-flex items-center justify-center gap-2 rounded-full bg-primary px-6 py-3 text-sm font-medium text-on-primary no-underline transition hover:opacity-90" @click="copyAndOpenGoogle">
-            {{ copyButtonLabel }}
-          </button>
-        </div>
-        <GuestAccountPrompt class="mt-8" />
-      </div>
+      <template v-else-if="requestData">
+        <p class="tenant-eyebrow text-muted">{{ requestData.organization.name }}</p>
+        <h1 class="mt-3 text-3xl font-semibold">{{ submitted ? 'Thank you' : 'How was your visit?' }}</h1>
+        <p v-if="!submitted" class="mt-3 text-sm text-muted">{{ [requestData.visit.title, requestData.visit.at].filter(Boolean).join(' · ') }}</p>
 
-      <form v-else class="mt-12 rounded-lg border border-default p-8" @submit.prevent="submitReview">
-        <p class="tenant-eyebrow text-muted">{{ requestData?.organization?.name }}</p>
-        <h1 class="mt-3 text-3xl font-semibold">How was your visit?</h1>
-        <p class="mt-3 text-sm text-muted">{{ requestData?.location?.title }}</p>
-
-        <div class="mt-8">
-          <label class="text-sm font-medium">Rating</label>
-          <div class="mt-3 flex gap-2">
-            <button
-              v-for="star in 5"
-              :key="star"
-              type="button"
-              class="rounded-full p-2 transition hover:bg-elevated"
-              :aria-label="`${star} star${star === 1 ? '' : 's'}`"
-              @click="rating = star"
-            >
-              <TenantIcon name="star" solid class="size-8" :class="star <= rating ? 'text-primary' : 'text-muted'" />
-            </button>
-          </div>
-        </div>
-
-        <label class="mt-8 block text-sm font-medium">
-          Title
-          <input v-model="title" class="mt-2 w-full rounded-lg border border-default bg-default px-3 py-2 text-sm outline-none focus:border-primary" maxlength="120">
-        </label>
-
-        <label class="mt-6 block text-sm font-medium">
-          Review
-          <textarea v-model="content" class="mt-2 min-h-36 w-full rounded-lg border border-default bg-default px-3 py-2 text-sm outline-none focus:border-primary" maxlength="2000" required />
-        </label>
-
-        <div class="mt-6">
-          <div class="flex items-center justify-between gap-3">
-            <label class="text-sm font-medium" for="review-media">Photos and videos</label>
-            <span class="text-xs text-muted">{{ imageCount }}/5 photos / {{ videoCount }}/2 videos</span>
-          </div>
-          <input
-            id="review-media"
-            ref="mediaInput"
-            class="sr-only"
-            type="file"
-            accept="image/jpeg,image/png,image/webp,video/mp4,video/webm"
-            multiple
-            @change="handleMediaSelect"
-          >
-          <div class="mt-3 flex flex-wrap gap-3">
-            <button type="button" class="rounded-lg border border-dashed border-default px-4 py-3 text-sm text-muted hover:border-primary hover:text-default" :disabled="uploadingMedia || removingMediaAssetId !== null" @click="mediaInput?.click()">
-              {{ uploadingMedia ? 'Uploading...' : 'Add media' }}
-            </button>
-            <div
-              v-for="item in media"
-              :key="item.asset_id"
-              class="relative h-20 w-20 overflow-hidden rounded-lg border border-default bg-elevated"
-            >
-              <img v-if="item.preview_url && item.kind === 'image'" :src="item.preview_url" alt="" class="h-full w-full object-cover">
-              <div v-else class="flex h-full w-full items-center justify-center text-xs text-muted">Video</div>
-              <button
-                type="button"
-                class="absolute right-1 top-1 rounded-full bg-default/90 px-1.5 text-xs disabled:cursor-wait disabled:opacity-60"
-                :disabled="removingMediaAssetId !== null"
-                :aria-label="removingMediaAssetId === item.asset_id ? 'Removing media' : 'Remove media'"
-                @click="removeMedia(item.asset_id)"
-              >x</button>
+        <!-- Ratings, then the public review, then what only the business reads, then the confirmation: one step at a time. -->
+        <UStepper ref="stepper" v-model="step" :items="steps" :linear="true" disabled class="mt-10" data-testid="review-steps">
+          <template #ratings>
+            <div class="space-y-8 pt-8">
+              <div>
+                <p id="overall-rating-label" class="text-base font-semibold text-highlighted">Overall</p>
+                <UInputRating v-model="rating" size="xl" class="mt-3" aria-labelledby="overall-rating-label" data-testid="review-overall-rating" />
+              </div>
+              <div class="space-y-5 border-t border-default pt-6">
+                <p class="text-sm text-muted">Rate any of these you’d like to. You can skip them.</p>
+                <div v-for="question in requestData.questions" :key="question.key" class="flex flex-wrap items-center justify-between gap-3">
+                  <p :id="`rating-${question.key}`" class="text-sm font-medium text-highlighted">{{ question.label }}</p>
+                  <UInputRating v-model="categories[question.key]" clearable :aria-labelledby="`rating-${question.key}`" :data-testid="`review-category-${question.key}`" />
+                </div>
+              </div>
             </div>
-          </div>
-          <p v-if="mediaError" class="mt-3 text-sm text-error">{{ mediaError }}</p>
-        </div>
+          </template>
 
-        <p v-if="submitError" class="mt-4 text-sm text-error">{{ submitError }}</p>
+          <template #public>
+            <div class="space-y-6 pt-8">
+              <USwitch v-model="publish" label="Share a public review" :description="`${requestData.organization.name} may show it on its website once they’ve checked it.`" data-testid="review-publish" />
+              <template v-if="publish">
+                <UFormField label="Show my name as">
+                  <URadioGroup v-model="displayName" :items="requestData.displayNames" />
+                </UFormField>
+                <UFormField label="Title" hint="Optional">
+                  <UInput v-model="title" maxlength="120" class="w-full" />
+                </UFormField>
+                <UFormField label="Your review" :hint="`${content.trim().length}/2000`">
+                  <UTextarea v-model="content" :rows="6" maxlength="2000" class="w-full" data-testid="review-content" />
+                </UFormField>
+                <div>
+                  <div class="flex items-center justify-between gap-3">
+                    <label class="text-sm font-medium" for="review-media">Photos and videos</label>
+                    <span class="text-xs text-muted">{{ imageCount }}/5 photos / {{ videoCount }}/2 videos</span>
+                  </div>
+                  <input
+                    id="review-media"
+                    ref="mediaInput"
+                    class="sr-only"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,video/mp4,video/webm"
+                    multiple
+                    @change="handleMediaSelect"
+                  >
+                  <div class="mt-3 flex flex-wrap gap-3">
+                    <UButton color="neutral" variant="outline" :label="uploadingMedia ? 'Uploading…' : 'Add media'" :disabled="uploadingMedia || removingMediaAssetId !== null" @click="mediaInput?.click()" />
+                    <div v-for="item in media" :key="item.asset_id" class="relative h-20 w-20 overflow-hidden rounded-lg border border-default bg-elevated">
+                      <img v-if="item.preview_url && item.kind === 'image'" :src="item.preview_url" alt="" class="h-full w-full object-cover">
+                      <div v-else class="flex h-full w-full items-center justify-center text-xs text-muted">Video</div>
+                      <UButton class="absolute right-1 top-1" size="xs" color="neutral" icon="i-lucide-x" :disabled="removingMediaAssetId !== null" :aria-label="removingMediaAssetId === item.asset_id ? 'Removing media' : 'Remove media'" @click="removeMedia(item.asset_id)" />
+                    </div>
+                  </div>
+                  <p v-if="mediaError" class="mt-3 text-sm text-error">{{ mediaError }}</p>
+                </div>
+              </template>
+            </div>
+          </template>
 
-        <div class="mt-8 flex flex-wrap items-center gap-3">
-          <TenantButton type="submit" :disabled="submitting || removingMediaAssetId !== null">
-            {{ submitting ? 'Submitting...' : 'Submit review' }}
-          </TenantButton>
-          <button type="button" class="text-sm text-muted underline-offset-4 hover:underline" @click="optOut">
-            Opt out of review emails
-          </button>
+          <template #private>
+            <div class="space-y-4 pt-8">
+              <UFormField label="Anything you’d like to tell the team privately?" :description="`Only ${requestData.organization.name} reads this. It is never published.`" hint="Optional">
+                <UTextarea v-model="privateFeedback" :rows="6" maxlength="2000" class="w-full" data-testid="review-private-feedback" />
+              </UFormField>
+            </div>
+          </template>
+
+          <template #done>
+            <div class="space-y-6 pt-8" data-testid="review-confirmation">
+              <p class="text-sm text-muted">
+                <template v-if="publish">Your review is with {{ requestData.organization.name }}. It appears on their website once they’ve checked it.</template>
+                <template v-else>Your feedback went to {{ requestData.organization.name }} only. Nothing was published.</template>
+              </p>
+              <UButton v-if="publish && requestData.location.googleReviewUrl" :label="copyButtonLabel" @click="copyAndOpenGoogle" />
+              <GuestAccountPrompt />
+            </div>
+          </template>
+        </UStepper>
+
+        <UAlert v-if="submitError" class="mt-6" color="error" variant="soft" :description="submitError" />
+
+        <div v-if="!submitted" class="mt-8 flex flex-wrap items-center justify-between gap-3">
+          <UButton v-if="step !== 'ratings'" label="Back" color="neutral" variant="ghost" :disabled="submitting" @click="stepper?.prev()" />
+          <UButton v-else label="Opt out of review emails" color="neutral" variant="link" @click="optOut" />
+          <UButton v-if="step !== 'private'" label="Next" :disabled="!stepValid" @click="next" />
+          <UButton v-else label="Submit" :loading="submitting" :disabled="removingMediaAssetId !== null" @click="submitReview" />
         </div>
-      </form>
+      </template>
     </section>
   </div>
 </template>
@@ -119,19 +118,31 @@ import GuestAccountPrompt from '~/components/booking/GuestAccountPrompt.vue'
 import { $fetch } from 'ofetch'
 import { REVIEW_VIDEO_MAX_BYTES, REVIEW_VIDEO_MAX_LABEL } from '~/config/media-limits'
 
-const { localePath } = useI18n()
-
 definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
-const slug = computed(() => String(route.params.slug))
 const token = computed(() => String(route.query.token || ''))
 
-const rating = ref(5)
+type Step = 'ratings' | 'public' | 'private' | 'done'
+const steps: Array<{ value: Step; slot: Step; title: string }> = [
+  { value: 'ratings', slot: 'ratings', title: 'Ratings' },
+  { value: 'public', slot: 'public', title: 'Public review' },
+  { value: 'private', slot: 'private', title: 'Private feedback' },
+  { value: 'done', slot: 'done', title: 'Done' },
+]
+const step = ref<Step>('ratings')
+const stepper = useTemplateRef<{ next: () => void; prev: () => void }>('stepper')
+
+// The overall rating is asked for explicitly; nothing is preselected.
+const rating = ref(0)
+const categories = reactive<Record<string, number | undefined>>({})
+const publish = ref(false)
+const displayName = ref('')
 const title = ref('')
 const content = ref('')
+const privateFeedback = ref('')
 const submitting = ref(false)
-const submitted = ref(false)
+const submitted = computed(() => step.value === 'done')
 // Whether this browser holds the anonymous identity the review belongs to, so
 // signing in here links it through Better Auth. Another browser cannot.
 const optedOut = ref(false)
@@ -148,13 +159,35 @@ const videoCount = computed(() => media.value.filter(item => item.kind === 'vide
 
 const { data: requestData, pending, error: validationError } = await useAsyncData<{
   request: { id: string; bookingType: string; expiresAt: string }
-  organization: { id: string; name: string | null }
-  location: { id: string | null; slug: string | null; title: string | null; googleReviewUrl: string | null }
-  customer: { name: string | null }
+  organization: { id: string; name: string }
+  visit: { subject: string; title: string | null; at: string; locationTitle: string | null }
+  questions: Array<{ key: string; label: string }>
+  location: { googleReviewUrl: string | null }
+  displayNames: string[]
 }>(() => `review-request-validation-${token.value}`, () =>
   $fetch('/api/public/review-requests/validate', { query: { token: token.value } }),
 )
 const loadError = computed(() => validationError.value ? 'The link may have expired or already been used.' : '')
+watch(requestData, (data) => { if (data && !displayName.value) displayName.value = data.displayNames[0] ?? '' }, { immediate: true })
+
+// Each step asks only for what it needs: an overall rating, then — if the guest shares one — the public text.
+const stepValid = computed(() => step.value === 'ratings'
+  ? rating.value >= 1
+  : step.value === 'public'
+    ? !publish.value || (content.value.trim().length >= 10 && Boolean(displayName.value) && !uploadingMedia.value)
+    : true)
+
+async function next() {
+  submitError.value = ''
+  // Media belongs to the public review; turning it off removes what was uploaded for it.
+  if (step.value === 'public' && !publish.value) {
+    for (const item of [...media.value]) await removeMedia(item.asset_id)
+    if (media.value.length) return
+    title.value = ''
+    content.value = ''
+  }
+  stepper.value?.next()
+}
 
 onMounted(async () => {
   if (route.query.optOut === '1' || route.query.optOut === 'true') {
@@ -325,27 +358,27 @@ async function submitReview() {
     submitError.value = 'Wait for the media removal to finish before submitting.'
     return
   }
-  if (content.value.trim().length < 10) {
-    submitError.value = 'Review text must be at least 10 characters.'
-    return
-  }
   submitting.value = true
   try {
-    await publicApiMutation<{ success: true; reviewId: string; status: 'pending' }>('/api/public/review-requests/submit', {
+    const status = publish.value ? 'pending' : 'private'
+    await publicApiMutation<{ success: true; reviewId: string; status: 'pending' | 'private' }>('/api/public/review-requests/submit', {
       method: 'POST',
       body: {
         token: token.value,
         rating: rating.value,
-        title: title.value,
-        content: content.value,
+        // A question the guest skipped is left out, never sent as a score.
+        categories: Object.fromEntries(Object.entries(categories).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] >= 1)),
+        publish: publish.value,
+        ...(publish.value ? { displayName: displayName.value, title: title.value, content: content.value } : {}),
+        privateFeedback: privateFeedback.value,
       },
-      validate: (value): value is { success: true; reviewId: string; status: 'pending' } =>
+      validate: (value): value is { success: true; reviewId: string; status: 'pending' | 'private' } =>
         isRecord(value)
         && value.success === true
         && typeof value.reviewId === 'string'
-        && value.status === 'pending',
+        && value.status === status,
     })
-    submitted.value = true
+    stepper.value?.next()
   } catch (error) {
     submitError.value = (error as { data?: { error?: string } })?.data?.error || 'Could not submit your review.'
   } finally {
@@ -386,10 +419,11 @@ async function optOut() {
 }
 
 useSocialMetadata(() => ({
-  path: `/locations/${slug.value}/review-submit`,
+  path: '/review-submit',
   title: 'Leave a review',
-  description: `Submit a review for ${requestData.value?.location?.title || 'this location'}.`,
+  description: `Review your visit to ${requestData.value?.organization.name || 'this business'}.`,
   socialImage: null,
   discoverability: 'private',
 }))
+useHead({ meta: [{ name: 'referrer', content: 'no-referrer' }] })
 </script>

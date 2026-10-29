@@ -281,6 +281,8 @@ export interface ReviewEventInput {
   authorName: string
   rating: number
   content: string
+  /** The guest also wrote to the business privately; its text is read where it is authorized, never in an alert. */
+  hasPrivateFeedback?: boolean
   organizationName: string
   reviewsUrl: string | null
 }
@@ -289,7 +291,8 @@ export function reviewReceivedMessage(input: ReviewEventInput): NotificationMess
   // The approved template has a rating slot and an excerpt slot and no author
   // slot, so the author leads the excerpt — the email's own headline is
   // "New review from {author}", and WhatsApp used to name nobody at all.
-  const excerpt = input.content.trim() ? `${input.authorName}: ${input.content.trim()}` : `${input.authorName} left a rating.`
+  const privately = input.hasPrivateFeedback ? ' and private feedback' : ''
+  const excerpt = input.content.trim() ? `${input.authorName}: ${input.content.trim()}` : `${input.authorName} left a rating${privately}.`
   return {
     title: `New ${input.rating}-star review from ${input.authorName}`,
     preheader: input.content.slice(0, 120) || `${input.rating} out of 5`,
