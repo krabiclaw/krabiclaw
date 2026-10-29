@@ -48,13 +48,19 @@ jobs:
       - run: yarn lint:schema-drift
       - run: yarn test:migrations
 
-  e2e:
-    name: E2E
+  # The suite in four Playwright shards, each on its own runner with its own
+  # local Worker and D1, prepared exactly as one run was.
+  e2e-shard:
+    name: E2E shard ${{ matrix.shard }}/4
     if: >-
       github.event_name == 'pull_request'
       && !(github.base_ref == 'main' && github.head_ref == 'staging')
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     env:
       BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
       PLATFORM_OWNER_EMAILS: ${{ secrets.PLATFORM_OWNER_EMAILS }}
@@ -99,20 +105,32 @@ jobs:
       # already prepared: local schema verification and the production build. The explicit
       # local:setup step copies the shared review credential once.
       - run: yarn local:setup
-      - run: yarn test:e2e
+      - run: yarn test:e2e --shard=${{ matrix.shard }}/4
       # Wrangler's own log names why the local Worker stopped serving; run
       # 36298734414 died serving _nuxt chunks with nothing else to read.
       - name: Upload Playwright report
         if: ${{ failure() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: playwright-report-pr
+          name: playwright-report-pr-${{ matrix.shard }}
           path: |
             playwright-report/
             test-results/
             ~/.config/.wrangler/logs/
           retention-days: 14
           if-no-files-found: ignore
+
+  # The one E2E result: green only when every shard passed.
+  e2e:
+    name: E2E
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && !(github.base_ref == 'main' && github.head_ref == 'staging')
+    needs: e2e-shard
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.e2e-shard.result }}" = success
 
   e2e-staging:
     name: Deploy and test staging

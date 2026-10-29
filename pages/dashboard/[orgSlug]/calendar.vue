@@ -14,7 +14,7 @@
     :offering-items="offeringItems"
     :offerings-error="offeringsError"
   />
-  <CalendarPage v-else :key="productId ?? 'agenda'" :session-product="scoped?.product" :session-locations="scoped?.locations ?? []" :offering-items="offeringItems" :offerings-error="offeringsError" :can-create-stay="Boolean(homes?.manage && homes.homes.length)" />
+  <CalendarPage v-else :key="productId ?? 'agenda'" :session-product="scoped?.product" :session-locations="scoped?.locations ?? []" :offering-items="offeringItems" :offerings-error="offeringsError" :can-create-stay="Boolean(homes?.manage && homes.homes.length)" :has-homes="Boolean(homes?.homes.length)" />
 </template>
 
 <script setup lang="ts">

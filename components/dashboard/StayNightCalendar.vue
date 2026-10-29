@@ -169,7 +169,10 @@ const initialError = computed(() => props.homeError || (!homeOption.value ? 'Tha
 const currentDay = computed(() => homeOption.value ? today(homeOption.value.timezone) : null)
 const requestedMonth = typeof route.query.month === 'string' ? `${route.query.month}-01` : null
 if (route.query.month !== undefined && (!requestedMonth || !isValidCalendarDate(requestedMonth))) throw createError({ statusCode: 400, statusMessage: 'Choose a valid calendar month.' })
-const placeholder = shallowRef<DateValue | undefined>(requestedMonth ? parseDate(requestedMonth) : currentDay.value ?? undefined)
+// The multi-calendar opens a home on the night that was tapped, selected.
+if (route.query.date !== undefined && (typeof route.query.date !== 'string' || !isValidCalendarDate(route.query.date))) throw createError({ statusCode: 400, statusMessage: 'Choose a valid calendar date.' })
+const requestedDate = typeof route.query.date === 'string' ? parseDate(route.query.date) : null
+const placeholder = shallowRef<DateValue | undefined>(requestedMonth ? parseDate(requestedMonth) : requestedDate ?? currentDay.value ?? undefined)
 const views = { month: { label: 'Month', icon: 'i-lucide-layout-grid' }, year: { label: 'Year', icon: 'i-lucide-grid-3x3' }, list: { label: 'List', icon: 'i-lucide-list' } } as const
 type CalendarView = keyof typeof views
 const view = computed<CalendarView>(() => {
@@ -179,7 +182,7 @@ const view = computed<CalendarView>(() => {
 })
 const channels = STAY_CHANNEL_LABELS
 const viewItems = computed(() => [Object.entries(views).map(([key, value]) => ({ ...value, type: 'checkbox' as const, checked: view.value === key, onSelect: () => changeView(key as CalendarView) }))])
-const selectedDates = shallowRef<DateValue[]>([])
+const selectedDates = shallowRef<DateValue[]>(requestedDate ? [requestedDate] : [])
 const selectedRanges = computed(() => {
   const ranges: { from: string; to: string }[] = []
   for (const date of [...new Set(selectedDates.value.map(day => day.toString()))].sort()) {
@@ -287,7 +290,7 @@ const dateLabel = computed(() => {
   return `${formatCalendarDate(range.from, 'en', options)}${selectedCount.value > 1 ? ` – ${formatCalendarDate(end, 'en', options)}` : ''}`
 })
 const concern = ref<NightConcern>('summary')
-const drawerOpen = ref(false)
+const drawerOpen = ref(Boolean(requestedDate))
 const busy = ref(false)
 const writeError = ref('')
 const datesOpen = ref(false)

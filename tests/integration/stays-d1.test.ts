@@ -8,7 +8,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
-import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
+import { addStayHomePhoto, applyChannelBooking, cancelStay, createStay, createStayPhotoRoom, deleteStayPayment, getStay, listStays, moveStayPhotos, readStayCalendar, readStayCalendars, readStayHome, recordStayPayment, removeStayHomePhoto, removeStayPhotoRoom, reorderStayHomePhotos, setStayNights, updateStay, updateStayHome, updateStayHomeAccessibility, updateStayPhotoRoom, type GuestStay, type StayAccess } from '../../server/domain/stays.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 import { getQuery, H3 } from 'nitro/h3'
 import { createAuth } from '../../server/utils/auth.ts'
@@ -1110,6 +1110,44 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
     // A closed night is the host's choice for guests; it does not hold a stay the host takes themselves.
     await setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-10', to: '2026-11-11', closed: true })
     await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'closed', check_in_date: '2026-11-10', check_out_date: '2026-11-11', ...guest })
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('the multi-calendar reads every home the caller looks after, each night as its own home calendar reads it', { timeout: 120_000 }, async () => {
+  const { runtime, db, env } = await boot()
+  try {
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
+    const lake = await home(db, env, { name: 'Lake house', location: 'lake-site' })
+    await setStayNights(db, env, manager, { product_id: lake.id, from: '2026-11-02', to: '2026-11-04', price_minor: 22_000, min_stay_arrival: 3 })
+    await setStayNights(db, env, manager, { product_id: cabin.id, from: '2026-11-05', to: '2026-11-06', closed: true })
+    const cabinStay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-10-30', check_out_date: '2026-11-03', ...guest, guest_name: 'Ana' })
+    const lakeStay = await createStay(db, env, manager, { product_id: lake.id, idempotency_key: 'l', check_in_date: '2026-11-04', check_out_date: '2026-11-07', ...guest, guest_name: 'Bo' })
+    const window = { from: '2026-11-01', to: '2026-11-08' }
+    const all = await readStayCalendars(db, manager, window)
+    assert.deepEqual(all.homes.map(entry => entry.home.name), ['Cabin', 'Lake house'])
+    for (const entry of all.homes) {
+      const own = await readStayCalendar(db, manager, { productId: entry.home.product_id, ...window })
+      assert.deepEqual(entry, { home: own.home, nights: own.nights })
+    }
+    const cabinNights = all.homes[0]!.nights
+    assert.deepEqual(cabinNights.map(night => [night.date, night.stay_id, night.closed, night.available]), [
+      ['2026-11-01', cabinStay.id, false, false], ['2026-11-02', cabinStay.id, false, false], ['2026-11-03', null, false, true], ['2026-11-04', null, false, true],
+      ['2026-11-05', null, true, false], ['2026-11-06', null, false, true], ['2026-11-07', null, false, true],
+    ])
+    assert.deepEqual(all.homes[1]!.nights.slice(1, 4).map(night => [night.date, night.price_minor, night.min_stay_arrival, night.stay_id]), [
+      ['2026-11-02', 22_000, 3, null], ['2026-11-03', 22_000, 3, null], ['2026-11-04', 15_000, null, lakeStay.id],
+    ])
+    assert.deepEqual(all.stays.map(stay => [stay.id, stay.guest_name, stay.channel, stay.check_in_date, stay.check_out_date]), [
+      [cabinStay.id, 'Ana', 'direct', '2026-10-30', '2026-11-03'], [lakeStay.id, 'Bo', 'direct', '2026-11-04', '2026-11-07'],
+    ])
+    const assigned = await readStayCalendars(db, cleaner, window)
+    assert.deepEqual(assigned.homes.map(entry => entry.home.product_id), [cabin.id])
+    assert.deepEqual(assigned.homes[0]!.nights, cabinNights)
+    assert.deepEqual(assigned.stays.map(stay => stay.id), [cabinStay.id])
+    assert.deepEqual(await readStayCalendars(db, outsider, window), { ...window, homes: [], stays: [] })
+    await assert.rejects(readStayCalendars(db, manager, { from: '2026-11-01', to: '2027-02-02' }), code('INVALID_RANGE'))
   } finally {
     await runtime.dispose()
   }
