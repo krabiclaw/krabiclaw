@@ -3,6 +3,7 @@ import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/
 import type { MediaCategory } from '~/shared/media-placement-contract'
 import { sql } from "drizzle-orm"
 import { PRODUCT_KINDS } from "../../shared/product-details"
+import { REVIEW_CATEGORY_KEYS, type ReviewCategory } from "../../shared/review-questions"
 import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
@@ -1009,6 +1010,9 @@ export const bookings = sqliteTable("bookings", {
 	// Hold expiry for a pending claim. NULL means the claim does not expire.
 	cancelled_at: text(),
 	cancellation_reason: text(),
+	// Staff recorded that the guest did not come. It suppresses the visit's
+	// review invitation and revokes an unused one; the status stays as it was.
+	no_show_at: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
@@ -1131,6 +1135,9 @@ export const reservations = sqliteTable("reservations", {
 	status: text().default("confirmed").notNull(),
 	cancelled_at: text(),
 	cancellation_reason: text(),
+	// Staff recorded that the guest did not come. It suppresses the visit's
+	// review invitation and revokes an unused one; the status stays as it was.
+	no_show_at: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
@@ -1463,6 +1470,9 @@ export const stays = sqliteTable("stays", {
 	booking_received_at: text(),
 	cancelled_at: text(),
 	cancellation_reason: text(),
+	// Staff recorded that the guest did not come. It suppresses the visit's
+	// review invitation and revokes an unused one; the status stays as it was.
+	no_show_at: text(),
 	version: integer().default(1).notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -2379,6 +2389,10 @@ export const reviews = sqliteTable("reviews", {
 	rating: integer().notNull(),
 	title: text(),
 	content: text(),
+	// What the guest told the business and not the public. Never read by a
+	// public projection; readable by owners, admins and the visit's
+	// responsible members.
+	private_feedback: text(),
 	google_review_id: text(),
 	google_review_metadata: text(),
 	owner_reply: text(),
@@ -2418,6 +2432,19 @@ export const reviews = sqliteTable("reviews", {
 	check("reviews_product_scope_check", sql`product_id IS NULL OR organization_id IS NOT NULL`),
 	check("reviews_owner_entered_provenance_check", sql`source != 'owner_entered' OR (organization_id IS NOT NULL AND location_id IS NULL AND entered_by_user_id IS NOT NULL AND collection_method IS NOT NULL AND publication_authorized = 1)`),
 	index("reviews_organization_id_idx").on(table.organization_id),
+]);
+
+// A guest's optional score for one of the fixed questions about their visit
+// (shared/review-questions.ts). A question the guest skipped has no row;
+// it is never filled in from the overall rating.
+export const review_category_ratings = sqliteTable("review_category_ratings", {
+	review_id: text().notNull().references(() => reviews.id, { onDelete: "cascade" }),
+	category: text().$type<ReviewCategory>().notNull(),
+	rating: integer().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.review_id, table.category], name: "review_category_ratings_pk" }),
+	check("review_category_ratings_rating_check", sql`rating BETWEEN 1 AND 5`),
+	check("review_category_ratings_category_check", sql`category IN (${sql.raw(REVIEW_CATEGORY_KEYS.map(key => `'${key}'`).join(', '))})`),
 ]);
 
 export const session = sqliteTable("session", {

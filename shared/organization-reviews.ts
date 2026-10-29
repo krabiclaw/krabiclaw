@@ -11,5 +11,6 @@ export const OWNER_REVIEW_COLLECTION_METHOD_LABELS: Record<OwnerReviewCollection
   other: 'Other',
 }
 
-export const OWNER_REVIEW_STATUSES = ['pending', 'approved', 'rejected'] as const
+// `private`: a guest's review without their consent to publish. It is never moderated.
+export const OWNER_REVIEW_STATUSES = ['pending', 'approved', 'rejected', 'private'] as const
 export type OwnerReviewStatus = typeof OWNER_REVIEW_STATUSES[number]

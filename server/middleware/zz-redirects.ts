@@ -159,6 +159,13 @@ export default defineHandler(async (event) => {
     return redirect('/docs/mcp-setup', 302)
   }
 
+  // Review invitations sent before every kind of visit shared one review
+  // address named their location; the token alone identifies the visit, and
+  // each such link stops working 30 days after it was sent.
+  if (/^\/locations\/[^/]+\/review-submit$/.test(normalizedPathname)) {
+    return redirect(`/review-submit${url.search}`, 301)
+  }
+
   if (event.context.tenantType === TENANT_TYPES.PLATFORM && PLATFORM_GONE_PATHS.has(normalizedPathname)) {
     throw new HTTPError({ statusCode: 410, statusMessage: 'Gone' })
   }

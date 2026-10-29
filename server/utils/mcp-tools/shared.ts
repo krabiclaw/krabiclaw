@@ -670,6 +670,12 @@ export const reviewObject = {
     original_reference: { type: ['string', 'null'] },
     publication_authorized: { type: 'boolean' },
     verified: { type: 'boolean' },
+    private_feedback: { type: ['string', 'null'], description: 'What the guest told the business privately. Never published.' },
+    category_ratings: {
+      type: 'array',
+      description: "The guest's optional 1-5 scores for the visit's fixed questions; a skipped question has no entry.",
+      items: { type: 'object', properties: { category: { type: 'string' }, rating: { type: 'number' } }, required: ['category', 'rating'] },
+    },
   },
   required: ['id', 'rating', 'source', 'status', 'created_at', 'updated_at', 'publication_authorized', 'verified'],
 }

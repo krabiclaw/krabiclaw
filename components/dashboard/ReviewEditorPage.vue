@@ -3,7 +3,7 @@
   <DashboardIndexPanel
     id="organization-review-record"
     :title="record ? `Review from ${record.author_name}` : 'Review'"
-    :auto-open="record ? `${recordPath}/visibility` : null"
+    :auto-open="record && record.status !== 'private' ? `${recordPath}/visibility` : null"
   >
     <UAlert
       v-if="loadError"
@@ -28,9 +28,15 @@
         <span class="text-xs text-muted">{{ new Date(record.created_at).toLocaleDateString() }}</span>
       </div>
       <p v-if="record.title" class="text-sm font-semibold text-highlighted">{{ record.title }}</p>
-      <p class="whitespace-pre-line text-sm text-muted">{{ record.content }}</p>
+      <p v-if="record.content" class="whitespace-pre-line text-sm text-muted">{{ record.content }}</p>
+      <p v-if="record.category_ratings.length" class="text-xs text-muted" data-testid="review-category-ratings">{{ record.category_ratings.map(rating => `${categoryLabel(rating.category)} ${rating.rating}`).join(' · ') }}</p>
+      <div v-if="record.private_feedback" class="rounded-md bg-muted px-3 py-2" data-testid="review-private-feedback">
+        <p class="text-xs font-medium text-highlighted">Private feedback</p>
+        <p class="mt-1 whitespace-pre-line text-sm text-muted">{{ record.private_feedback }}</p>
+      </div>
+      <p v-if="record.status === 'private'" class="text-sm text-muted">The guest shared this privately, so it can’t be published.</p>
     </div>
-    <EditorNavigationList v-if="record" :groups="navigationGroups" :active-item="level.child.value" />
+    <EditorNavigationList v-if="record && record.status !== 'private'" :groups="navigationGroups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
 
@@ -54,6 +60,12 @@ export const reviewEditorKey = Symbol('review-editor') as InjectionKey<ReviewEdi
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { getErrorMessage } from '~/utils/errors'
+import { REVIEW_CATEGORIES, REVIEW_SUBJECTS } from '~/shared/review-questions'
+
+const QUESTIONS: ReadonlyArray<{ key: string; label: string }> = REVIEW_SUBJECTS.flatMap(subject => [...REVIEW_CATEGORIES[subject]])
+function categoryLabel(key: string) {
+  return QUESTIONS.find(question => question.key === key)?.label ?? key
+}
 
 // The location the URL scopes this to with `?location_id=`, or none for the whole site.
 const locationScope = useLocationScope()
@@ -101,7 +113,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [
 ])
 
 // A guest review arrives pending; the owner's decision is publish or archive, never back to pending.
-const saveDisabled = computed(() => !record.value || form.status === record.value.status || form.status === 'pending')
+const saveDisabled = computed(() => !record.value || record.value.status === 'private' || form.status === record.value.status || form.status === 'pending' || form.status === 'private')
 
 async function save() {
   const row = record.value

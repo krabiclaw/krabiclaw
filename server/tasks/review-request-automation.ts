@@ -1,6 +1,6 @@
 import type { D1Database } from '@cloudflare/workers-types'
 import { queryAllPages } from '~/server/db'
-import type { ReviewBookingType } from '~/server/utils/review-requests'
+import { getReviewBookingContext, reviewInvitationDue, REVIEW_REQUEST_DELAY_HOURS, REVIEW_REQUEST_TTL_DAYS, type ReviewBookingType } from '~/server/utils/review-requests'
 import { sendReviewRequestForBooking } from '~/server/utils/review-request-delivery'
 import { defineScheduledTask } from '~/server/utils/scheduled-task'
 import { filterEntitledRows } from '~/server/utils/billing-access'
@@ -26,24 +26,27 @@ interface TaskResult {
 
 async function sendDue(db: D1Database, env: ApiRecord): Promise<{ sent: number; failures: string[] }> {
   const wantsReviewRequests = wantsCategoryEmailSql('r.user_id', 'review_requests')
+  // A day after the visit ended and within the request window, read off the
+  // record that holds it. A stay ends at its checkout in its home's zone, which
+  // SQL cannot place; its earliest possible instant (midnight at UTC+14)
+  // admits it here, and reviewInvitationDue decides on the exact one.
   const candidates = await queryAllPages<SendDueRow>(db, `
       SELECT r.id, r.organization_id, r.kind AS booking_type
         FROM requests r
         JOIN (
-          SELECT b.request_id, b.status, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id
+          SELECT b.request_id, b.status, b.no_show_at, ps.ends_at FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id
           UNION ALL
-          SELECT request_id, status, ends_at FROM reservations
+          SELECT request_id, status, no_show_at, ends_at FROM reservations
+          UNION ALL
+          SELECT request_id, status, no_show_at, datetime(check_out_date, '-14 hours') FROM stays WHERE channel = 'direct'
         ) record ON record.request_id = r.id
-       -- Done is the clock: confirmed, and its end has passed. There is no
-       -- stored completion stamp to wait for, so the visit's own end is when
-       -- the review clock starts.
-       WHERE r.kind IN ('reservation', 'booking') AND record.status = 'confirmed'
-         AND datetime(record.ends_at) <= datetime('now')
-         AND json_extract(r.payload_json, '$.review.submitted_at') IS NULL
+       WHERE r.kind IN ('reservation', 'booking', 'stay') AND record.status = 'confirmed' AND record.no_show_at IS NULL
+         AND datetime(record.ends_at) <= datetime('now', '-${REVIEW_REQUEST_DELAY_HOURS} hours')
+         AND datetime(record.ends_at) > datetime('now', '-${REVIEW_REQUEST_TTL_DAYS + 2} days')
+         AND json_extract(r.payload_json, '$.review.submitted_at') IS NULL AND r.review_id IS NULL
+         AND json_extract(r.payload_json, '$.review.request_sent_at') IS NULL
          AND r.user_id IS NOT NULL
          AND ${wantsReviewRequests.sql}
-         AND json_extract(r.payload_json, '$.review.request_sent_at') IS NULL
-         AND datetime(record.ends_at) <= datetime('now', '-24 hours')
        ORDER BY booking_type, r.id
     `, wantsReviewRequests.params)
   const rows = await filterEntitledRows(env as CloudflareEnv, candidates, 'review_requests')
@@ -51,7 +54,9 @@ async function sendDue(db: D1Database, env: ApiRecord): Promise<{ sent: number; 
   let sent = 0
   const failures: string[] = []
   for (const row of rows) {
-    const result = await sendReviewRequestForBooking(env, db, row.booking_type, row.id).catch((error) => ({
+    const context = await getReviewBookingContext(db, row.booking_type, row.id)
+    if (!context || !reviewInvitationDue(context) || !context.guest_email) continue
+    const result = await sendReviewRequestForBooking(env as CloudflareEnv, db, row.booking_type, row.id).catch((error) => ({
       sent: false,
       requestId: '',
       error: error instanceof Error ? error.message : String(error),
@@ -65,7 +70,7 @@ async function sendDue(db: D1Database, env: ApiRecord): Promise<{ sent: number; 
 export default defineScheduledTask({
   meta: {
     name: 'review-request-automation',
-    description: 'Completes bookings and sends entitled post-booking review requests',
+    description: 'Invites guests to review their ended visits',
   },
   async run({ context }): Promise<{ result: TaskResult }> {
     const taskContext = context as ReviewRequestTaskContext | undefined

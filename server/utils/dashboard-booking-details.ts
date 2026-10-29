@@ -59,6 +59,8 @@ interface BookingRow {
   policy_json: string | null
   product_kind: string | null
   product_details_json: string | null
+  no_show_at: string | null
+  review_id: string | null
 }
 
 export interface DashboardBookingNote {
@@ -124,6 +126,12 @@ export interface DashboardBookingDetails {
   guestCanRetryCancellation: boolean
   /** The business's phone for this booking, as the guest reaches it. */
   contactPhone: string | null
+  /** When staff recorded the guest did not come. */
+  noShowAt: string | null
+  /** The team may still record a no-show: confirmed, begun, and not reviewed. */
+  canMarkNoShow: boolean
+  /** Where the visit's review invitation stands, for the team; null before one is sent. */
+  reviewInvitation: { state: 'sent' | 'submitted' | 'revoked' | 'expired'; at: string } | null
 }
 
 interface BookingAccessContext {
@@ -165,15 +173,15 @@ async function loadBookingRow(
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS requests,
     record.product_id AS experience_id, record.product_name AS experience_title, record.product_session_id AS session_id,
-    r.id AS request_id, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, r.created_at, r.updated_at
+    r.id AS request_id, json_extract(r.payload_json, '$.cancellation.used_at') AS cancellation_used_at, r.created_at, r.updated_at, record.no_show_at, r.review_id
     FROM requests r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, ps.status AS session_status
+      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json, cfg.scheduling_mode, ps.status AS session_status, b.no_show_at
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN products p ON p.id = b.product_id
         LEFT JOIN product_booking_configs cfg ON cfg.product_id = b.product_id AND cfg.organization_id = b.organization_id
       UNION ALL
-      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at, res.policy_json, NULL, NULL, NULL, NULL FROM reservations res
+      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at, res.policy_json, NULL, NULL, NULL, NULL, res.no_show_at FROM reservations res
     ) record ON record.request_id = r.id
     LEFT JOIN business_locations l ON l.id = record.location_id
     WHERE r.id = ? AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
@@ -346,7 +354,21 @@ async function composeBookingDetails(
     guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at,
     guestCanRetryCancellation,
     contactPhone: contact?.contactPhone ?? null,
+    noShowAt: row.no_show_at,
+    canMarkNoShow: !reader.buyerUserId && row.status === 'confirmed' && row.no_show_at === null && row.review_id === null && row.starts_at <= now,
+    reviewInvitation: reader.buyerUserId || !row.request_id ? null : await reviewInvitationState(db, type, row.request_id, now),
   }
+}
+
+/** The latest invitation minted for the visit, as the team reads it. */
+async function reviewInvitationState(db: DbClient, type: DashboardBookingType, requestId: string, now: string): Promise<DashboardBookingDetails['reviewInvitation']> {
+  const request = await queryFirst<{ first_sent_at: string | null; submitted_at: string | null; revoked_at: string | null; expires_at: string }>(db,
+    'SELECT first_sent_at, submitted_at, revoked_at, expires_at FROM review_requests WHERE booking_type = ? AND booking_id = ? ORDER BY created_at DESC LIMIT 1', [type, requestId])
+  if (!request?.first_sent_at) return null
+  if (request.submitted_at) return { state: 'submitted', at: request.submitted_at }
+  if (request.revoked_at) return { state: 'revoked', at: request.revoked_at }
+  if (request.expires_at <= now) return { state: 'expired', at: request.expires_at }
+  return { state: 'sent', at: request.first_sent_at }
 }
 
 export async function requestDashboardBookingChange(
@@ -476,6 +498,9 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds), order: paymentOrderDisplay(detail.order) }],
     guestCanCancel: false,
     guestCanRetryCancellation: false,
+    noShowAt: null,
+    canMarkNoShow: false,
+    reviewInvitation: null,
     contactPhone: contact?.contactPhone ?? null,
   }
 }
