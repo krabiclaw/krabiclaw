@@ -57,9 +57,9 @@ class FakeChannex {
     if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1') {
       return Response.json({ data: { id: 'chan-1', type: 'channel', attributes: { rate_plans: ['1', '2', '3'].map(listing => ({ id: `map-${listing}`, rate_plan_id: `rate-${listing}`, settings: { listing_id: `listing-${listing}` } })) } } })
     }
-    // Airbnb's own instant-booking setting and guest controls, which every booking-settings update restates.
+    // Airbnb's own instant-booking setting, guest controls and guest expectations, which every booking-settings update restates.
     if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1/action/listing_details') {
-      return Response.json({ data: { listing: { id: url.searchParams.get('listing_id'), booking_settings: { instant_booking_allowed_category: 'everyone', guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: false, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: null } } } } })
+      return Response.json({ data: { listing: { id: url.searchParams.get('listing_id'), booking_settings: { instant_booking_allowed_category: 'everyone', listing_expectations_for_guests: [{ type: 'requires_stairs', added_details: null }], guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: false, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: null } } } } })
     }
     if (init.method === 'PUT' && (/^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path) || (path as string) === '/channels/chan-1/execute/update_booking_setting')) {
       this.settings.push({ path, body: JSON.parse(init.body as string) })
@@ -616,7 +616,7 @@ test('removed guest controls retain the committed channel completion intent for 
     const updateIntent = await db.prepare("SELECT json_extract(payload_json, '$.metadata.channel_completion') AS intent FROM activity_entries WHERE dedupe_key=?").bind(updateReceipt).first<string>('intent')
     assert.deepEqual(JSON.parse(updateIntent!), { nights: false, settings: { booking: true, cancellation: false, availability: false } })
     assert.deepEqual(channex.settings, [{ path: '/channels/chan-1/execute/update_booking_setting', body: {
-      channel_rate_plan_id: 'map-1', data: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10, instant_booking_allowed_category: 'everyone' },
+      channel_rate_plan_id: 'map-1', data: { check_in_time_start: '16', check_in_time_end: 'FLEXIBLE', check_out_time: 10, instant_booking_allowed_category: 'everyone', listing_expectations_for_guests: [{ type: 'requires_stairs', added_details: null }] },
     } }], 'unknown guest controls stay omitted from the canonical provider payload')
     const attemptedUpdate = channex.settings[0]
     channex.settingsAnswer = undefined

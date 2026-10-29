@@ -146,13 +146,18 @@ async function listingRecord(env: ChannexEnv, channelId: string, listingId: stri
  * Channex refuses a booking-settings update without (422s seen on staging
  * 2026-10-30): who may book instantly, and the guest controls beside the pets,
  * smoking and events rules (children, infants, pet capacity). Every update
- * restates the listing's.
+ * restates the listing's. Airbnb also clears the guest expectations it shows
+ * (water nearby, stairs...) from any update that leaves them out, so they are
+ * restated as the listing has them.
  */
-export async function keptBookingSettings(env: ChannexEnv, channelId: string, listingId: string): Promise<{ instantBooking: string; guestControls: JsonRecord }> {
+export async function keptBookingSettings(env: ChannexEnv, channelId: string, listingId: string): Promise<{ instantBooking: string; guestControls: JsonRecord; expectations: unknown[] }> {
   const booking = object((await readListingRecord(env, channelId, listingId)).booking_settings, 'Booking settings')
+  const expectations = booking.listing_expectations_for_guests ?? []
+  if (!Array.isArray(expectations)) throw new ChannexDataError('Airbnb listing_expectations_for_guests must be a list')
   return {
     instantBooking: string(booking.instant_booking_allowed_category, 'Instant booking allowed category'),
     guestControls: object(booking.guest_controls, 'Guest controls'),
+    expectations,
   }
 }
 

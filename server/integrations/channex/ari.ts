@@ -519,7 +519,7 @@ export async function pushAirbnbListingSettings(db: DbClient, env: ChannexEnv, o
       const kept = await keptBookingSettings(env, row!.channel_id, row!.listing_id)
       const controls = settings.booking.guest_controls
       await channexRequest(env, `${path}/execute/update_booking_setting`, 'PUT', { channel_rate_plan_id: listing.id, data: {
-        ...settings.booking, instant_booking_allowed_category: kept.instantBooking,
+        ...settings.booking, instant_booking_allowed_category: kept.instantBooking, listing_expectations_for_guests: kept.expectations,
         ...(controls === undefined ? {} : { guest_controls: { ...kept.guestControls, ...object(controls, 'guest_controls') } }),
       } })
     }
