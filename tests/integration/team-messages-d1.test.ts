@@ -119,8 +119,9 @@ test('members talk in team conversations, see unread state and receive recorded 
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner', assigned_team_id: null })
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-cleaner')
     assert.ok(stay.request_id)
-    await assertAssignedBookingAccess(db, { ...principal('cleaner', 'member'), requestId: stay.request_id })
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['cleaner', 'owner'], 'guest work reaches the selected member alongside established owner oversight')
+    // A stay's guest conversation is owners' and admins': the member looking after the home reads its turnover.
+    await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cleaner', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a stay conversation alerts owner oversight, not the member looking after the home')
     await db.prepare("INSERT INTO team(id,organizationId,name,createdAt) VALUES('operators',?,'Cabin operators',0),('outsider-team',?,'Other operators',0)").bind(ORG, OTHER).run()
     await db.prepare("INSERT INTO teamMember(id,teamId,userId,createdAt) VALUES('operators-cleaner','operators','cleaner',0),('operators-cook','operators','cook',0)").run()
     const locationAssignments = await Promise.allSettled([
@@ -138,8 +139,8 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_team_id: 'operators' }), refused(422, 'RESPONSIBILITY_TARGET_CONFLICT', 'assigned_team_id'))
     await assert.rejects(updateStayHome(env, db, manager, cabin.id, { assigned_member_id: null, assigned_team_id: 'outsider-team' }), refused(422, 'INVALID_RESPONSIBILITY', 'assigned_team_id'))
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: null, assigned_team_id: 'operators' })
-    await assertAssignedBookingAccess(db, { ...principal('cook', 'member'), requestId: stay.request_id })
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['cleaner', 'cook', 'owner'], 'the responsible Better Auth team uses the same guest scope for alerts and reads')
+    await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cook', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a responsible Better Auth team reaches the stay conversation no more than a responsible member')
     await updateStayHome(env, db, manager, cabin.id, { assigned_member_id: 'm-cleaner', assigned_team_id: null })
     const about = await createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id })
     assert.equal(about.created, true)
@@ -157,7 +158,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     // Assigning cook to cabin-site gives cook access to reuse and view the location conversation
     await db.prepare('UPDATE business_locations SET assigned_member_id = ? WHERE id = ?').bind('m-cook', 'cabin-site').run()
     await assert.rejects(assertAssignedBookingAccess(db, { ...principal('cook', 'member'), requestId: stay.request_id }), refused(404, 'THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['cleaner', 'owner'], 'a location assignment does not substitute for the home responsible for a lodging conversation')
+    assert.deepEqual((await listOrganizationNotificationMembers(env, ORG, { requestId: stay.request_id })).map(member => member.userId).sort(), ['owner'], 'a location assignment does not reach a lodging conversation either')
     assert.deepEqual(await createTeamThread(env, db, cook, { memberIds: ['owner'], locationId: 'cabin-site' }), { id: floorChat.id, created: false })
     const cookFloorView = (await listTeamThreads(env, db, cook, { locationId: 'cabin-site' })).find(thread => thread.id === floorChat.id)!
     assert.equal(cookFloorView.locationId, 'cabin-site')

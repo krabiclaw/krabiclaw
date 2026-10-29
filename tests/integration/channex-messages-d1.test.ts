@@ -193,9 +193,11 @@ test('empty greenfield collections are valid; inquiries mirror into the canonica
     const afterToday = (await getGuestThreadDetail(db, rows[0]!.id, ORG))!
     assert.deepEqual([afterToday.guestName, afterToday.guestEmail, afterToday.guestPhone, afterToday.operationalRecord], [null, null, null, null])
     assert.equal(await db.prepare('SELECT count(*) FROM stays').first('count(*)'), 0)
-    const principal = (userId: string) => memberAccessPrincipal({ userId, organizationId: ORG, role: 'member' }, { env })
-    await assertAssignedBookingAccess(db, { ...principal(OWNER), requestId: rows[0]!.id })
-    await assert.rejects(assertAssignedBookingAccess(db, { ...principal('unassigned-user'), requestId: rows[0]!.id }), code('THREAD_NOT_FOUND'))
+    // An Airbnb conversation is the stay's guest conversation: owners and admins open it; a member does not, even one responsible for the home.
+    const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, organizationId: ORG, role }, { env })
+    await assertAssignedBookingAccess(db, { ...principal(OWNER, 'owner'), requestId: rows[0]!.id })
+    await assert.rejects(assertAssignedBookingAccess(db, { ...principal(OWNER, 'member'), requestId: rows[0]!.id }), code('THREAD_NOT_FOUND'))
+    await assert.rejects(assertAssignedBookingAccess(db, { ...principal('unassigned-user', 'member'), requestId: rows[0]!.id }), code('THREAD_NOT_FOUND'))
     await mirrorChannexThread(db, env, 'thread', 'property')
     assert.equal(await db.prepare('SELECT count(*) FROM activity_entries WHERE request_id IS NOT NULL').first('count(*)'), 2)
     await assert.rejects(mirrorChannexMessageEvent(db, env, { event: 'message', property_id: 'property', payload: { id: 'not-visible-yet', property_id: 'property', message_thread_id: 'thread' } }), code('CHANNEL_MESSAGE_NOT_READY'))

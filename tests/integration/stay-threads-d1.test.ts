@@ -117,7 +117,8 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.ok(cyThread)
     assert.deepEqual(await db.prepare('SELECT guest_email, request_id FROM stays WHERE id = ?').bind(cy.id).first(), { guest_email: 'cy@example.test', request_id: cyThread })
 
-    // The inbox lists them with their nights; the member who looks after the home sees them, another member does not.
+    // The inbox lists them with their nights for owners and admins. A stay's guest conversation is not a member's,
+    // even the member who looks after the home: they read its stays as turnovers.
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG }, { env })
     const listed = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay' })
     assert.deepEqual(listed.map(row => row.id).sort(), [ana.request_id, boWithEmail.request_id, cyThread, dee.request_id].sort())
@@ -127,7 +128,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const nights = (from: string, to: string) => [from, to].map(date => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${date}T00:00:00Z`)))
     const [anaIn, anaOut] = nights(day(3), day(6))
     assert.deepEqual([anaRow.submissionType, anaRow.whenLabel, anaRow.operationalStatusLabel, anaRow.mailbox], ['stay', `${anaIn} – ${anaOut} · 2 guests`, 'Confirmed', 'current'])
-    assert.equal((await listGuestThreads(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') })).length, 4)
+    assert.deepEqual(await listGuestThreads(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') }), [])
     assert.deepEqual(await listGuestThreads(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
 
     // The thread is answered like any other; a stay is changed from its own screen, not its thread.
