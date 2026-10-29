@@ -53,6 +53,8 @@
         <p class="text-base font-medium text-highlighted">Arriving</p>
         <p class="mt-1 text-base text-muted">{{ formatTime(stay.arrival_time, 'en') }}</p>
       </div>
+      <!-- A member's turnover says the guest never arrived; managers read it with the stay's payments below. -->
+      <p v-if="!personalScope && !detail && stay.no_show_at" class="mt-6 border-t border-default pt-4 text-base text-muted" data-testid="stay-no-show">No-show recorded {{ formatCalendarDate(stay.no_show_at.slice(0, 10), 'en') }}.</p>
       </UCard>
       <UCard v-if="!personalScope && hostHome && (hostHome.check_in_method || hostHome.check_in_instructions)" variant="record">
         <h3 class="text-base font-semibold text-highlighted">{{ t('stay.check_in_method') }}</h3>
