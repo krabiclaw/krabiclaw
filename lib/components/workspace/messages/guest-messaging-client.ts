@@ -4,18 +4,12 @@ import { isRecord } from '~/utils/api-clients'
 import { authClient } from '~/lib/auth-client'
 import { isValidInstant, isValidTimezone } from '~/utils/timezone'
 import type { GuestMessageSchedule } from '~/server/domain/guest-message-schedule'
-import type { MessageTemplate, guestThreadMessagingContext, listMessageTemplates, listScheduledGuestMessages, scheduledGuestMessage } from '~/server/domain/guest-messaging'
+import type { MessageTemplate, listMessageTemplates, listScheduledGuestMessages, scheduledGuestMessage } from '~/server/domain/guest-messaging'
 
 export type { MessageTemplate, GuestMessageSchedule }
 export type MessageTemplatePage = Awaited<ReturnType<typeof listMessageTemplates>>
 export type ScheduledMessage = ReturnType<typeof scheduledGuestMessage>
 export type ScheduledMessagePage = Awaited<ReturnType<typeof listScheduledGuestMessages>>
-export type GuestMessagingContext = Awaited<ReturnType<typeof guestThreadMessagingContext>>
-export function isGuestMessagingContext(value: unknown): value is GuestMessagingContext {
-  return isRecord(value) && typeof value.requestId === 'string' && (value.home === null || isRecord(value.home)
-    && typeof value.home.product_id === 'string' && typeof value.home.name === 'string' && (value.home.check_in_instructions === null || typeof value.home.check_in_instructions === 'string'))
-    && (value.stay === null || isRecord(value.stay) && typeof value.stay.id === 'string')
-}
 
 function isSchedule(value: unknown): value is GuestMessageSchedule {
   if (!isRecord(value) || !Array.isArray(value.productIds) || !value.productIds.length || !value.productIds.every(id => typeof id === 'string' && Boolean(id))) return false
