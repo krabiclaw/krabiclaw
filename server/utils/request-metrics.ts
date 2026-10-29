@@ -337,7 +337,11 @@ export async function flushRequestMetrics(event: HTTPEvent, response: Response) 
   const metrics = metricsByEvent.get(event)
   if (!metrics) return
 
-  if (metrics.resources.size === 0 && response.status !== 101) {
+  // h3 holds the response until this hook settles, and an event stream such as
+  // MCP's subscriptions/listen never ends: reading it held the stream from the
+  // client until the isolate died. Its size does not exist yet, so none is logged.
+  const streamed = response.headers.get('content-type')?.includes('text/event-stream') ?? false
+  if (metrics.resources.size === 0 && response.status !== 101 && !streamed) {
     const serialized = await response.clone().text()
     metrics.resources.set(new URL(event.req.url).pathname, new TextEncoder().encode(serialized).byteLength)
   }
@@ -345,7 +349,7 @@ export async function flushRequestMetrics(event: HTTPEvent, response: Response) 
     metrics.finalized = true
   }
   const cacheStatus = String(response.headers.get('x-bootstrap-cache') ?? 'BYPASS')
-  const responseBytes = [...metrics.resources.values()].reduce((total, bytes) => total + bytes, 0)
+  const responseBytes = streamed ? null : [...metrics.resources.values()].reduce((total, bytes) => total + bytes, 0)
   const status = response.status
   const errorCode = status >= 400 ? `HTTP_${status}` : null
   const totalDuration = performance.now() - metrics.startedAt

@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { execute, queryAllPages, queryFirst, type DbClient } from '~/server/db'
-import { isValidInstant } from '~/utils/timezone'
+import { isValidInstant, localDateTimeToInstant } from '~/utils/timezone'
 import { guestMessageDueAt, messagingError } from './guest-message-schedule'
 import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
 import { sendScheduledGuestReply, type ReplyOutcome } from './guest-threads/operations'
@@ -20,12 +20,14 @@ interface PlanningStay {
   updated_at: string
   timezone: string
   timezone_updated_at: string | null
+  check_in_time: string
+  check_in_instructions: string | null
 }
 
 type Plan = Pick<ScheduledGuestMessageRow, 'due_at' | 'status' | 'reason' | 'error_code' | 'error_field'>
 
 const PLANNING_STAY = `SELECT s.id, s.organization_id, s.product_id, s.request_id, s.status, s.check_in_date, s.check_out_date,
-  s.booking_received_at, s.version, s.updated_at, l.timezone, l.updated_at AS timezone_updated_at
+  s.booking_received_at, s.version, s.updated_at, l.timezone, l.updated_at AS timezone_updated_at, c.check_in_time, c.check_in_instructions
   FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
   JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id`
 
@@ -45,7 +47,7 @@ async function plan(db: DbClient, template: MessageTemplateRow, stay: PlanningSt
       WHERE id = ? AND status = 'pending' AND updated_at = ?
         AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?)
         AND EXISTS (SELECT 1 FROM stays WHERE id = ? AND organization_id = ? AND version = ? AND request_id IS ?)`,
-    [stay.request_id, stay.status === 'cancelled' ? 'The stay was cancelled.' : 'The saved reply no longer schedules this home.', now, existing.id, existing.updated_at,
+    [stay.request_id, stay.status === 'cancelled' ? 'The stay was cancelled.' : 'The automatic message no longer includes this home.', now, existing.id, existing.updated_at,
       template.id, template.organization_id, template.version, stay.id, stay.organization_id, stay.version, stay.request_id])
     return
   }
@@ -103,9 +105,62 @@ async function savePlan(db: DbClient, template: MessageTemplateRow, stay: Planni
   }
 }
 
+export const CHECK_IN_MESSAGE_TITLE = 'Check-in instructions'
+// The reasons the planner itself cancels a check-in message. Only these come
+// back when the stay or instructions become eligible again; a manager's
+// cancellation stays cancelled.
+const CHECK_IN_NOT_CONFIRMED = 'The stay is not confirmed.'
+const CHECK_IN_NO_INSTRUCTIONS = 'The home has no check-in instructions.'
+const CHECK_IN_NO_CONVERSATION = 'The stay has no guest conversation to send through.'
+
+/**
+ * Every confirmed stay is sent its home's check-in instructions at 10:00 the day
+ * before arrival in the home's timezone, or at once when it was booked after
+ * that. Airbnb guests never see KrabiClaw's instructions otherwise. The body is
+ * refreshed from the home until it is sent; a home without instructions, or a
+ * stay with no guest conversation, sends nothing.
+ */
+async function planCheckInMessage(db: DbClient, stay: PlanningStay, now: string): Promise<void> {
+  const existing = await queryFirst<ScheduledGuestMessageRow>(db, 'SELECT * FROM scheduled_guest_messages WHERE stay_id = ? AND template_id IS NULL AND template_title = ?',
+    [stay.id, CHECK_IN_MESSAGE_TITLE])
+  const plannerCancelled = existing?.status === 'cancelled' && [CHECK_IN_NOT_CONFIRMED, CHECK_IN_NO_INSTRUCTIONS, CHECK_IN_NO_CONVERSATION].includes(existing.reason ?? '')
+  if (existing && existing.status !== 'pending' && !plannerCancelled) return
+  const instructions = stay.check_in_instructions?.trim() ? stay.check_in_instructions : null
+  const scope = `EXISTS (SELECT 1 FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+    JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+    WHERE s.id = ? AND s.organization_id = ? AND s.version = ? AND s.request_id IS ? AND l.timezone = ? AND c.check_in_instructions IS ?)`
+  const guards = [stay.id, stay.organization_id, stay.version, stay.request_id, stay.timezone, stay.check_in_instructions]
+  const arrival = localDateTimeToInstant(stay.check_in_date, stay.check_in_time, stay.timezone, 'earlier').toISOString()
+  if (stay.status !== 'confirmed' || instructions === null || stay.request_id === null || arrival <= now) {
+    if (existing?.status === 'pending') await execute(db, `UPDATE scheduled_guest_messages SET status = ?, reason = ?, updated_at = ? WHERE id = ? AND status = 'pending' AND updated_at = ?`,
+      [arrival <= now && stay.status === 'confirmed' && instructions !== null && stay.request_id !== null ? 'skipped' : 'cancelled',
+        stay.status !== 'confirmed' ? CHECK_IN_NOT_CONFIRMED : instructions === null ? CHECK_IN_NO_INSTRUCTIONS
+          : stay.request_id === null ? CHECK_IN_NO_CONVERSATION : 'Check-in had already passed.',
+        now, existing.id, existing.updated_at])
+    return
+  }
+  const planned = guestMessageDueAt({ trigger: 'check_in', offsetDays: -1, localTime: '10:00', productIds: [] }, stay, stay.timezone)
+  const due = planned > now ? planned : existing?.status === 'pending' && existing.due_at && existing.due_at <= now ? existing.due_at : now
+  if (existing?.status === 'pending' && existing.body === instructions && existing.due_at === due && existing.stay_version === stay.version
+    && existing.timezone === stay.timezone && existing.request_id === stay.request_id) return
+  if (existing) {
+    await execute(db, `UPDATE scheduled_guest_messages SET request_id = ?, stay_version = ?, body = ?, due_at = ?, timezone = ?, status = 'pending', reason = NULL, updated_at = ?
+      WHERE id = ? AND status = ? AND updated_at = ? AND ${scope}`,
+    [stay.request_id, stay.version, instructions, due, stay.timezone, now, existing.id, existing.status, existing.updated_at, ...guards])
+  } else {
+    await execute(db, `INSERT INTO scheduled_guest_messages (id, organization_id, product_id, stay_id, request_id, template_id, template_title, template_version, stay_version,
+      body, due_at, timezone, status, created_at, updated_at)
+      SELECT ?, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?, ?, 'pending', ?, ? WHERE ${scope}
+      ON CONFLICT(stay_id) WHERE template_id IS NULL AND template_title = 'Check-in instructions' DO NOTHING`,
+    [crypto.randomUUID(), stay.organization_id, stay.product_id, stay.id, stay.request_id, CHECK_IN_MESSAGE_TITLE, stay.version,
+      instructions, due, stay.timezone, now, now, ...guards])
+  }
+}
+
 export async function planStayMessages(db: DbClient, organizationId: string, stayId: string, now = new Date().toISOString()): Promise<void> {
   const stay = await queryFirst<PlanningStay>(db, `${PLANNING_STAY} WHERE s.organization_id = ? AND s.id = ?`, [organizationId, stayId])
   if (!stay) messagingError(500, 'INVALID_MESSAGE_STAY', 'The stay’s home or timezone is missing; its messages could not be planned', 'stayId')
+  await planCheckInMessage(db, stay, now)
   const templates = await queryAllPages<MessageTemplateRow>(db, 'SELECT * FROM message_templates WHERE organization_id = ? ORDER BY id', [organizationId])
   for (const template of templates) await plan(db, template, stay, now)
 }
@@ -132,6 +187,15 @@ export async function planHomeMessages(db: DbClient, organizationId: string, loc
 async function reconcileScheduledGuestMessagePlans(db: DbClient, now: string): Promise<Error[]> {
   const templates = await queryAllPages<MessageTemplateRow>(db, 'SELECT * FROM message_templates WHERE schedule_json IS NOT NULL ORDER BY id', [])
   const failures: Error[] = []
+  // Check-in messages for stays not yet arrived; an edited home's instructions reach them here.
+  const arriving = await queryAllPages<PlanningStay>(db, `${PLANNING_STAY} WHERE s.status = 'confirmed' AND s.check_in_date >= date(?, '-1 day') ORDER BY s.id`, [now])
+  for (const stay of arriving) {
+    try {
+      await planCheckInMessage(db, stay, now)
+    } catch (error) {
+      failures.push(new Error(`Planning the check-in message for stay ${stay.id} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error }))
+    }
+  }
   for (const template of templates) {
     try {
       await planTemplateMessages(db, template, now)

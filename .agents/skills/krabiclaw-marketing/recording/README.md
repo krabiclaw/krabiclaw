@@ -11,7 +11,7 @@ Screen Recording permission for the terminal that runs it.
 
 | File | Does |
 | --- | --- |
-| `winrec.swift` | Records one Chrome window with ScreenCaptureKit; other windows on top don't appear. `rec.py` builds it on first use. |
+| `winrec.swift` | Records the Chrome window with an exact, unique title through ScreenCaptureKit; other windows on top don't appear. `rec.py` rebuilds it when the source changes. |
 | `rec.py` | Opens a 1728×972 (16:9) Chrome window; finds elements by text, moves the real cursor, clicks, types, scrolls, waits; starts and stops recordings. |
 | `build.py` | Cut list (`cut.json`) → HyperFrames `index.html`: trimmed and sped-up clips, captions, title and closing cards. |
 | `youtube_upload.py` | Puts the MP4 into YouTube Studio's upload field and sets title, description, not-for-kids, Unlisted. |

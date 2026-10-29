@@ -74,7 +74,7 @@ const STARTER_PLAN: Plan = {
     'Bookings, ticketed experiences & consultation requests',
     'Home listings, nightly rates & stay calendars',
     'Airbnb connection for listing imports, stays & availability',
-    'Arrival guides, saved replies & scheduled guest messages',
+    'Arrival guides, automatic guest messages & send later',
     'iPhone companion app — no extra subscription',
     'Email notifications for reservations & bookings',
     'Structured SEO schema for restaurants, experiences, law firms & lodging',
