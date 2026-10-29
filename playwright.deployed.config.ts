@@ -21,7 +21,7 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  workers: 2,
+  workers: Number(process.env.PLAYWRIGHT_WORKERS ?? 2),
   reporter: process.env.CI
     ? [['list'], ['./tests/e2e/progress-reporter.ts'], ['html', { open: 'never' }]]
     : [['list'], ['./tests/e2e/progress-reporter.ts']],

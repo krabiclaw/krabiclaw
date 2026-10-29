@@ -159,11 +159,12 @@ test('a featured image alt text saved in the media library reaches the rendered 
       const publicRead = await request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: '/' } })
       expect(publicRead.status(), await publicRead.text()).toBe(200)
       expect((await publicRead.json() as AuthoredPage).page.blocks.find(block => block.id === cta!.id)?.media).toContainEqual(expect.objectContaining({ asset_id: featured.asset_id, slot: 'featured', alt_text: original[0]!.alt_text }))
-      const rendered = await page.reload({ waitUntil: 'load' })
-      expect(rendered?.status()).toBe(200)
-      await expect(picture).toHaveAttribute('src', featured.public_url)
-      await expect(picture).toHaveAttribute('alt', original[0]!.alt_text ?? '')
     }
+    // Reached only when the edit itself passed, so the page is loaded.
+    const rendered = await page.reload({ waitUntil: 'load' })
+    expect(rendered?.status()).toBe(200)
+    await expect(picture).toHaveAttribute('src', featured.public_url)
+    await expect(picture).toHaveAttribute('alt', original[0]!.alt_text ?? '')
   } finally {
     await releaseTenantMutationLock()
   }
