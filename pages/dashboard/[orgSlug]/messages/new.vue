@@ -23,7 +23,7 @@ import { authClient } from '~/lib/auth-client'
 import { getErrorMessage } from '~/utils/errors'
 import { isRecord } from '~/utils/api-clients'
 import { isTeamMembersResponse } from '~/lib/components/workspace/messages/team-thread-client'
-import type { StayDetail } from '~/server/domain/stays'
+import type { StayTurnover } from '~/server/domain/stays'
 definePageMeta({ layout: 'dashboard', tab: 'messages' })
 const route = useRoute()
 const dashboard = useDashboardOrganization()
@@ -49,7 +49,7 @@ const location = locationId ? dashboard.locations.value.find(location => locatio
 if (locationId && !location) throw createError({ statusCode: 404, statusMessage: 'That conversation location is not available in this workspace' })
 const { data: members, error: membersError } = await useAsyncData(`team-members:${dashboard.organizationId.value}`, () => api('/api/dashboard/team/members', { validate: isTeamMembersResponse }))
 const { data: stayData, error: stayError } = await useAsyncData(`team-compose-stay:${dashboard.organizationId.value}:${stayId}`, () => stayId ? api(`/api/dashboard/stays/${encodeURIComponent(stayId)}`, {
-  validate: (value): value is { stay: StayDetail } => isRecord(value) && isRecord(value.stay) && value.stay.id === stayId && typeof value.stay.check_in_date === 'string' && typeof value.stay.check_out_date === 'string',
+  validate: (value): value is { stay: StayTurnover } => isRecord(value) && isRecord(value.stay) && value.stay.id === stayId && typeof value.stay.check_in_date === 'string' && typeof value.stay.check_out_date === 'string',
 }) : Promise.resolve(null))
 const stay = computed(() => stayData.value?.stay)
 const visibleMembers = computed(() => members.value?.members.filter(member => member.id !== session.value.data?.user.id && `${member.name} ${member.email}`.toLocaleLowerCase().includes(search.value.toLocaleLowerCase())) ?? [])

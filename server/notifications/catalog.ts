@@ -12,6 +12,7 @@ import {
   contactReceivedMessage,
   stayBookedMessage,
   stayCancelledMessage,
+  stayTurnoverAlert,
   domainUpdateMessage,
   onboardingCompletedMessage,
   contentReportedMessage,
@@ -83,6 +84,16 @@ const sampleLogo = 'https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/881bb3e2-b2
 // Owner alerts leave the event builders without a mark; notifyOwner adds the
 // organization's logo before rendering, and the preview shows what it sends.
 const ownerAlert = (message: NotificationMessage): NotificationMessage => ({ ...message, organizationLogoUrl: sampleLogo })
+
+const stay = {
+  guestName: 'Mina', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
+  checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', arrival: '6:00 PM', nights: '3', guests: '2 adults',
+  organizationName: 'Pinecone Stays', heroImageUrl: null, replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
+}
+const stayBooked = { ...stay, total: '$645.00', notes: 'We will bring our dog if that is fine.' }
+const stayCancelled = { ...stay, refund: '$322.50' }
+// A member looking after the home opens the stay itself.
+const stayPreviewUrl = 'https://demo.krabiclaw.com/dashboard/pinecone-stays/bookings/stay/preview-1'
 
 const booking = {
   ...reservation,
@@ -160,23 +171,25 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
     id: 'stay-booked',
     audience: 'owner',
     title: 'Owner — new stay booked on the site',
-    message: ownerAlert(stayBookedMessage({
-      guestName: 'Mina Park', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
-      checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults',
-      total: '$645.00', notes: 'We will arrive around 6 pm.', organizationName: 'Pinecone Stays', heroImageUrl: null,
-      replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
-    })),
+    message: ownerAlert(stayBookedMessage(stayBooked)),
+  },
+  {
+    id: 'stay-booked-member',
+    audience: 'owner',
+    title: 'Member looking after the home — new stay booked on the site',
+    message: ownerAlert(stayBookedMessage(stayTurnoverAlert(stayBooked, stayPreviewUrl))),
   },
   {
     id: 'stay-cancelled',
     audience: 'owner',
     title: 'Owner — stay cancelled by its guest',
-    message: ownerAlert(stayCancelledMessage({
-      guestName: 'Mina Park', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
-      checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults',
-      refund: '$322.50', organizationName: 'Pinecone Stays', heroImageUrl: null,
-      replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
-    })),
+    message: ownerAlert(stayCancelledMessage(stayCancelled)),
+  },
+  {
+    id: 'stay-cancelled-member',
+    audience: 'owner',
+    title: 'Member looking after the home — stay cancelled by its guest',
+    message: ownerAlert(stayCancelledMessage(stayTurnoverAlert(stayCancelled, stayPreviewUrl))),
   },
   {
     id: 'contact-received',

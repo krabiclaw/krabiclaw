@@ -13,6 +13,15 @@ export const MAX_STAY_NIGHTS = 365
 export const STAY_CHANNELS = ['airbnb', 'vrbo', 'booking_com', 'direct'] as const
 export type StayChannel = typeof STAY_CHANNELS[number]
 export const STAY_CHANNEL_LABELS: Record<StayChannel, string> = { airbnb: 'Airbnb', vrbo: 'Vrbo', booking_com: 'Booking.com', direct: 'Direct' }
+
+/**
+ * The guest's first name, as a member looking after the home reads it. A
+ * channel sends the surname apart, but a site checkout and a host can save the
+ * whole name in guest_name, so its first word is the first name.
+ */
+export function stayGuestFirstName(name: string | null): string | null {
+  return name?.trim().split(/\s+/)[0] || null
+}
 export const STAY_PAYMENT_METHODS = ['cash', 'bank_transfer', 'card_external', 'other'] as const
 export type StayPaymentMethod = typeof STAY_PAYMENT_METHODS[number]
 export const STAY_PAYMENT_METHOD_LABELS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }

@@ -1,5 +1,5 @@
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertAssignedBookingAccess, assignedResponsibilitySql, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertAssignedBookingAccess, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { getGuestRequest } from '~/server/domain/requests'
 import { getStay, readStayHome, stayAccessFor, type StayAccess } from '~/server/domain/stays'
@@ -197,15 +197,17 @@ export function scheduledGuestMessage(row: ScheduledGuestMessageRow) {
     entryId: row.entry_id, startedAt: row.started_at, sentAt: row.sent_at, createdAt: row.created_at, updatedAt: row.updated_at }
 }
 
+/** Scheduled messages are guest correspondence: managers read them; a member looking after a home reads its stays as turnovers. */
 export async function listScheduledGuestMessages(db: DbClient, access: StayAccess, query: MessageListQuery, requestId: string | null) {
+  if (!access.manage) messagingError(403, 'MESSAGING_ROLE_REQUIRED', 'Only workspace managers can read scheduled guest messages', 'permissions.operations.update')
   if (requestId !== null && !await getGuestRequest(db, requestId, access.organizationId)) {
     messagingError(404, 'THREAD_NOT_FOUND', 'This conversation is not in the workspace', 'requestId')
   }
   const rows = await queryAll<ScheduledGuestMessageRow>(db, `SELECT m.* FROM scheduled_guest_messages m
     JOIN product_stay_configs c ON c.organization_id = m.organization_id AND c.product_id = m.product_id
-    WHERE m.organization_id = ? ${requestId === null ? '' : 'AND m.request_id = ?'} ${access.manage ? '' : `AND ${assignedResponsibilitySql('c')}`}
+    WHERE m.organization_id = ? ${requestId === null ? '' : 'AND m.request_id = ?'}
     ORDER BY m.created_at DESC, m.id DESC LIMIT ? OFFSET ?`,
-  [access.organizationId, ...(requestId === null ? [] : [requestId]), ...(access.manage ? [] : [access.userId, access.userId]), query.limit + 1, query.offset])
+  [access.organizationId, ...(requestId === null ? [] : [requestId]), query.limit + 1, query.offset])
   const page = messageListPage(rows.map(scheduledGuestMessage), query)
   return { messages: page.items, pagination: page.pagination }
 }

@@ -1,6 +1,7 @@
 import type { NotificationFact, NotificationMessage } from './messages'
 import { formatPhone } from '~/utils/phone'
 import type { BookingPresentation } from '~/utils/booking-presentation'
+import { stayGuestFirstName } from '~/shared/bookings'
 
 /**
  * The owner-facing events that send on both channels, each described once.
@@ -93,14 +94,16 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
 /** A stay a guest booked and paid for on the site. */
 export interface StayEventInput {
   guestName: string
-  guestEmail: string
+  guestEmail: string | null
   guestPhone: string | null
   homeName: string
   checkIn: string
   checkOut: string
+  /** The guest's own arrival time, when they gave one. */
+  arrival: string | null
   nights: string
   guests: string
-  total: string
+  total: string | null
   notes: string | null
   organizationName: string
   heroImageUrl: string | null
@@ -117,6 +120,7 @@ export function stayBookedMessage(input: StayEventInput): NotificationMessage {
       fact('guestName', 'Guest', input.guestName, true),
       fact('checkIn', 'Check-in', input.checkIn, true),
       fact('checkOut', 'Check-out', input.checkOut, true),
+      fact('arrival', 'Arriving', input.arrival),
       fact('nights', 'Nights', input.nights, true),
       fact('partySize', 'Guests', input.guests, true),
       fact('total', 'Paid', input.total, true),
@@ -133,7 +137,7 @@ export function stayBookedMessage(input: StayEventInput): NotificationMessage {
 }
 
 /** A guest cancelled their stay on the site; the refund is what their booked policy returned. */
-export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'total'> & { refund: string }): NotificationMessage {
+export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'total'> & { refund: string | null }): NotificationMessage {
   return {
     title: `Stay cancelled by ${input.guestName}`,
     preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
@@ -143,6 +147,7 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
       fact('guestName', 'Guest', input.guestName, true),
       fact('checkIn', 'Check-in', input.checkIn, true),
       fact('checkOut', 'Check-out', input.checkOut, true),
+      fact('arrival', 'Arriving', input.arrival),
       fact('nights', 'Nights', input.nights, true),
       fact('partySize', 'Guests', input.guests, true),
       fact('refund', 'Refunded by your cancellation policy', input.refund, true),
@@ -155,6 +160,16 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
     emailReason: `You received this email because a stay with ${input.organizationName} was cancelled and you receive its booking notifications.`,
     organizationName: input.organizationName,
   }
+}
+
+/**
+ * A stay alert as a member looking after the home receives it: the turnover's
+ * facts, with no contact, money or notes, opening the stay instead of the
+ * guest's conversation. Owners and admins receive the input as it is.
+ */
+export function stayTurnoverAlert<T extends Pick<StayEventInput, 'guestName' | 'guestEmail' | 'guestPhone' | 'replyUrl'>>(input: T, stayUrl: string): T {
+  const money = Object.fromEntries((['notes', 'total', 'refund'] as const).filter(field => field in input).map(field => [field, null]))
+  return { ...input, ...money, guestName: stayGuestFirstName(input.guestName) ?? input.guestName, guestEmail: null, guestPhone: null, replyUrl: stayUrl }
 }
 
 export interface BookingEventInput extends ReservationEventInput {

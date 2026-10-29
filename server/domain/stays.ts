@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
+import { MAX_STAY_NIGHTS, STAY_PAYMENT_METHODS, stayGuestFirstName, type StayChannel, type StayPaymentMethod } from '~/shared/bookings'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, execute, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedResponsibilitySql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
@@ -102,6 +102,20 @@ export interface Stay {
   version: number
   created_at: string
   updated_at: string
+}
+
+/**
+ * A stay as a member responsible for its home sees it: the Turnovers view.
+ * Dates, arrival, the guest's first name and party, and whether they never
+ * arrived (no_show_at); nothing that reaches
+ * the guest or their money. Owners and admins read the whole stay.
+ */
+export const STAY_TURNOVER_FIELDS = ['id', 'product_id', 'location_id', 'timezone', 'status', 'check_in_date', 'check_out_date', 'arrival_time', 'adults', 'children', 'infants', 'guest_name', 'no_show_at'] as const
+export type StayTurnover = Pick<Stay, typeof STAY_TURNOVER_FIELDS[number]>
+
+export function stayTurnover(stay: Stay): StayTurnover {
+  const turnover = Object.fromEntries(STAY_TURNOVER_FIELDS.map(field => [field, stay[field]])) as StayTurnover
+  return { ...turnover, guest_name: stayGuestFirstName(stay.guest_name) }
 }
 
 export interface StayPayment {
@@ -1101,14 +1115,18 @@ export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInb
   return { home: await changedStayPhotoRooms(db, env, access, home), destination_room_id: roomId, created_room_id: creating ? roomId : null, moved_photo_ids: photos.map(photo => photo.photo_id) }
 }
 
+/** What this caller reads of a stay: the whole stay for managers, its turnover for members. */
+export type StayView<A extends StayAccess> = A extends { manage: true } ? Stay : StayTurnover
+type StayDetailView<A extends StayAccess> = A extends { manage: true } ? StayDetail : StayTurnover
+
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */
-export async function listStays(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown; productId?: string; includeCancelled?: boolean }): Promise<Stay[]> {
+export async function listStays<A extends StayAccess>(db: DbClient, access: A, input: { from: unknown; to: unknown; productId?: string; includeCancelled?: boolean }): Promise<Array<StayView<A>>> {
   const { from, to } = range(input, MAX_LIST_DAYS)
   return staysOverlapping(db, access, { from, to, productId: input.productId, includeCancelled: input.includeCancelled })
 }
 
 /** Stays overlapping a range its caller has already checked. */
-async function staysOverlapping(db: DbClient, access: StayAccess, input: { from: string; to: string; productId?: string; includeCancelled?: boolean }): Promise<Stay[]> {
+async function staysOverlapping<A extends StayAccess>(db: DbClient, access: A, input: { from: string; to: string; productId?: string; includeCancelled?: boolean }): Promise<Array<StayView<A>>> {
   const { from, to } = input
   const scope = visibleHomes(access)
   const rows = await queryAll<Record<string, unknown>>(db, `
@@ -1117,10 +1135,10 @@ async function staysOverlapping(db: DbClient, access: StayAccess, input: { from:
      WHERE s.organization_id = ? AND s.check_in_date < ? AND s.check_out_date > ?
        ${input.productId ? 'AND s.product_id = ?' : ''} ${input.includeCancelled ? '' : "AND s.status <> 'cancelled'"} AND ${scope.sql}
      ORDER BY s.check_in_date, s.id`, [access.organizationId, to, from, ...(input.productId ? [input.productId] : []), ...scope.params])
-  return rows.map(mapStay)
+  return rows.map(row => access.manage ? mapStay(row) : stayTurnover(mapStay(row))) as Array<StayView<A>>
 }
 
-export async function getStay(db: DbClient, access: StayAccess, stayId: string): Promise<StayDetail> {
+export async function getStay<A extends StayAccess>(db: DbClient, access: A, stayId: string): Promise<StayDetailView<A>> {
   const scope = visibleHomes(access)
   const row = await queryFirst<Record<string, unknown> & Pick<StayDetail, 'guest_image_url'>>(db, `
     SELECT ${STAY_COLUMNS}, (SELECT u.image FROM user u WHERE u.id = s.user_id) AS guest_image_url
@@ -1129,6 +1147,7 @@ export async function getStay(db: DbClient, access: StayAccess, stayId: string):
      WHERE s.organization_id = ? AND s.id = ? AND ${scope.sql}`, [access.organizationId, stayId, ...scope.params])
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
   const stay = mapStay(row)
+  if (!access.manage) return stayTurnover(stay) as StayDetailView<A>
   const [payments, online] = await Promise.all([
     queryAll<StayPayment>(db, `
       SELECT id, stay_id, amount_minor, currency, method, paid_on, reference, note, created_at, created_by
@@ -1145,11 +1164,11 @@ export async function getStay(db: DbClient, access: StayAccess, stayId: string):
   const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (onlinePayment ? onlinePayment.captured_minor - onlinePayment.refunded_minor : 0)
   const status = stay.owner === 'channel' ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
-  return { ...stay, guest_image_url: row.guest_image_url, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status }
+  return { ...stay, guest_image_url: row.guest_image_url, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status } as StayDetailView<A>
 }
 
 /** Every night of [from, to) at one home: whether it is free, its price and rules, and the stay holding it. */
-export async function readStayCalendar(db: DbClient, access: StayAccess, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[] }> {
+export async function readStayCalendar<A extends StayAccess>(db: DbClient, access: A, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Array<StayView<A>> }> {
   const { from, to } = range(input, MAX_CALENDAR_DAYS)
   const home = await readStayHome(db, access, input.productId)
   const [nights, stays] = await Promise.all([homeNights(db, access.organizationId, home, from, to), staysOverlapping(db, access, { from, to, productId: input.productId })])
@@ -1161,7 +1180,7 @@ export async function readStayCalendar(db: DbClient, access: StayAccess, input: 
  * multi-calendar's read: each home with its nights, and the stays holding any
  * of them. A night's stay_id names its stay in `stays`.
  */
-export async function readStayCalendars(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown }): Promise<{ from: string; to: string; homes: Array<{ home: StayHome; nights: StayNight[] }>; stays: Stay[] }> {
+export async function readStayCalendars<A extends StayAccess>(db: DbClient, access: A, input: { from: unknown; to: unknown }): Promise<{ from: string; to: string; homes: Array<{ home: StayHome; nights: StayNight[] }>; stays: Array<StayView<A>> }> {
   const { from, to } = range(input, MAX_HOMES_CALENDAR_DAYS)
   const [homes, stays] = await Promise.all([stayHomes(db, access, null), staysOverlapping(db, access, { from, to })])
   const nights = homes.length ? await homesNights(db, access.organizationId, homes, from, to) : []
@@ -1541,6 +1560,7 @@ function versionChanged(results: unknown): boolean {
 }
 
 export async function updateStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: Record<string, unknown> & { expected_version: unknown }): Promise<StayDetail & { channel_push: SuccessfulChannelPush | null }> {
+  requireManager(access)
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const home = await readStayHome(db, access, current.product_id)
   const fields = stayFields({ ...current, ...input }, home)
