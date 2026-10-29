@@ -6,7 +6,7 @@ import type {
   GuestThreadDetailViewModel,
   GuestThreadListItemViewModel,
 } from '../../server/domain/guest-threads/types'
-import { loginAs } from './helpers/auth'
+import { authRequestHeaders, loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { E2E_DEMO_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHeaders, potteryHouseTestExtraHeaders, tenantTestExtraHeaders, testBaseUrl } from './test-env'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
@@ -903,5 +903,112 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
       entry.eventName === 'booking_change.accepted'
       && entry.payload?.requestId === request.id,
     )).toHaveLength(1)
+  }
+})
+
+test('buyer conversation approves and declines canonical changes without moving a pending reservation', async ({ page, playwright }, testInfo) => {
+  test.skip(!local, 'Buyer decisions and log-only delivery use disposable local data')
+  releaseDemoLock = await acquireTenantMutationLock(testInfo, E2E_DEMO_ORGANIZATION_ID)
+  const owner = await playwright.request.newContext({ baseURL })
+  let threadId: string | null = null
+  try {
+    await loginAs(owner, baseURL, 'user-e2e-demo-owner')
+    await loginAs(page.request, baseURL, 'user-e2e-buyer')
+    let slot: { date: string; time: string } | null = null
+    for (let offset = 1; offset <= 7 && !slot; offset++) {
+      const date = new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
+      const available = await page.request.get('/api/public/reservations/availability', {
+        params: { date, location_id: 'loc-demo' }, headers: tenantTestExtraHeaders(),
+      })
+      await expectStatus(available, 200)
+      const { dates } = await available.json() as { dates: Array<{ slots: Array<{ time_slot: string; is_closed: boolean; is_full: boolean }> }> }
+      const time = dates[0]?.slots.find(candidate => !candidate.is_closed && !candidate.is_full)?.time_slot
+      if (time) slot = { date, time }
+    }
+    expect(slot, 'The existing restaurant fixture has a future reservable time').not.toBeNull()
+    const created = await page.request.post('/api/public/reservations', {
+      headers: tenantTestExtraHeaders(),
+      data: { name: 'E2E Buyer', email: 'buyer@playwright.example', phone: '+12025550123', ...slot!, guests: '1', location_id: 'loc-demo', idempotency_key: crypto.randomUUID() },
+    })
+    await expectStatus(created, 201)
+    threadId = (await created.json() as { request_id: string }).request_id
+    const read = async () => {
+      const response = await owner.get(`/api/dashboard/bookings/reservation/${threadId}`, { params: { org: 'ember-slice-demo' } })
+      await expectStatus(response, 200)
+      return (await response.json() as { booking: { updatedAt: string; bookingDate: string; bookingTime: string; partySize: number; locationId: string } }).booking
+    }
+    const original = await read()
+    const requestChange = async (partySize: number) => {
+      const current = await read()
+      const response = await owner.post(`/api/dashboard/bookings/reservation/${threadId}/changes`, {
+        params: { org: 'ember-slice-demo' },
+        data: { kind: 'reservation', locationId: current.locationId, bookingDate: current.bookingDate, bookingTime: current.bookingTime.slice(0, 5), partySize, expectedUpdatedAt: current.updatedAt, idempotencyKey: crypto.randomUUID() },
+      })
+      await expectStatus(response, 200)
+      const detail = await loadThreadDetail(owner, threadId!, 'org-demo')
+      const proposal = detail.entries.findLast(entry => entry.eventName === 'booking_change.requested')
+      expect(proposal?.bookingChange?.status).toBe('pending')
+      return proposal!
+    }
+    const first = await requestChange(2)
+    expect(await read()).toMatchObject({ partySize: 1, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
+    await dismissPreviewToolbar(page)
+    await page.goto(`${baseURL}/dashboard/account/messages/${threadId}`)
+    const card = page.getByTestId('booking-change-request')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByRole('heading', { name: 'Review changes', exact: true })).toBeVisible()
+    await expect(card).toContainText('Before')
+    await expect(card).toContainText('Proposed')
+    await expect(card).toContainText('Your booking stays unchanged until you accept.')
+    await expect(card.getByRole('button', { name: 'Accept changes', exact: true })).toBeVisible()
+    const declined = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/account/bookings/change')
+    await card.getByRole('button', { name: 'Decline changes', exact: true }).click()
+    await expectStatus(await declined, 200)
+    await expect(card).toContainText('Changes declined')
+    await expect(card).toContainText('Your original booking is unchanged.')
+    await expect(card.getByRole('button', { name: 'Accept changes', exact: true })).toHaveCount(0)
+    expect(await read()).toMatchObject({ partySize: 1, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
+    const afterDecline = await loadThreadDetail(owner, threadId, 'org-demo')
+    expect(afterDecline.entries.filter(entry => entry.eventName === 'booking_change.declined' && entry.payload?.requestId === first.id)).toHaveLength(1)
+
+    const second = await requestChange(2)
+    await page.reload()
+    const pending = card.filter({ hasText: 'Your booking stays unchanged until you accept.' })
+    await expect(pending).toHaveCount(1)
+    const accepted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/account/bookings/change')
+    await pending.getByRole('button', { name: 'Accept changes', exact: true }).click()
+    await expectStatus(await accepted, 200)
+    await expect(card.filter({ hasText: 'Changes accepted' })).toContainText('Your booking has been updated.')
+    expect(await read()).toMatchObject({ partySize: 2, bookingDate: original.bookingDate, bookingTime: original.bookingTime })
+    const final = await loadThreadDetail(owner, threadId, 'org-demo')
+    expect(final.entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === second.id)).toHaveLength(1)
+    const replay = await page.request.post('/api/account/bookings/change', {
+      headers: authRequestHeaders(baseURL), data: { thread_id: threadId, request_id: second.id, decision: 'accept' },
+    })
+    await expectStatus(replay, 200)
+    expect((await loadThreadDetail(owner, threadId, 'org-demo')).entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === second.id)).toHaveLength(1)
+    await page.goto(`${baseURL}/dashboard/account/activity/reservation/${threadId}`)
+    await page.getByRole('button', { name: 'Manage reservation', exact: true }).click()
+    await page.getByRole('link', { name: 'Send a change request', exact: true }).click()
+    await expect(page).toHaveURL(`${baseURL}/dashboard/account/messages/${threadId}?intent=booking-change`)
+    const changeMessage = 'Could we move this reservation later? Please send an available time.'
+    await expect(page.getByText('Describe the dates, time or guest details you would like to change. The business will review your request before anything changes.', { exact: true })).toBeVisible()
+    await page.getByRole('textbox', { name: 'Write a message…', exact: true }).fill(changeMessage)
+    const sentAt = new Date().toISOString()
+    const sentRequest = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/account/messages/${threadId}/reply`)
+    await page.getByRole('button', { name: 'Send a change request', exact: true }).click()
+    await expectStatus(await sentRequest, 200)
+    await expect(page.getByText('Your change request was sent to the business. Your booking is unchanged while it is reviewed.', { exact: true })).toBeVisible()
+    const requested = await loadThreadDetail(owner, threadId, 'org-demo')
+    expect(requested.conversationState).toBe('needs_attention')
+    expect(requested.operationalRecord).toEqual(final.operationalRecord)
+    const customerRequest = requested.entries.filter(entry => entry.kind === 'message' && entry.actorKind === 'guest' && entry.body === changeMessage)
+    expect(customerRequest).toHaveLength(1)
+    const requestDelivery = await owner.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: 'org-demo', since: sentAt } })
+    await expectStatus(requestDelivery, 200)
+    expect((await requestDelivery.json() as DeliveryList).deliveries.some(delivery => delivery.entry_id === customerRequest[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
+  } finally {
+    if (threadId) await expectStatus(await owner.post(`/api/dashboard/organizations/org-demo/guest-threads/${threadId}/operations/cancel`, { data: { idempotencyKey: crypto.randomUUID() } }), 200)
+    await owner.dispose()
   }
 })

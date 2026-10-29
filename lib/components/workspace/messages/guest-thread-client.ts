@@ -113,7 +113,11 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
     && (value.thread.organizationVertical === null || typeof value.thread.organizationVertical === 'string')
     && Array.isArray(value.thread.entries)
     && value.thread.entries.every(entry => isRecord(entry) && (entry.providerTimestamp === null || typeof entry.providerTimestamp === 'string')
-      && (entry.kind !== 'message' || entry.actorKind === 'guest' || (typeof entry.actorLabel === 'string' && Boolean(entry.actorLabel))))
+      && (entry.kind !== 'message' || entry.actorKind === 'guest' || (typeof entry.actorLabel === 'string' && Boolean(entry.actorLabel)))
+      && (entry.bookingChange === null || (isRecord(entry.bookingChange)
+        && ['pending', 'accepted', 'declined', 'stale', 'expired'].includes(String(entry.bookingChange.status))
+        && isRecord(entry.bookingChange.before) && typeof entry.bookingChange.before.whenLabel === 'string'
+        && isRecord(entry.bookingChange.after) && typeof entry.bookingChange.after.whenLabel === 'string')))
     && Array.isArray(value.thread.availableActions)
     && (value.thread.mailbox === 'current' || value.thread.mailbox === 'past' || value.thread.mailbox === 'blocked')
     && typeof value.thread.manuallyArchived === 'boolean'

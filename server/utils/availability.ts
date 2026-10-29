@@ -910,16 +910,16 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
 }
 
 /** Move the same operational Booking ID, preserving its review and payment identity. */
-export async function sessionMoveQuery(db: DbClient, input: SessionAllocationInput & { bookingId: string }): Promise<BatchQuery> {
+export async function sessionMoveQuery(db: DbClient, input: SessionAllocationInput & { bookingId: string; writeGuard?: BatchQuery }): Promise<BatchQuery> {
   const allocation = await sessionAllocationPredicate(db, { ...input, replacingBookingId: input.bookingId })
   return {
     query: `UPDATE bookings SET assigned_member_id = (SELECT ${sessionMemberSql('destination')} FROM product_sessions destination WHERE destination.id=? AND destination.organization_id=?), product_session_id = ?, party_size = ?, updated_at = ?
-      WHERE id = ? AND organization_id = ? AND product_id = ? AND status IN ('pending', 'confirmed')
+      WHERE ${input.writeGuard ? `(${input.writeGuard.query}) AND ` : ''}id = ? AND organization_id = ? AND product_id = ? AND status IN ('pending', 'confirmed')
         AND EXISTS (SELECT 1 FROM product_sessions current_session WHERE current_session.id=bookings.product_session_id AND current_session.ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))
         AND ${allocation.query}
         AND (NOT EXISTS (SELECT 1 FROM payments p WHERE p.organization_id=bookings.organization_id AND p.subject_type='booking' AND p.subject_id=bookings.id AND p.captured_amount>p.refunded_amount)
           OR (party_size=? AND (SELECT location_id FROM product_sessions WHERE id=bookings.product_session_id) IS (SELECT location_id FROM product_sessions WHERE id=? AND organization_id=bookings.organization_id)))`,
-    params: [input.sessionId, input.organizationId, input.sessionId, input.partySize, input.now, input.bookingId, input.organizationId, input.productId, ...allocation.params!, input.partySize, input.sessionId],
+    params: [input.sessionId, input.organizationId, input.sessionId, input.partySize, input.now, ...(input.writeGuard?.params ?? []), input.bookingId, input.organizationId, input.productId, ...allocation.params!, input.partySize, input.sessionId],
   }
 }
 

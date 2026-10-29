@@ -14,7 +14,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { localPartsAt } from '~/utils/timezone'
 import { appendEntry, getEntryById, GuestThreadEntryDedupeConflictError } from '~/server/domain/guest-threads/entries'
-import { moveBooking, requestBookingChange } from '~/server/domain/guest-threads/booking-changes'
+import { moveBooking, requestBookingChange, bookingChangeViews } from '~/server/domain/guest-threads/booking-changes'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
@@ -115,7 +115,7 @@ export interface DashboardBookingDetails {
   policy: RenderedBookingPolicySummary | null
   notes: DashboardBookingNote[]
   /** A change the business proposed that the guest has not answered; Airbnb's "Change requested". */
-  pendingChange: { requestId: string; requestedAt: string; afterLabel: string; partySize: number } | null
+  pendingChange: { requestId: string; requestedAt: string; beforeLabel: string; afterLabel: string; partySize: number; beforeAssignedMemberName: string | null; afterAssignedMemberName: string | null } | null
   locations: Array<{ id: string; title: string; imageUrl: string | null }>
   payments: Array<{payment:PaymentDisplay;refunds:PaymentRefundDisplay[];order:PaymentOrderDisplay|null}> | null
   /** The guest's own self-service cancellation is still open. */
@@ -200,18 +200,14 @@ function localTimeOf(row: Pick<BookingRow, 'starts_at' | 'timezone'>): string {
 /** The latest proposal on the thread with no acceptance or decline answering it. */
 async function pendingBookingChange(db: DbClient, threadId: string | null): Promise<DashboardBookingDetails['pendingChange']> {
   if (!threadId) return null
-  const row = await queryFirst<{ id: string; created_at: string; payload_json: string | null }>(db, `
-    SELECT e.id, e.created_at, e.payload_json FROM activity_entries e
-     WHERE e.request_id = ? AND e.event_name = 'booking_change.requested'
-       AND NOT EXISTS (SELECT 1 FROM activity_entries r WHERE r.request_id = e.request_id
-                         AND ((r.event_name IN ('booking_change.accepted', 'booking_change.declined') AND json_extract(r.payload_json, '$.requestId') = e.id)
-                           -- A move after the proposal supersedes it: the guest's answer would be refused as stale.
-                           OR (r.event_name = 'booking_change.moved' AND r.sequence > e.sequence)))
-     ORDER BY e.created_at DESC LIMIT 1`, [threadId])
+  const row = await queryFirst<import('~/server/domain/guest-threads/types').GuestThreadEntryRow>(db, "SELECT * FROM activity_entries WHERE request_id=? AND event_name='booking_change.requested' ORDER BY sequence DESC LIMIT 1", [threadId])
   if (!row) return null
-  const proposal: unknown = JSON.parse(row.payload_json || '{}')
-  if (!isRecord(proposal) || typeof proposal.afterLabel !== 'string' || !isRecord(proposal.after) || typeof proposal.after.partySize !== 'number') throw new Error('Booking change proposal has invalid required state')
-  return { requestId: row.id, requestedAt: row.created_at, afterLabel: proposal.afterLabel, partySize: proposal.after.partySize }
+  const thread = await getGuestRequest(db, threadId)
+  if (!thread) return null
+  const proposal = (await bookingChangeViews(db, thread, [row])).get(row.id)
+  if (!proposal || proposal.status !== 'pending') return null
+  return { requestId: row.id, requestedAt: row.created_at, beforeLabel: proposal.before.whenLabel, afterLabel: proposal.after.whenLabel, partySize: proposal.after.partySize,
+    beforeAssignedMemberName: proposal.before.assignedMemberName, afterAssignedMemberName: proposal.after.assignedMemberName }
 }
 
 async function listInternalNotes(db: DbClient, threadId: string | null): Promise<DashboardBookingNote[]> {

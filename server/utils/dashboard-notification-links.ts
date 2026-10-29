@@ -1,3 +1,6 @@
+import { accountActivityPath, isAccountActivityPath, type AccountActivityKind } from '~/shared/account-activity'
+import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
+import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { findOrganizationById } from '~/server/utils/member-access'
@@ -43,6 +46,19 @@ export function platformOrigin(env: DashboardNotificationLinkEnv): string {
   const origin = new URL(env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '')
   if (!['http:', 'https:'].includes(origin.protocol)) throw new Error('NUXT_PUBLIC_PLATFORM_DOMAIN must be an HTTP or HTTPS URL')
   return origin.origin
+}
+
+/** An account activity link carries no guest capability; the ordinary session owns access. */
+export function composeBuyerActivityUrl(env: DashboardNotificationLinkEnv, kind: AccountActivityKind, id: string): string {
+  return new URL(accountActivityPath(kind, id), platformOrigin(env)).href
+}
+
+/** Omit account management for unowned/imported records; never guess a buyer or visit. */
+export async function buildBuyerRequestActivityUrl(env: DashboardNotificationLinkEnv, db: DbClient, opts: { organizationId: string; threadId: string }): Promise<string | null> {
+  const owner = await queryFirst<{ user_id: string }>(db, `SELECT r.user_id FROM requests r WHERE r.id=? AND r.organization_id=? AND r.kind IN ('booking','reservation','stay') AND ${REQUEST_CURRENT_BUYER_SQL}`, [opts.threadId, opts.organizationId])
+  if (!owner) return null
+  const path = await buyerRequestActivityPath(db, owner.user_id, opts.threadId)
+  return isAccountActivityPath(path) ? new URL(path, platformOrigin(env)).href : null
 }
 
 export function dashboardOrigin(env: DashboardNotificationLinkEnv, slugs: DashboardSlugs): string {

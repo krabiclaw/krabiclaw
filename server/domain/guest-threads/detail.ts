@@ -9,6 +9,8 @@ import { listMessagePhotos } from './attachments'
 import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryRow, GuestThreadEntryViewModel } from './types'
 import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
+import { guestThreadConversationState } from './booking-change-state'
+import { bookingChangeViews } from './booking-changes'
 
 /** Builds the full canonical thread detail view model — the sole source for the detail API. */
 export async function getGuestThreadDetail(
@@ -17,6 +19,7 @@ export async function getGuestThreadDetail(
   organizationId: string,
   audience?: { buyerUserId: string },
 ): Promise<GuestThreadDetailViewModel | null> {
+  const now = new Date().toISOString()
   const thread = await getGuestRequest(db, threadId, organizationId, undefined, audience?.buyerUserId)
   if (!thread || (audience && thread.user_id !== audience.buyerUserId)) return null
   const record = await getThreadOperationalRecord(db, thread.id)
@@ -65,6 +68,7 @@ export async function getGuestThreadDetail(
     return !acceptedChannelIds.has(payload.provider_message_id)
   })
   const visibleEntries = audience ? presentationEntries.filter(isBuyerVisibleThreadEntry) : presentationEntries
+  const changes = await bookingChangeViews(db, thread, entryRows, now)
   const entries: GuestThreadEntryViewModel[] = visibleEntries.map(entry => {
     const payload = parseEntryPayload(entry)
     if (payload) delete payload.email
@@ -96,11 +100,11 @@ export async function getGuestThreadDetail(
       providerTimestamp: providerRecordedAt,
       deliveries: audience ? [] : deliveriesByEntry.get(entry.id) ?? [],
       attachments,
+      bookingChange: changes.get(entry.id) ?? null,
     }
   })
 
   const summary = await requestSummary(db, thread, record)
-  const now = new Date().toISOString()
   const mailbox = resolveGuestThreadMailbox(thread, record, now, audience?'buyer':'member')
 
   return {
@@ -117,7 +121,7 @@ export async function getGuestThreadDetail(
     submissionType: thread.kind,
     submissionId: thread.id,
     locationLabel: summary.locationTitle,
-    conversationState: audience ? null : thread.conversation_state,
+    conversationState: audience ? null : await guestThreadConversationState(db, thread.id, now),
     operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
     source: {
       submissionType: thread.kind,

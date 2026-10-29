@@ -15,15 +15,17 @@ import { NOT_HANDLED, optionalDaysWindow, optionalString, requiredString, resolv
 import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 
 const nullableString = { type: ['string', 'null'] }
+const changeSide = { type: 'object', properties: { whenLabel: { type: 'string' }, partySize: { type: 'integer' }, assignedMemberId: nullableString, assignedMemberName: nullableString }, required: ['whenLabel', 'partySize', 'assignedMemberId', 'assignedMemberName'] }
+const bookingChange = { type: ['object', 'null'], description: 'Canonical proposal details and current response state. A pending proposal does not change the operational record.', properties: { status: { type: 'string', enum: ['pending', 'accepted', 'declined', 'stale', 'expired'] }, before: changeSide, after: changeSide, locationTitle: { type: 'string' }, originalLocationTitle: { type: 'string' }, message: { type: 'string' } }, required: ['status', 'before', 'after', 'locationTitle', 'originalLocationTitle'] }
 const conversationResult = { type: 'object', properties: { conversation: { type: 'object', properties: {
   request_id: { type: 'string' }, type: { type: 'string', enum: ['contact', 'reservation', 'booking', 'stay'] }, state: nullableString, archived: { type: 'boolean' }, updated_at: { type: 'string' },
   participant_label: { type: 'string' }, reply_channel: { type: 'string', enum: ['email', 'airbnb'] },
   guest: { type: 'object', properties: { name: nullableString, email: nullableString, phone: nullableString }, required: ['name', 'email', 'phone'] },
   operational_record: { type: ['object', 'null'], description: 'For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.', properties: { id: { type: 'string' }, kind: { type: 'string', enum: ['booking', 'reservation', 'stay'] }, status: { type: 'string' }, starts_at: { type: 'string' }, ends_at: { type: 'string' }, timezone: { type: 'string' }, party_size: { type: 'integer' }, check_in_date: nullableString, check_out_date: nullableString }, required: ['id', 'kind', 'status', 'starts_at', 'ends_at', 'timezone', 'party_size', 'check_in_date', 'check_out_date'] },
-  entries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, kind: { type: 'string' }, actor: nullableString, channel: nullableString, body: nullableString, event: nullableString, occurred_at: { type: 'string' }, provider_timestamp: nullableString, payload: { type: ['object', 'null'] },
+  entries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, kind: { type: 'string' }, actor: nullableString, channel: nullableString, body: nullableString, event: nullableString, occurred_at: { type: 'string' }, provider_timestamp: nullableString, payload: { type: ['object', 'null'] }, booking_change: bookingChange,
     deliveries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, channel: { type: 'string' }, purpose: { type: 'string' }, status: { type: 'string' } }, required: ['id', 'channel', 'purpose', 'status'] } },
     attachments: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, url: { type: 'string' }, alt: nullableString, width: { type: ['integer', 'null'] }, height: { type: ['integer', 'null'] } }, required: ['id', 'url', 'alt', 'width', 'height'] } },
-  }, required: ['id', 'kind', 'actor', 'channel', 'body', 'event', 'occurred_at', 'provider_timestamp', 'deliveries', 'attachments'] } },
+  }, required: ['id', 'kind', 'actor', 'channel', 'body', 'event', 'occurred_at', 'provider_timestamp', 'booking_change', 'deliveries', 'attachments'] } },
 }, required: ['request_id', 'type', 'state', 'archived', 'updated_at', 'participant_label', 'reply_channel', 'guest', 'operational_record', 'entries'] } }, required: ['conversation'] }
 const conversationMutationResult = { type: 'object', properties: {
   outcome: { type: 'object', properties: { ok: { const: true } }, required: ['ok'] },
@@ -37,7 +39,7 @@ async function readConversation(ctx: McpExecutorContext, requestId: string) {
   return { request_id: detail.id, type: detail.submissionType, state: detail.conversationState, archived: detail.manuallyArchived, updated_at: detail.updatedAt,
     participant_label: detail.participantLabel, reply_channel: detail.replyChannel,
     guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, operational_record: detail.operationalRecord,
-    entries: detail.entries.map(entry => ({ id: entry.id, kind: entry.kind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, occurred_at: entry.occurredAt, provider_timestamp: entry.providerTimestamp, deliveries: entry.deliveries, attachments: entry.attachments })),
+    entries: detail.entries.map(entry => ({ id: entry.id, kind: entry.kind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, booking_change: entry.bookingChange, occurred_at: entry.occurredAt, provider_timestamp: entry.providerTimestamp, deliveries: entry.deliveries, attachments: entry.attachments })),
   }
 }
 

@@ -10,6 +10,7 @@ import type { GuestStay, PublicStayCalendar, StayDetail, StayQuote } from '../..
 import { createReplayableReservationCancelToken } from '../../server/utils/reservation-cancel-token'
 import type { PostalAddress } from '../../utils/postal-address'
 import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
+import { devLoginHeaders } from './test-env'
 import type { PublicLocationDisclosure } from '../../types/public-location'
 import type { StayPhotoRoom } from '../../shared/stay-photos'
 import type { StayHomeAccessibility } from '../../shared/stay-accessibility'
@@ -188,7 +189,7 @@ test('a responsible home team sees its stay and conversation until Better Auth r
 })
 
 test('a host creates a stay and its buyer returns to arrival details, messages, notifications and cancellation', async ({ page, browser, baseURL }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(90_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!, true)
   await page.setViewportSize({ width: 390, height: 844 })
@@ -372,7 +373,7 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     expect(await accountRead.json()).toMatchObject({ organization_id: organizationId, stay: { id: stay.data!.stay.id, status: 'confirmed', user_id: 'user-e2e-buyer', guest_image_url: portraitUrl }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
     const receiptRead = await guest.request.get(receiptApi, { headers: receiptHeaders })
     await expectStatus(receiptRead, 200)
-    expect(await receiptRead.json()).toMatchObject({ stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
+    expect(await receiptRead.json()).toMatchObject({ manage_url: `${baseURL}/dashboard/account/activity/stay/${activityId}`, stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation, arrival_guide: { product_id: productId, ...guide }, house_rules: ['No pets'] } })
 
     const receiptPage = await guest.newPage()
     const receiptPageviews: string[] = []
@@ -389,6 +390,8 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     await expect(addressTerm.locator('..').getByRole('definition')).toHaveText(addressText)
     await expect(receiptHome.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveAttribute('href', mapUrl)
     await expect(receiptHome.getByRole('link', { name: 'Message host', exact: true })).toHaveAttribute('href', `${baseURL}/dashboard/account/messages/${activityId}`)
+    await expect(receiptHome.getByRole('link', { name: 'Manage in your account', exact: true })).toHaveAttribute('href', `${baseURL}/dashboard/account/activity/stay/${activityId}`)
+    await expect(receiptHome.getByText('Sign in with the email used for this booking to manage it in your account.', { exact: true })).toBeVisible()
     const accountPage = await guest.newPage()
     const buyerTelemetry: string[] = []
     accountPage.on('request', outgoing => { if (new URL(outgoing.url()).pathname === '/api/dashboard/telemetry') buyerTelemetry.push(outgoing.url()) })
@@ -433,12 +436,32 @@ test('a host creates a stay and its buyer returns to arrival details, messages, 
     const guideScreenshot = test.info().outputPath('buyer-arrival-guide-mobile.png')
     await accountPage.screenshot({ path: guideScreenshot, fullPage: true })
     await test.info().attach('buyer-arrival-guide-mobile', { path: guideScreenshot, contentType: 'image/png' })
-    await accountHome.getByRole('link', { name: 'Message host', exact: true }).click()
-    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/messages/${activityId}`)
+    const beforeRequest = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+    expect(beforeRequest.error).toBeNull()
+    await accountHome.getByRole('button', { name: 'Manage', exact: true }).click()
+    const manageStay = accountPage.getByRole('dialog', { name: 'Manage', exact: true })
+    await expect(manageStay.getByRole('link', { name: 'Send a change request', exact: true })).toHaveAttribute('href', `/dashboard/account/messages/${activityId}?intent=booking-change`)
+    await manageStay.getByRole('link', { name: 'Send a change request', exact: true }).click()
+    await expect(accountPage).toHaveURL(`${baseURL}/dashboard/account/messages/${activityId}?intent=booking-change`)
+    await expect(accountPage.getByText('Describe the dates, time or guest details you would like to change. The business will review your request before anything changes.', { exact: true })).toBeVisible()
     await accountPage.getByRole('textbox', { name: 'Write a message…', exact: true }).fill('Can I arrive at 4 pm?')
-    const [buyerReply] = await Promise.all([accountPage.waitForResponse(response => response.url().includes(`/api/account/messages/${activityId}/reply`) && response.request().method() === 'POST'), accountPage.getByRole('button', { name: 'Send reply', exact: true }).click()])
+    const [buyerReply] = await Promise.all([accountPage.waitForResponse(response => response.url().includes(`/api/account/messages/${activityId}/reply`) && response.request().method() === 'POST'), accountPage.getByRole('button', { name: 'Send a change request', exact: true }).click()])
     await expectStatus(buyerReply, 200)
     await expect(accountPage.locator('#dashboard-panel-account-message-thread').getByText('Can I arrive at 4 pm?', { exact: true })).toBeVisible()
+    await expect(accountPage.getByText('Your change request was sent to the business. Your booking is unchanged while it is reviewed.', { exact: true })).toBeVisible()
+    const afterRequest = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.data!.stay.id })
+    expect(afterRequest.error).toBeNull()
+    expect(afterRequest.data!.stay).toEqual(beforeRequest.data!.stay)
+    const requestedThread = await request.get(`${baseURL}/api/dashboard/organizations/${organizationId}/guest-threads/${activityId}`)
+    await expectStatus(requestedThread, 200)
+    const requestedState = await requestedThread.json() as { thread: { conversationState: string; entries: Array<{ id: string; body: string | null; actorKind: string }> } }
+    expect(requestedState.thread.conversationState).toBe('needs_attention')
+    const changeMessages = requestedState.thread.entries.filter(entry => entry.actorKind === 'guest' && entry.body === 'Can I arrive at 4 pm?')
+    expect(changeMessages).toHaveLength(1)
+    const requestDeliveries = await request.get(`${baseURL}/api/dev/notifications`, { headers: devLoginHeaders(), params: { organization_id: organizationId } })
+    await expectStatus(requestDeliveries, 200)
+    const deliveryState = await requestDeliveries.json() as { deliveries: Array<{ entry_id: string; purpose: string; status: string }> }
+    expect(deliveryState.deliveries.some(delivery => delivery.entry_id === changeMessages[0]!.id && delivery.purpose === 'owner_alert' && delivery.status === 'sent')).toBe(true)
     await page.goto(`/dashboard/${slug}/messages/${activityId}`)
     await expect(page.locator('#dashboard-panel-organization-messages-thread').getByText('Can I arrive at 4 pm?', { exact: true })).toBeVisible()
     await page.getByRole('textbox', { name: 'Write a message…', exact: true }).fill('Yes, the lockbox is ready at 4 pm.')

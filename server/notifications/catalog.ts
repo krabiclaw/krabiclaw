@@ -8,7 +8,6 @@ import {
   bookingCancelledMessage,
   calendarSyncMessage,
   bookingChangeMessage,
-  bookingReassignedMessage,
   bookingCreatedMessage,
   contactReceivedMessage,
   stayBookedMessage,
@@ -232,16 +231,8 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
       recordKind: 'booking', guestName: 'Mina Park', status: 'accepted', location: 'Main Studio',
       date: 'Jul 21, 2026', time: '2:00 PM', whenLabel: 'Tue, Jul 21, 2026 at 2:00 PM',
       partySize: '2 guests', summary: 'The guest accepted. The updated details are now confirmed.',
+      assignment: { beforeMemberId: 'previous-preview-member', beforeName: 'Priya Shah', afterMemberId: 'next-preview-member', afterName: 'Sam Rivera', label: 'Host' },
       replyUrl: inbox, organizationName: studio,
-    })),
-  },
-  {
-    id: 'booking-reassigned',
-    audience: 'owner',
-    title: 'Owner — booking moved to another team member',
-    message: ownerAlert(bookingReassignedMessage({
-      guestName: 'Mina Park', productTitle: 'Pottery Wheel Class', date: 'Jul 21, 2026', time: '2:00 PM',
-      partySize: '2', fromName: 'Priya Shah', toName: 'Sam Rivera', replyUrl: inbox, organizationName: studio,
     })),
   },
   {
