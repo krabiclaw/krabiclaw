@@ -37,7 +37,7 @@
 
                 <section v-else-if="item.type === 'change'" class="mx-auto my-4 max-w-xl rounded-2xl border border-default bg-elevated p-5" :aria-labelledby="`change-title-${item.key}`" data-testid="booking-change-request">
                   <h3 :id="`change-title-${item.key}`" class="font-semibold text-highlighted">{{ t('booking.change_review') }}</h3>
-                  <p class="mt-1 text-sm text-muted">{{ t('booking.change_requested_by', { organization: currentBusiness }) }}</p>
+                  <p class="mt-1 text-sm text-muted">{{ item.change.requestedBy === 'guest' ? t('booking.change_requested_by_guest', { guest: item.change.guestName, channel: 'Airbnb' }) : t('booking.change_requested_by', { organization: currentBusiness }) }}</p>
                   <dl class="mt-4 space-y-4 text-sm">
                     <div v-for="field in changeFields(item.change)" :key="field.label">
                       <dt class="font-medium text-highlighted">{{ field.label }}</dt>
@@ -48,7 +48,7 @@
                     </div>
                   </dl>
                   <p class="mt-4 text-sm" :class="item.change.status === 'pending' ? 'text-muted' : 'text-highlighted'" role="status">{{ changeStatus(item.change) }}</p>
-                  <div v-if="personalScope && item.change.status === 'pending'" class="mt-4 flex gap-3">
+                  <div v-if="item.change.status === 'pending' && (personalScope ? item.change.requestedBy === 'business' && !item.change.channel : item.change.requestedBy === 'guest')" class="mt-4 flex gap-3">
                     <UButton :label="t('booking.change_accept')" :loading="answeringChange?.requestId === item.key && answeringChange.decision === 'accept'" :disabled="answeringChange !== null" @click="answerChange(item.key, 'accept')" />
                     <UButton :label="t('booking.change_decline')" color="neutral" variant="outline" :loading="answeringChange?.requestId === item.key && answeringChange.decision === 'decline'" :disabled="answeringChange !== null" @click="answerChange(item.key, 'decline')" />
                   </div>
@@ -298,10 +298,19 @@ const currentBusiness = computed(() => thread.value?.organizationName)
 const answeringChange = ref<{ requestId: string; decision: 'accept' | 'decline' } | null>(null)
 
 async function answerChange(requestId: string, decision: 'accept' | 'decline') {
-  if (!props.personalScope || answeringChange.value) return
+  if (answeringChange.value) return
   answeringChange.value = { requestId, decision }
   actionError.value = null
   try {
+    // The host answers a guest's request on their channel through the conversation's operations.
+    if (!props.personalScope) {
+      data.value = await dashboardApi(`${threadPath.value}/operations/${decision}_change`, {
+        method: 'POST',
+        body: { requestId, idempotencyKey: `${requestId}:${decision}` },
+        validate: isThreadDetailResponse,
+      })
+      return
+    }
     await applicationFetch('/api/account/bookings/change', {
       method: 'POST',
       body: { thread_id: props.threadId, request_id: requestId, decision },
@@ -326,6 +335,7 @@ function changeFields(change: BookingChangeView) {
     { label: copy.locationLabel, before: change.originalLocationTitle, after: change.locationTitle },
     { label: copy.dateLabel, before: change.before.whenLabel, after: change.after.whenLabel },
     { label: copy.guestsLabel, before: String(change.before.partySize), after: String(change.after.partySize) },
+    ...change.before.totalLabel && change.after.totalLabel ? [{ label: t('booking.change_total'), before: change.before.totalLabel, after: change.after.totalLabel }] : [],
   ]
   if (change.type === 'booking') fields.push({
     label: copy.assigneeLabel,
@@ -335,6 +345,12 @@ function changeFields(change: BookingChangeView) {
   return fields.filter(field => field.label === copy.dateLabel || field.label === copy.assigneeLabel || field.before !== field.after)
 }
 function changeStatus(change: BookingChangeView) {
+  if (change.channel) {
+    if (change.status === 'pending') return t(change.requestedBy === 'guest' ? 'booking.change_guest_waiting' : 'booking.change_host_waiting', { channel: 'Airbnb' })
+    if (change.status === 'accepted') return t('booking.change_guest_accepted', { channel: 'Airbnb' })
+    if (change.status === 'declined') return `${t('booking.change_declined')} ${t('booking.change_unchanged')}`
+    return t('booking.change_withdrawn', { channel: 'Airbnb' })
+  }
   if (change.status === 'pending') return t(props.personalScope ? 'booking.change_pending' : 'booking.change_waiting')
   if (change.status === 'accepted') return `${t('booking.change_accepted')} ${t('booking.change_updated')}`
   if (change.status === 'declined') return `${t('booking.change_declined')} ${t('booking.change_unchanged')}`

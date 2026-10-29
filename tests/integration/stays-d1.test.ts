@@ -1044,12 +1044,17 @@ test('a channel stay is read-only here and is paid through its channel; an app s
   const { runtime, db, env } = await boot()
   try {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
-    await db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, guest_name, total_minor, currency, provider, external_booking_id, created_at, updated_at)
-      VALUES ('airbnb-1', ?, ?, 'airbnb', 'channel', 'confirmed', '2026-11-20', '2026-11-22', 2, 'Bo', 30000, 'USD', 'channex', 'chx-1', ?, ?)`).bind(ORG, cabin.id, NOW, NOW).run()
-    await assert.rejects(updateStay(db, env, manager, 'airbnb-1', { expected_version: 1, adults: 1 }), code('STAY_NOT_EDITABLE'))
-    await assert.rejects(cancelStay(db, env, manager, 'airbnb-1', { expected_version: 1 }), code('STAY_NOT_EDITABLE'))
-    await assert.rejects(recordStayPayment(db, env, manager, 'airbnb-1', { amount_minor: 100, method: 'cash', paid_on: '2026-11-20', idempotency_key: 'pay-1' }), code('STAY_NOT_EDITABLE'))
+    await db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, guest_name, total_minor, currency, provider, external_booking_id, channel_booking_id, created_at, updated_at)
+      VALUES ('airbnb-1', ?, ?, 'airbnb', 'channel', 'confirmed', '2026-11-20', '2026-11-22', 2, 'Bo', 30000, 'USD', 'channex', 'chx-1', 'HMBO1234', ?, ?)`).bind(ORG, cabin.id, NOW, NOW).run()
+    // The refusal links to the reservation on Airbnb, read from the confirmation code Channex sent.
+    const airbnb = 'https://www.airbnb.com/hosting/reservations/details/HMBO1234'
+    const onAirbnb = (message: string) => (error: unknown) => code('STAY_NOT_EDITABLE')(error)
+      && (error as { data: { channel_booking_url: unknown } }).data.channel_booking_url === airbnb && (error as Error).message === message
+    await assert.rejects(updateStay(db, env, manager, 'airbnb-1', { expected_version: 1, adults: 1 }), onAirbnb(`This stay belongs to Airbnb; change it there: ${airbnb}`))
+    await assert.rejects(cancelStay(db, env, manager, 'airbnb-1', { expected_version: 1 }), onAirbnb(`This stay belongs to Airbnb; change it there: ${airbnb}`))
+    await assert.rejects(recordStayPayment(db, env, manager, 'airbnb-1', { amount_minor: 100, method: 'cash', paid_on: '2026-11-20', idempotency_key: 'pay-1' }), onAirbnb(`This stay is paid through Airbnb; change it there: ${airbnb}`))
     assert.equal((await getStay(db, manager, 'airbnb-1')).payment_status, null)
+    assert.equal((await getStay(db, manager, 'airbnb-1')).channel_booking_url, airbnb)
 
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'p', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
     await assert.rejects(recordStayPayment(db, env, manager, stay.id, { amount_minor: 0, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'pay-2' }), code('INVALID_AMOUNT'))

@@ -1662,12 +1662,15 @@ export async function notifyBookingChangeOwner(
   db: DbClient,
   opts: OrganizationContext & {
     threadId: string
-    submissionType: 'reservation' | 'booking'
+    submissionType: 'reservation' | 'booking' | 'stay'
     submissionId: string
     sourceEntryId: string
     guestName: string
-    guestEmail: string
     status: 'requested' | 'accepted' | 'declined'
+    /** A guest asking on their channel (an Airbnb alteration) waits on the owners, not the guest. */
+    requestedBy?: 'guest'
+    /** The stay's assigned member, for a stay; a booking's come from its assignment. */
+    memberIds?: string[]
     noun: string
     locationId: string | null
     assignment?: BookingChangeAssignment
@@ -1688,8 +1691,11 @@ export async function notifyBookingChangeOwner(
     locationTitle: string
   },
 ) {
+  const { submissionType, requestedBy, memberIds, ...context } = opts
   const noun = opts.noun
-  const message = opts.status === 'requested'
+  const message = requestedBy === 'guest'
+    ? `The guest asked on Airbnb to change their ${noun}. Accept or decline it in the conversation; the ${noun} is unchanged until you accept.`
+    : opts.status === 'requested'
     ? 'The guest has been asked to accept or decline. The original details remain unchanged until they accept.'
     : opts.status === 'accepted'
       ? 'The guest accepted. The updated details are now confirmed.'
@@ -1710,19 +1716,20 @@ export async function notifyBookingChangeOwner(
     organizationName: organizationName(opts),
   })
   await notifyOwner(env, db, {
-    ...opts,
+    ...context,
+    ...(submissionType === 'stay' ? {} : { submissionType }),
     template: `${noun}.change_${opts.status}`,
     title: ownerMessage.title,
     payload: {
       request_id: opts.threadId,
-      submission_type: opts.submissionType,
+      submission_type: submissionType,
       submission_id: opts.submissionId,
       status: opts.status,
       deep_link: replyUrl ?? '',
     },
     notificationSource: { threadId: opts.threadId, entryId: opts.sourceEntryId },
     message: ownerMessage,
-    memberIds: opts.assignment ? [...new Set([opts.assignment.beforeMemberId, ...(opts.status === 'accepted' ? [opts.assignment.afterMemberId] : [])].filter((id): id is string => id !== null))] : opts.submissionType === 'booking' ? [] : undefined,
+    memberIds: memberIds ?? (opts.assignment ? [...new Set([opts.assignment.beforeMemberId, ...(opts.status === 'accepted' ? [opts.assignment.afterMemberId] : [])].filter((id): id is string => id !== null))] : submissionType === 'booking' ? [] : undefined),
     whatsappTemplate: 'booking_change_update',
   })
 }

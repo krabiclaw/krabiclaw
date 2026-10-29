@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6a1183acb502e1c567b69d0527ac40a3f8a5231629f4a4047b3e6b3fa9f77ac6",
-  "documentationFingerprint": "sha256:468ee301750ace0208a3756b24454891e26a91d1eeb71a2503aed0e45366cc4b",
+  "fingerprint": "sha256:abc5f172e8e828ecbbef7936a1c14424d3be1660c26f957fc2bfdfaea75d5034",
+  "documentationFingerprint": "sha256:49652d2cf9a0abc6a902363f8b8bd585629e00a0eee9fb757deabb02736c3de5",
   "tools": [
     {
       "name": "add_organization_language",
@@ -46084,6 +46084,7 @@
                             "pending",
                             "accepted",
                             "declined",
+                            "withdrawn",
                             "stale",
                             "expired"
                           ],
@@ -62483,6 +62484,13 @@
                       "null"
                     ]
                   },
+                  "channel_booking_url": {
+                    "description": "The reservation on its channel (Airbnb's host reservation page), where a channel stay is changed or cancelled. Null for other stays.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "channel_push": {
                     "anyOf": [
                       {
@@ -62828,6 +62836,7 @@
                   "provider",
                   "external_booking_id",
                   "channel_booking_id",
+                  "channel_booking_url",
                   "request_id",
                   "cancelled_at",
                   "cancellation_reason",
@@ -123196,7 +123205,7 @@
         "cancel_product_booking": "sha256:a90b3075935852ee847849f1774addc7077bac2636dd83439a792db5a98c9ca3",
         "cancel_table_reservation": "sha256:7c17a97a9f730249ce112981850351006406adab44d5230f8306953e4450b165",
         "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
-        "get_guest_conversation": "sha256:b7f2fab6e0363d3cac7a8c748104afe78818e24c9034c389fa6ab152cd888c4b",
+        "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
         "get_product_booking": "sha256:f556f5a1b85a50415d2ec9d1464f44b876afced7651eb51aabd5445eca9ebcaa",
         "get_team_conversation": "sha256:7b308f8af66846f200d2d30c489b3ddf53c1126bdfc2e91616bf58e7d8f7cec7",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
@@ -123331,7 +123340,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:b7f2fab6e0363d3cac7a8c748104afe78818e24c9034c389fa6ab152cd888c4b",
+        "get_guest_conversation": "sha256:0e458314aacd4ef9b6f948eea9e5b395c0f6cc4fd6e5a9dd9884f99e008fdfa5",
         "get_organization_analytics": "sha256:3f37e5014639f5dd6702f1715ed115454c66affa9e0854c5b0611dea6964bc56",
         "get_product": "sha256:452a8f34d0fab75ca9943fb90d1ad135ef2ede78bed0c00c01e9cf7ff72731a6",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

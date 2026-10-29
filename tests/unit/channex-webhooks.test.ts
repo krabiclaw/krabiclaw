@@ -52,11 +52,11 @@ test('a hand-made webhook is reported, brought into line once, and then left alo
   const channex = fakeChannex(listed())
   await withFetch(channex, async () => {
     assert.deepEqual(await ensureChannexWebhook(env, target, false), { action: 'would_update', id: 'hook-1',
-      differences: ['event_mask is "booking;ari;message;message_thread_booking_assigned;sync_error;sync_warning", needs "booking;message;message_thread_booking_assigned;inquiry"'] })
+      differences: ['event_mask is "booking;ari;message;message_thread_booking_assigned;sync_error;sync_warning", needs "booking;message;message_thread_booking_assigned;inquiry;alteration_request"'] })
     assert.deepEqual(channex.writes, [])
     assert.equal((await ensureChannexWebhook(env, target, true)).action, 'updated')
     assert.deepEqual(channex.writes, [{ method: 'PUT', path: '/webhooks/hook-1', body: { webhook: {
-      callback_url: callback, event_mask: 'booking;message;message_thread_booking_assigned;inquiry', property_id: 'property-1', is_global: false,
+      callback_url: callback, event_mask: 'booking;message;message_thread_booking_assigned;inquiry;alteration_request', property_id: 'property-1', is_global: false,
       headers: { 'x-channex-webhook-secret': 'webhook-secret' }, request_params: {}, is_active: true, send_data: true,
     } } }])
     assert.deepEqual(await ensureChannexWebhook(env, target, true), { action: 'unchanged', id: 'hook-1', differences: [] })
