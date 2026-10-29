@@ -385,23 +385,23 @@ export async function assertResponsibilityTarget(db: DbClient, organizationId: s
 }
 
 /** Clear only departed/dangling current targets; booked-person history stays. */
-export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string; departingUserId?: string }): Promise<void> {
+export async function reconcileResponsibilities(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string }): Promise<void> {
   const now = new Date().toISOString()
   let changed = false
   for (const [table, key] of [['business_locations', 'id'], ['product_booking_configs', 'product_id'], ['product_stay_configs', 'product_id']] as const) {
-    const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id AND m.userId IS NOT ?)`
+    const memberMissing = `${table}.assigned_member_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM member m WHERE m.id = ${table}.assigned_member_id AND m.organizationId = ${table}.organization_id)`
     const teamMissing = `${table}.assigned_team_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM team t WHERE t.id = ${table}.assigned_team_id AND t.organizationId = ${table}.organization_id)`
     const rows = await queryAll<ResponsibilityTarget & { resource_id: string; member_missing: number; team_missing: number }>(db,
       `SELECT ${key} AS resource_id, assigned_member_id, assigned_team_id, (${memberMissing}) AS member_missing, (${teamMissing}) AS team_missing
         FROM ${table} WHERE organization_id = ? AND ((${memberMissing}) OR (${teamMissing}))`,
-      [input.departingUserId ?? null, input.organizationId, input.departingUserId ?? null])
+      [input.organizationId])
     for (let offset = 0; offset < rows.length; offset += 400) {
       const chunk = rows.slice(offset, offset + 400)
       const results = await executeBatch(db, chunk.flatMap(row => [{
         query: `UPDATE ${table} SET assigned_member_id = CASE WHEN ${memberMissing} THEN NULL ELSE assigned_member_id END,
           assigned_team_id = CASE WHEN ${teamMissing} THEN NULL ELSE assigned_team_id END, updated_at = ?${table === 'business_locations' ? '' : ", updated_by = 'system'"}
           WHERE organization_id = ? AND ${key} = ? AND assigned_member_id IS ? AND assigned_team_id IS ? AND ((${memberMissing}) OR (${teamMissing}))`,
-        params: [input.departingUserId ?? null, now, input.organizationId, row.resource_id, row.assigned_member_id, row.assigned_team_id, input.departingUserId ?? null],
+        params: [now, input.organizationId, row.resource_id, row.assigned_member_id, row.assigned_team_id],
       }, organizationEventQuery({ organizationId: input.organizationId, actorType: 'system', eventType: 'member.access_scope_revoked', entityType: table, entityId: row.resource_id,
         beforeState: { assigned_member_id: row.assigned_member_id, assigned_team_id: row.assigned_team_id },
         afterState: { assigned_member_id: row.member_missing ? null : row.assigned_member_id, assigned_team_id: row.team_missing ? null : row.assigned_team_id },

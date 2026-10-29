@@ -435,7 +435,8 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
     assert.deepEqual([edited.channel_push, edited.airbnb_unsynced], [{ state: 'pushed', detail: null }, []])
     assert.deepEqual(channex.settings, [
       { booking: { channel_rate_plan_id: 'map-1', data: { check_in_time_start: '17', check_in_time_end: '25', check_out_time: 10,
-        guest_controls: { allows_pets_as_host: true, allows_smoking_as_host: false, allows_events_as_host: false }, cancellation_policy_settings: { cancellation_policy_category: 'firm_14', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD' }, instant_booking_allowed_category: 'everyone' } } },
+        // The listing's children, infant and pet-capacity controls are restated under ours.
+        guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: true, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: 1 }, cancellation_policy_settings: { cancellation_policy_category: 'firm_14', lts_cancellation_policy_id: 'CANCEL_LONG_TERM_WITH_GRACE_PERIOD' }, instant_booking_allowed_category: 'everyone' } } },
       { availability_settings: { availability_settings: { default_min_nights: 3 } } },
     ])
     // A value Airbnb cannot take is refused before the home changes.

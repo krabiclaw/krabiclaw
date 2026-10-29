@@ -57,9 +57,9 @@ class FakeChannex {
     if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1') {
       return Response.json({ data: { id: 'chan-1', type: 'channel', attributes: { rate_plans: ['1', '2', '3'].map(listing => ({ id: `map-${listing}`, rate_plan_id: `rate-${listing}`, settings: { listing_id: `listing-${listing}` } })) } } })
     }
-    // Airbnb's own instant-booking setting, which every booking-settings update restates.
+    // Airbnb's own instant-booking setting and guest controls, which every booking-settings update restates.
     if ((init.method ?? 'GET') === 'GET' && (path as string) === '/channels/chan-1/action/listing_details') {
-      return Response.json({ data: { listing: { id: url.searchParams.get('listing_id'), booking_settings: { instant_booking_allowed_category: 'everyone' } } } })
+      return Response.json({ data: { listing: { id: url.searchParams.get('listing_id'), booking_settings: { instant_booking_allowed_category: 'everyone', guest_controls: { allows_children_as_host: true, allows_infants_as_host: true, allows_pets_as_host: false, allows_events_as_host: false, allows_smoking_as_host: false, children_not_allowed_details: null, pet_capacity: null } } } } })
     }
     if (init.method === 'PUT' && (/^\/channels\/chan-1\/mappings\/map-\d\/availability_settings$/.test(path) || (path as string) === '/channels/chan-1/execute/update_booking_setting')) {
       this.settings.push({ path, body: JSON.parse(init.body as string) })

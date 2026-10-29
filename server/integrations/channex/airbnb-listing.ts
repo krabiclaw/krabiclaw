@@ -142,14 +142,18 @@ async function listingRecord(env: ChannexEnv, channelId: string, listingId: stri
 }
 
 /**
- * Who may book the listing instantly (`booking_settings.instant_booking_allowed_category`).
- * Channex refuses a booking-settings update without it ("can't be blank", seen on
- * 2026-10-30) and KrabiClaw has no setting of its own for it, so every update
+ * The listing's booking settings KrabiClaw has none of its own for, which
+ * Channex refuses a booking-settings update without (422s seen on staging
+ * 2026-10-30): who may book instantly, and the guest controls beside the pets,
+ * smoking and events rules (children, infants, pet capacity). Every update
  * restates the listing's.
  */
-export async function instantBookingCategory(env: ChannexEnv, channelId: string, listingId: string): Promise<string> {
-  const listing = await readListingRecord(env, channelId, listingId)
-  return string(object(listing.booking_settings, 'Booking settings').instant_booking_allowed_category, 'Instant booking allowed category')
+export async function keptBookingSettings(env: ChannexEnv, channelId: string, listingId: string): Promise<{ instantBooking: string; guestControls: JsonRecord }> {
+  const booking = object((await readListingRecord(env, channelId, listingId)).booking_settings, 'Booking settings')
+  return {
+    instantBooking: string(booking.instant_booking_allowed_category, 'Instant booking allowed category'),
+    guestControls: object(booking.guest_controls, 'Guest controls'),
+  }
 }
 
 export async function listingDetails(env: ChannexEnv, channelId: string, listingId: string, contact: OrganizationContact): Promise<ListingDetails> {
