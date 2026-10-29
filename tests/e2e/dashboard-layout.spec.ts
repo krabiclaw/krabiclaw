@@ -313,15 +313,20 @@ test.describe('dashboard pane hierarchy', () => {
     try {
       memberContext = await browser.newContext({ baseURL, viewport: PHONE })
       original = await readLocation()
-      expect(original).toMatchObject({ id: locationId, assigned_member_id: null, assigned_team_id: null })
+      expect(original).toMatchObject({ id: locationId, assigned_team_id: null })
       const otherTenant = await page.request.get('/api/dashboard/locations/loc-pottery-house', { params: { org: 'pottery-house' } })
       expect(otherTenant.status(), await otherTenant.text()).toBe(200)
       expect(await otherTenant.json()).toMatchObject({ location: { id: 'loc-pottery-house', organization_id: 'org-user-pottery-house' } })
       const memberRead = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
       expect(memberRead.status(), await memberRead.text()).toBe(200)
-      actor = (await memberRead.json() as { members: Member[] }).members.find(member => member.userId === 'user-e2e-demo-role-owner')
+      const members = (await memberRead.json() as { members: Member[] }).members
+      actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
       expect(actor, 'The canonical role actor already belongs to the demo tenant').toBeDefined()
       if (!actor) throw new Error('The canonical demo role actor is missing')
+      // The branch keeps the tenant's own responsibility; the actor holds none of it.
+      expect(original.assigned_member_id).not.toBe(actor.id)
+      const responsible = original.assigned_member_id ? members.find(member => member.id === original!.assigned_member_id) : null
+      if (original.assigned_member_id) expect(responsible, 'The branch is assigned to a current member').toBeDefined()
       expect(actor.role).toBe('owner')
       const changed = await page.request.post('/api/auth/organization/update-member-role', {
         headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
@@ -339,8 +344,7 @@ test.describe('dashboard pane hierarchy', () => {
       await page.setViewportSize(WIDE)
       await open(page, assignmentPath)
       const leaf = page.locator('#dashboard-panel-location-assignment')
-      await expect(leaf.getByRole('radio', { name: 'Unassigned No person or team is assigned.', exact: true })).toBeChecked()
-      await expect(leaf).toContainText('No person or team is assigned.')
+      await expect(leaf.getByRole('radio', { name: responsible ? responsible.user.name : 'Unassigned No person or team is assigned.', exact: true })).toBeChecked()
       const memberChoice = leaf.getByRole('radio', { name: actor.user.name, exact: true })
       await memberChoice.click()
       const saved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')

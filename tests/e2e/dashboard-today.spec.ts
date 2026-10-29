@@ -156,12 +156,14 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     const memberRequest = memberContext.request
     await loginAs(page.request, baseURL!)
     original = await readAssignment()
-    expect(original).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
     const members = await page.request.get('/api/dashboard/members', { params: { org } })
     expect(members.status(), await members.text()).toBe(200)
     actor = (await members.json() as { members: Member[] }).members.find(member => member.userId === 'user-e2e-demo-role-owner')
     expect(actor, 'The canonical role actor already belongs to the demo tenant').toBeDefined()
     if (!actor) throw new Error('The canonical demo role actor is missing')
+    // The branch keeps the tenant's own responsibility; the actor holds none of it.
+    expect(original.assigned_member_id).not.toBe(actor.id)
+    expect(original.assigned_team_id).toBeNull()
     const teams = await page.request.get('/api/auth/organization/list-teams', { params: { organizationId } })
     expect(teams.status(), await teams.text()).toBe(200)
     originalTeamIds = (await teams.json() as Array<{ id: string }>).map(team => team.id).sort()

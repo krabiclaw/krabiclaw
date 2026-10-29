@@ -962,7 +962,7 @@ test.describe('stateless MCP server', () => {
         expect(response.status()).toBe(200)
         return await response.json()
       }
-      const created = mcpData<{ product: { id: string } }>(await call('create_product', { kind: 'service', active: true, idempotency_key: crypto.randomUUID(), name: 'Shared writer parity' })).product
+      const created = mcpData<{ product: { id: string } }>(await call('create_product', { kind: 'experience', active: true, idempotency_key: crypto.randomUUID(), name: 'Shared writer parity' })).product
       const productId = created.id
       const productUrl = `${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`
       const qaUrl = `${baseURL}/api/editor/organizations/${organizationId}/qa`
@@ -1083,8 +1083,8 @@ test.describe('stateless MCP server', () => {
       const restore = { cleanupRequest, page, baseURL: baseURL!, organizationId, productId: null as string | null, locationId: location.id }
       bookedSessionRestore = restore
       await loginAs(cleanupRequest, baseURL!)
-      const created = mcpData<{ product: { id: string; slug: string } }>(await call('create_product', { kind: 'service', active: true, idempotency_key: crypto.randomUUID(),
-        name: 'Family Estate Planning Consultation', variants: [{ name: 'Consultation', prices: [{ unit_amount: 1000, currency: settings.default_currency }] }],
+      const created = mcpData<{ product: { id: string; slug: string } }>(await call('create_product', { kind: 'experience', active: true, idempotency_key: crypto.randomUUID(),
+        name: 'Family Pizza Class', variants: [{ name: 'Class seat', prices: [{ unit_amount: 1000, currency: settings.default_currency }] }],
       })).product
       restore.productId = created.id
       const url = `${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`
@@ -1098,7 +1098,7 @@ test.describe('stateless MCP server', () => {
       await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
       await waitForNuxtHydration(page)
       await expect(page.getByRole('link', { name: 'Duration 120 minutes', exact: true })).toBeVisible()
-      await expect(page.getByRole('link', { name: 'Client limit Up to 10 clients per consultation', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Guest limit Up to 10 guests per session', exact: true })).toBeVisible()
       const scheduleConcern = page.locator('#dashboard-panel-product-booking').getByTestId('editor-row-schedule')
       await expect(scheduleConcern).toHaveAccessibleName(`Weekly schedule ${location.title} · Sunday`)
       await expect(scheduleConcern).toHaveAttribute('href', `/dashboard/ember-slice-demo/products/${created.id}/booking/schedule?location_id=loc-demo`)
@@ -1117,14 +1117,14 @@ test.describe('stateless MCP server', () => {
       expect(target).toBeTruthy()
       const booked = await request.post(`${baseURL}/api/public/products/${created.slug}/book`, {
         headers: tenantTestExtraHeaders(),
-        data: { session_id: target!.id, guest_name: 'Estate Planning Client', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
+        data: { session_id: target!.id, guest_name: 'Pizza Class Guest', guest_email: `session-authority-${Date.now()}@example.test`, party_size: 6, idempotency_key: crypto.randomUUID() },
       })
       expect(booked.status(), await booked.text()).toBe(201)
       const before = (await read()).find(row => row.id === target!.id)!
       expect(before).toMatchObject({ capacity: 10, claimed: 6, remaining: 4 })
       await page.getByRole('button', { name: 'Remove start time 1', exact: true }).click()
       await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page.getByRole('link', { name: 'Sunday No consultations', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Sunday No sessions', exact: true })).toBeVisible()
       const cleared = await request.get(`${url}/availability?location_id=loc-demo`)
       expect(cleared.status()).toBe(200)
       expect((await cleared.json()).rules).toEqual([])
@@ -1152,13 +1152,13 @@ test.describe('stateless MCP server', () => {
       const starts = draft.getByLabel('Starts', { exact: true })
       const ends = draft.getByLabel('Ends', { exact: true })
       const add = draft.getByRole('button', { name: 'Add to calendar', exact: true })
-      const locationChoice = draft.getByRole('combobox', { name: 'Office*', exact: true })
-      await expect(draft.getByRole('spinbutton', { name: 'Client limit', exact: true })).toHaveValue('2')
+      const locationChoice = draft.getByRole('combobox', { name: 'Location*', exact: true })
+      await expect(draft.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('2')
       await locationChoice.click()
       await expect(page.getByRole('listbox')).toBeVisible()
       await page.keyboard.press('Escape')
-      await expect(draft.getByText('Choose an office.', { exact: true })).toBeVisible()
-      await expect(locationChoice).toHaveAccessibleDescription('Choose an office.')
+      await expect(draft.getByText('Choose a location.', { exact: true })).toBeVisible()
+      await expect(locationChoice).toHaveAccessibleDescription('Choose a location.')
       await expect(date).toHaveValue(gapDate)
       await expect(starts).toBeDisabled()
       await expect(ends).toBeDisabled()
