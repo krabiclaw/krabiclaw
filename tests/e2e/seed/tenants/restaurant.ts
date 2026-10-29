@@ -57,6 +57,18 @@ export async function seedRestaurant(createTenant: CreateTenant): Promise<SeedTe
     await collection('starters', 'Starters', starters)
     await collection('brooklyn-specials', 'Brooklyn Specials', [special], brooklyn.id)
 
+    // The home page's hero sends guests to the menu.
+    const { pages } = await tool<{ pages: Array<{ id: string; path: string }> }>('list_site_pages', { locale: 'en' })
+    const home = pages.find(page => page.path === '/')
+    if (!home) throw new Error('Ember & Slice has no home page')
+    const { page } = await tool<{ page: { blocks: Array<{ id: string; type: string; updated_at: string; data: { title?: string } }> } }>('get_site_page', { variant_id: home.id })
+    const hero = page.blocks.find(block => block.type === 'hero')
+    if (!hero) throw new Error('Ember & Slice\'s home page has no hero')
+    await tool('replace_content_block', {
+      block_id: hero.id, expected_updated_at: hero.updated_at,
+      data: { title: hero.data.title ?? 'Ember & Slice', subtitle: 'Wood-fired pizza in Brooklyn and Williamsburg.', cta_label: 'Reserve a table', cta_url: '/reservations', secondary_label: 'View menu', secondary_url: '/menu' },
+    })
+
     const { category } = await tool<{ category: { id: string; name: string } }>('create_article_category', { collection: 'blog', name: 'Kitchen', description: 'Notes from the kitchen' })
     tenant.categories.kitchen = { id: category.id, name: category.name }
     return tenant

@@ -61,6 +61,8 @@ const localWorkerCommand = [
   `corepack yarn wrangler dev .output/server/index.mjs --env e2e --persist-to ${e2eStateDirectory}`,
   '--assets .output/public',
   `--port ${port}`,
+  // Parallel local runs each need their own debugger port as well.
+  `--inspector-port ${port + 10000}`,
   '--var E2E_ALLOW_DEV_ROUTES:true',
   `--var E2E_DEV_ROUTE_SECRET:${localDevRouteSecret}`,
   ...(!liveGooglePlaces ? ['--var GOOGLE_PLACES_API_KEY:'] : []),

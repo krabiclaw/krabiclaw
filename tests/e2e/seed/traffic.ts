@@ -35,6 +35,20 @@ export async function seedTraffic(baseURL: string, manifest: SeedManifest) {
           data: { name: 'Seed Guest', email: `seed-guest+${key}@playwright.example`, message: `A question for ${tenant.name} about visiting.`, consent: true },
         })
         if (sent.status() !== 201) throw new Error(`The ${tenant.name} contact form answered ${sent.status()} ${await sent.text()}`)
+        // Two guests book the studio's wheel class.
+        if (key === 'experience') {
+          const slug = tenant.products['wheel-class']!.slug
+          const listed = await context.request.get(`/api/public/products/${slug}/sessions`)
+          if (listed.status() !== 200) throw new Error(`${tenant.name}'s class times answered ${listed.status()} ${await listed.text()}`)
+          const open = (await listed.json() as { sessions: Array<{ id: string; is_full: boolean }> }).sessions.filter(session => !session.is_full)
+          if (open.length < 2) throw new Error(`${tenant.name} has fewer than two bookable class times`)
+          for (const [index, session] of open.slice(0, 2).entries()) {
+            const booked = await context.request.post(`/api/public/products/${slug}/book`, {
+              data: { session_id: session.id, guest_name: `Seed Guest ${index + 1}`, guest_email: `seed-booking-${index + 1}@playwright.example`, party_size: 1, idempotency_key: crypto.randomUUID() },
+            })
+            if (booked.status() !== 201) throw new Error(`Booking ${tenant.name}'s class answered ${booked.status()} ${await booked.text()}`)
+          }
+        }
       } finally { await context.close() }
     }
   } finally { await browser.close() }

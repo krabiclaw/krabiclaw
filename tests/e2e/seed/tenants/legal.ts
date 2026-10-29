@@ -54,6 +54,15 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
     await practiceArea('housing', 'Housing Law', '/services/housing', 'Eviction defense and tenant rights.')
     await tool('set_consultation_mode', { mode: 'native' })
 
+    // What consultations cost, with the questions clients ask on that page.
+    await tool('create_site_page', {
+      path: '/pricing', title: 'Pricing', pageType: 'custom', locale: 'en',
+      blocks: [
+        { type: 'hero', data: { title: 'Pricing', subtitle: 'Free consultations for clients who qualify for legal aid.' } },
+        { type: 'faq', data: { source: 'page_qa', title: 'Questions about cost' } },
+      ],
+    })
+
     // The home page asks for a consultation, beside a photo of the office.
     const { pages } = await tool<{ pages: Array<{ id: string; path: string }> }>('list_site_pages', { locale: 'en' })
     const home = pages.find(page => page.path === '/')
