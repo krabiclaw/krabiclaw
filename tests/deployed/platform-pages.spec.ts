@@ -89,8 +89,6 @@ test('KrabiClaw pricing retains its billing plans after hydration', async ({ pag
       const headerBottom = await page.locator('header').first().evaluate(element => Math.ceil(element.getBoundingClientRect().bottom))
       await expect.poll(() => heading.evaluate(element => Math.floor(element.getBoundingClientRect().top)), 'Tool anchors must land below the sticky site header').toBeGreaterThanOrEqual(headerBottom)
     }
-    const menuHeading = article.locator('h3').filter({ hasText: / — update_menu$/ })
-    await menuHeading.evaluate(element => element.scrollIntoView({ block: 'start' }))
   })
 
   test(`KrabiClaw policies render their own headers and body at ${width}px`, async ({ page }) => {
