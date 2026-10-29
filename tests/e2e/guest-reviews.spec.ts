@@ -35,10 +35,10 @@ test('a guest who did not come is marked a no-show from the booking record, and 
     await page.goto(`/dashboard/org-user-pottery-house/bookings/${thread.submissionType}/${thread.id}`)
     await waitForNuxtHydration(page)
     await page.getByRole('button', { name: /^Manage / }).click()
-    await page.getByRole('button', { name: 'Mark as a no-show' }).click()
+    await page.getByRole('button', { name: 'Mark as a no-show', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: 'Mark as a no-show' })
     await expect(dialog).toContainText('won’t be asked to review')
-    await dialog.getByRole('button', { name: 'Mark as a no-show' }).click()
+    await dialog.getByRole('button', { name: 'Mark as a no-show', exact: true }).click()
     await expect(page.getByTestId('booking-review-state')).toContainText('No-show')
 
     // Read back through other paths: the record, the conversation, and a repeat refused.
