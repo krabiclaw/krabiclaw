@@ -1089,10 +1089,12 @@ test.describe('stateless MCP server', () => {
       restore.productId = created.id
       const url = `${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`
       const slots = [{ weekday: 0, start_time: '14:00' }]
-      await call('set_product_publication', { product_id: created.id, published: true })
-      await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: true })
+      // An experience is published only once it has a bookable time at a published location.
       await call('set_product_booking_config', { product_id: created.id, duration_minutes: 120, default_capacity: 10 })
+      await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: false })
       await call('replace_product_weekly_schedule', { product_id: created.id, location_id: 'loc-demo', slots })
+      await call('set_product_location', { product_id: created.id, location_id: 'loc-demo', active: true, published: true })
+      await call('set_product_publication', { product_id: created.id, published: true })
       await loginAs(page.request, baseURL!)
       // The location's schedule is the one Product editor's Booking, scoped to that location.
       await page.goto(`${baseURL}/dashboard/ember-slice-demo/products/${created.id}/booking?location_id=loc-demo`)
