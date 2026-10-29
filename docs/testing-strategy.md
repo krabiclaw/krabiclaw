@@ -170,7 +170,13 @@ The tests exercise cache invalidation without provisioning or indexing a remote
 AI Search instance.
 
 `staging` is the first deployed validation. A push to `staging` deploys it and
-then runs read-only MCP discovery and tenant rendering against staging itself.
+then runs read-only MCP discovery and the `tenants` checks against staging itself;
+production runs `tests/deployed` after its own deploy. `tests/deployed` holds
+the checks of real customer and platform content and runs only against a
+deployed environment, never in pull-request E2E. Its `tenants` project (customer
+pages, media and navigation) runs on staging and production; its `platform`
+project (KrabiClaw's pricing, products and docs, authored on production) runs on
+production only.
 Production deploys what `main` holds once `main`'s own `Checks` pass; whoever
 promotes decides the candidate is ready.
 
@@ -182,7 +188,7 @@ Focused commands:
 ```bash
 yarn test:unit
 yarn test:e2e:local
-yarn test:e2e:tenant-rendering
+PLAYWRIGHT_PREVIEW_URL=https://staging.krabiclaw.com yarn test:deployed
 yarn test:e2e:guest-journeys
 yarn test:e2e:mcp
 ```

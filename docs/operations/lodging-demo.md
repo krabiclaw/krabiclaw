@@ -23,7 +23,7 @@ at `/stays/<slug>`. The site's own location, made with the organization, holds
 no home and is inactive, so it takes no plan location and stays off the public
 site.
 
-The staging post-deploy stay test (`tests/e2e/tenant-rendering.spec.ts`) books
+The staging post-deploy stay test (`tests/deployed/tenant-rendering.spec.ts`) books
 Saltleaf Ocean Avenue Studio at `/stays/saltleaf-ocean-avenue-studio`, and
 checks the homepage links to it. Keep the subdomain, that home's name (its
 slug), its online payments and its open nights, and keep it published and

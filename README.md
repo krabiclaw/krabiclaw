@@ -136,7 +136,7 @@ Wrangler reads the same `.env` as Nuxt. Playwright also loads it and supplies
 test-specific local URLs and delivery settings to the Worker.
 
 ```bash
-yarn test:e2e:local tests/e2e/tenant-rendering.spec.ts
+yarn test:e2e:local tests/e2e/tenant-content.spec.ts
 ```
 
 For a production-like local Worker:
