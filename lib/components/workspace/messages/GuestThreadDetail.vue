@@ -422,8 +422,9 @@ watch(error, cause => {
   chosen.value = []
   viewer.value = null
   attempt.value = null
-  messagingContext.value = undefined
-  checkInOpen.value = false
+  sendAt.value = null
+  pendingLater.value = undefined
+  suggestion.value = null
 }, { flush: 'sync' })
 
 watch(realtime.connectionEpoch, (epoch) => {
