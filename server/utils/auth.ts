@@ -438,6 +438,12 @@ function buildAuth(env: CloudflareEnv) {
             throw new APIError('BAD_REQUEST', { message: 'A plan is billed once; homes are billed by what you use.' })
           }
         }
+        // Better Auth restores the administrator from the signed admin_session
+        // cookie impersonate-user set, and answers a bare 500 without it. A
+        // bearer client that did not send the cookie back is told so.
+        if (ctx.path === '/admin/stop-impersonating' && !await ctx.getSignedCookie(ctx.context.createAuthCookie('admin_session').name, ctx.context.secret)) {
+          throw APIError.from('UNAUTHORIZED', { code: 'ADMIN_SESSION_REQUIRED', message: 'Send back the admin_session cookie impersonate-user returned, with an Origin header.' })
+        }
         // The policy applies where a password is chosen. It is not part of
         // password.hash: Better Auth also hashes on sign-in for an email with
         // no password, and a policy error there tells the caller so.
