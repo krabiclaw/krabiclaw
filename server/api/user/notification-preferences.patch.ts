@@ -9,7 +9,7 @@
 import { defineHandler, HTTPError } from 'nitro'
 import { cloudflareEnv, jsonResponse, readStrictBody } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
-import { getNotificationPreferences, setNotificationPreference } from '~/server/domain/notification-preferences'
+import { getNotificationCategoryLabels, getNotificationPreferences, setNotificationPreference } from '~/server/domain/notification-preferences'
 import { isMandatoryEmailCategory, isNotificationCategory, isPushOnlyCategory } from '~/shared/notification-categories'
 
 const CHANNELS = ['email', 'whatsapp', 'push'] as const
@@ -43,5 +43,6 @@ export default defineHandler(async (event) => {
   }
 
   await setNotificationPreference(db, env, session.user.id, body.category, setting)
-  return jsonResponse({ preferences: await getNotificationPreferences(db, session.user.id) })
+  const [preferences, labels] = await Promise.all([getNotificationPreferences(db, session.user.id), getNotificationCategoryLabels(db, session.user.id)])
+  return jsonResponse({ preferences, labels })
 })

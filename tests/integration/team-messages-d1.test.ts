@@ -58,7 +58,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     }
     // The owner's phone is signed in; APNs is not configured here, so its push is a recorded failure.
     await db.prepare("INSERT INTO session (id, expiresAt, token, userId) VALUES ('owner-session', unixepoch() + 3600, 'owner-session-token', 'owner')").run()
-    await db.prepare("INSERT INTO device_tokens (token, user_id, session_id, environment) VALUES ('ab12', 'owner', 'owner-session', 'sandbox')").run()
+    await db.prepare("INSERT INTO device_tokens (token, kind, user_id, session_id, environment) VALUES ('ab12', 'apns', 'owner', 'owner-session', 'sandbox')").run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('cabin-site', ?, 'cabin', 'Pine Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
     const cabin = await createProduct(db, { env, organizationId: ORG, actor: { actorId: 'owner' }, product: {

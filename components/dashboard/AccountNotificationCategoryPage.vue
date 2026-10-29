@@ -12,9 +12,11 @@
           <SettingRow v-model="draft.whatsapp" label="WhatsApp" :disabled="!phoneVerified || saving" />
         </UFormField>
       </template>
-      <!-- Reaches every phone signed in to the KrabiClaw app. -->
+      <!-- Reaches every device the person registered: the KrabiClaw app and subscribed browsers. -->
       <UFormField name="push">
-        <SettingRow v-model="draft.push" label="Push notifications" :disabled="saving" />
+        <SettingRow :model-value="draft.push" label="Push" :description="pushLine" :disabled="saving || enablingPush" @update:model-value="setPush">
+          <UButton v-if="offHere" label="Turn on" color="neutral" variant="link" class="p-0" :loading="enablingPush" @click="turnOnHere" />
+        </SettingRow>
       </UFormField>
     </div>
 
@@ -57,6 +59,40 @@ watchEffect(() => {
   draft.whatsapp = current.whatsapp
   draft.push = current.push
 })
+
+// Push is the person's choice for every device; whether this browser is one of
+// them is said under the switch, and turning it on here asks this browser.
+const pushSubscription = usePushSubscription()
+const enablingPush = ref(false)
+onMounted(() => {
+  void pushSubscription.refresh().catch((cause) => { failure.value = cause instanceof Error ? cause.message : 'Could not read this browser\'s notification permission.' })
+})
+const offHere = computed(() => draft.push && pushSubscription.state.value.availability === 'available' && !pushSubscription.state.value.subscribed)
+const pushLine = computed(() => {
+  const { availability, ios } = pushSubscription.state.value
+  if (availability === 'blocked') return 'Blocked in this browser. Allow it in site settings.'
+  if (availability === 'unsupported') return ios ? 'On iPhone, add KrabiClaw to your Home Screen first.' : 'This browser can\'t show notifications.'
+  return offHere.value ? 'Not on in this browser.' : undefined
+})
+
+async function turnOnHere() {
+  enablingPush.value = true
+  failure.value = ''
+  try {
+    return await pushSubscription.enable()
+  } catch (cause) {
+    failure.value = cause instanceof Error ? cause.message : 'Could not turn on notifications in this browser.'
+    return false
+  } finally {
+    enablingPush.value = false
+  }
+}
+
+// Switching Push on is the click the browser's permission prompt needs.
+async function setPush(on: boolean) {
+  draft.push = on
+  if (on && pushSubscription.state.value.availability === 'available' && !pushSubscription.state.value.subscribed) await turnOnHere()
+}
 
 const form = useTemplateRef('form')
 const revision = ref(0)

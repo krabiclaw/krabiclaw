@@ -13,7 +13,7 @@ import { registerDevice } from '../../server/domain/devices.ts'
 const BASE = 'https://devices-proof.example'
 const PASSWORD = 'DeviceProof123!'
 
-test('device registration requires the current bearer session and cascades with that session', { timeout: 120_000 }, async () => {
+test('device registration requires the current session and cascades with that session', { timeout: 120_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'devices-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
@@ -56,8 +56,8 @@ test('device registration requires the current bearer session and cascades with 
     const registration = { deviceToken: 'AB'.repeat(40), environment: 'sandbox' }
     const count = () => db.prepare('SELECT count(*) AS n FROM device_tokens').first<number>('n')
 
-    // Cookie authentication does not substitute for the required native bearer credential.
-    const invalidCredentials: Record<string, string>[] = [{}, { cookie: first.cookie }, { authorization: 'Bearer not-a-session' }, { authorization: 'Bearer not-a-session', cookie: first.cookie }]
+    // The app presents its bearer session and the dashboard its cookie; neither may be absent or forged.
+    const invalidCredentials: Record<string, string>[] = [{}, { authorization: 'Bearer not-a-session' }, { cookie: 'better-auth.session_token=not-a-session' }]
     for (const headers of invalidCredentials) {
       const refusal = await call('POST', headers, registration)
       assert.equal(refusal.status, 401)
@@ -80,12 +80,12 @@ test('device registration requires the current bearer session and cascades with 
     assert.equal(await count(), 0)
     const identityInjection = await call('POST', bearer, { ...registration, userId: 'second-user', sessionId: first.sessionId })
     assert.deepEqual({ status: identityInjection.status, ...identityInjection.body.data }, { status: 400, code: 'INVALID_BODY', fields: ['sessionId', 'userId'] })
-    await assert.rejects(registerDevice(db, { token: registration.deviceToken, environment: 'sandbox', userId: 'second-user', sessionId: first.sessionId }),
+    await assert.rejects(registerDevice(db, { kind: 'apns', deviceToken: registration.deviceToken, environment: 'sandbox', userId: 'second-user', sessionId: first.sessionId }),
       { status: 401, data: { code: 'UNAUTHORIZED', field: 'session' } })
     assert.equal(await count(), 0)
     assert.deepEqual(await call('POST', bearer, registration), { status: 200, body: { status: 'registered' } })
-    assert.deepEqual(await db.prepare('SELECT token, user_id, session_id, environment FROM device_tokens').first(), {
-      token: registration.deviceToken.toLowerCase(), user_id: 'first-user', session_id: first.sessionId, environment: 'sandbox',
+    assert.deepEqual(await db.prepare('SELECT token, kind, user_id, session_id, environment, p256dh, auth FROM device_tokens').first(), {
+      token: registration.deviceToken.toLowerCase(), kind: 'apns', user_id: 'first-user', session_id: first.sessionId, environment: 'sandbox', p256dh: null, auth: null,
     })
     assert.deepEqual(await call('POST', bearer, registration), { status: 200, body: { status: 'registered' } })
     assert.equal(await count(), 1)
@@ -99,7 +99,7 @@ test('device registration requires the current bearer session and cascades with 
     await auth.api.signOut({ headers: new Headers({ authorization: `Bearer ${first.token}` }) })
     assert.equal(await count(), 1)
     // An operation already authenticated before logout cannot rebind the token afterward.
-    await assert.rejects(registerDevice(db, { token: registration.deviceToken, environment: 'sandbox', userId: 'first-user', sessionId: first.sessionId }),
+    await assert.rejects(registerDevice(db, { kind: 'apns', deviceToken: registration.deviceToken, environment: 'sandbox', userId: 'first-user', sessionId: first.sessionId }),
       { status: 401, data: { code: 'UNAUTHORIZED', field: 'session' } })
     assert.equal(await db.prepare('SELECT session_id FROM device_tokens').first('session_id'), next.sessionId)
 
@@ -114,9 +114,27 @@ test('device registration requires the current bearer session and cascades with 
 
     const expiring = await signIn('first-user')
     await db.prepare('UPDATE session SET expiresAt = unixepoch() - 1 WHERE id = ?').bind(expiring.sessionId).run()
-    await assert.rejects(registerDevice(db, { token: registration.deviceToken, environment: 'sandbox', userId: 'first-user', sessionId: expiring.sessionId }),
+    await assert.rejects(registerDevice(db, { kind: 'apns', deviceToken: registration.deviceToken, environment: 'sandbox', userId: 'first-user', sessionId: expiring.sessionId }),
       { status: 401, data: { code: 'UNAUTHORIZED', field: 'session' } })
     assert.equal(await count(), 0)
+
+    // A browser registers its push subscription with the dashboard's cookie session, and removes it by endpoint.
+    const browser = await signIn('first-user')
+    const subscription = { endpoint: 'https://push.example/send/browser-proof', p256dh: 'BPj'.padEnd(87, 'a'), auth: 'c2VjcmV0LWF1dGgtYnl0ZXM' }
+    for (const [body, code, field] of [
+      [{ ...subscription, endpoint: 'http://push.example/send/browser-proof' }, 'INVALID_PUSH_ENDPOINT', 'endpoint'],
+      [{ ...subscription, p256dh: 'not base64url!' }, 'INVALID_PUSH_KEY', 'p256dh'],
+      [{ endpoint: subscription.endpoint, p256dh: subscription.p256dh }, 'INVALID_PUSH_KEY', 'auth'],
+    ] as const) {
+      const refusal = await call('POST', { cookie: browser.cookie }, body)
+      assert.deepEqual({ status: refusal.status, ...refusal.body.data }, { status: 422, code, field })
+    }
+    assert.deepEqual(await call('POST', { cookie: browser.cookie }, subscription), { status: 200, body: { status: 'registered' } })
+    assert.deepEqual(await db.prepare("SELECT token, kind, user_id, session_id, environment, p256dh, auth FROM device_tokens WHERE kind = 'web'").first(), {
+      token: subscription.endpoint, kind: 'web', user_id: 'first-user', session_id: browser.sessionId, environment: null, p256dh: subscription.p256dh, auth: subscription.auth,
+    })
+    assert.equal((await call('DELETE', { cookie: browser.cookie }, { endpoint: subscription.endpoint })).status, 200)
+    assert.equal(await db.prepare("SELECT count(*) AS n FROM device_tokens WHERE kind = 'web'").first('n'), 0)
 
     // Deleting the account also removes its remaining session-bound devices.
     assert.equal((await call('POST', { authorization: `Bearer ${second.token}` }, registration)).status, 200)

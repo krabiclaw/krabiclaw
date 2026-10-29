@@ -19,14 +19,14 @@ const level = useRouteLevel()
 
 const session = authClient.useSession()
 const sessionData = computed(() => session.value.data)
-const { preferences, error, load } = useNotificationPreferences(() => sessionData.value?.user?.id)
+const { preferences, labels, error, load } = useNotificationPreferences(() => sessionData.value?.user?.id)
 await load()
 
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'categories',
   items: NOTIFICATION_CATEGORIES.map(category => ({
     id: category,
-    label: NOTIFICATION_CATEGORY_LABELS[category],
+    label: labels.value?.[category] ?? NOTIFICATION_CATEGORY_LABELS[category],
     icon: NOTIFICATION_CATEGORY_ICONS[category],
     summary: preferences.value ? describeNotificationSetting(preferences.value[category]) : '',
     to: `${level.path.value}/${category}`,

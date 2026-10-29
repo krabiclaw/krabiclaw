@@ -5,6 +5,7 @@ import { organizationAccessControl, organizationRoles } from '~/utils/organizati
 import { oauthProviderClient } from '@better-auth/oauth-provider/client'
 import { stripeClient } from '@better-auth/stripe/client'
 import { pageEventIdFor, whenLeaving } from '~/utils/pageview-tracking-runtime.client'
+import { forgetPushSubscription } from '~/composables/usePushSubscription'
 
 // Every auth request names the page visit it came from, so the signup it may produce is recorded with
 // that visit's page, language and attribution. The server believes it only for the visitor's own session.
@@ -15,6 +16,8 @@ export const authClient = createAuthClient({
         ? await Promise.race([pageEventIdFor(window.location.pathname), whenLeaving()])
         : null
       if (pageEventId) context.headers.set('x-analytics-page-event', pageEventId)
+      // Like the app unregistering before sign-out: whoever signs in next on this browser starts with push off.
+      if (import.meta.client && new URL(context.url, window.location.origin).pathname.endsWith('/sign-out')) await forgetPushSubscription()
     },
   },
   plugins: [

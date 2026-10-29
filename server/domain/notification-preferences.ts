@@ -4,6 +4,7 @@ import {
   NOTIFICATION_CATEGORY_DEFAULTS,
   isMandatoryEmailCategory,
   isPushOnlyCategory,
+  notificationCategoryLabels,
   type NotificationCategory,
   type NotificationCategorySetting,
   type NotificationChannel,
@@ -57,6 +58,16 @@ export async function getNotificationPreferences(db: DbClient, userId: string): 
     }
   }
   return preferences
+}
+
+/** Category names in the words of every business this person is a member of. */
+export async function getNotificationCategoryLabels(db: DbClient, userId: string): Promise<Record<NotificationCategory, string>> {
+  const rows = await queryAll<{ vertical: string }>(
+    db,
+    'SELECT DISTINCT o.vertical FROM member m JOIN organization o ON o.id = m.organizationId WHERE m.userId = ?',
+    [userId],
+  )
+  return notificationCategoryLabels(rows.map(row => row.vertical))
 }
 
 /**

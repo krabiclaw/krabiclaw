@@ -3,7 +3,7 @@
     <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(24rem,45%)_1fr]">
       <!-- The step column. One question at a time, its own header and footer. -->
       <div class="flex min-h-0 flex-col border-r border-default bg-default">
-        <div v-if="currentStep" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
+        <div v-if="currentStep && !pushAskHome" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
           <UButton
             color="neutral"
             variant="outline"
@@ -16,11 +16,12 @@
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto pb-6" :class="dashboardGutterClass" :inert="busy">
-          <p v-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
+          <PushAsk v-if="pushAskHome" class="py-6" title="Your site is live" :lede="pushAskLede" @done="router.push(pushAskHome)" />
+          <p v-else-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
           <NuxtPage v-else @advance="goNext" @uploading="uploading = $event" />
         </div>
 
-        <div v-if="currentStep && !restoreError" class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
+        <div v-if="currentStep && !restoreError && !pushAskHome" class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
           <p v-if="!canSave" class="mb-3 text-sm text-muted">
             {{ state.draftId ? 'Finish the required details to save your changes.' : 'Your answers have not been saved yet.' }}
           </p>
@@ -93,6 +94,8 @@ import {
 } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
+import PushAsk from '~/components/dashboard/PushAsk.vue'
+import { notificationCategoryLabels } from '~/shared/notification-categories'
 
 // This route creates a new site, so it has no org or site of its own yet: there
 // is no orgSlug segment, so the dashboard layout requests no context, and it
@@ -112,6 +115,14 @@ onBeforeRouteLeave(() => !draft.busy.value && !uploading.value)
 onBeforeRouteUpdate(() => !draft.busy.value && !uploading.value)
 
 const currentStep = computed(() => onboardingStep(String(route.params.step ?? '')))
+
+const pushSubscription = usePushSubscription()
+// The dashboard the new site opens on, once the push ask is answered.
+const pushAskHome = ref<string | null>(null)
+const pushAskLede = computed(() => {
+  const labels = notificationCategoryLabels([state.value.vertical])
+  return `Get new ${labels.reservations_bookings.toLowerCase()} and ${labels.guest_messages.toLowerCase()} as they arrive.`
+})
 const previousStep = computed(() => currentStep.value ? previousOf(currentStep.value.id) : null)
 const nextStep = computed(() => currentStep.value ? nextOf(currentStep.value.id) : null)
 const nextLabel = computed(() => currentStep.value?.nextLabel?.(state.value)
@@ -166,7 +177,14 @@ async function goNext() {
   if (step.action === 'commit') {
     if (!await draft.activate()) return
     const created = state.value.created
-    await router.push(created?.orgSlug ? `/dashboard/${created.orgSlug}` : '/dashboard')
+    const home = created?.orgSlug ? `/dashboard/${created.orgSlug}` : '/dashboard'
+    // The site takes requests from here on, so this is when to offer push — once, where the browser can still be asked.
+    await pushSubscription.refresh()
+    if (pushSubscription.state.value.askable) {
+      pushAskHome.value = home
+      return
+    }
+    await router.push(home)
     return
   }
 
