@@ -43,6 +43,48 @@ interface TenantPlan {
   vertical: 'restaurant' | 'experience' | 'service' | 'lodging'
   currency: string
   timezone: string
+  /** The KrabiClaw plan the business pays for; null stays on Basic. */
+  subscription: 'growth' | 'business' | null
+}
+
+/**
+ * Better Auth starts the owner's upgrade exactly as the dashboard does: it
+ * gives the organization its Stripe test customer and an incomplete
+ * subscription, and returns the Checkout Session. The seed then completes what
+ * the owner would complete in Checkout: Stripe test mode creates the
+ * subscription from the session's own items, paid with Stripe's test card, and Stripe's
+ * checkout.session.completed reaches Better Auth's webhook, signed with the
+ * local webhook secret, so Better Auth itself records the active plan.
+ */
+async function subscribe(baseURL: string, owner: SeedClient, organizationId: string, plan: 'growth' | 'business') {
+  const secretKey = process.env.STRIPE_SECRET_KEY
+  if (!secretKey?.startsWith('sk_test_') && !secretKey?.startsWith('rk_test_')) throw new Error('The E2E seed needs a Stripe test-mode STRIPE_SECRET_KEY')
+  const { default: Stripe } = await import('stripe')
+  const stripe = new Stripe(secretKey)
+  const session = await owner.auth<{ id: string; customer: string; metadata: Record<string, string> }>('subscription/upgrade', {
+    plan, referenceId: organizationId, customerType: 'organization', disableRedirect: true,
+    successUrl: `${baseURL}/dashboard`, cancelUrl: `${baseURL}/dashboard`,
+  })
+  const items = await stripe.checkout.sessions.listLineItems(session.id, { limit: 100, expand: ['data.price'] })
+  const card = await stripe.paymentMethods.attach('pm_card_visa', { customer: session.customer })
+  const subscription = await stripe.subscriptions.create({
+    customer: session.customer, default_payment_method: card.id, metadata: session.metadata,
+    items: items.data.map(item => item.price!.recurring?.usage_type === 'metered' ? { price: item.price!.id } : { price: item.price!.id, quantity: item.quantity ?? 1 }),
+  })
+  const payload = JSON.stringify({
+    id: `evt_seed_${subscription.id}`, object: 'event', type: 'checkout.session.completed', api_version: '2025-08-27.basil',
+    created: Math.floor(Date.now() / 1000), livemode: false,
+    data: { object: { ...session, object: 'checkout.session', mode: 'subscription', status: 'complete', subscription: subscription.id } },
+  })
+  const signed = await fetch(`${baseURL}/api/dev/stripe-signature`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-dev-route-secret': DEV_ROUTE_SECRET() }, body: JSON.stringify({ payload }),
+  })
+  if (signed.status !== 200) throw new Error(`Signing the Stripe event failed: ${signed.status} ${await signed.text()}`)
+  const { signature } = await signed.json() as { signature: string }
+  const delivered = await fetch(`${baseURL}/api/auth/stripe/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': signature }, body: payload })
+  if (delivered.status !== 200) throw new Error(`Better Auth refused the Stripe event: ${delivered.status} ${await delivered.text()}`)
+  const active = await owner.auth<Array<{ plan: string; status: string }>>(`subscription/list?referenceId=${organizationId}&customerType=organization`)
+  if (!active.some(row => row.plan === plan && row.status === 'active')) throw new Error(`Better Auth did not record the ${plan} plan: ${JSON.stringify(active)}`)
 }
 
 /** The first owner listed for a tenant creates it; every other fixture member joins by invitation. */
@@ -55,6 +97,7 @@ async function createTenant(baseURL: string, plan: TenantPlan): Promise<{ owner:
   })
   await owner.json('POST', '/api/organizations', { organizationId: organization.id, name: plan.name, subdomain: plan.subdomain, vertical: plan.vertical, sourceLocale: 'en' })
   await owner.auth('organization/set-active', { organizationId: organization.id })
+  if (plan.subscription) await subscribe(baseURL, owner, organization.id, plan.subscription)
   for (const fixture of members) {
     if (fixture.id === creator.id) continue
     const role = fixture.memberships!.find(membership => membership.tenant === plan.key)!.role
@@ -77,8 +120,13 @@ export async function seedE2e(baseURL: string) {
   try {
     await createActors(admin)
     const manifest: SeedManifest = { baseURL, adminUserId: E2E_ADMIN_ID, tenants: {} as SeedManifest['tenants'] }
-    const { seedRestaurant } = await import('./tenants/restaurant.ts')
-    manifest.tenants.restaurant = await seedRestaurant((plan: TenantPlan) => createTenant(baseURL, plan))
+    const create: CreateTenant = plan => createTenant(baseURL, plan)
+    const [{ seedRestaurant }, { seedExperience }, { seedLegal }] = await Promise.all([
+      import('./tenants/restaurant.ts'), import('./tenants/experience.ts'), import('./tenants/legal.ts'),
+    ])
+    manifest.tenants.restaurant = await seedRestaurant(create)
+    manifest.tenants.experience = await seedExperience(create)
+    manifest.tenants.legal = await seedLegal(create)
     mkdirSync(new URL('.', SEED_MANIFEST_PATH), { recursive: true })
     writeFileSync(SEED_MANIFEST_PATH, JSON.stringify(manifest, null, 2))
     return manifest

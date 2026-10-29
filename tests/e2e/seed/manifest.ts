@@ -36,7 +36,7 @@ export function seed(): SeedManifest {
     try {
       cached = JSON.parse(readFileSync(SEED_MANIFEST_PATH, 'utf8')) as SeedManifest
     } catch (error) {
-      throw new Error(`The E2E seed manifest is missing; Playwright's global setup writes it (${(error as Error).message})`)
+      throw new Error("The E2E seed manifest is missing; Playwright's global setup writes it", { cause: error })
     }
   }
   return cached
