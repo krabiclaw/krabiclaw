@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:08e81ee31e12d9dcf8cceb16ee4cee39c7e3eed3b3539328623f0fefc3f68b4d",
-  "documentationFingerprint": "sha256:141922eb83383eaf85cb95f4fded6ba7fcd263ee5aba4e7cf26432ef13b15c92",
+  "fingerprint": "sha256:c0b2d2885db7b366482252919979803a2548d9d6a76c19255dcfdce4d14e3323",
+  "documentationFingerprint": "sha256:b7adc74a9472f4569f77c08e11ceb4f2e2a15afcae766ac94d76d87962e17a6c",
   "tools": [
     {
       "name": "add_organization_language",
@@ -12830,6 +12830,153 @@
       "uiResourceUri": null
     },
     {
+      "name": "cancel_scheduled_reply",
+      "title": "Cancel scheduled reply",
+      "description": "Cancel one of your own scheduled replies before it starts sending.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "message_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "reply": {
+            "properties": {
+              "body": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "createdAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "entryId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "errorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "errorField": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "organizationId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sendAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "sentAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "sending",
+                  "sent",
+                  "failed",
+                  "needs_review",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "threadId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "updatedAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "organizationId",
+              "threadId",
+              "body",
+              "sendAt",
+              "status",
+              "reason",
+              "errorCode",
+              "errorField",
+              "entryId",
+              "version",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "reply"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false,
+        "title": "Cancel scheduled reply"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "cancel_stay",
       "title": "Cancel stay",
       "description": "Cancel a host-entered stay under its current version, free its nights, cancel pending automatic guest messages and update availability on the home’s connected Airbnb listing through Channex. A failed channel update reports that cancellation was saved. If a website payment needs a refund, returns financial_action_required with an authenticated dashboard link before cancellation or financial writes. Offline refunds can be recorded separately with record_stay_payment; that record moves no money.",
@@ -19422,7 +19569,7 @@
     {
       "name": "create_message_template",
       "title": "Create message template",
-      "description": "Save a guest reply. schedule:null saves a quick reply without automatic delivery. An explicit schedule plans only eligible future events at the named homes in their own timezones; ambiguous or nonexistent local times fail visibly.",
+      "description": "Create an automatic guest message, sent to every guest at the named homes at the scheduled time in each home’s own timezone. It plans only eligible future events; ambiguous or nonexistent local times fail visibly. Every confirmed stay is already sent its home’s check-in instructions at 10:00 the day before arrival, so the name “Check-in instructions” is reserved.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -19439,9 +19586,6 @@
           },
           "schedule": {
             "oneOf": [
-              {
-                "type": "null"
-              },
               {
                 "additionalProperties": false,
                 "properties": {
@@ -19548,9 +19692,6 @@
               },
               "schedule": {
                 "oneOf": [
-                  {
-                    "type": "null"
-                  },
                   {
                     "additionalProperties": false,
                     "properties": {
@@ -40271,7 +40412,7 @@
     {
       "name": "delete_message_template",
       "title": "Delete message template",
-      "description": "Delete a saved reply using its current version and cancel its pending messages. Earlier delivery snapshots remain recorded; an in-flight send cannot be recalled.",
+      "description": "Delete an automatic message using its current version and cancel its pending messages. Earlier delivery snapshots remain recorded; an in-flight send cannot be recalled.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -65902,7 +66043,7 @@
     {
       "name": "list_message_templates",
       "title": "List message templates",
-      "description": "Read the workspace’s saved guest replies and their explicit automatic-delivery schedules. Follow page_info for every page.",
+      "description": "Read the workspace’s automatic guest messages: text the server sends every guest at the named homes on its own schedule. Follow page_info for every page.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -65969,9 +66110,6 @@
                 },
                 "schedule": {
                   "oneOf": [
-                    {
-                      "type": "null"
-                    },
                     {
                       "additionalProperties": false,
                       "properties": {
@@ -68144,7 +68282,7 @@
     {
       "name": "list_scheduled_guest_messages",
       "title": "List scheduled guest messages",
-      "description": "Read scheduled guest-message snapshots and visible failure reasons, optionally for one canonical guest conversation. Members see only assigned homes. Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "description": "Read automatic guest-message snapshots and visible failure reasons, optionally for one canonical guest conversation, including each stay’s built-in check-in message (templateId null, title “Check-in instructions”). Members see only assigned homes. Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -68343,6 +68481,155 @@
         "openWorldHint": false,
         "readOnlyHint": true,
         "title": "List scheduled guest messages"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_scheduled_replies",
+      "title": "List scheduled replies",
+      "description": "Read your own replies scheduled with schedule_guest_reply that have not been sent, and any that failed, optionally for one conversation. Teammates’ scheduled replies are not visible.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "replies": {
+            "items": {
+              "properties": {
+                "body": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "createdAt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "entryId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "errorCode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "errorField": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "organizationId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "sendAt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "sentAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "sending",
+                    "sent",
+                    "failed",
+                    "needs_review",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                "threadId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "organizationId",
+                "threadId",
+                "body",
+                "sendAt",
+                "status",
+                "reason",
+                "errorCode",
+                "errorField",
+                "entryId",
+                "version",
+                "sentAt",
+                "createdAt",
+                "updatedAt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "replies"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "List scheduled replies"
       },
       "securitySchemes": [
         {
@@ -95480,6 +95767,165 @@
       "uiResourceUri": null
     },
     {
+      "name": "schedule_guest_reply",
+      "title": "Schedule guest reply",
+      "description": "Send your own text reply in a guest conversation later, at send_at (an ISO 8601 instant within the next year). It is sent through the conversation’s reply_channel as your reply, if you can still reach the conversation then. Only you see it pending; cancel it with cancel_scheduled_reply. Text only: send photos now with reply_to_guest.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal organization ID from get_workspace_context or list_organizations. If omitted, uses the accessible organization saved by set_workspace_context, or the only accessible organization when no saved selection applies. Otherwise the call fails and requires a selection. Read get_workspace_context before relying on the default. A URL, domain, slug or business name is not an ID.",
+            "minLength": 1,
+            "pattern": "^[\\s\\S]*\\S[\\s\\S]*$",
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "send_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "message",
+          "send_at"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
+        "properties": {
+          "reply": {
+            "properties": {
+              "body": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "createdAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "entryId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "errorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "errorField": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "organizationId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sendAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "sentAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "sending",
+                  "sent",
+                  "failed",
+                  "needs_review",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "threadId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "updatedAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "organizationId",
+              "threadId",
+              "body",
+              "sendAt",
+              "status",
+              "reason",
+              "errorCode",
+              "errorField",
+              "entryId",
+              "version",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "reply"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false,
+        "title": "Schedule guest reply"
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "send_team_message",
       "title": "Send team message",
       "description": "Send the text and/or supplied photo to an internal team conversation you belong to. Sends as the authenticated member and records push outcomes; a saved message does not prove delivery to a participant’s device. Reuse the same idempotency_key for an identical retry; a failed realtime publication may report committed:true and must retry that same request. This never replies to a guest.",
@@ -107516,7 +107962,7 @@
     {
       "name": "update_message_template",
       "title": "Update message template",
-      "description": "Replace a saved guest reply and its schedule using the current version. Completed, failed, skipped, cancelled and uncertain deliveries are never recreated by an edit.",
+      "description": "Replace an automatic message and its schedule using the current version. Completed, failed, skipped, cancelled and uncertain deliveries are never recreated by an edit.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -107537,9 +107983,6 @@
           },
           "schedule": {
             "oneOf": [
-              {
-                "type": "null"
-              },
               {
                 "additionalProperties": false,
                 "properties": {
@@ -107652,9 +108095,6 @@
               },
               "schedule": {
                 "oneOf": [
-                  {
-                    "type": "null"
-                  },
                   {
                     "additionalProperties": false,
                     "properties": {

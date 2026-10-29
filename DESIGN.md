@@ -323,15 +323,18 @@ pane and Back, including on reload and deep links.
 | Organization member | that member's public profile and independently authored availability in the named organization |
 | Organization | the shared site: brand, domains, languages, connections |
 | User | account name, avatar, personal preferences and security |
-| Guest messaging | organization saved replies and their automatic home schedules at `O/messages/replies`; immutable delivery snapshots at `O/messages/scheduled` or a conversation's `scheduled` child |
+| Guest messaging | organization automatic messages and their home schedules at `O/messages/automatic`; immutable delivery snapshots at `O/messages/scheduled` or a conversation's `scheduled` child; each member's own send-later replies |
 
-Saved replies use the canonical message-template operations: Reply edits its name
-and reusable message, Automatic schedule edits its trigger, local time and named
-homes. New saved reply presents the message and optional schedule together before
-creating one record. Managers create, change and delete them; members can insert a reply into
-the conversation's existing composer before sending. Scheduled-message history
-reads the canonical snapshots and reasons; managers may cancel pending messages.
-Neither editor introduces a second sending or scheduling lifecycle.
+Automatic messages use the canonical message-template operations: Message edits
+its name and text, When it is sent edits its trigger, local time and named homes;
+every automatic message has a schedule. Managers create, change and delete them.
+Every confirmed stay is also sent its home's check-in instructions by the server;
+that message has no template. In a conversation, "+" adds to the message
+(photos, or Send later), and the conversation's "⋯" holds Messaging settings:
+the person's own Suggested replies switch and their pending Send later replies.
+A suggested reply is the composer's placeholder until Use or Tab puts it in the
+field. Scheduled-message history reads the canonical snapshots and reasons;
+managers may cancel pending messages. Neither editor introduces a second sending or scheduling lifecycle.
 
 Themes own nothing. A theme renders what these hold; it adds no CMS route,
 editor or writer, and it never grants or hides an authorization.

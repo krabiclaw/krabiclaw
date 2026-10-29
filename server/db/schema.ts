@@ -1592,7 +1592,9 @@ export const stay_payments = sqliteTable("stay_payments", {
 	check("stay_payments_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
-// One plan snapshot per actual stay and template. The outbound activity entry
+// One plan snapshot per actual stay and template, plus the built-in check-in
+// message (template_id NULL) every stay gets from its home's check-in
+// instructions. The outbound activity entry
 // links to the canonical guest_thread_deliveries receipt; provider IDs and send
 // outcomes are never copied into a second receipt ledger here.
 export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", {
@@ -1622,6 +1624,8 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "scheduled_guest_messages_request_scope_fk" }).onDelete("no action"),
 	foreignKey({ columns: [table.organization_id, table.template_id], foreignColumns: [message_templates.organization_id, message_templates.id], name: "scheduled_guest_messages_template_scope_fk" }).onDelete("no action"),
 	uniqueIndex("scheduled_guest_messages_template_stay_unique").on(table.template_id, table.stay_id),
+	// The built-in check-in message: one per stay, with no template.
+	uniqueIndex("scheduled_guest_messages_check_in_stay_unique").on(table.stay_id).where(sql`template_id IS NULL AND template_title = 'Check-in instructions'`),
 	index("scheduled_guest_messages_due_idx").on(table.status, table.due_at),
 	index("scheduled_guest_messages_org_created_idx").on(table.organization_id, table.created_at, table.id),
 	check("scheduled_guest_messages_status_check", sql`status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped')`),
@@ -1631,6 +1635,39 @@ export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", 
 	check("scheduled_guest_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
 	check("scheduled_guest_messages_text_check", sql`length(trim(template_title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000 AND template_version >= 1 AND stay_version >= 1`),
 	check("scheduled_guest_messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)`),
+]);
+
+// A reply one member wrote and chose to send later in one guest conversation,
+// any vertical. Only its author sees it pending, edits or cancels it; at
+// due_at it is sent as that member's own reply, if they still have access.
+// The sent message is the activity entry; outcomes are never copied here.
+export const send_later_messages = sqliteTable("send_later_messages", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	request_id: text().notNull(),
+	user_id: text().notNull().references(() => user.id, { onDelete: "cascade" }),
+	body: text().notNull(),
+	due_at: text().notNull(),
+	status: text().$type<'pending' | 'sending' | 'sent' | 'failed' | 'needs_review' | 'cancelled'>().notNull(),
+	reason: text(),
+	error_code: text(),
+	error_field: text(),
+	entry_id: text().references(() => activity_entries.id, { onDelete: "no action" }),
+	version: integer().notNull(),
+	started_at: text(),
+	sent_at: text(),
+	created_at: text().notNull(),
+	updated_at: text().notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "send_later_messages_request_scope_fk" }).onDelete("cascade"),
+	index("send_later_messages_due_idx").on(table.status, table.due_at),
+	index("send_later_messages_author_idx").on(table.organization_id, table.user_id, table.due_at),
+	check("send_later_messages_status_check", sql`status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled')`),
+	check("send_later_messages_error_check", sql`status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)`),
+	check("send_later_messages_sent_check", sql`status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)`),
+	check("send_later_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
+	check("send_later_messages_text_check", sql`length(trim(body)) BETWEEN 1 AND 5000 AND version >= 1`),
+	check("send_later_messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)`),
 ]);
 
 // A place to stay as Channex and Airbnb know it, and how far its import got.

@@ -12,18 +12,25 @@
     fill
   >
     <template #right>
-      <UButton v-if="thread" :to="{ path: `${threadPath}/scheduled`, query: route.query }" icon="i-lucide-clock" color="neutral" variant="ghost" aria-label="Scheduled messages for this conversation" />
+      <UDropdownMenu v-if="thread" :items="actions" :content="{ align: 'end' }">
+        <UButton icon="i-lucide-ellipsis" color="neutral" variant="ghost" aria-label="Conversation actions" />
+      </UDropdownMenu>
       <UButton v-if="recordTo" :to="recordTo" color="neutral" variant="soft" class="h-10 rounded-full px-4" :aria-label="`Show ${recordTitle.toLowerCase()}`">
         Details
       </UButton>
     </template>
 
     <GuestThreadDetail :thread-id="threadId" />
+    <UModal v-model:open="settingsOpen" title="Messaging settings">
+      <template #body><MessagingSettings /></template>
+    </UModal>
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import GuestThreadDetail from '~/lib/components/workspace/messages/GuestThreadDetail.vue'
+import MessagingSettings from '~/lib/components/workspace/messages/MessagingSettings.vue'
+import type { DropdownMenuItem } from '@nuxt/ui'
 import { threadRecordTitle } from '~/lib/components/workspace/messages/guest-thread-client'
 
 definePageMeta({ layout: 'dashboard', key: route => `guest-conversation:${route.params.orgSlug}:${route.params.threadId}` })
@@ -37,6 +44,12 @@ const threadPath = level.path
 // word, so the conversation's control and the panel it opens agree.
 const { thread } = await useGuestThread(threadId)
 const dashboard = useDashboardOrganization()
+// Settings for how this person writes to guests, and the conversation's automatic messages.
+const settingsOpen = ref(false)
+const actions = computed<DropdownMenuItem[]>(() => [
+  { label: 'Messaging settings', icon: 'i-lucide-settings', onSelect: () => { settingsOpen.value = true } },
+  { label: 'Automatic messages', icon: 'i-lucide-clock', to: { path: `${threadPath.value}/scheduled`, query: route.query } },
+])
 const recordTitle = computed(() => thread.value
   ? threadRecordTitle(thread.value.submissionType, dashboard.organization.value?.vertical ?? null)
   : 'Details')
