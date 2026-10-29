@@ -187,29 +187,21 @@
           />
         </TransitionGroup>
 
-        <div v-if="!personalScope" class="flex flex-wrap items-center gap-2">
-          <SavedReplyPicker :disabled="!canReply || sending" @insert="insertText" />
-          <UPopover v-model:open="checkInOpen">
-            <UButton label="Check-in instructions" icon="i-lucide-key-round" color="neutral" variant="ghost" size="sm" :disabled="sending" />
-            <template #content>
-              <div class="w-80 max-w-[calc(100vw-2rem)] space-y-3 p-4">
-                <UAlert v-if="contextError" color="error" title="Check-in instructions could not be loaded" :description="getErrorMessage(contextError, 'Conversation context request failed')" />
-                <template v-else-if="messagingContext">
-                  <template v-if="messagingContext.home">
-                    <p class="font-semibold">{{ messagingContext.home.name }}</p>
-                    <p class="max-h-60 overflow-y-auto whitespace-pre-wrap break-words text-sm">{{ messagingContext.home.check_in_instructions || 'No check-in instructions saved for this home.' }}</p>
-                    <UButton v-if="messagingContext.home.check_in_instructions" label="Insert instructions" color="neutral" :disabled="!canReply || sending" @click="insertText(messagingContext.home.check_in_instructions); checkInOpen = false" />
-                    <UButton :to="`/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/products/${encodeURIComponent(messagingContext.home.product_id)}/check-in-method/instructions`" label="View home’s check-in instructions" color="neutral" variant="link" />
-                  </template>
-                  <p v-else class="text-sm text-muted">This conversation has no home linked to it.</p>
-                </template>
-                <p v-else role="status" class="text-sm text-muted">Loading check-in instructions…</p>
-              </div>
-            </template>
-          </UPopover>
-        </div>
+        <!-- Your own messages set to send later in this conversation; only you see them. -->
+        <ul v-if="pendingLater?.messages.length" class="mb-2 space-y-1">
+          <li v-for="later in pendingLater.messages" :key="later.id" class="flex items-center gap-2 rounded-xl border border-dashed border-primary px-3 py-2 text-sm">
+            <UIcon name="i-lucide-clock" class="size-4 shrink-0 text-primary" />
+            <span class="min-w-0 flex-1 truncate"><span class="text-primary">{{ laterLabel(later.sendAt) }}</span> · {{ later.body }}</span>
+            <span v-if="later.status !== 'pending'" class="text-error">{{ later.reason }}</span>
+            <UButton v-if="later.status === 'pending'" label="Cancel" color="neutral" variant="ghost" size="xs" :loading="cancellingLater === later.id" @click="cancelLater(later.id)" />
+          </li>
+        </ul>
+        <p v-if="suggestionError" class="mb-2 flex items-center gap-2 text-xs text-muted">
+          <UIcon name="i-lucide-triangle-alert" class="size-3.5" />{{ suggestionError }}
+          <UButton label="Retry" color="neutral" variant="link" size="xs" @click="suggestionAttempt += 1" />
+        </p>
         <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
-        <MessageComposer v-model="draft" v-model:photos="chosen" :disabled="!canReply" :sending="sending" :channel="!personalScope && thread.replyChannel === 'airbnb' ? 'airbnb' : 'email'" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" />
+        <MessageComposer v-model="draft" v-model:photos="chosen" v-model:send-at="sendAt" :disabled="!canReply" :sending="sending" :channel="!personalScope && thread.replyChannel === 'airbnb' ? 'airbnb' : 'email'" :send-later="!personalScope" :suggestion="suggestion" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" />
         <MessagePhotoViewer v-model="viewer" />
 
         <p v-if="!canReply" class="mt-2 text-xs text-warning">This guest has no email on file. Once they accept an invite to this conversation, your replies reach their KrabiClaw inbox.</p>
@@ -231,8 +223,7 @@ import { useDashboardInvalidations } from '~/composables/useDashboardInvalidatio
 import { authClient } from '~/lib/auth-client'
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
 import MessagePhotoViewer, { type MessagePhotoViewerState } from './MessagePhotoViewer.vue'
-import SavedReplyPicker from './SavedReplyPicker.vue'
-import { isGuestMessagingContext } from './guest-messaging-client'
+import { isSendLaterList, isSendLaterResponse, isSuggestedReply, useSuggestedReplies } from './guest-messaging-client'
 import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 /*
@@ -259,14 +250,48 @@ const draft = ref('')
 const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && thread.value?.operationalRecord && thread.value.replyChannel === 'email')
 const changeRequestSent = ref(false)
 watch(() => `${props.threadId}:${String(route.query.intent)}`, () => { changeRequestSent.value = false })
-const checkInOpen = ref(false)
-const { data: messagingContext, error: contextError, refresh: refreshContext } = await useAsyncData(
-  () => `guest-messaging-context:${dashboard.organizationId.value}:${props.threadId}`,
-  () => props.personalScope ? Promise.resolve(null) : dashboardApi(`${threadPath.value}/context`, { validate: isGuestMessagingContext }),
-  { immediate: false },
+const sendAt = ref<string | null>(null)
+
+// Your send-later messages for this conversation.
+const { data: pendingLater, refresh: refreshLater } = await useAsyncData(
+  () => `send-later:${dashboard.organizationId.value}:${props.threadId}`,
+  () => props.personalScope ? Promise.resolve(null) : dashboardApi(`/api/dashboard/organizations/${dashboard.organizationId.value}/send-later`, { query: { threadId: props.threadId }, validate: isSendLaterList }),
 )
-watch(checkInOpen, open => { if (open) void refreshContext() })
-function insertText(value: string) { if (!sending.value && canReply.value) draft.value = [draft.value.trimEnd(), value].filter(Boolean).join('\n\n') }
+const cancellingLater = ref<string | null>(null)
+async function cancelLater(id: string) {
+  cancellingLater.value = id
+  actionError.value = null
+  try {
+    await dashboardApi(`/api/dashboard/organizations/${dashboard.organizationId.value}/send-later/${encodeURIComponent(id)}/cancel`, { method: 'POST', validate: isSendLaterResponse })
+    await refreshLater()
+  } catch (err) {
+    actionError.value = getErrorMessage(err, 'The message could not be cancelled')
+  } finally {
+    cancellingLater.value = null
+  }
+}
+const laterLabel = (instant: string) => new Intl.DateTimeFormat(locale.value, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(instant))
+
+// A drafted reply to the guest's latest message becomes the composer's placeholder.
+const suggestionsOn = useSuggestedReplies(() => dashboard.organizationId.value)
+const suggestion = ref<string | null>(null)
+const suggestionError = ref<string | null>(null)
+const suggestionAttempt = ref(0)
+const latestGuestMessage = computed(() => {
+  const last = thread.value?.entries.findLast(entry => entry.kind === 'message' && entry.actorKind !== 'system' && entry.body?.trim())
+  return last?.actorKind === 'guest' ? last.id : null
+})
+watch([latestGuestMessage, suggestionsOn, suggestionAttempt], async ([messageId, on]) => {
+  suggestion.value = null
+  suggestionError.value = null
+  if (props.personalScope || !on || !messageId || !import.meta.client) return
+  try {
+    const result = await dashboardApi(`${threadPath.value}/suggested-reply`, { method: 'POST', validate: isSuggestedReply })
+    if (latestGuestMessage.value === messageId) suggestion.value = result.suggestion
+  } catch (err) {
+    suggestionError.value = `A reply could not be suggested: ${getErrorMessage(err, 'Suggested reply request failed')}`
+  }
+}, { immediate: true })
 const actionError = ref<string | null>(null)
 const readError = ref<string | null>(null)
 const currentBusiness = computed(() => thread.value?.organizationName)
@@ -331,6 +356,21 @@ async function sendReply() {
   const body = draft.value.trim()
   const photos = chosen.value
   if (!thread.value || !canReply.value || (!body && !photos.length) || sending.value) return
+  if (sendAt.value) {
+    sending.value = true
+    actionError.value = null
+    try {
+      await dashboardApi(`${threadPath.value}/send-later`, { method: 'POST', body: { body, sendAt: sendAt.value }, validate: isSendLaterResponse })
+      draft.value = ''
+      sendAt.value = null
+      await refreshLater()
+    } catch (err) {
+      actionError.value = getErrorMessage(err, 'The message could not be scheduled')
+    } finally {
+      sending.value = false
+    }
+    return
+  }
   if (attempt.value?.body !== body || !sameMessagePhotos(attempt.value.photos, photos)) {
     attempt.value = { key: crypto.randomUUID(), body, photos, sentAfter: new Set(thread.value.entries.map(entry => entry.id)) }
   }
@@ -367,6 +407,7 @@ const viewer = ref<MessagePhotoViewerState | null>(null)
 function refreshThreadState() {
   if (!props.personalScope) realtime.connect()
   void refresh()
+  void refreshLater()
 }
 
 watch(realtime.event, (event) => {

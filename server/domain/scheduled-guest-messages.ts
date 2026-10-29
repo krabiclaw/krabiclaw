@@ -47,7 +47,7 @@ async function plan(db: DbClient, template: MessageTemplateRow, stay: PlanningSt
       WHERE id = ? AND status = 'pending' AND updated_at = ?
         AND EXISTS (SELECT 1 FROM message_templates WHERE id = ? AND organization_id = ? AND version = ?)
         AND EXISTS (SELECT 1 FROM stays WHERE id = ? AND organization_id = ? AND version = ? AND request_id IS ?)`,
-    [stay.request_id, stay.status === 'cancelled' ? 'The stay was cancelled.' : 'The saved reply no longer schedules this home.', now, existing.id, existing.updated_at,
+    [stay.request_id, stay.status === 'cancelled' ? 'The stay was cancelled.' : 'The automatic message no longer includes this home.', now, existing.id, existing.updated_at,
       template.id, template.organization_id, template.version, stay.id, stay.organization_id, stay.version, stay.request_id])
     return
   }

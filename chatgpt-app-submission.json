@@ -116,6 +116,18 @@
         "destructive_justification": "Cancels one pending scheduled guest message so it is never sent; a message already sending, sent or under review is refused."
       }
     },
+    "cancel_scheduled_reply": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Cancels one of the caller’s own scheduled replies before it starts sending, so it is never sent.",
+        "open_world_justification": "Cancels one of the caller’s own scheduled replies before it starts sending, so it is never sent. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Cancels one of the caller’s own scheduled replies before it starts sending, so it is never sent."
+      }
+    },
     "cancel_stay": {
       "annotations": {
         "readOnlyHint": false,
@@ -231,9 +243,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Saves a guest reply, optionally scheduled for named homes; planning creates pending scheduled messages for eligible future stays and sends nothing immediately.",
-        "open_world_justification": "A schedule makes the production cron later send this text to eligible guests through each conversation’s email or Airbnb address.",
-        "destructive_justification": "Saves a guest reply, optionally scheduled for named homes; planning creates pending scheduled messages for eligible future stays and sends nothing immediately."
+        "read_only_justification": "Saves an automatic guest message scheduled for named homes; planning creates pending scheduled messages for eligible future stays and sends nothing immediately.",
+        "open_world_justification": "Its schedule makes the production cron later send this text to eligible guests through each conversation’s email or Airbnb address.",
+        "destructive_justification": "Saves an automatic guest message scheduled for named homes; planning creates pending scheduled messages for eligible future stays and sends nothing immediately."
       }
     },
     "create_post": {
@@ -435,9 +447,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records.",
-        "open_world_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records."
+        "read_only_justification": "Deletes an automatic guest message under its version and cancels its pending scheduled messages, keeping earlier delivery records.",
+        "open_world_justification": "Deletes an automatic guest message under its version and cancels its pending scheduled messages, keeping earlier delivery records. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Deletes an automatic guest message under its version and cancels its pending scheduled messages, keeping earlier delivery records."
       }
     },
     "delete_organization_language": {
@@ -1196,6 +1208,18 @@
         "destructive_justification": "Reads scheduled guest-message snapshots with their status and recorded failure reasons; members see only assigned homes."
       }
     },
+    "list_scheduled_replies": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads the caller’s own replies scheduled to send later, with any failure reasons; teammates’ scheduled replies are not returned.",
+        "open_world_justification": "Reads the caller’s own replies scheduled to send later, with any failure reasons; teammates’ scheduled replies are not returned. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads the caller’s own replies scheduled to send later, with any failure reasons; teammates’ scheduled replies are not returned."
+      }
+    },
     "list_site_pages": {
       "annotations": {
         "readOnlyHint": true,
@@ -1616,6 +1640,18 @@
         "destructive_justification": "Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish."
       }
     },
+    "schedule_guest_reply": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Saves the caller’s own text reply to be sent later in one guest conversation; nothing is sent immediately.",
+        "open_world_justification": "At the chosen time the production cron sends the text as the caller’s reply through the conversation’s email or Airbnb address, if the caller can still reach the conversation.",
+        "destructive_justification": "Saves the caller’s own text reply to be sent later in one guest conversation; nothing is sent immediately."
+      }
+    },
     "send_team_message": {
       "annotations": {
         "readOnlyHint": false,
@@ -1911,9 +1947,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Replaces a saved guest reply and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept.",
+        "read_only_justification": "Replaces an automatic guest message and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept.",
         "open_world_justification": "A schedule makes the production cron later send this text to eligible guests through each conversation’s email or Airbnb address.",
-        "destructive_justification": "Replaces a saved guest reply and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept."
+        "destructive_justification": "Replaces an automatic guest message and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept."
       }
     },
     "update_organization_member_role": {

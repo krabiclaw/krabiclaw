@@ -93,8 +93,7 @@ export async function saveMessageTemplate(db: DbClient, access: StayAccess, temp
   const input = value as Record<string, unknown>
   const title = messageText(input.title, 'title', 100), body = messageText(input.body, 'body', 5000)
   if (title.trim() === CHECK_IN_MESSAGE_TITLE) messagingError(422, 'MESSAGE_TITLE_RESERVED', `“${CHECK_IN_MESSAGE_TITLE}” is the built-in message every stay is sent; choose another name`, 'title')
-  const schedule = parseGuestMessageSchedule(input.schedule)
-  if (schedule === null) messagingError(422, 'MESSAGE_SCHEDULE_REQUIRED', 'An automatic message needs a schedule: when it is sent, and to which homes', 'schedule')
+  const schedule = parseGuestMessageSchedule(input.schedule)!
   const current = templateId === null ? null : await getMessageTemplate(db, access.organizationId, templateId)
   if (current === null ? 'expectedVersion' in input : expectedTemplateVersion(input.expectedVersion) !== current.version) {
     messagingError(current === null ? 422 : 409, current === null ? 'INVALID_MESSAGING_FIELD' : 'MESSAGE_TEMPLATE_VERSION_CONFLICT', current === null ? 'A new automatic message has no expectedVersion' : 'This automatic message changed; reload it before editing', 'expectedVersion')

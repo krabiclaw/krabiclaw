@@ -15,7 +15,7 @@
           <UAlert v-if="message.reason" :color="message.status === 'failed' || message.status === 'needs_review' ? 'error' : 'neutral'" variant="soft" :description="message.reason" />
           <div class="flex flex-wrap gap-3">
             <UButton v-if="message.requestId && !threadId" :to="`${messagesPath}/${encodeURIComponent(message.requestId)}`" label="Open conversation" color="neutral" variant="link" />
-            <UButton v-if="manage && message.templateId" :to="`${messagesPath}/replies/${encodeURIComponent(message.templateId)}/schedule`" label="Edit saved reply" color="neutral" variant="link" />
+            <UButton v-if="manage && message.templateId" :to="`${messagesPath}/automatic/${encodeURIComponent(message.templateId)}/schedule`" label="Edit saved reply" color="neutral" variant="link" />
             <UButton v-if="manage && message.status === 'pending'" label="Cancel scheduled message" color="neutral" variant="outline" :loading="cancelling === message.id" :disabled="!!cancelling" @click="cancel(message.id)" />
           </div>
         </article>
