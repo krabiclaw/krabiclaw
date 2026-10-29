@@ -217,9 +217,12 @@ test('declining leaves the stay as it is; a request withdrawn or answered on Air
     assert.deepEqual(await stayRow(db, stay.id), { check_in_date: '2027-01-10', check_out_date: '2027-01-13', adults: 2, total_minor: 45_000, version: 1 })
 
     // The guest withdrew on Airbnb, which sends no notification: the next feed run reads it.
+    // The host's own proposal, accepted by the guest there, reads as the guest's answer.
     channex.requests.get('alt-withdrawn')!.status = 'CANCELED'
-    assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 1 })
+    channex.requests.get('alt-host')!.status = 'ACCEPTED'
+    assert.deepEqual(await runAlterationRequestFeed(db, env), { recorded: 0, reconciled: 2 })
     assert.deepEqual(await decision(db, recorded.get('alt-withdrawn')!), { event_name: 'booking_change.withdrawn', actor_kind: 'system', actor_user_id: null, body: 'The guest withdrew the change on Airbnb.' })
+    assert.deepEqual(await decision(db, hostProposal), { event_name: 'booking_change.accepted', actor_kind: 'system', actor_user_id: null, body: 'The guest accepted the change on Airbnb.' })
 
     // Declined on Airbnb before the host answered here: the host's accept records Airbnb's outcome and is refused naming it.
     channex.requests.get('alt-answered')!.status = 'DECLINED'

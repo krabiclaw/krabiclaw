@@ -48,19 +48,20 @@ function nightsLabel(terms: Terms, locale: string): string {
   return `${day(terms.check_in_date)} – ${day(terms.check_out_date)}`
 }
 
-const ANSWERS: Record<Outcome, { event: string; host: string; airbnb: string }> = {
-  accepted: { event: 'booking_change.accepted', host: 'Accepted the guest’s change on Airbnb.', airbnb: 'The guest’s change was accepted on Airbnb.' },
-  declined: { event: 'booking_change.declined', host: 'Declined the guest’s change on Airbnb.', airbnb: 'The guest’s change was declined on Airbnb.' },
-  withdrawn: { event: 'booking_change.withdrawn', host: 'Withdrew the change on Airbnb.', airbnb: 'The guest withdrew the change on Airbnb.' },
+/** How each outcome reads: answered by the host here, or on Airbnb, for a change the guest or the host asked for. */
+const ANSWERS: Record<Outcome, { event: string; host: string; guest: string; airbnb: string }> = {
+  accepted: { event: 'booking_change.accepted', host: 'Accepted the guest’s change on Airbnb.', guest: 'The guest’s change was accepted on Airbnb.', airbnb: 'The guest accepted the change on Airbnb.' },
+  declined: { event: 'booking_change.declined', host: 'Declined the guest’s change on Airbnb.', guest: 'The guest’s change was declined on Airbnb.', airbnb: 'The guest declined the change on Airbnb.' },
+  withdrawn: { event: 'booking_change.withdrawn', host: 'Withdrew the change on Airbnb.', guest: 'The guest withdrew the change on Airbnb.', airbnb: 'The change was withdrawn on Airbnb.' },
 }
 
-/** Airbnb's outcome, recorded once as the request's answer. */
-async function recordOutcome(db: DbClient, env: AnswerEnv, entry: GuestThreadEntryRow, outcome: Outcome, actorUserId: string | null): Promise<void> {
+/** Airbnb's outcome, recorded once as the request's answer; a member is named only for the answer they chose. */
+async function recordOutcome(db: DbClient, env: AnswerEnv, entry: GuestThreadEntryRow, proposal: Proposal, outcome: Outcome, actorUserId: string | null): Promise<void> {
   const answer = ANSWERS[outcome]
   const decision = await appendEntry(db, {
     threadId: entry.request_id, kind: 'operation', actorKind: actorUserId ? 'member' : 'system', actorUserId, channel: 'airbnb',
     eventName: answer.event, dedupeKey: `booking-change-decision:${entry.id}`,
-    body: actorUserId ? answer.host : answer.airbnb,
+    body: actorUserId ? answer.host : proposal.initiated_by === 'guest' ? answer.guest : answer.airbnb,
     payloadJson: { requestId: entry.id, outcome },
   })
   await updateThreadProjectionIfLatestEntry(db, entry.request_id, decision.id, { conversationState: 'resolved' })
@@ -130,7 +131,7 @@ export async function takeAlterationRequest(db: DbClient, env: CloudflareEnv, re
   if (await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)) return 'unchanged'
   const proposal = proposalSchema.parse(JSON.parse(entry.payload_json || '{}'))
   if (request.outcome) {
-    await recordOutcome(db, env, entry, request.outcome, null)
+    await recordOutcome(db, env, entry, proposal, request.outcome, null)
     if (request.outcome === 'accepted') await landAcceptedChange(db, env, proposal)
     return 'reconciled'
   }
@@ -184,7 +185,7 @@ export async function respondToStayChangeRequest(db: DbClient, env: AnswerEnv, i
     const current = await readAlterationRequest(env, proposal.live_feed_event_id)
     const answered = current.outcome ?? (await resolveAlterationRequest(env, current.id, input.decision)).outcome
     if (!answered) throw new HTTPError({ statusCode: 502, message: 'Channex accepted the answer but still lists the change request as waiting. Reload before answering again.', data: { code: 'CHANNEX_DECISION_NOT_RECORDED', field: 'resolution' } })
-    await recordOutcome(db, env, entry, answered, current.outcome ? null : input.actorUserId)
+    await recordOutcome(db, env, entry, proposal, answered, !current.outcome && answered === wanted ? input.actorUserId : null)
     decision = await findEntryByDedupeKey(db, `booking-change-decision:${entry.id}`)
   }
   const outcome = (decision ? JSON.parse(decision.payload_json || '{}') as { outcome?: Outcome } : {}).outcome
