@@ -1407,10 +1407,11 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
   const guestTitle = `${guestMessage.title} — ${guestMessage.facts.find(fact => fact.key === 'what')?.value ?? home.name}`
   const results = await Promise.allSettled([
+    // Owners and admins only: this alert carries the guest's contact, payment and conversation.
+    // A member looking after the home reads the stay as a turnover.
     notifyOwner(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, template: 'new_stay', title: ownerMessage.title, payload, message: ownerMessage,
       notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
-      memberIds: home.assigned_member_id ? [home.assigned_member_id] : [],
     }),
     sendEmailNotification(env, db, {
       organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
@@ -1462,7 +1463,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     entry = await appendEntry(db, {
       threadId: stay.request_id, kind: 'operation', actorKind: by === 'guest' ? 'guest' : 'member', channel: 'web', body: guestEmail.text,
       eventName: `stay.${by}_cancelled`, dedupeKey,
-      payloadJson: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id, member_ids: home.assigned_member_id ? [home.assigned_member_id] : [],
+      payloadJson: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id,
         email: { to: stay.guest_email, fromName: studio, replyTo, html: guestEmail.html, text: guestEmail.text },
         owner: {
           guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
@@ -1484,7 +1485,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
   }
   if (!isRecord(stored?.email)) throw new Error('Stay cancellation notification has no recorded email content to retry')
   const recorded = z.object({
-    subject: z.string().min(1), refund_minor: z.number().int().nonnegative(), location_id: z.string().min(1), member_ids: z.array(z.string().min(1)),
+    subject: z.string().min(1), refund_minor: z.number().int().nonnegative(), location_id: z.string().min(1),
     email: z.object({ to: z.string().min(1), fromName: z.string().min(1), replyTo: z.string().nullable(), html: z.string().min(1), text: z.string().min(1) }),
     owner: z.object({
       guestName: z.string(), guestEmail: z.string(), guestPhone: z.string().nullable(), homeName: z.string(), checkIn: z.string(), checkOut: z.string(),
@@ -1499,7 +1500,7 @@ export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, or
     ...(by === 'guest' ? [notifyOwner(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, template: 'stay_cancelled', payload,
       notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
-      memberIds: recorded.member_ids, title: ownerMessage.title, message: ownerMessage,
+      title: ownerMessage.title, message: ownerMessage,
     })] : []),
     sendEmailNotification(env, db, {
       organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,

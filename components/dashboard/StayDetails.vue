@@ -1,5 +1,5 @@
 <template>
-  <!-- One stay at a place to stay: who is coming, when, and what the host has collected. -->
+  <!-- One stay at a place to stay: who is coming, when, and what the host has collected. A member looking after the home reads its turnover. -->
   <!-- Inside the guest thread's leaf, which owns the column, it is the body alone. -->
   <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="embedded ? {} : { id: 'stay-details', title, column: 'record' }">
     <template #right>
@@ -11,7 +11,7 @@
       <UAlert v-if="homeError" class="mb-5" color="error" variant="soft" title="The home could not be loaded" :description="getErrorMessage(homeError, 'Home request failed')" />
       <!-- A channel stay overlapping another is the host's to resolve; it never resolves itself. -->
       <UAlert
-        v-if="stay.overbooked"
+        v-if="detail?.overbooked"
         class="mb-5"
         color="error"
         icon="i-lucide-triangle-alert"
@@ -21,13 +21,14 @@
       <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
       <div class="flex flex-col items-center pb-12 pt-10 text-center">
         <div v-if="!personalScope && guest.state === 'named'" class="relative mb-6 shrink-0 md:mb-8" :class="guestCount > 1 ? 'h-30 w-35 md:h-40 md:w-46' : 'size-27 md:size-36'">
-          <UAvatar :src="stay.guest_image_url || undefined" :alt="guest.name" :text="guestFirstName?.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0" :class="guestCount > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
+          <UAvatar :src="detail?.guest_image_url || undefined" :alt="guest.name" :text="guestFirstName?.slice(0, 1).toUpperCase()" size="3xl" class="absolute bottom-0 left-0" :class="guestCount > 1 ? 'size-21 md:size-28' : 'size-27 md:size-36'" :ui="{ fallback: 'text-[30px] font-semibold text-highlighted md:text-4xl' }" />
           <span v-if="guestCount > 1" class="absolute right-0 top-0 flex size-16 items-center justify-center rounded-full bg-elevated text-[9px] font-bold text-highlighted md:size-21 md:text-xs" :aria-label="`${guestCount - 1} other guests`">+{{ guestCount - 1 }}</span>
         </div>
         <h2 v-if="personalScope && home" class="max-w-full text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ home.name }}</h2>
         <h2 v-else-if="guest.state === 'named'" class="max-w-full text-[32px] font-semibold leading-9 tracking-tight text-highlighted">{{ partyTitle }}</h2>
         <h2 v-else-if="guest.state === 'not-provided'" class="text-2xl font-semibold text-muted">Name not provided by {{ channelName }}</h2>
         <h2 v-else-if="guest.state === 'missing'" class="text-2xl font-semibold text-error">Guest name missing</h2>
+        <h2 v-else-if="guest.state === 'unnamed'" class="text-2xl font-semibold text-muted">Guest</h2>
         <p v-if="personalScope && home" class="mt-1 text-base text-muted">{{ home.organization_name }}</p>
         <p class="mt-4 text-base text-muted">{{ stayDates }}</p>
         <p v-if="!personalScope && recordHome" class="mt-1 text-base text-muted">{{ recordHome.name }}</p>
@@ -73,7 +74,7 @@
       <UCard variant="record">
         <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Who’s coming' : 'Guests' }}</h3>
         <div v-if="guest.state === 'named'" class="mt-4 flex items-center gap-4">
-          <UAvatar :src="stay.guest_image_url || undefined" :alt="guest.name" :text="guestFirstName?.slice(0, 1).toUpperCase()" size="xl" class="size-12 bg-muted" aria-hidden="true" />
+          <UAvatar :src="detail?.guest_image_url || undefined" :alt="guest.name" :text="guestFirstName?.slice(0, 1).toUpperCase()" size="xl" class="size-12 bg-muted" aria-hidden="true" />
           <span class="min-w-0 flex-1 text-base text-highlighted">{{ guest.name }}</span>
         </div>
         <div v-if="guestCount > 1" class="mt-4 flex items-center gap-4">
@@ -81,16 +82,17 @@
           <span class="text-base text-highlighted">{{ guestCount - 1 }} other {{ guestCount === 2 ? 'guest' : 'guests' }}</span>
         </div>
         <p class="mt-3 text-base text-muted">{{ partyLabel }}</p>
-        <a v-if="stay.guest_phone" :href="`tel:${stay.guest_phone}`" class="mt-3 block w-fit text-base text-highlighted underline underline-offset-4">{{ formatPhone(stay.guest_phone) }}</a>
-        <a v-if="stay.guest_email" :href="`mailto:${stay.guest_email}`" class="mt-2 block w-fit break-all text-base text-highlighted underline underline-offset-4">{{ stay.guest_email }}</a>
+        <a v-if="detail?.guest_phone" :href="`tel:${detail.guest_phone}`" class="mt-3 block w-fit text-base text-highlighted underline underline-offset-4">{{ formatPhone(detail.guest_phone) }}</a>
+        <a v-if="detail?.guest_email" :href="`mailto:${detail.guest_email}`" class="mt-2 block w-fit break-all text-base text-highlighted underline underline-offset-4">{{ detail.guest_email }}</a>
       </UCard>
-      <UCard v-if="stay.notes" variant="record">
+      <template v-if="detail">
+      <UCard v-if="detail.notes" variant="record">
         <h3 class="text-base font-semibold text-highlighted">{{ personalScope ? 'Your requests' : 'Guest requests' }}</h3>
-        <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ stay.notes }}</p>
+        <p class="mt-3 whitespace-pre-wrap text-base text-muted">{{ detail.notes }}</p>
       </UCard>
 
       <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
-      <UCard v-if="policy || stay.cancellation_reason" variant="record">
+      <UCard v-if="policy || detail.cancellation_reason" variant="record">
       <template v-if="policy">
         <h2 class="text-base font-semibold text-highlighted">Cancellation policy</h2>
         <p class="mt-1 text-base text-highlighted">{{ policy.label }}</p>
@@ -98,9 +100,9 @@
           <li v-for="term in policy.terms" :key="term">{{ term }}</li>
         </ul>
       </template>
-      <section v-if="stay.cancellation_reason" class="mt-6">
+      <section v-if="detail.cancellation_reason" class="mt-6">
         <h3 class="text-base font-semibold text-highlighted">Cancellation reason</h3>
-        <p class="mt-2 whitespace-pre-wrap text-base text-muted">{{ stay.cancellation_reason }}</p>
+        <p class="mt-2 whitespace-pre-wrap text-base text-muted">{{ detail.cancellation_reason }}</p>
       </section>
       </UCard>
 
@@ -108,37 +110,37 @@
       <dl class="space-y-4">
         <div class="flex items-start justify-between gap-4">
           <dt class="text-base font-semibold text-highlighted">Total</dt>
-          <dd class="text-right text-base font-semibold text-highlighted">{{ money(stay.total_minor) }}</dd>
+          <dd class="text-right text-base font-semibold text-highlighted">{{ money(detail.total_minor) }}</dd>
         </div>
-        <div v-if="stay.owner === 'app'" class="flex items-start justify-between gap-4 border-t border-default pt-4">
+        <div v-if="detail.owner === 'app'" class="flex items-start justify-between gap-4 border-t border-default pt-4">
           <dt class="text-base text-muted">Paid</dt>
-          <dd class="text-right text-base text-highlighted">{{ money(stay.paid_minor) }}</dd>
+          <dd class="text-right text-base text-highlighted">{{ money(detail.paid_minor) }}</dd>
         </div>
       </dl>
       </UCard>
 
       <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
-      <UCard v-if="!personalScope && (stay.owner === 'app' || stay.online_payment)" variant="record">
+      <UCard v-if="!personalScope && (detail.owner === 'app' || detail.online_payment)" variant="record">
       <h2 class="text-base font-semibold text-highlighted">Payments</h2>
-      <template v-if="stay.online_payment">
+      <template v-if="detail.online_payment">
         <h3 class="mt-6 text-base font-semibold text-highlighted">Paid on your site</h3>
-        <p class="mt-1 text-base text-muted">{{ money(stay.online_payment.captured_minor) }}{{ stay.online_payment.refunded_minor ? ` · ${money(stay.online_payment.refunded_minor)} refunded` : '' }}</p>
+        <p class="mt-1 text-base text-muted">{{ money(detail.online_payment.captured_minor) }}{{ detail.online_payment.refunded_minor ? ` · ${money(detail.online_payment.refunded_minor)} refunded` : '' }}</p>
         <div class="mt-4 divide-y divide-default border-y border-default">
           <NuxtLink :to="`${paymentPath}`" class="flex items-center gap-4 py-4">
             <span class="min-w-0 flex-1 text-base font-medium text-highlighted">View payment</span>
             <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
           </NuxtLink>
-          <NuxtLink v-if="manage && stay.online_payment.captured_minor > stay.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: stay.online_payment.payment_id } }" class="flex items-center gap-4 py-4">
+          <NuxtLink v-if="manage && detail.online_payment.captured_minor > detail.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: detail.online_payment.payment_id } }" class="flex items-center gap-4 py-4">
             <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
             <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
           </NuxtLink>
         </div>
       </template>
 
-      <template v-if="stay.owner === 'app'">
-        <p class="text-sm text-muted" :class="stay.online_payment ? 'mt-6' : 'mt-1'">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
-        <ul v-if="stay.payments.length" class="mt-4 divide-y divide-default border-y border-default">
-          <li v-for="payment in stay.payments" :key="payment.id" class="flex items-center gap-4 py-3">
+      <template v-if="detail.owner === 'app'">
+        <p class="text-sm text-muted" :class="detail.online_payment ? 'mt-6' : 'mt-1'">Money you received or refunded outside KrabiClaw. Recording it moves no money.</p>
+        <ul v-if="detail.payments.length" class="mt-4 divide-y divide-default border-y border-default">
+          <li v-for="payment in detail.payments" :key="payment.id" class="flex items-center gap-4 py-3">
             <span class="min-w-0 flex-1">
               <span class="block text-base text-highlighted">{{ money(payment.amount_minor) }} · {{ methodLabel(payment.method) }}</span>
               <span class="block text-sm text-muted">{{ formatCalendarDate(payment.paid_on, 'en') }}{{ payment.reference ? ` · ${payment.reference}` : '' }}</span>
@@ -150,7 +152,7 @@
 
         <UForm v-if="manage" :state="draft" class="mt-6 space-y-4" @submit="recordPayment">
           <div class="grid gap-4 sm:grid-cols-2">
-            <UFormField :label="`Amount (${stay.currency})`" name="amount" description="Negative for a refund." required>
+            <UFormField :label="`Amount (${detail.currency})`" name="amount" description="Negative for a refund." required>
               <UInput v-model="draft.amount" inputmode="decimal" class="w-full" />
             </UFormField>
             <UFormField label="Method" name="method" required>
@@ -165,7 +167,7 @@
           </div>
           <UButton type="submit" label="Record payment" :loading="busy === 'record'" :disabled="!draft.amount.trim() || !draft.paid_on" />
         </UForm>
-        <UButton v-if="manage && stay.status !== 'cancelled'" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
+        <UButton v-if="manage && detail.status !== 'cancelled'" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
       </template>
       </UCard>
       <UCard v-if="personalScope" as="button" type="button" variant="record" class="w-full text-left" @click="manageOpen = true">
@@ -174,21 +176,22 @@
 
       <UCard variant="record">
       <dl class="space-y-4">
-        <div v-if="stay.channel_booking_id" class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
-          <dt class="text-base text-muted">{{ STAY_CHANNEL_LABELS[stay.channel] }} confirmation</dt>
-          <dd class="break-words text-right text-base text-highlighted">{{ stay.channel_booking_id }}</dd>
+        <div v-if="detail.channel_booking_id" class="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] gap-4">
+          <dt class="text-base text-muted">{{ STAY_CHANNEL_LABELS[detail.channel] }} confirmation</dt>
+          <dd class="break-words text-right text-base text-highlighted">{{ detail.channel_booking_id }}</dd>
         </div>
         <div class="flex items-start justify-between gap-4">
           <dt class="text-base text-muted">Booked through</dt>
-          <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[stay.channel] }}</dd>
+          <dd class="text-right text-base text-highlighted">{{ STAY_CHANNEL_LABELS[detail.channel] }}</dd>
         </div>
       </dl>
-      <p v-if="!personalScope && stay.owner === 'channel'" class="mt-4 text-base text-muted">{{ channelName }} collected payment for this stay. Change or cancel it on {{ channelName }}.</p>
+      <p v-if="!personalScope && detail.owner === 'channel'" class="mt-4 text-base text-muted">{{ channelName }} collected payment for this stay. Change or cancel it on {{ channelName }}.</p>
       <div v-if="embedded && (messagePath || callPhone)" class="mt-6 flex flex-wrap justify-center gap-3">
         <UButton v-if="messagePath" :to="messagePath" color="neutral" variant="solid" class="h-14 rounded-full px-8 shadow-lg" :label="personalScope ? t('stay.message_host') : 'Message'" :aria-label="personalScope ? t('stay.message_host') : 'Message guest'" />
         <UButton v-if="callPhone" :to="`tel:${callPhone}`" color="neutral" variant="solid" class="h-14 rounded-full px-8 shadow-lg" label="Call" />
       </div>
       </UCard>
+      </template>
       </div>
     </div>
     <template v-if="!embedded && stay && !error && (messagePath || callPhone)" #footer>
@@ -199,11 +202,11 @@
     </template>
   </component>
   <DashboardListItemDialog v-model:open="manageOpen" :title="t('booking.manage')" :show-actions="false" :error="actionError">
-    <div v-if="stay" class="divide-y divide-default">
-      <p v-if="stay.owner === 'channel'" class="py-4 text-base text-muted">{{ t('booking.channel_manage', { channel: channelName }) }}</p>
+    <div v-if="detail" class="divide-y divide-default">
+      <p v-if="detail.owner === 'channel'" class="py-4 text-base text-muted">{{ t('booking.channel_manage', { channel: channelName }) }}</p>
       <NuxtLink v-if="canRequestChange && messagePath" :to="{ path: messagePath, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <NuxtLink v-if="messagePath" :to="messagePath" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('stay.message_host') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
-      <UButton v-if="personalScope && stay.owner === 'app' && cancellation" color="error" variant="ghost" block class="justify-start py-4" label="Cancel stay" :loading="busy === 'cancel'" @click="manageOpen = false; cancelAsGuest()" />
+      <UButton v-if="personalScope && detail.owner === 'app' && cancellation" color="error" variant="ghost" block class="justify-start py-4" label="Cancel stay" :loading="busy === 'cancel'" @click="manageOpen = false; cancelAsGuest()" />
     </div>
   </DashboardListItemDialog>
 </template>
@@ -216,7 +219,7 @@ import { isGuestStay, isStayArrivalGuide, stayCheckInWindow } from '~/shared/sta
 import { STAY_CHECK_IN_METHODS } from '~/shared/stay-listing'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
-import type { GuestStay, StayDetail, StayHome } from '~/server/domain/stays'
+import type { GuestStay, StayDetail, StayHome, StayTurnover } from '~/server/domain/stays'
 import { STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod } from '~/shared/bookings'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -243,10 +246,16 @@ const manageOpen = ref(false)
 
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
   && (value.stay.guest_image_url === null || typeof value.stay.guest_image_url === 'string')
-const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : 'dashboard'}-stay:${props.stayId}`, (): Promise<{ stay: StayDetail; manage?: boolean } | GuestStay> => props.personalScope
+/** Managers read the whole stay; a member looking after the home reads its turnover. */
+type DashboardStay = { stay: StayDetail; manage: true } | { stay: StayTurnover; manage: false }
+const isDashboardStay = (value: unknown): value is DashboardStay => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
+  && (value.manage === false || (value.manage === true && isStay(value)))
+const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : 'dashboard'}-stay:${props.stayId}`, (): Promise<DashboardStay | GuestStay> => props.personalScope
   ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
-  : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isStay }))
+  : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isDashboardStay }))
 const stay = computed(() => data.value?.stay ?? null)
+/** The whole stay: the guest's own, or a manager's. Null for a member's turnover. */
+const detail = computed(() => !data.value ? null : 'home' in data.value ? data.value.stay : data.value.manage ? data.value.stay : null)
 const manage = computed(() => !props.personalScope && data.value !== null && 'manage' in data.value! && data.value.manage === true)
 const home = computed(() => data.value && 'home' in data.value ? data.value.home : null)
 const { data: hostHomeData, error: homeError, refresh: refreshHostHome } = await useAsyncData(
@@ -270,17 +279,17 @@ const recordHome = computed(() => home.value ?? hostHome.value)
 const checkInTime = computed(() => recordHome.value
   ? stayCheckInWindow(formatTime(recordHome.value.check_in_time, 'en'), hostHome.value?.check_in_end_time ? formatTime(hostHome.value.check_in_end_time, 'en') : null)
   : null)
-const messagePath = computed(() => stay.value?.request_id
-  ? props.personalScope ? `/dashboard/account/messages/${encodeURIComponent(stay.value.request_id)}`
-    : `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${encodeURIComponent(stay.value.request_id)}`
+const messagePath = computed(() => detail.value?.request_id
+  ? props.personalScope ? `/dashboard/account/messages/${encodeURIComponent(detail.value.request_id)}`
+    : `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/messages/${encodeURIComponent(detail.value.request_id)}`
   : null)
-const callPhone = computed(() => !props.personalScope ? stay.value?.guest_phone ?? null : null)
+const callPhone = computed(() => !props.personalScope ? detail.value?.guest_phone ?? null : null)
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
-const canRequestChange = computed(() => props.personalScope && stay.value?.owner === 'app' && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(stay.value.status)
-  && Boolean(recordHome.value) && localDateTimeToInstant(stay.value.check_out_date, recordHome.value!.check_out_time, stay.value.timezone, 'compatible').getTime() > Date.now())
-const policy = computed(() => stay.value?.cancellation_policy ? bookedPolicyTerms(stay.value.cancellation_policy) : null)
-const paymentPath = computed(() => stay.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(stay.value.online_payment.payment_id)}` : '')
+const canRequestChange = computed(() => props.personalScope && detail.value?.owner === 'app' && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(detail.value.status)
+  && Boolean(recordHome.value) && localDateTimeToInstant(detail.value.check_out_date, recordHome.value!.check_out_time, detail.value.timezone, 'compatible').getTime() > Date.now())
+const policy = computed(() => detail.value?.cancellation_policy ? bookedPolicyTerms(detail.value.cancellation_policy) : null)
+const paymentPath = computed(() => detail.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(detail.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {
   if (event?.type === 'stay.changed' && (event.stayId === props.stayId || (event.stayId === null && event.productId === stay.value?.product_id))) {
     void refresh()
@@ -295,16 +304,17 @@ watch(realtime.connectionEpoch, epoch => {
 })
 
 const methods = Object.entries(STAY_PAYMENT_METHOD_LABELS).map(([value, label]) => ({ value, label }))
-const channelName = computed(() => stay.value ? stay.value.channel === 'direct' ? 'You' : STAY_CHANNEL_LABELS[stay.value.channel] : '')
+const channelName = computed(() => detail.value ? detail.value.channel === 'direct' ? 'You' : STAY_CHANNEL_LABELS[detail.value.channel] : '')
 /**
  * Who the stay is for. A stay made here always names its guest, so one without
  * is missing data; a channel may send a stay without a name, which is said as
  * such rather than given one.
  */
-type GuestIdentity = { state: 'loading' } | { state: 'named'; name: string } | { state: 'not-provided' } | { state: 'missing' }
+type GuestIdentity = { state: 'loading' } | { state: 'named'; name: string } | { state: 'not-provided' } | { state: 'missing' } | { state: 'unnamed' }
 const guest = computed<GuestIdentity>(() => {
-  const value = stay.value
-  if (!value) return { state: 'loading' }
+  const value = detail.value
+  // A turnover carries the guest's first name and nothing about who booked it.
+  if (!value) return !stay.value ? { state: 'loading' } : stay.value.guest_name ? { state: 'named', name: stay.value.guest_name } : { state: 'unnamed' }
   if (value.owner === 'app' && !value.guest_name) return { state: 'missing' }
   const name = [value.guest_name, value.guest_surname].filter(Boolean).join(' ')
   return name ? { state: 'named', name } : { state: 'not-provided' }
@@ -328,7 +338,7 @@ const partyTitle = computed(() => guestFirstName.value && guestCount.value > 1 ?
 const statusLabel = computed(() => !stay.value ? 'Stay' : stay.value.status === 'cancelled' ? 'Cancelled' : stay.value.status === 'pending' ? 'Pending' : 'Confirmed')
 
 function money(minor: number): string {
-  const currency = stay.value?.currency
+  const currency = detail.value?.currency
   if (!isCurrencyCode(currency)) throw new Error(`Unsupported stay currency ${String(currency)}`)
   return `${minor < 0 ? '−' : ''}${formatMinorAmount(Math.abs(minor), currency)}`
 }
@@ -364,7 +374,7 @@ async function run(key: string, action: () => Promise<unknown>, failure: string)
 }
 
 async function recordPayment() {
-  const value = stay.value
+  const value = detail.value
   if (!value || !isCurrencyCode(value.currency)) return
   const typed = draft.amount.trim()
   const negative = typed.startsWith('-')
@@ -381,14 +391,14 @@ async function recordPayment() {
 }
 
 async function deletePayment(paymentId: string) {
-  const value = stay.value
+  const value = detail.value
   if (!value) return
   await run(paymentId, () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/payments/${encodeURIComponent(paymentId)}`, { method: 'DELETE', validate: isStay }), 'The payment could not be deleted')
 }
 
 // A stay paid on the site returns the guest's whole payment, as Airbnb's host cancellation does; the host approves that refund next.
 async function cancel() {
-  const value = stay.value
+  const value = detail.value
   if (!value) return
   const held = value.online_payment ? value.online_payment.captured_minor - value.online_payment.refunded_minor : 0
   const description = held > 0
@@ -421,7 +431,7 @@ async function cancel() {
 
 /** The guest cancels their own stay; the policy they booked under decides what comes back. */
 async function cancelAsGuest() {
-  const value = stay.value
+  const value = detail.value
   const quote = cancellation.value
   if (!value || !quote || !value.request_id || !policy.value) return
   const description = quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`

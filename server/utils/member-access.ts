@@ -446,16 +446,16 @@ export function assignedBookingSql(alias: string, userSql = '?'): string {
     WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ${userSql})`
 }
 
-/** The same assigned-conversation scope is used by lists, reads, writes and realtime. */
+/**
+ * The same assigned-conversation scope is used by lists, reads, writes and realtime.
+ * A stay's guest conversation is not in it: a member looking after a home reads
+ * its stays as turnovers (`stayTurnover`), never the guest's messages or contact.
+ */
 export function assignedGuestThreadScope(alias: string, user: string | { /** Trusted query column, never request input. */ column: string }): { sql: string; params: string[] } {
   const userSql = typeof user === 'string' ? '?' : user.column
   const sql = `((${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedBookingSql('b', userSql)}))
       OR (${alias}.kind = 'booking' AND EXISTS (SELECT 1 FROM bookings b JOIN product_booking_configs c ON c.product_id = b.product_id AND c.organization_id = b.organization_id
         WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedResponsibilitySql('c', userSql)}))
-      OR (${alias}.kind = 'stay' AND EXISTS (SELECT 1 FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
-        WHERE st.request_id = ${alias}.id AND st.organization_id = ${alias}.organization_id AND ${assignedResponsibilitySql('c', userSql)}))
-      OR (${alias}.kind = 'stay' AND EXISTS (SELECT 1 FROM channel_threads ct JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
-        WHERE ct.request_id = ${alias}.id AND ct.organization_id = ${alias}.organization_id AND ${assignedResponsibilitySql('c', userSql)}))
       OR (${alias}.kind = 'contact' AND ${alias}.location_id IS NOT NULL AND EXISTS (SELECT 1 FROM business_locations bl
         WHERE bl.id = ${alias}.location_id AND bl.organization_id = ${alias}.organization_id AND ${assignedResponsibilitySql('bl', userSql)}))
       OR (${alias}.kind = 'reservation' AND EXISTS (SELECT 1 FROM reservations res JOIN business_locations bl ON bl.id = res.location_id AND bl.organization_id = res.organization_id

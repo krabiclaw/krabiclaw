@@ -267,12 +267,13 @@ export async function listAgenda(
 
   // A stay is two moments at its home: guests arrive on the check-in date at the
   // home's check-in time and leave on the checkout date at its checkout time,
-  // both in the location's zone. Members see the homes they look after; buyers
+  // both in the location's zone. Members see the homes they look after, with the
+  // guest's first name as their turnover (`stayTurnover`) carries it; buyers
   // read their whole stay interval in Today and Calendar.
   const stayRows = requestedKinds.has('stay') ? queryAll<{
     id: string; request_id: string | null; organization_id: string; organization_name: string; product_id: string; product_name: string; status: string; overbooked: number; check_in_date: string; check_out_date: string
     owner: 'app' | 'channel'; channel: Stay['channel']; guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string; check_out_time: string; same_day_arrival: number
-  }>(db, `SELECT st.id, st.request_id, st.organization_id, o.name AS organization_name, st.product_id, p.name AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, st.guest_surname,
+  }>(db, `SELECT st.id, st.request_id, st.organization_id, o.name AS organization_name, st.product_id, p.name AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.owner, st.channel, st.guest_name, ${staff ? 'NULL' : 'st.guest_surname'} AS guest_surname,
         st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time,
         EXISTS (SELECT 1 FROM stays next_stay WHERE next_stay.organization_id = st.organization_id AND next_stay.product_id = st.product_id
           AND next_stay.id <> st.id AND next_stay.status <> 'cancelled' AND next_stay.check_in_date = st.check_out_date) AS same_day_arrival

@@ -107,7 +107,12 @@ function previewLocators(page: Page) {
   return { previewLink, previewModal, previewIframe, preview: previewIframe.contentFrame() }
 }
 
-test('a responsible home team sees its stay and conversation until Better Auth removes its membership', async ({ page, browser, baseURL }) => {
+// A member responsible for a home reads its stays as Turnovers shows them, on
+// every surface: dates, arrival time, the guest's first name and party. The
+// guest's contact, money and conversation stay with owners and admins. This
+// replaces the earlier premise that a responsible member opened the stay's
+// guest conversation: members now never do.
+test('a responsible home team reads its stays as turnovers on every surface until Better Auth removes its membership', async ({ page, browser, baseURL }) => {
   test.setTimeout(120_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Home responsibility uses disposable local data only')
   const { headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
@@ -136,50 +141,92 @@ test('a responsible home team sees its stay and conversation until Better Auth r
     const productRead = await call<{ product: Product }>('get_product', { product_id: productId })
     expect(productRead.error).toBeNull()
     expect(productRead.data!.product.stay).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
-    const guestName = `Home team guest ${crypto.randomUUID()}`
-    const made = await page.request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(0), check_out_date: localDay(2), adults: 1,
-      guest_name: guestName, guest_email: `${slug}@playwright.example`, total_minor: 0, idempotency_key: crypto.randomUUID() } })
+    const marker = crypto.randomUUID().slice(0, 8)
+    const guestName = `Ana${marker}`
+    const surname = `Surname${marker}`
+    const guestEmail = `${slug}@playwright.example`
+    const notes = `Private note ${marker}`
+    const made = await page.request.post(api('stays'), { data: { product_id: productId, check_in_date: localDay(0), check_out_date: localDay(2), arrival_time: '15:30', adults: 2, children: 1,
+      guest_name: guestName, guest_surname: surname, guest_email: guestEmail, notes, total_minor: 123_400, idempotency_key: crypto.randomUUID() } })
     await expectStatus(made, 201)
     const { stay } = await made.json() as { stay: StayDetail }
     expect(stay.request_id).toBeTruthy()
+    // Exactly the Turnovers fields, with the values the host saved.
+    const turnover = { id: stay.id, product_id: productId, location_id: stay.location_id, timezone: stay.timezone, status: stay.status, check_in_date: localDay(0), check_out_date: localDay(2),
+      arrival_time: '15:30', adults: 2, children: 1, infants: 0, guest_name: guestName }
+    const leaks = (body: unknown) => [surname, guestEmail, notes, stay.request_id!].filter(secret => JSON.stringify(body).includes(secret))
     const stayPath = api(`stays/${stay.id}`)
-    const inboxPath = `/api/dashboard/organizations/${organizationId}/guest-threads/${stay.request_id}`
     const memberStay = await memberContext.request.get(stayPath)
     await expectStatus(memberStay, 200)
-    expect((await memberStay.json() as { stay: StayDetail }).stay).toMatchObject({ id: stay.id, product_id: productId, guest_name: guestName })
+    expect(await memberStay.json()).toEqual({ stay: turnover, manage: false })
+    const memberList = await memberContext.request.get(api(`stays?from=${localDay(0)}&to=${localDay(3)}`))
+    await expectStatus(memberList, 200)
+    expect(await memberList.json()).toEqual({ stays: [turnover], manage: false })
+    for (const path of [`stay-homes/calendar?from=${localDay(0)}&to=${localDay(3)}`, `stay-homes/${productId}/calendar?from=${localDay(0)}&to=${localDay(3)}`]) {
+      const calendar = await memberContext.request.get(api(path))
+      await expectStatus(calendar, 200)
+      expect((await calendar.json() as { stays: unknown[] }).stays).toEqual([turnover])
+    }
+    // The same projection through MCP, whose output schemas validate it.
+    const memberCall = <T>(name: string, args: Record<string, unknown>) => tool<T>(memberContext.request, baseURL!, organizationId, name, args)
+    expect(await memberCall('get_stay', { stay_id: stay.id })).toEqual({ data: { stay: turnover }, error: null })
+    expect(await memberCall('list_stays', { from: localDay(0), to: localDay(3) })).toEqual({ data: { stays: [turnover] }, error: null })
+    const memberCalendar = await memberCall<{ stays: unknown[] }>('get_stay_calendar', { product_id: productId, from: localDay(0), to: localDay(3) })
+    expect(memberCalendar.data!.stays).toEqual([turnover])
     const today = await memberContext.request.get(api('today'))
     await expectStatus(today, 200)
-    expect((await today.json() as import('../../shared/dashboard-today').TodayFeedPayload).cards.map(card => card.id)).toContain(`stay:${stay.id}:arrival`)
+    const todayBody = await today.json() as import('../../shared/dashboard-today').TodayFeedPayload
+    expect(todayBody.cards.map(card => card.id)).toContain(`stay:${stay.id}:arrival`)
+    expect(leaks(todayBody)).toEqual([])
+    // The guest's conversation, scheduled messages, money and changes are the managers'.
+    await expectStatus(await memberContext.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${stay.request_id}`), 404)
+    const scheduled = await memberContext.request.get(api('scheduled-guest-messages?limit=20&offset=0'))
+    await expectStatus(scheduled, 403)
+    expect(await scheduled.json()).toMatchObject({ data: { code: 'MESSAGING_ROLE_REQUIRED' } })
+    for (const [method, path, data] of [
+      ['post', `stays/${stay.id}/payments`, { amount_minor: 100, method: 'cash', paid_on: localDay(0), idempotency_key: crypto.randomUUID() }],
+      ['patch', `stays/${stay.id}`, { expected_version: stay.version, adults: 1 }],
+      ['post', `stays/${stay.id}/cancel`, { expected_version: stay.version }],
+    ] as const) {
+      const refused = await memberContext.request[method](api(path), { data })
+      await expectStatus(refused, 403)
+      expect(await refused.json()).toMatchObject({ data: { code: 'STAY_ROLE_REQUIRED' } })
+    }
+    const memberMcpPayment = await memberCall('record_stay_payment', { stay_id: stay.id, amount_minor: 100, method: 'cash', paid_on: localDay(0), idempotency_key: crypto.randomUUID() })
+    expect(memberMcpPayment.data).toBeNull()
+    // The dashboard's stay screen renders the turnover and nothing of the guest's contact or money.
     const memberPage = await memberContext.newPage()
-    let socket: WebSocket | undefined
-    memberPage.on('websocket', next => { if (new URL(next.url()).pathname === '/api/dashboard/guest-inbox/socket') socket = next })
-    const reconciled = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === inboxPath)
-    await memberPage.goto(`/dashboard/${slug}/messages/${stay.request_id}`)
-    await expectStatus(await reconciled, 200)
-    await expect(memberPage.getByRole('heading', { name: guestName, exact: true })).toBeVisible()
-    await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toBeVisible()
-    if (!socket || socket.isClosed()) throw new Error('The responsible home member has no live inbox socket')
-    const revoked = socket.waitForEvent('framereceived', { predicate: frame => {
-      if (frame.payload === 'pong') return false
-      const event: unknown = JSON.parse(String(frame.payload))
-      return isDashboardInvalidation(event) && event.type === 'access.changed' && event.organizationId === organizationId
-    } })
+    const stayRead = memberPage.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === `/api/dashboard/stays/${stay.id}`)
+    await memberPage.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`)
+    await expectStatus(await stayRead, 200)
+    const details = memberPage.locator('#stay-details')
+    await expect(details.getByRole('heading', { name: `${guestName}’s group of 3`, exact: true })).toBeVisible()
+    await expect(details.getByText('2 adults, 1 child', { exact: true })).toBeVisible()
+    await expect(details.getByText(/^3:30\sPM$/u)).toBeVisible()
+    await expect(details.getByText('Cliff Cabin', { exact: true })).toBeVisible()
+    for (const hidden of [surname, guestEmail, notes]) await expect(memberPage.getByText(hidden)).toHaveCount(0)
+    await expect(details.getByRole('heading', { name: 'Payments', exact: true })).toHaveCount(0)
+    await expect(memberPage.getByRole('link', { name: 'Message guest', exact: true })).toHaveCount(0)
+    // Owners still read the whole stay.
+    const ownerStay = await page.request.get(stayPath)
+    await expectStatus(ownerStay, 200)
+    expect(await ownerStay.json()).toMatchObject({ manage: true, stay: { id: stay.id, guest_name: guestName, guest_surname: surname, guest_email: guestEmail, notes, total_minor: 123_400, request_id: stay.request_id, payments: [], paid_minor: 0 } })
+    const ownerMcp = await call<{ stay: StayDetail }>('get_stay', { stay_id: stay.id })
+    expect(ownerMcp.data!.stay).toMatchObject({ guest_surname: surname, guest_email: guestEmail, notes, total_minor: 123_400, request_id: stay.request_id })
+    await expectStatus(await page.request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${stay.request_id}`), 200)
+
     const removed = await page.request.post('/api/auth/organization/remove-team-member', { headers, data: { organizationId, teamId, userId: 'user-e2e-lodging-native' } })
     await expectStatus(removed, 200)
-    await revoked
-    await expect(memberPage.getByText(guestName, { exact: true })).toHaveCount(0)
-    await expect(memberPage.getByRole('textbox', { name: 'Write a message…', exact: true })).toHaveCount(0)
     await expectStatus(await memberContext.request.get(stayPath), 404)
-    await expectStatus(await memberContext.request.get(inboxPath), 404)
     const homes = await memberContext.request.get(api('stay-homes'))
     await expectStatus(homes, 200)
     expect((await homes.json() as { homes: Array<{ product_id: string }> }).homes.map(home => home.product_id)).not.toContain(productId)
+    const afterList = await memberContext.request.get(api(`stays?from=${localDay(0)}&to=${localDay(3)}`))
+    await expectStatus(afterList, 200)
+    expect(await afterList.json()).toEqual({ stays: [], manage: false })
     const afterToday = await memberContext.request.get(api('today'))
     await expectStatus(afterToday, 200)
     expect((await afterToday.json() as import('../../shared/dashboard-today').TodayFeedPayload).cards.map(card => card.id)).not.toContain(`stay:${stay.id}:arrival`)
-    const retained = await page.request.get(stayPath)
-    await expectStatus(retained, 200)
-    expect((await retained.json() as { stay: StayDetail }).stay).toMatchObject({ id: stay.id, product_id: productId, guest_name: guestName, request_id: stay.request_id })
   } finally {
     try {
       const deleted = await page.request.post('/api/auth/organization/delete', { headers, data: { organizationId } })
