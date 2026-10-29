@@ -494,7 +494,9 @@ test('MCP consultation attorney replacement waits for buyer conversation approva
     if (product) {
       try {
         await body(await request.put(`${editor}/products/${product.id}/publication`, { data: { published: false } }))
-        await body(await request.put(`${editor}/products/${product.id}/booking`, { data: { held_online: false, scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: null } }))
+        // A legal consultation always keeps an attorney: the temporary team is
+        // released by handing the archived consultation to the original attorney.
+        await body(await request.put(`${editor}/products/${product.id}/booking`, { data: { scheduling_mode: 'provider', assigned_member_id: actors[0]!.id, assigned_team_id: null } }))
         if (bookings.length) await body(await request.patch(`${editor}/products/${product.id}`, { data: { active: false } }))
         else await body(await request.delete(`${editor}/products/${product.id}`))
       } catch (error) { failures.push(error) }
