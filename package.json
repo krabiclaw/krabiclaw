@@ -45,7 +45,7 @@
     "dev:worker": "yarn build && yarn dev:worker:start",
     "dev:worker:start": "wrangler dev .output/server/index.mjs --env e2e --assets .output/public --port 3000 --live-reload",
     "fixtures:verify:local": "node --experimental-strip-types scripts/verify-seeded-d1.ts",
-    "e2e:local:prepare": "yarn schema:local && node --env-file-if-exists=.env --experimental-strip-types scripts/reset-e2e-artifacts.ts --older-than-hours=0 && yarn fixtures:verify:local --local-dev && yarn build",
+    "e2e:local:prepare": "rm -rf .wrangler/e2e-state && wrangler d1 migrations apply DB --local --env e2e --persist-to .wrangler/e2e-state && yarn build",
     "postinstall": "nuxt prepare",
     "schema:local": "wrangler d1 migrations apply DB --local",
     "db:generate": "drizzle-kit generate",

@@ -56,7 +56,7 @@ const localWorkerEnvironment = [
 
 const localWorkerCommand = [
   localWorkerEnvironment,
-  'corepack yarn wrangler dev .output/server/index.mjs --env e2e',
+  'corepack yarn wrangler dev .output/server/index.mjs --env e2e --persist-to .wrangler/e2e-state',
   '--assets .output/public',
   `--port ${port}`,
   '--var E2E_ALLOW_DEV_ROUTES:true',
@@ -66,7 +66,7 @@ const localWorkerCommand = [
 
 export default defineConfig({
   testDir: './tests/e2e',
-  globalSetup: './scripts/provision-development-auth.ts',
+  globalSetup: './tests/e2e/seed/global-setup.ts',
   timeout: 30_000,
   expect: {
     timeout: 10_000
