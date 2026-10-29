@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { openTenantPage, waitForNuxtHydration } from './helpers'
-import { testBaseUrl } from './test-env'
+import { openTenantPage, waitForNuxtHydration } from '../e2e/helpers'
+import { testBaseUrl } from '../e2e/test-env'
 
 test('Products retains its authored content, media and canonical identity after hydration', async ({ page, request }) => {
   const legacy = await request.get(`${testBaseUrl()}/features?source=legacy`, { maxRedirects: 0 })

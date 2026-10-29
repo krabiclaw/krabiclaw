@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { loginAs } from './helpers/auth'
-import { waitForNuxtHydration } from './helpers'
+import { loginAs } from '../e2e/helpers/auth'
+import { waitForNuxtHydration } from '../e2e/helpers'
 import { docsCategoryArt } from '../../utils/docs-category-art'
 
 test('platform blog renders its public API posts in server HTML', async ({ request }) => {
@@ -86,6 +86,8 @@ test('docs collection, categories and articles publish connected canonical JSON-
   const { posts } = await response.json() as { posts: Array<{ slug: string; title: string; category: { slug: string; name: string } | null }> }
   expect(posts.length, 'the existing published docs must be available').toBeGreaterThan(0)
   const categories = [...new Set(posts.flatMap(post => post.category ? [post.category.slug] : []))]
+  // Every published guide and category is fetched over the network.
+  test.setTimeout(30_000 + (posts.length + categories.length) * 3_000)
   for (const path of ['/docs', ...categories.map(slug => `/docs/category/${slug}`)]) {
     const result = await request.get(path)
     expect(result.status()).toBe(200)
@@ -200,6 +202,8 @@ test('docs reading header exposes one mobile search shortcut without a second co
 test('docs category landings explain published tasks and preserve canonical guide identities', async ({ page, request, baseURL }) => {
   const response = await request.get('/api/public/blog?collection=docs')
   const { posts, categories } = await response.json() as { posts: Array<{ slug: string; title: string; excerpt: string | null; category: { slug: string } }>; categories: Array<{ slug: string; name: string }> }
+  // Every category landing is opened in the browser.
+  test.setTimeout(30_000 + categories.length * 10_000)
   await page.setViewportSize({ width: 1440, height: 900 })
   for (const category of categories) {
     await page.goto(`/docs/category/${category.slug}`)
@@ -266,7 +270,7 @@ test('docs category landings explain published tasks and preserve canonical guid
 
 
 test('mobile docs keep the signed-in account control visible beside search and navigation', async ({ page, baseURL }) => {
-  await loginAs(page.request, baseURL!, 'user-e2e-oauth-private-cimd')
+  await loginAs(page.request, baseURL!)
   const session = await (await page.request.get('/api/auth/get-session')).json()
   await page.setViewportSize({ width: 390, height: 900 })
   await page.goto('/docs')

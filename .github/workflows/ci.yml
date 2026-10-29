@@ -256,7 +256,7 @@ jobs:
         env:
           CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}
           CANARY_LOGIN_PASSWORD: ${{ secrets.CANARY_LOGIN_PASSWORD }}
-        run: yarn test:e2e:tenant-rendering
+        run: yarn test:deployed --project=tenants
       - name: Upload staging Playwright report
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -387,7 +387,7 @@ jobs:
         env:
           CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}
           CANARY_LOGIN_PASSWORD: ${{ secrets.CANARY_LOGIN_PASSWORD }}
-        run: yarn test:e2e:tenant-rendering
+        run: yarn test:deployed
       - name: Upload production Playwright report
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

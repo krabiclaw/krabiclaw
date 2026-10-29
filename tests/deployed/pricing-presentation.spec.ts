@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
-import { openTenantPage, waitForNuxtHydration } from './helpers'
-import { testBaseUrl } from './test-env'
+import { openTenantPage, waitForNuxtHydration } from '../e2e/helpers'
+import { testBaseUrl } from '../e2e/test-env'
 
 // Real page + canonical billing endpoint. No routes replace billing or CMS data.
 test('pricing desktop exposes provider details after one reveal and does not replay', async ({ page }) => {
