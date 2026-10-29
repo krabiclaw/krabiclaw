@@ -8,11 +8,12 @@ included automatically. Calendar-group allocation rules govern booking
 availability, not which bookings appear in Google. Cancelled records and
 payment holds are excluded.
 
-The sync runs both ways. An event KrabiClaw created that is moved in Google
-moves its booking through the one booking-move operation
-(`moveBooking` in `server/domain/guest-threads/booking-changes.ts`), the same
-operation the dashboard and ChatGPT use with `apply`, so the move passes the
-same availability checks and sends the guest the same email. An event deleted
+The sync runs both ways. A time or supported assigned-attorney change in Google
+requests client approval through `requestBookingChange` in
+`server/domain/guest-threads/booking-changes.ts`, shared with dashboard and
+ChatGPT consultation changes. The conversation shows the before/after details
+and Accept/Decline actions, and the canonical delivery path emails a signed
+review link. The appointment stays unchanged until the client accepts. An event deleted
 in Google never cancels or refunds a booking: the event is written back, the
 booking's conversation needs attention on Today and the owners are emailed.
 See [Inbound sync](#inbound-sync).
@@ -29,7 +30,7 @@ calendar picker, group picker, or reservation opt-in.
 
 Payments, MCP and dashboard operations commit the canonical Booking/Reservation
 and activity through the foundation. The projection worker reads those committed
-rows, canonical Session instants/timezone and the committed activity sequence.
+rows and canonical Session instants/timezone and participant identities.
 It never calls MCP and never participates in a guest booking transaction. A
 provider failure cannot roll back a booking or alter the guest response.
 The scheduled task runs on the existing five-minute cron; the contextual **Retry** action also reconciles immediately. SQL selects at most 25 missing or changed
@@ -48,8 +49,12 @@ operational ID and therefore update the same mapped Google event.
 
 The worker preallocates a Google-compatible event ID before provider I/O. A
 create that times out after Google commits retries the same ID; a conflict
-updates that identity. The source revision covers canonical status, interval,
-timezone, name and committed source/activity revision. Leases fence concurrent
+reads that identity before deciding whether an update is necessary. The source
+revision covers canonical status, interval, timezone, names, assignment,
+participant emails, request identity and current buyer ownership eligibility.
+Existing mapped events therefore gain or lose their management link when
+those canonical facts change. Conversation messages and pending proposals do not send
+redundant calendar invitations. Leases fence concurrent
 processors, and each attempt re-reads current booking/integration state. A late
 result after cancellation/disconnect is compensated by deleting that exact
 managed identity; if compensation fails, the persisted intent is retried. A
@@ -80,32 +85,55 @@ is recorded in `channel_sync_log` (`provider='google_calendar'`,
   within a day of expiry; the replaced channel is stopped. Google delivers only
   to HTTPS, so a local Worker runs on the task alone.
 - **Only managed events.** An item is matched to `google_calendar_event_links`
-  by calendar and event id; anything else on the calendar is the business's
+  by organization, calendar and event id; anything else on the calendar is the business's
   own and is never read. An item is compared with the canonical booking's
   instants; an unchanged one does nothing.
-- **Moves.** With **Reschedules** on (the default), a moved event's new start
+- **Change requests.** With **Reschedules** on (the default), a moved event's new start
   names the same product's session that starts then (sessions are
   materialized for provider-held consultations, so every bookable time is
-  one), or a reservation's new date and time in its own timezone. The booking
-  moves through `moveBooking` with the actor `google_calendar`: the session
-  claim, provider busy refresh, paid-booking rules and the guest's "your
-  booking was moved" email are the operation's own. A move the booking cannot
+  one), or a reservation's new date and time in its own timezone. Its current
+  location is retained; ambiguous destinations are refused. The canonical
+  proposal operation validates availability and the connected account owner's
+  Better Auth membership/access, records a system-originated proposal, and
+  notifies the client. Google does not expose the last editor: neither the
+  organizer nor the creator is treated as that person. A move the booking cannot
   follow — no session starts then, the session is full, the time is outside
   working hours, a paid reservation outside its policy — is refused: the
-  event is written back by the outbound pass, the conversation gets a
+  event is written back, the conversation gets a
   `calendar_sync.move_refused` entry and needs attention, and the owners are
   emailed the reason. With Reschedules off, the event is written back and the
   row is logged `applied`.
+- **Assigned attorney.** The consultation model assigns one canonical Better
+  Auth member per booking. Replacing exactly that attorney's email in Google
+  while retaining the client can propose a replacement, including at the same
+  time. The new email must identify exactly one verified member of this
+  business and an available session for that attorney, same practice area,
+  time and location. Additional attendees, removals, external members, calendar
+  organizer changes and RSVP changes never become staff assignment or client
+  consent. RSVP-only edits are left alone; unsupported attendee edits are
+  reported and the canonical participants restored. Changes from an event with
+  guest editing/invitations or guest-list visibility enabled are refused and
+  those permissions restored; the API cannot identify its last editor safely.
 - **Deletions.** A cancelled event is never a cancellation. The event is
-  written back (`calendarEvent` states `status: 'confirmed'`), the
+  written back from the committed status, the
   conversation gets a `calendar_sync.event_deleted` entry and needs attention,
   and the owners are emailed that the booking is still booked and how to
   cancel it properly. One Google change raises one entry and one email: the
-  dedupe key is the event id and Google's `updated` stamp.
-- **Writing back.** Inbound never writes to Google. Marking the link
-  `pending` with no `synced_revision` asks the outbound pass to recreate (a
-  `409` on an existing id is tolerated) and rewrite the event from the
-  booking, exactly as a booking change would.
+  dedupe key includes the event id and Google's revision.
+- **Writing back.** Inbound durably requests restoration before delivering a
+  proposal and invokes the existing outbound operation for that event, even if
+  proposal delivery fails. The Google event shows the committed time and
+  attorney while pending or declined. Only accepting the proposal changes the
+  booking and subsequent projection. Expired, stale, superseded and unavailable
+  proposals cannot change the booking. Current events are read before update;
+  `If-Match` protects Google's ETag. A newer concurrent edit leaves a visible
+  integration error and returns through the feed instead of being overwritten.
+  The scheduled task reads inbound changes before outbound reconciliation.
+  Staff can send Google's own update emails while editing in Google, before a
+  webhook reaches KrabiClaw. Google provides no appointment-consent interceptor.
+  Reconciliation sends the corrective committed appointment to participants;
+  a Google email or RSVP never changes the canonical booking or accepts the
+  proposal. Cross-provider visibility and notification timing are not atomic.
 
 ## Settings and cleanup
 
@@ -188,10 +216,53 @@ a calendar becomes inaccessible.
 
 ## Privacy
 
-Payloads contain a minimal consultation/reservation title and guest name,
-status, canonical start/end/timezone and dashboard link. Visibility is private.
-No email, notes, legal matter, thread body, attendees, invitations or office data
-are sent. Provider mutations use `sendUpdates=none`.
+Consultation payloads contain a generic consultation title, status, canonical
+start/end/timezone and the assigned attorney's public name. Only the actual
+client's recorded contact email and assigned attorney's verified Better Auth
+account email are attendees; other organization members are not invited. Legal
+matter, notes, conversation bodies and internal dashboard links are omitted.
+Consultations, experience bookings and dining reservations include a **Manage**
+link to their existing account activity detail when the request and commitment
+have the same canonical buyer. Opening it requires the ordinary authenticated
+owner; the URL grants no access and contains no cancellation or review token.
+Imported/unowned records and ownership mismatches have no invented management
+destination. Staff use their own existing dashboard links in staff notifications.
+Account Manage menus for consultations, experiences, reservations and direct stays
+offer **Send a change request**. This opens the existing buyer conversation: the
+customer describes the requested change, the business is notified, and the
+conversation needs attention. Sending the message leaves booked dates, time,
+guests and assignment unchanged. Channel-owned stays direct the customer to the
+booking channel for changes.
+Visibility is private; pending consultation requests are tentative events.
+Guests cannot edit, invite others or inspect the guest list. A pending allocation without its client conversation is a private hold
+with no attendees. A confirmed consultation without its client conversation,
+or a consultation missing required participant emails, reports an error rather
+than claiming invitation success. Experiences and reservations retain their
+minimal title, guest name, status and canonical interval. The Manage link does
+not add Google attendees or invitations to those verticals.
+
+Google's `source` URL is visible only to the event creator, so the shared Manage
+link belongs in its description. Lodging does not gain a Google projection:
+its buyer activity details and notifications provide management. Its existing
+Vrbo iCal feed is an anonymous home-occupancy calendar grouping contiguous taken
+nights, possibly across several stays or holds. It retains **Not available**
+events without guest identities or per-stay account links.
+
+Creates, meaningful updates and cancellations use `sendUpdates=all`, asking
+Google to send invitations/updates to all actual participants. Retained
+attendees keep their provider RSVP; a new attendee starts at `needsAction`.
+No proposed replacement attorney is invited by KrabiClaw before acceptance.
+An invitation does not grant Google calendar writer access. Guest edit
+permission is event-wide, so it remains off; staff edit the managed calendar
+through their existing writer/owner access. The app grants no blanket calendar
+access to organization members. Google RSVP is
+independent of KrabiClaw proposal consent. Google invitations originate from
+the calendar organizer, and [recipient invitation settings](https://developers.google.com/workspace/calendar/api/concepts/inviting-attendees-to-events)
+determine whether the event appears automatically or needs an email RSVP.
+The API does not prove inbox delivery; local qualification records exact
+recipient payloads and notification parameters without sending live invites.
+Google documents [`sendUpdates=all`](https://developers.google.com/workspace/calendar/api/v3/reference/events/update)
+for all guest notifications and warns against `none` for ordinary event creation.
 
 ## Deployment and owner setup
 

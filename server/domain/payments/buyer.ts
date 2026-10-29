@@ -3,7 +3,7 @@ import {executeBatch,queryAll,queryFirst,type DbClient} from '~/server/db'
 import {REQUEST_CURRENT_BUYER_SQL} from '~/server/domain/requests'
 import {loadOwnerPictures} from '~/server/notifications/hero'
 import {localDateTimeToInstant} from '~/utils/timezone'
-import {isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
+import {accountActivityPath,isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
 
 export async function ownedBuyerRequest(db:DbClient,userId:string,requestId:string) {
  const owned=await queryFirst<{organization_id:string;kind:'booking'|'reservation'|'stay'}>(db,`SELECT r.organization_id,r.kind FROM requests r WHERE r.id=? AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL} AND (
@@ -83,7 +83,7 @@ export async function buyerPayments(db:DbClient,userId:string):Promise<{entries:
   if(payment.captured_amount<=0)continue
   const item=resolvePaymentActivity(rows,payment),snapshot:unknown=JSON.parse(payment.price_snapshot_json)
   if(!snapshot||typeof snapshot!=='object'||!('title' in snapshot)||typeof snapshot.title!=='string'||!snapshot.title.trim())throw new Error('Owned payment has no immutable title')
-  const to=`/dashboard/account/activity/${item.kind}/${encodeURIComponent(item.id)}`
+  const to=accountActivityPath(item.kind,item.id)
   const visit=rows.visits.find(row=>row.kind===item.kind&&row.id===item.id)
   const ownerType=visit?.product_id?'product':'business_location',ownerId=visit?(visit.product_id??visit.location_id):(await queryFirst<{product_id:string|null}>(db,'SELECT l.product_id FROM payment_order_lines l JOIN payment_orders o ON o.id=l.order_id WHERE o.payment_id=? ORDER BY l.rowid LIMIT 1',[payment.id]))?.product_id??null
   const imageUrl=ownerId?(await loadOwnerPictures(db,payment.organization_id,visit?ownerType:'product',[ownerId])).get(ownerId)?.imageUrl??null:null
@@ -99,19 +99,19 @@ export async function buyerPaymentActivityPath(db:DbClient,userId:string,payment
  const rows=await buyerActivityRows(db,userId),payment=rows.payments.find(row=>row.id===paymentId)
  if(!payment)throw new HTTPError({statusCode:404,statusMessage:'Owned activity not found'})
  const item=resolvePaymentActivity(rows,payment)
- return `/dashboard/account/activity/${item.kind}/${encodeURIComponent(item.id)}`
+ return accountActivityPath(item.kind,item.id)
 }
 /** Conversation links share the same actual visit/payment association resolver. */
 export async function buyerRequestActivityPath(db:DbClient,userId:string,requestId:string):Promise<string|null> {
  const rows=await buyerActivityRows(db,userId)
  const visits=rows.visits.filter(row=>row.request_id===requestId)
  if(visits.length>1)throw new Error('Owned conversation has ambiguous visit associations')
- if(visits[0])return `/dashboard/account/activity/${visits[0].kind}/${encodeURIComponent(visits[0].id)}`
+ if(visits[0])return accountActivityPath(visits[0].kind,visits[0].id)
  const payments=rows.payments.filter(row=>row.hold_request_id===requestId)
  if(payments.length>1)return '/dashboard/account/activity'
  if(!payments[0])return null
  const item=resolvePaymentActivity(rows,payments[0])
- return `/dashboard/account/activity/${item.kind}/${encodeURIComponent(item.id)}`
+ return accountActivityPath(item.kind,item.id)
 }
 export async function tokenHash(token:string):Promise<string>{return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(token)))).map(v=>v.toString(16).padStart(2,'0')).join('')}
 /** Hidden Checkout-return proof, accepted only after native Stripe verification. */

@@ -1,10 +1,12 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type APIRequestContext, type APIResponse } from '@playwright/test'
 import { createHmac } from 'node:crypto'
-import type { ProductBookingConfig } from '../../server/types/products'
-import { loginAs } from './helpers/auth'
+import type { Product, ProductBookingConfig } from '../../server/types/products'
+import type { GuestThreadDetailViewModel } from '../../server/domain/guest-threads/types'
+import { authRequestHeaders, loginAs } from './helpers/auth'
+import { dismissPreviewToolbar } from './helpers'
 import { MCP_ORGANIZATION_ID, mcpData, mcpRequest } from './helpers/mcp'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
-import { devLoginHeaders, E2E_POTTERY_ORGANIZATION_ID as org, potteryHouseTestExtraHeaders } from './test-env'
+import { blawbyTestExtraHeaders, devLoginHeaders, E2E_POTTERY_ORGANIZATION_ID as org, potteryHouseTestExtraHeaders } from './test-env'
 
 type Created = { success: boolean; operational_booking_id: string; request_id: string; status: string; replayed: boolean; code?: string }
 
@@ -226,6 +228,20 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       ids.push(publicCreated.operational_booking_id)
       expect(publicCreated).toMatchObject({ success: true, status: instant.status, booking_id: publicCreated.request_id })
       expect(await read(publicCreated.operational_booking_id)).not.toHaveProperty('guest_user_id')
+      const experienceBeforeRequest = await read(publicCreated.operational_booking_id)
+      await page.goto(`${baseURL}/dashboard/account/activity/booking/${publicCreated.request_id}`)
+      await page.getByRole('button', { name: 'Manage booking', exact: true }).click()
+      await page.getByRole('link', { name: 'Send a change request', exact: true }).click()
+      await expect(page).toHaveURL(`${baseURL}/dashboard/account/messages/${publicCreated.request_id}?intent=booking-change`)
+      await page.getByRole('textbox', { name: 'Write a message…', exact: true }).fill('Could we attend the following week instead?')
+      await page.getByRole('button', { name: 'Send a change request', exact: true }).click()
+      await expect(page.getByText('Your change request was sent to the business. Your booking is unchanged while it is reviewed.', { exact: true })).toBeVisible()
+      expect((await read(publicCreated.operational_booking_id)).record).toEqual(experienceBeforeRequest.record)
+      const experienceThreadResponse = await request.get(`${baseURL}/api/dashboard/organizations/${org}/guest-threads/${publicCreated.request_id}`)
+      expect(experienceThreadResponse.status(), await experienceThreadResponse.text()).toBe(200)
+      const experienceThread = (await experienceThreadResponse.json()).thread
+      expect(experienceThread.conversationState).toBe('needs_attention')
+      expect(experienceThread.entries.filter((entry: { actorKind: string; body: string }) => entry.actorKind === 'guest' && entry.body === 'Could we attend the following week instead?')).toHaveLength(1)
       const foreign = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product_booking', args: { organization_id: 'org-demo', operational_booking_id: instant.operational_booking_id } })
       expect(foreign.status()).toBe(200)
       expect((await foreign.json()).result.isError).toBe(true)
@@ -315,4 +331,217 @@ test('MCP online collection returns the real Payments setup handoff without chan
       await release()
     }
   }
+})
+
+test('MCP consultation attorney replacement waits for buyer conversation approval and preserves the other client', async ({ page, playwright, request, baseURL }, testInfo) => {
+  test.setTimeout(180_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Consultation writes and log-only notifications require disposable local D1')
+  const organizationId = 'org-ncls-blawby'
+  const slug = 'north-carolina-legal-services'
+  const editor = `/api/editor/organizations/${organizationId}`
+  const release = await acquireTenantMutationLock(testInfo, organizationId)
+  const attorneyRequest = await playwright.request.newContext({ baseURL })
+  const otherClient = await playwright.request.newContext({ baseURL })
+  const failures: unknown[] = []
+  const bookings: Created[] = []
+  let product: Product | null = null
+  let teamId: string | null = null
+  let previousMode: { mode: string; external_url: string | null } | null = null
+  type Schedule = { timezone: string | null; weekly: Array<{ weekday: number; start: string; end: string }> | null; time_off: Array<{ start: string; end: string }> | null; public_name: string | null; public_photo_url: string | null; public_bio: string | null; public_approved: number; updated_at: string }
+  type Actor = { id: string; userId: string; role: string; user: { email: string }; previous: Schedule | null; teamIds: string[]; changed: boolean; client: APIRequestContext }
+  const actors: Actor[] = []
+  const body = async <T>(response: APIResponse, status = 200): Promise<T> => {
+    expect(response.status(), await response.text()).toBe(status)
+    return response.json() as Promise<T>
+  }
+  const call = async <T>(toolName: string, args: Record<string, unknown>) => {
+    const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, ...args } })
+    expect(response.status(), await response.text()).toBe(200)
+    return mcpData<T>(await response.json())
+  }
+  try {
+    await loginAs(request, baseURL!, 'user-e2e-ncls-owner')
+    await loginAs(attorneyRequest, baseURL!, 'user-e2e-ncls-consultation-owner')
+    await loginAs(page.request, baseURL!, 'user-e2e-buyer')
+    const membership = await body<{ members: Array<{ id: string; userId: string; role: string; user: { email: string } }> }>(await request.get('/api/auth/organization/list-members', { params: { organizationId } }))
+    for (const [userId, client] of [['user-e2e-ncls-consultation-owner', attorneyRequest], ['user-e2e-ncls-owner', request]] as const) {
+      const member = membership.members.find(member => member.userId === userId)
+      expect(member, 'The consultation uses the existing NCLS Better Auth actor memberships').toBeDefined()
+      if (!member) throw new Error('The NCLS attorney fixture membership is missing')
+      const saved = await body<{ scheduling: Schedule | null }>(await request.get(`/api/organizations/${organizationId}/members/${member.id}/scheduling`))
+      const teams = await body<Array<{ id: string }>>(await request.get('/api/auth/organization/list-user-teams', { params: { organizationId, userId } }))
+      actors.push({ ...member, previous: saved.scheduling, teamIds: teams.map(team => team.id), changed: false, client })
+    }
+    const [originalAttorney, replacementAttorney] = actors as [Actor, Actor]
+    previousMode = await body(await request.get(`${editor}/consultation`))
+    const consultationDate = new Date(Date.now() + 14 * 86_400_000)
+    const day = consultationDate.toISOString().slice(0, 10)
+    for (const [index, actor] of actors.entries()) {
+      await body(await request.put(`/api/organizations/${organizationId}/members/${actor.id}/scheduling`, { data: {
+        timezone: 'UTC', weekly: [{ weekday: consultationDate.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [],
+        public_name: index === 0 ? 'MCP Original Attorney' : 'MCP Replacement Attorney', public_approved: true,
+        expected_updated_at: actor.previous?.updated_at ?? null,
+      } }))
+      actor.changed = true
+    }
+    teamId = (await body<{ id: string }>(await request.post('/api/auth/organization/create-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, name: `Consultation approval ${crypto.randomUUID()}` } }))).id
+    for (const actor of actors) await body(await request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } }))
+    product = (await body<{ product: Product }>(await request.post(`${editor}/products`, { data: {
+      kind: 'service', active: true, name: `MCP consultation approval ${crypto.randomUUID()}`, description: 'A legal consultation to discuss questions with an attorney.',
+      details: { preparation: 'Bring your consultation questions.', cancellation_policy: 'Contact the legal team before the consultation to cancel.' },
+      variants: [{ name: 'Online consultation', prices: [{ unit_amount: 0, currency: 'USD' }] }],
+    } }), 201)).product
+    await body(await request.put(`${editor}/products/${product.id}/booking`, { data: {
+      duration_minutes: 45, default_capacity: 2, confirmation_mode: 'review', online_payment_required: false,
+      scheduling_mode: 'provider', assigned_member_id: null, assigned_team_id: teamId, held_online: true,
+    } }))
+    await body(await request.put(`${editor}/products/${product.id}/publication`, { data: { published: true } }))
+    await body(await request.put(`${editor}/consultation`, { data: { mode: 'native' } }))
+    const sessions = (await call<{ sessions: Array<{ id: string; assigned_member_id: string | null; starts_at: string; ends_at: string; remaining: number | null }> }>('list_product_booking_sessions', { product_id: product.id, from: `${day}T00:00:00.000Z`, to: `${day}T23:59:59.999Z` })).sessions
+    const originalSession = sessions.find(session => session.starts_at === `${day}T14:00:00.000Z` && session.assigned_member_id === originalAttorney.id)
+    const replacementSession = sessions.find(session => session.starts_at === `${day}T14:00:00.000Z` && session.assigned_member_id === replacementAttorney.id)
+    expect(originalSession, 'The original attorney has a real returned consultation session').toBeDefined()
+    expect(replacementSession, 'The replacement attorney has a real same-time consultation session').toBeDefined()
+    if (!originalSession || !replacementSession) throw new Error('The attorney team has no matching consultation sessions')
+    expect(replacementSession.ends_at).toBe(originalSession.ends_at)
+    for (const [client, guestName, email] of [[page.request, 'E2E Buyer', 'buyer@playwright.example'], [otherClient, 'Other consultation client', 'other-consultation@playwright.example']] as const) {
+      const booked = await body<Created>(await client.post(`/api/public/products/${product.slug}/book`, { headers: blawbyTestExtraHeaders(), data: {
+        session_id: originalSession.id, variant_id: product.variants[0]!.id, party_size: 1, guest_name: guestName, guest_email: email, locale: 'en', idempotency_key: crypto.randomUUID(),
+      } }), 201)
+      expect(booked.status).toBe('pending')
+      bookings.push(booked)
+      await call('confirm_product_booking', { operational_booking_id: booked.operational_booking_id, idempotency_key: crypto.randomUUID() })
+    }
+    type BookingRead = { operational_updated_at: string; record: { id: string; status: string; assigned_member_id: string | null; starts_at: string; ends_at: string; party_size: number } }
+    const read = (booking: Created) => call<BookingRead>('get_product_booking', { operational_booking_id: booking.operational_booking_id })
+    const [first, other] = bookings as [Created, Created]
+    const before = await read(first)
+    const otherBefore = await read(other)
+    expect(before.record).toMatchObject({ status: 'confirmed', assigned_member_id: originalAttorney.id, starts_at: originalSession.starts_at, ends_at: originalSession.ends_at })
+    const since = new Date().toISOString()
+    const change = { operational_booking_id: first.operational_booking_id, member_id: replacementAttorney.id, expected_updated_at: before.operational_updated_at, idempotency_key: crypto.randomUUID() }
+    const pending = await call<{ session_id: string; assigned_member_id: string | null; request_id: string; change_status: string }>('reassign_product_booking', change)
+    expect(pending).toEqual({ session_id: originalSession.id, assigned_member_id: originalAttorney.id, request_id: first.request_id, change_status: 'awaiting_guest_acceptance' })
+    expect(await call('reassign_product_booking', change)).toEqual(pending)
+    const independentPending = await body<{ booking: { assignedMemberId: string; sessionId: string } }>(await request.get(`/api/dashboard/bookings/booking/${first.request_id}`, { params: { org: slug } }))
+    expect(independentPending.booking).toMatchObject({ assignedMemberId: originalAttorney.id, sessionId: originalSession.id })
+    expect(await read(other)).toEqual(otherBefore)
+    const detail = await body<{ thread: GuestThreadDetailViewModel }>(await page.request.get(`/api/account/messages/${first.request_id}`))
+    const proposals = detail.thread.entries.filter(entry => entry.eventName === 'booking_change.requested')
+    expect(proposals).toHaveLength(1)
+    expect(proposals[0]!.bookingChange).toMatchObject({ status: 'pending', before: { assignedMemberId: originalAttorney.id, assignedMemberName: 'MCP Original Attorney' }, after: { assignedMemberId: replacementAttorney.id, assignedMemberName: 'MCP Replacement Attorney' } })
+    const conversation = () => call<{ conversation: { entries: Array<{ id: string; booking_change: GuestThreadDetailViewModel['entries'][number]['bookingChange'] }> } }>('get_guest_conversation', { request_id: first.request_id })
+    expect((await conversation()).conversation.entries.find(entry => entry.id === proposals[0]!.id)?.booking_change).toEqual(proposals[0]!.bookingChange)
+    expect(proposals[0]!.bookingChange!.before.whenLabel).toBe(proposals[0]!.bookingChange!.after.whenLabel)
+    const deliveries = await body<{ deliveries: Array<{ entry_id: string; purpose: string; status: string; email_json: string | null }> }>(await request.get('/api/dev/notifications', { headers: devLoginHeaders(), params: { organization_id: organizationId, since } }))
+    const proposalEmail = deliveries.deliveries.find(delivery => delivery.entry_id === proposals[0]!.id && delivery.purpose === 'status_update')
+    expect(proposalEmail?.status).toBe('sent')
+    expect(proposalEmail?.email_json).toBeTruthy()
+    const email = JSON.parse(proposalEmail!.email_json!) as { message: { to: string; html: string } }
+    expect(email.message.to).toBe('buyer@playwright.example')
+    expect(email.message.html).toContain('MCP Original Attorney')
+    expect(email.message.html).toContain('MCP Replacement Attorney')
+    const managePath = `/dashboard/account/activity/booking/${first.request_id}`
+    const signedOut = await playwright.request.newContext({ baseURL })
+    let loginUrl: string
+    try {
+      const gated = await signedOut.get(managePath, { maxRedirects: 0 })
+      expect(gated.status(), await gated.text()).toBe(302)
+      const destination = new URL(gated.headers().location!, baseURL)
+      expect(destination.pathname).toBe('/login')
+      expect(destination.searchParams.get('redirect')).toBe(managePath)
+      loginUrl = destination.href
+    } finally { await signedOut.dispose() }
+    await page.goto(loginUrl!)
+    await expect(page).toHaveURL(`${baseURL}${managePath}`)
+    await expect(page.getByRole('button', { name: 'Manage consultation', exact: true })).toBeVisible()
+    const notifications = await body<{ notifications: Array<{ deep_link: string; template: string }> }>(await page.request.get('/api/dashboard/notifications', { params: { scope: 'personal' } }))
+    expect(notifications.notifications.some(notification => notification.template === 'guest_thread_event' && notification.deep_link === `/dashboard/account/messages/${first.request_id}`)).toBe(true)
+    await dismissPreviewToolbar(page)
+    await page.goto(`${baseURL}/dashboard/account/messages/${first.request_id}`)
+    const card = page.getByTestId('booking-change-request')
+    await expect(card).toHaveCount(1)
+    await expect(card).toContainText('Attorney or legal team')
+    await expect(card).toContainText('MCP Original Attorney')
+    await expect(card).toContainText('MCP Replacement Attorney')
+    await expect(card).toContainText('Your booking stays unchanged until you accept.')
+    await page.screenshot({ path: testInfo.outputPath('consultation-change-pending.png'), fullPage: true })
+    const accepted = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/account/bookings/change')
+    await card.getByRole('button', { name: 'Accept changes', exact: true }).click()
+    await body(await accepted)
+    await expect(card).toContainText('Changes accepted')
+    await expect(card.getByRole('button', { name: 'Accept changes', exact: true })).toHaveCount(0)
+    const after = await body<{ booking: { assignedMemberId: string; sessionId: string; status: string } }>(await request.get(`/api/dashboard/bookings/booking/${first.request_id}`, { params: { org: slug } }))
+    expect(after.booking).toMatchObject({ assignedMemberId: replacementAttorney.id, sessionId: replacementSession.id, status: 'confirmed' })
+    const acceptedRead = await read(first)
+    expect(acceptedRead.record).toEqual({ ...before.record, assigned_member_id: replacementAttorney.id })
+    expect(await read(other)).toEqual(otherBefore)
+    expect((await call<{ change_status: string }>('reassign_product_booking', change)).change_status).toBe('accepted')
+    const answered = await body<{ thread: GuestThreadDetailViewModel }>(await request.get(`/api/dashboard/organizations/${organizationId}/guest-threads/${first.request_id}`))
+    const acceptanceEntries = answered.thread.entries.filter(entry => entry.eventName === 'booking_change.accepted' && entry.payload?.requestId === proposals[0]!.id)
+    expect(acceptanceEntries).toHaveLength(1)
+    expect((await conversation()).conversation.entries.find(entry => entry.id === proposals[0]!.id)?.booking_change?.status).toBe('accepted')
+    const staffNotifications = await body<{ notifications: Array<{ id: string; title: string; message: string }> }>(await request.get('/api/dashboard/notifications'))
+    const acceptanceNotice = staffNotifications.notifications.find(notification => notification.id === `notification:${acceptanceEntries[0]!.id}:consultation.change_accepted`)
+    expect(acceptanceNotice?.title).toBe('E2E Buyer accepted the consultation changes')
+    expect(acceptanceNotice?.message).toContain('MCP Original Attorney')
+    expect(acceptanceNotice?.message).toContain('MCP Replacement Attorney')
+  } catch (error) { failures.push(error) }
+  finally {
+    for (const booking of bookings) {
+      try { await call('cancel_product_booking', { operational_booking_id: booking.operational_booking_id, idempotency_key: crypto.randomUUID() }) } catch (error) { failures.push(error) }
+    }
+    if (product) {
+      try {
+        await body(await request.put(`${editor}/products/${product.id}/publication`, { data: { published: false } }))
+        // A legal consultation always keeps an attorney: the temporary team is
+        // released by handing the archived consultation to the original attorney.
+        await body(await request.put(`${editor}/products/${product.id}/booking`, { data: { scheduling_mode: 'provider', assigned_member_id: actors[0]!.id, assigned_team_id: null } }))
+        if (bookings.length) await body(await request.patch(`${editor}/products/${product.id}`, { data: { active: false } }))
+        else await body(await request.delete(`${editor}/products/${product.id}`))
+      } catch (error) { failures.push(error) }
+    }
+    if (previousMode) {
+      try { await body(await request.put(`${editor}/consultation`, { data: { mode: previousMode.mode, ...(previousMode.external_url ? { external_url: previousMode.external_url } : {}) } })) } catch (error) { failures.push(error) }
+    }
+    if (teamId) {
+      try { await body(await request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })) } catch (error) { failures.push(error) }
+    }
+    for (const actor of actors.filter(actor => actor.changed)) {
+      try {
+        const admin = actor.client === request ? attorneyRequest : request
+        if (actor.previous?.timezone) {
+          const current = await body<{ scheduling: Schedule }>(await admin.get(`/api/organizations/${organizationId}/members/${actor.id}/scheduling`))
+          await body(await admin.put(`/api/organizations/${organizationId}/members/${actor.id}/scheduling`, { data: {
+            timezone: actor.previous.timezone, weekly: actor.previous.weekly, time_off: actor.previous.time_off, expected_updated_at: current.scheduling.updated_at,
+            public_name: actor.previous.public_name, public_photo_url: actor.previous.public_photo_url, public_bio: actor.previous.public_bio, public_approved: Boolean(actor.previous.public_approved),
+          } }))
+        } else {
+          // Scheduling has no separate deletion lifecycle. Better Auth removes the
+          // temporary actor schedule; its existing account, role and teams return.
+          await body(await admin.post('/api/auth/organization/remove-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberIdOrEmail: actor.id } }))
+          const invitation = await body<{ id: string }>(await admin.post('/api/auth/organization/invite-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, email: actor.user.email, role: actor.role, resend: true } }))
+          await body(await actor.client.post('/api/auth/organization/accept-invitation', { headers: authRequestHeaders(baseURL!), data: { invitationId: invitation.id } }))
+          for (const id of actor.teamIds) await body(await admin.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId: id, userId: actor.userId } }))
+          const restored = await body<{ members: Array<{ id: string; userId: string; role: string }> }>(await admin.get('/api/auth/organization/list-members', { params: { organizationId } }))
+          const member = restored.members.find(member => member.userId === actor.userId)
+          expect(member?.role).toBe(actor.role)
+          expect(member).toBeDefined()
+          actor.id = member!.id
+          if (actor.previous) await body(await admin.put(`/api/organizations/${organizationId}/members/${actor.id}/scheduling`, { data: {
+            expected_updated_at: null, public_name: actor.previous.public_name, public_photo_url: actor.previous.public_photo_url, public_bio: actor.previous.public_bio, public_approved: Boolean(actor.previous.public_approved),
+          } }))
+        }
+        const saved = await body<{ scheduling: Schedule | null }>(await actor.client.get(`/api/organizations/${organizationId}/members/${actor.id}/scheduling`))
+        if (actor.previous) expect(saved.scheduling).toMatchObject({ timezone: actor.previous.timezone, weekly: actor.previous.weekly, time_off: actor.previous.time_off, public_name: actor.previous.public_name, public_photo_url: actor.previous.public_photo_url, public_bio: actor.previous.public_bio, public_approved: actor.previous.public_approved })
+        else expect(saved.scheduling).toBeNull()
+        const teams = await body<Array<{ id: string }>>(await actor.client.get('/api/auth/organization/list-user-teams', { params: { organizationId } }))
+        expect(teams.map(team => team.id).sort()).toEqual(actor.teamIds.sort())
+      } catch (error) { failures.push(error) }
+    }
+    await attorneyRequest.dispose()
+    await otherClient.dispose()
+    await release()
+  }
+  if (failures.length) throw new AggregateError(failures, 'MCP consultation approval or canonical cleanup failed')
 })

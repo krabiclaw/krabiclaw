@@ -2,6 +2,7 @@ import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requ
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
 import type { StayChannel } from '~/shared/bookings'
+import type { BookingChangeView } from './booking-changes'
 
 export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment' | 'resolution'
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
@@ -182,6 +183,8 @@ export interface GuestThreadEntryViewModel {
   providerTimestamp: string | null
   deliveries: GuestThreadEntryDeliveryViewModel[]
   attachments: GuestThreadEntryAttachmentViewModel[]
+  /** Canonical consent state and public before/after details for a requested change. */
+  bookingChange: BookingChangeView | null
 }
 
 export interface GuestThreadDeliveryFailureViewModel {

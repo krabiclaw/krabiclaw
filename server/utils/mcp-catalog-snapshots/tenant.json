@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6a09d9ad2e9b4b89bae958a9c346e01233fc31dae40f2e0341ac4545b5f1c783",
-  "documentationFingerprint": "sha256:80fc95a9ac7d4e93e695e141bcc8ae5e079f59d72fd363c08c68c348e0e018dd",
+  "fingerprint": "sha256:08e81ee31e12d9dcf8cceb16ee4cee39c7e3eed3b3539328623f0fefc3f68b4d",
+  "documentationFingerprint": "sha256:141922eb83383eaf85cb95f4fded6ba7fcd263ee5aba4e7cf26432ef13b15c92",
   "tools": [
     {
       "name": "add_organization_language",
@@ -45900,6 +45900,99 @@
                         "null"
                       ]
                     },
+                    "booking_change": {
+                      "description": "Canonical proposal details and current response state. A pending proposal does not change the operational record.",
+                      "properties": {
+                        "after": {
+                          "properties": {
+                            "assignedMemberId": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "assignedMemberName": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "partySize": {
+                              "type": "integer"
+                            },
+                            "whenLabel": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "whenLabel",
+                            "partySize",
+                            "assignedMemberId",
+                            "assignedMemberName"
+                          ],
+                          "type": "object"
+                        },
+                        "before": {
+                          "properties": {
+                            "assignedMemberId": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "assignedMemberName": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            },
+                            "partySize": {
+                              "type": "integer"
+                            },
+                            "whenLabel": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "whenLabel",
+                            "partySize",
+                            "assignedMemberId",
+                            "assignedMemberName"
+                          ],
+                          "type": "object"
+                        },
+                        "locationTitle": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "originalLocationTitle": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "pending",
+                            "accepted",
+                            "declined",
+                            "stale",
+                            "expired"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "before",
+                        "after",
+                        "locationTitle",
+                        "originalLocationTitle"
+                      ],
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
                     "channel": {
                       "type": [
                         "string",
@@ -45969,6 +46062,7 @@
                     "event",
                     "occurred_at",
                     "provider_timestamp",
+                    "booking_change",
                     "deliveries",
                     "attachments"
                   ],
@@ -80491,12 +80585,12 @@
     {
       "name": "reassign_product_booking",
       "title": "Reassign product booking",
-      "description": "Move a provider-led booking’s whole session to an available team member, preserving its time and attendees’ booking IDs. Read get_product_booking first and supply its operational_updated_at, not its conversation updated_at. Sends guest and staff notifications; active checkout holds prevent the change.",
+      "description": "Propose a same-time attorney replacement for one consultation. The current appointment and other clients remain unchanged until this client accepts in their conversation. Uses a published available session for that attorney. Read get_product_booking and supply operational_updated_at.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "expected_updated_at": {
-            "description": "operational_updated_at from get_product_booking, or the booking updated_at from list_product_bookings.",
+            "description": "operational_updated_at from get_product_booking.",
             "type": "string"
           },
           "idempotency_key": {
@@ -80506,7 +80600,7 @@
             "type": "string"
           },
           "member_id": {
-            "description": "Organization member ID from get_member_scheduling or list_teams, not a user ID.",
+            "description": "Better Auth organization member ID from get_member_scheduling or list_teams.",
             "type": "string"
           },
           "operational_booking_id": {
@@ -80533,6 +80627,20 @@
         "description": "Success fields for this operation. A failure returns MCP isError: true with text content explaining the reason; execution errors may include status, code and recovery fields. Failed results do not use this success schema.",
         "properties": {
           "assigned_member_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "change_status": {
+            "enum": [
+              "awaiting_guest_acceptance",
+              "accepted",
+              "declined"
+            ],
+            "type": "string"
+          },
+          "request_id": {
             "minLength": 1,
             "type": "string"
           },
@@ -80543,7 +80651,9 @@
         },
         "required": [
           "session_id",
-          "assigned_member_id"
+          "assigned_member_id",
+          "request_id",
+          "change_status"
         ],
         "type": "object"
       },
@@ -93963,13 +94073,17 @@
     {
       "name": "request_product_booking_change",
       "title": "Request product booking change",
-      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. With apply, the booking moves now and the guest is emailed the new time; a change that needs the guest’s consent (a paid booking’s quantity or location) is refused.",
+      "description": "Email the guest a proposal to change a booking’s session or party size. The current booking and places remain unchanged until guest acceptance, which requires availability and preserves its review status. Consultation time and attorney changes always require client acceptance. For other booking kinds, apply moves the booking now and emails the guest; a paid quantity or location change is refused.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "apply": {
-            "description": "Move the booking now instead of asking the guest. The guest is emailed the new time.",
+            "description": "For bookings other than consultations, move immediately and email the guest. Consultations always require client acceptance.",
             "type": "boolean"
+          },
+          "assigned_member_id": {
+            "description": "Optional explicit target attorney member ID; must match the selected session.",
+            "type": "string"
           },
           "expected_updated_at": {
             "description": "Thread updated_at from get_product_booking.",
@@ -122384,7 +122498,7 @@
         "cancel_product_booking": "sha256:a90b3075935852ee847849f1774addc7077bac2636dd83439a792db5a98c9ca3",
         "cancel_table_reservation": "sha256:7c17a97a9f730249ce112981850351006406adab44d5230f8306953e4450b165",
         "confirm_product_booking": "sha256:d1269994270301b34621918853c929c1e77f702b21fa336ac4dd23dcbf81e18e",
-        "get_guest_conversation": "sha256:48379654b6842489124993bdd57cd4a175bbd3d5d5ab02e535641e57e76bb4e5",
+        "get_guest_conversation": "sha256:b7f2fab6e0363d3cac7a8c748104afe78818e24c9034c389fa6ab152cd888c4b",
         "get_product_booking": "sha256:f556f5a1b85a50415d2ec9d1464f44b876afced7651eb51aabd5445eca9ebcaa",
         "get_team_conversation": "sha256:fb0eae689fdfa8508658a4477f7fec885ba4b044d464772e4d6182d918c11532",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
@@ -122396,7 +122510,7 @@
         "mark_team_conversation_read": "sha256:3ad65b07c9bd78090f9f81aeffa74ac00f1c201ee8b6325cf16cd879f1e2644d",
         "reject_product_booking": "sha256:d391fc30d744361aecae959a6e0530b4193bb3366cf9da36cc2a7e2011088357",
         "reply_to_guest": "sha256:28402ef75ec3f1464c60ffbaa91a3781f96f9764994e56b2c7362dbd26eefb80",
-        "request_product_booking_change": "sha256:72aa7532cc80d1896748e6f70a6ed4dbc30239df013a42e35fe8fbd4d08fe04c",
+        "request_product_booking_change": "sha256:d09a9c88466237aff04465bbcffa219f28e197cfad0cb4fdd99f41484343d400",
         "request_table_reservation_change": "sha256:71868f28cc9f329b1f44276ae0a223c487c789f4682c3bb8f3a09b96fde9e2dd",
         "send_team_message": "sha256:a7e3d79ac0e34594d49274dc922d3d34b13e390b335cd63f2d73f1e53d973171",
         "start_team_conversation": "sha256:b297eb76fda6a481f0246ee8c6c39d5481ebe9379dd979ecee747b54c67f0492",
@@ -122519,7 +122633,7 @@
       },
       "toolContracts": {
         "create_post": "sha256:4426da1dfe56a987581ac2c736cfc0b51369ca0d7315d43552e090b377917a06",
-        "get_guest_conversation": "sha256:48379654b6842489124993bdd57cd4a175bbd3d5d5ab02e535641e57e76bb4e5",
+        "get_guest_conversation": "sha256:b7f2fab6e0363d3cac7a8c748104afe78818e24c9034c389fa6ab152cd888c4b",
         "get_organization_analytics": "sha256:3f37e5014639f5dd6702f1715ed115454c66affa9e0854c5b0611dea6964bc56",
         "get_product": "sha256:b5016e9a8bc2c7ef6aa3483ef7cae33cbea1fc35511704194e25080083843b37",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",

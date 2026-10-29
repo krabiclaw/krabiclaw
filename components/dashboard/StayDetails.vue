@@ -168,8 +168,8 @@
         <UButton v-if="manage && stay.status !== 'cancelled'" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
       </template>
       </UCard>
-      <UCard v-if="personalScope && cancellation" variant="record">
-        <UButton color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancelAsGuest" />
+      <UCard v-if="personalScope" as="button" type="button" variant="record" class="w-full text-left" @click="manageOpen = true">
+        <span class="flex items-center gap-4"><span class="min-w-0 flex-1 text-base font-semibold text-highlighted">{{ t('booking.manage') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></span>
       </UCard>
 
       <UCard variant="record">
@@ -198,9 +198,18 @@
       </div>
     </template>
   </component>
+  <DashboardListItemDialog v-model:open="manageOpen" :title="t('booking.manage')" :show-actions="false" :error="actionError">
+    <div v-if="stay" class="divide-y divide-default">
+      <p v-if="stay.owner === 'channel'" class="py-4 text-base text-muted">{{ t('booking.channel_manage', { channel: channelName }) }}</p>
+      <NuxtLink v-if="canRequestChange && messagePath" :to="{ path: messagePath, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
+      <NuxtLink v-if="messagePath" :to="messagePath" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('stay.message_host') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
+      <UButton v-if="personalScope && stay.owner === 'app' && cancellation" color="error" variant="ghost" block class="justify-start py-4" label="Cancel stay" :loading="busy === 'cancel'" @click="manageOpen = false; cancelAsGuest()" />
+    </div>
+  </DashboardListItemDialog>
 </template>
 
 <script setup lang="ts">
+import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { formatPhone } from '~/utils/phone'
 import StayArrivalGuideView from '~/components/booking/StayArrivalGuide.vue'
 import { isGuestStay, isStayArrivalGuide, stayCheckInWindow } from '~/shared/stay-arrival'
@@ -212,7 +221,7 @@ import { STAY_CHANNEL_LABELS, STAY_PAYMENT_METHOD_LABELS, type StayPaymentMethod
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
-import { formatCalendarDate, formatTime, localDateAt } from '~/utils/timezone'
+import { formatCalendarDate, formatTime, localDateAt, localDateTimeToInstant } from '~/utils/timezone'
 import { formatPostalAddress } from '~/utils/postal-address'
 import { getErrorMessage } from '~/utils/errors'
 import { ApiClientError } from '~/utils/api-clients'
@@ -230,6 +239,7 @@ const { t } = useI18n()
 const route = useRoute()
 const realtime = useDashboardInvalidations()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
+const manageOpen = ref(false)
 
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
   && (value.stay.guest_image_url === null || typeof value.stay.guest_image_url === 'string')
@@ -267,6 +277,8 @@ const messagePath = computed(() => stay.value?.request_id
 const callPhone = computed(() => !props.personalScope ? stay.value?.guest_phone ?? null : null)
 const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
+const canRequestChange = computed(() => props.personalScope && stay.value?.owner === 'app' && Boolean(messagePath.value) && ['pending', 'confirmed'].includes(stay.value.status)
+  && Boolean(recordHome.value) && localDateTimeToInstant(stay.value.check_out_date, recordHome.value!.check_out_time, stay.value.timezone, 'compatible').getTime() > Date.now())
 const policy = computed(() => stay.value?.cancellation_policy ? bookedPolicyTerms(stay.value.cancellation_policy) : null)
 const paymentPath = computed(() => stay.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(stay.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {

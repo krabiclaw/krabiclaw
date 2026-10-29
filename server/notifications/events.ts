@@ -306,42 +306,15 @@ export function reviewReceivedMessage(input: ReviewEventInput): NotificationMess
   }
 }
 
-export interface BookingReassignedEventInput {
-  guestName: string
-  productTitle: string
-  date: string
-  time: string
-  partySize: string
-  fromName: string | null
-  toName: string
-  replyUrl: string | null
-  organizationName: string
-}
-
-export function bookingReassignedMessage(input: BookingReassignedEventInput): NotificationMessage {
-  return {
-    title: `${input.guestName}’s booking is now with ${input.toName}`,
-    preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
-    hero: null,
-    facts: facts(
-      fact('context', 'Booking', input.productTitle, true),
-      fact('guestName', 'Guest', input.guestName, true),
-      fact('date', 'Date', input.date, true),
-      fact('time', 'Time', input.time, true),
-      fact('partySize', 'Party size', input.partySize, true),
-      fact('toName', 'Team member', input.toName, true),
-      fact('fromName', 'Previously', input.fromName),
-    ),
-    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
-    category: 'reservations_bookings',
-    emailPurpose: 'transactional',
-    emailReason: `You received this email because a booking assignment changed at ${input.organizationName} and you receive its booking notifications.`,
-    organizationName: input.organizationName,
-  }
+export interface BookingChangeAssignment {
+  beforeMemberId: string | null; beforeName: string | null
+  afterMemberId: string | null; afterName: string | null
+  label: string
 }
 
 export interface BookingChangeEventInput {
   recordKind: string
+  assignment?: BookingChangeAssignment
   guestName: string
   status: 'requested' | 'accepted' | 'declined'
   location: string
@@ -355,13 +328,17 @@ export interface BookingChangeEventInput {
 }
 
 export function bookingChangeMessage(input: BookingChangeEventInput): NotificationMessage {
+  const assignment = input.assignment
+  const summary = assignment && assignment.beforeMemberId !== assignment.afterMemberId
+    ? `${input.summary} ${input.status === 'accepted' ? assignment.label : `Proposed ${assignment.label.toLowerCase()}`}: ${assignment.beforeName ?? 'Unassigned'} → ${assignment.afterName ?? 'Unassigned'}.`
+    : input.summary
   return {
     title: input.status === 'requested'
       ? `Changes requested for ${input.guestName}'s ${input.recordKind}`
       : `${input.guestName} ${input.status} the ${input.recordKind} changes`,
-    preheader: input.summary,
+    preheader: summary,
     hero: null,
-    intro: input.summary,
+    intro: summary,
     facts: facts(
       fact('recordKind', 'Type', input.recordKind, true),
       fact('guestName', 'Guest', input.guestName, true),
@@ -374,7 +351,7 @@ export function bookingChangeMessage(input: BookingChangeEventInput): Notificati
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
-      fact('summary', 'Summary', input.summary, true),
+      fact('summary', 'Summary', summary, true),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'View in dashboard' } : undefined,
     category: 'reservations_bookings',

@@ -35,6 +35,25 @@
                   <span>{{ item.label }}</span>
                 </p>
 
+                <section v-else-if="item.type === 'change'" class="mx-auto my-4 max-w-xl rounded-2xl border border-default bg-elevated p-5" :aria-labelledby="`change-title-${item.key}`" data-testid="booking-change-request">
+                  <h3 :id="`change-title-${item.key}`" class="font-semibold text-highlighted">{{ t('booking.change_review') }}</h3>
+                  <p class="mt-1 text-sm text-muted">{{ t('booking.change_requested_by', { organization: currentBusiness }) }}</p>
+                  <dl class="mt-4 space-y-4 text-sm">
+                    <div v-for="field in changeFields(item.change)" :key="field.label">
+                      <dt class="font-medium text-highlighted">{{ field.label }}</dt>
+                      <dd class="mt-1 grid grid-cols-2 gap-4">
+                        <div><span class="block text-xs text-muted">{{ t('booking.change_before') }}</span><span>{{ field.before }}</span></div>
+                        <div><span class="block text-xs text-muted">{{ t('booking.change_proposed') }}</span><span>{{ field.after }}</span></div>
+                      </dd>
+                    </div>
+                  </dl>
+                  <p class="mt-4 text-sm" :class="item.change.status === 'pending' ? 'text-muted' : 'text-highlighted'" role="status">{{ changeStatus(item.change) }}</p>
+                  <div v-if="personalScope && item.change.status === 'pending'" class="mt-4 flex gap-3">
+                    <UButton :label="t('booking.change_accept')" :loading="answeringChange?.requestId === item.key && answeringChange.decision === 'accept'" :disabled="answeringChange !== null" @click="answerChange(item.key, 'accept')" />
+                    <UButton :label="t('booking.change_decline')" color="neutral" variant="outline" :loading="answeringChange?.requestId === item.key && answeringChange.decision === 'decline'" :disabled="answeringChange !== null" @click="answerChange(item.key, 'decline')" />
+                  </div>
+                </section>
+
                 <!-- The current buyer's own web replies sit opposite the business;
                      historical authors retain the identity actually recorded. -->
                 <UChatMessage
@@ -189,7 +208,8 @@
             </template>
           </UPopover>
         </div>
-        <MessageComposer v-model="draft" v-model:photos="chosen" :disabled="!canReply" :sending="sending" :channel="!personalScope && thread.replyChannel === 'airbnb' ? 'airbnb' : 'email'" send-label="Send reply" @send="sendReply" />
+        <UAlert v-if="requestingChange" class="mb-3" color="info" variant="soft" :description="t(changeRequestSent ? 'booking.change_request_sent' : 'booking.change_request_help')" />
+        <MessageComposer v-model="draft" v-model:photos="chosen" :disabled="!canReply" :sending="sending" :channel="!personalScope && thread.replyChannel === 'airbnb' ? 'airbnb' : 'email'" :send-label="requestingChange && !changeRequestSent ? t('booking.request_change') : 'Send reply'" @send="sendReply" />
         <MessagePhotoViewer v-model="viewer" />
 
         <p v-if="!canReply" class="mt-2 text-xs text-warning">This guest has no email on file. Once they accept an invite to this conversation, your replies reach their KrabiClaw inbox.</p>
@@ -206,6 +226,7 @@ import type { AvatarProps } from '@nuxt/ui'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import { isThreadDetailResponse, threadRecordTitle, type ThreadDetail } from '~/lib/components/workspace/messages/guest-thread-client'
 import type { GuestThreadDeliveryFailureViewModel, GuestThreadEntryViewModel } from '~/server/domain/guest-threads/types'
+import type { BookingChangeView } from '~/server/domain/guest-threads/booking-changes'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
 import MessageComposer, { messageReplyForm, sameMessagePhotos, useMessagePhotoDraft, type MessagePhotoDraft } from './MessageComposer.vue'
@@ -225,7 +246,7 @@ const dashboard = useDashboardOrganization()
 const route = useRoute()
 const dashboardApi = useDashboardApi(useDashboardRouteScope())
 const realtime = useDashboardInvalidations()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 const session = authClient.useSession()
 
 // The one copy of this thread. The record beside the conversation reads the
@@ -235,6 +256,9 @@ const canReply = computed(() => props.personalScope || thread.value?.replyChanne
 const threadPath = computed(() => props.personalScope ? `/api/account/messages/${encodeURIComponent(props.threadId)}` : `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
 
 const draft = ref('')
+const requestingChange = computed(() => props.personalScope && route.query.intent === 'booking-change' && thread.value?.operationalRecord && thread.value.replyChannel === 'email')
+const changeRequestSent = ref(false)
+watch(() => `${props.threadId}:${String(route.query.intent)}`, () => { changeRequestSent.value = false })
 const checkInOpen = ref(false)
 const { data: messagingContext, error: contextError, refresh: refreshContext } = await useAsyncData(
   () => `guest-messaging-context:${dashboard.organizationId.value}:${props.threadId}`,
@@ -245,6 +269,52 @@ watch(checkInOpen, open => { if (open) void refreshContext() })
 function insertText(value: string) { if (!sending.value && canReply.value) draft.value = [draft.value.trimEnd(), value].filter(Boolean).join('\n\n') }
 const actionError = ref<string | null>(null)
 const readError = ref<string | null>(null)
+const currentBusiness = computed(() => thread.value?.organizationName)
+const answeringChange = ref<{ requestId: string; decision: 'accept' | 'decline' } | null>(null)
+
+async function answerChange(requestId: string, decision: 'accept' | 'decline') {
+  if (!props.personalScope || answeringChange.value) return
+  answeringChange.value = { requestId, decision }
+  actionError.value = null
+  try {
+    await applicationFetch('/api/account/bookings/change', {
+      method: 'POST',
+      body: { thread_id: props.threadId, request_id: requestId, decision },
+      validate: (value: unknown): value is BookingChangeView => isRecord(value) && ['accepted', 'declined'].includes(String(value.status)),
+    })
+    await refresh()
+    if (error.value) throw error.value
+    await refreshNuxtData(`account-activity:${session.value.data?.user.id}`)
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, 'Your answer could not be saved')
+    // A concurrent answer or changed destination must be shown after the failed action.
+    await refresh()
+  } finally {
+    answeringChange.value = null
+  }
+}
+
+function capitalize(value: string) { return value.charAt(0).toUpperCase() + value.slice(1) }
+function changeFields(change: BookingChangeView) {
+  const copy = getVerticalCopy(change.vertical, locale.value)
+  const fields = [
+    { label: copy.locationLabel, before: change.originalLocationTitle, after: change.locationTitle },
+    { label: copy.dateLabel, before: change.before.whenLabel, after: change.after.whenLabel },
+    { label: copy.guestsLabel, before: String(change.before.partySize), after: String(change.after.partySize) },
+  ]
+  if (change.type === 'booking') fields.push({
+    label: copy.assigneeLabel,
+    before: change.before.assignedMemberName ?? t('booking.change_unassigned'),
+    after: change.after.assignedMemberName ?? t('booking.change_unassigned'),
+  })
+  return fields.filter(field => field.label === copy.dateLabel || field.label === copy.assigneeLabel || field.before !== field.after)
+}
+function changeStatus(change: BookingChangeView) {
+  if (change.status === 'pending') return t(props.personalScope ? 'booking.change_pending' : 'booking.change_waiting')
+  if (change.status === 'accepted') return `${t('booking.change_accepted')} ${t('booking.change_updated')}`
+  if (change.status === 'declined') return `${t('booking.change_declined')} ${t('booking.change_unchanged')}`
+  return t(change.status === 'expired' ? 'booking.change_expired' : 'booking.change_stale')
+}
 
 /*
   A reply shows the moment it is sent, dimmed and "Sending…" until the server
@@ -277,6 +347,7 @@ async function sendReply() {
     const reply = res.thread.entries.findLast(entry => entry.kind === 'message' && entry.actorKind === (props.personalScope?'guest':'member') && !current.sentAfter.has(entry.id))
     if (reply) settledKeys.value = { ...settledKeys.value, [reply.id]: `pending:${current.key}` }
     data.value = res
+    if (requestingChange.value) changeRequestSent.value = true
     attempt.value = null
     draft.value = ''
     chosen.value = []
@@ -434,6 +505,7 @@ type MessageItem = {
 type StreamItem =
   | { type: 'day'; key: string; label: string }
   | { type: 'event'; key: string; icon: string; label: string }
+  | { type: 'change'; key: string; change: BookingChangeView }
   | MessageItem
 
 // A provider civil clock is valid data too; the instant predicate only tells us
@@ -498,6 +570,8 @@ const stream = computed<StreamItem[]>(() => {
         unshown: Array.isArray(unshown) ? unshown.filter((name): name is string => typeof name === 'string') : [],
         ...(member ? { receipt: receiptFor(entry, current.participantLabel) } : {}),
       })
+    } else if (entry.bookingChange) {
+      push(entry.occurredAt, { type: 'change', key, change: entry.bookingChange })
     } else {
       push(entry.occurredAt, { type: 'event', key, icon: systemEventIcon(entry), label: systemEventLabel(entry) })
     }
@@ -595,6 +669,9 @@ function systemEventLabel(entry: GuestThreadEntryViewModel) {
       return entry.body
     }
     if (entry.eventName === 'migration_snapshot') return 'Imported from previous system'
+    if (entry.eventName === 'booking_change.accepted') return 'The client accepted the requested changes'
+    if (entry.eventName === 'booking_change.declined') return 'The client declined the requested changes'
+    if (entry.eventName === 'booking_change.moved') return entry.body ?? `${capitalize(recordNoun.value)} updated`
     if (entry.payload?.action === 'cancel') return `${actor}cancelled the ${recordNoun.value}`.trim()
     if (entry.eventName === 'thread.archived') return `${actor}archived this conversation`.trim()
     if (entry.eventName === 'thread.unarchived') return `${actor}moved this conversation to messages`.trim()

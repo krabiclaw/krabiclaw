@@ -14,7 +14,7 @@ import { resolveGuestThreadMailbox } from './mailbox'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { guestThreadReplyMessage, guestThreadStatusMessage } from '~/server/notifications/guest-events'
 import { organizationLogo } from '~/server/notifications/hero'
-import { getPlatformDomain } from '~/server/utils/dashboard-notification-links'
+import { getPlatformDomain, buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
 import { isBookingComplete } from '~/shared/bookings'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { guestPresentation } from '~/server/utils/notifications'
@@ -157,15 +157,13 @@ function sourceMutationPlan(context: ThreadContext, action: string): SourceMutat
 /**
  * The record has not finished yet, as the database sees it.
  *
- * A reservation holds its own end; a booking's is on its session. The entry and
- * the status update each carry this, because they land in one batch and each
- * carries the other's condition — a visit that finishes between the read and
- * the write must not be cancelled by either half.
+ * A reservation holds its own end; a booking's is on its session. The first
+ * guarded ledger insert checks this once for the atomic mutation batch.
  */
 function sourceStillRunningSql(plan: SourceMutationPlan, table: string): string {
   return plan.kind === 'reservation'
-    ? `${table}.ends_at > ?`
-    : `EXISTS (SELECT 1 FROM product_sessions s WHERE s.id = ${table}.product_session_id AND s.ends_at > ?)`
+    ? `${table}.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+    : `EXISTS (SELECT 1 FROM product_sessions s WHERE s.id = ${table}.product_session_id AND s.ends_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`
 }
 
 function operationEntryQuery(
@@ -186,12 +184,13 @@ function operationEntryQuery(
              COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = gt.id), 0) + 1,
              ?, ?
       FROM requests gt
-      WHERE gt.id = ? AND gt.organization_id = ? AND gt.kind = ?
+      WHERE gt.id = ? AND gt.organization_id = ? AND gt.kind = ? AND gt.updated_at = ?
         -- Guarded on the state of the record that holds the seats, because the
         -- thread has no status of its own: two dashboards acting at once must
         -- not both write an entry for the same transition.
-        AND EXISTS (SELECT 1 FROM ${plan.kind === 'reservation' ? 'reservations' : 'bookings'} src
-                     WHERE src.request_id = gt.id AND src.status = ? AND ${sourceStillRunningSql(plan, 'src')})
+        AND EXISTS (SELECT 1 FROM ${plan.kind === 'reservation' ? 'reservations src' : 'bookings src JOIN product_sessions occurrence ON occurrence.id=src.product_session_id AND occurrence.organization_id=src.organization_id AND occurrence.product_id=src.product_id'}
+                     WHERE src.request_id = gt.id AND src.organization_id=gt.organization_id AND src.status = ? AND ${sourceStillRunningSql(plan, 'src')}
+                       AND json_array(src.id,src.party_size,${plan.kind === 'reservation' ? 'NULL,NULL,src.starts_at,src.ends_at,src.timezone,src.location_id' : 'src.assigned_member_id,src.product_id,occurrence.starts_at,occurrence.ends_at,occurrence.timezone,occurrence.location_id'},json_extract(gt.payload_json,'$.party_size_is_minimum'))=json_array(?,CAST(? AS INTEGER),?,?,?,?,?,?,CAST(? AS INTEGER)))
         AND (${financialGuard?.query ?? '1=1'})
       ON CONFLICT(dedupe_key) DO NOTHING
     `,
@@ -219,8 +218,9 @@ function operationEntryQuery(
       context.thread.id,
       context.thread.organization_id,
       plan.kind,
+      context.thread.updated_at,
       plan.beforeStatus,
-      now,
+      context.record!.id, context.record!.party_size, context.record!.assigned_member_id, context.record!.product_id, context.record!.starts_at, context.record!.ends_at, context.record!.timezone, context.record!.location_id, Number(partySizeIsMinimum(context.thread)),
       ...(financialGuard?.params ?? []),
     ],
   }
@@ -238,18 +238,16 @@ function sourceUpdateQuery(context: ThreadContext, plan: SourceMutationPlan, inp
   const table = plan.kind === 'reservation' ? 'reservations' : 'bookings'
   const stamps = plan.afterStatus === 'cancelled' ? ', cancelled_at = COALESCE(cancelled_at, ?), cancellation_reason = ?' : ''
   const stampParams = plan.afterStatus === 'cancelled' ? [now, plan.action === 'reject' ? 'host_rejected' : 'host_cancelled'] : []
-  // The record's end carries the same refusal the caller already made, so a
-  // visit that finishes between reading it and writing cannot be cancelled
-  // afterwards. A reservation holds its own end; a booking's is on its session.
-  const stillRunning = sourceStillRunningSql(plan, table)
+  // The first ledger insert already checked the live source and end time.
+  // This statement follows it in the same atomic batch, without a second clock gate.
   return {
     query: `
       UPDATE ${table}
       SET status = ?, updated_at = ?${stamps}
-      WHERE id = ? AND status = ? AND ${stillRunning}
+      WHERE id = ? AND status = ?
         AND EXISTS (SELECT 1 FROM activity_entries WHERE id = ?)
     `,
-    params: [plan.afterStatus, now, ...stampParams, context.record!.id, plan.beforeStatus, now, entryId],
+    params: [plan.afterStatus, now, ...stampParams, context.record!.id, plan.beforeStatus, entryId],
   }
 }
 
@@ -330,6 +328,7 @@ async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationI
     organizationName: guest.organizationName,
     organizationLogoUrl,
     body: entry.body ?? '',
+    manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: entry.request_id }),
     photos: photos.map(photo => ({ imageUrl: photo.url, alt: photo.alt ?? `Photo from ${organizationName}` })),
   }), { platformDomain: getPlatformDomain(env) })
 }
@@ -351,7 +350,7 @@ async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: Thr
   const guests = labels['site.experience_detail.guest_count']!.replace('{count}', `${context.record.party_size}${partySizeIsMinimum(context.thread) ? '+' : ''}`)
   const body = [guest.locationName, formatTimestamp(context.record.starts_at, guest.locale, context.record.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), guests].filter(Boolean).join(' · ')
   const organizationLogoUrl = await organizationLogo(db, context.thread.organization_id)
-  const email = await renderNotificationEmail(guestThreadStatusMessage({ locale: guest.locale, organizationName: guest.organizationName, organizationLogoUrl, heading: subject, body }), { platformDomain: getPlatformDomain(env) })
+  const email = await renderNotificationEmail(guestThreadStatusMessage({ locale: guest.locale, organizationName: guest.organizationName, organizationLogoUrl, heading: subject, body, manageUrl: await buildBuyerRequestActivityUrl(env, db, { organizationId: context.thread.organization_id, threadId: context.thread.id }) }), { platformDomain: getPlatformDomain(env) })
   return { to, fromName, locale: guest.locale, subject, body, email }
 }
 

@@ -32,6 +32,8 @@ export interface BookingConfirmation {
   title?: string
   requests?: string | null
   cancelUrl?: string | null
+  /** Authenticated management entrypoint for the current canonical buyer, when linked. */
+  manageUrl?: string | null
   contactPhone?: string | null
   contactEmail?: string | null
   message?: string
@@ -89,7 +91,7 @@ export async function loadBookingConfirmation(
     kind: BookingConfirmation['type']; status: 'pending' | 'confirmed' | 'cancelled'; name: string; email: string
     starts_at: string; timezone: string; guests: string; location_id: string | null; product_id: string | null; product_kind: ProductKind | null; product_name: string | null
     location_name: string | null; location_slug: string | null
-    locale: string; policy_summary: ApiRecord | null; paid: { amount: number; currency: string } | null; image_url: string | null
+    locale: string; policy_summary: ApiRecord | null; paid: { amount: number; currency: string } | null; image_url: string | null; manage_url: string | null
   } }>(`/api/public/booking-requests/${encodeURIComponent(requestId)}`, {
     query: { locale: language.locale },
     headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
@@ -100,6 +102,7 @@ export async function loadBookingConfirmation(
     || typeof booking.name !== 'string' || typeof booking.email !== 'string' || !isValidInstant(booking.starts_at) || !isValidTimezone(booking.timezone)
     || (kind === 'booking' && (!booking.product_kind || !PRODUCT_KINDS.includes(booking.product_kind)))
     || typeof booking.guests !== 'string' || booking.locale !== language.locale || (booking.location_id !== null && typeof booking.location_id !== 'string')
+    || (booking.manage_url !== null && (typeof booking.manage_url !== 'string' || !URL.canParse(booking.manage_url)))
     || (booking.paid !== null && (!Number.isInteger(booking.paid?.amount) || typeof booking.paid?.currency !== 'string'))) {
     throw new Error(language.t('booking.receipt_failed'))
   }
@@ -118,6 +121,7 @@ export async function loadBookingConfirmation(
     locationSlug: booking.location_slug,
     paid: booking.paid,
     imageUrl: typeof booking.image_url === 'string' ? booking.image_url : null,
+    manageUrl: booking.manage_url,
     locationAddress: sameLocation && sameLocale ? matchingHandoff?.locationAddress : null,
     title: booking.product_name ?? (sameLocale ? matchingHandoff?.title : undefined),
     policySummary: sameLocale && sameLocation && sameProduct && matchingHandoff?.policySummary ? matchingHandoff.policySummary : booking.policy_summary,

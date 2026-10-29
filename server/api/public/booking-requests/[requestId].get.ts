@@ -14,6 +14,7 @@ import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-s
 import type { ProductKind } from '~/shared/product-details'
 import { defineHandler } from 'nitro'
 import { getQuery, getRouterParam } from 'nitro/h3'
+import { buildBuyerRequestActivityUrl } from '~/server/utils/dashboard-notification-links'
 
 /**
  * What a guest's cancellation link refers to.
@@ -111,6 +112,7 @@ export default defineHandler(async (event) => {
       policy_summary: policy ? renderBookingPolicySummary(policy, locale, productKind) : null,
       paid: await paidOnline(db, organizationId, record.kind, record.id),
       image_url: picture?.imageUrl ?? null,
+      manage_url: await buildBuyerRequestActivityUrl(env, db, { organizationId, threadId: request.id }),
     },
   }, { headers: { 'cache-control': 'private, no-store' } })
 })

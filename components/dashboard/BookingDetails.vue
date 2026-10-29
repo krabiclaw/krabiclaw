@@ -33,10 +33,10 @@
             variant="soft"
             icon="i-lucide-clock"
             :title="personalScope ? `${booking.organizationName} requested a change` : 'Change requested'"
-            :description="`${booking.pendingChange.afterLabel} · ${booking.pendingChange.partySize} ${booking.pendingChange.partySize === 1 ? recordCopy?.guestLabel : recordCopy?.guestsLabelPlural}${personalScope ? '' : ` · Waiting for ${firstName(booking.guestName ?? '')} to respond`}`"
+            :description="pendingChangeDescription"
             :actions="personalScope ? [
-              { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', onClick: () => answerChange('accept') },
-              { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', onClick: () => answerChange('decline') },
+              { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', disabled: answering !== null, onClick: () => answerChange('accept') },
+              { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', disabled: answering !== null, onClick: () => answerChange('decline') },
             ] : undefined"
           />
 
@@ -147,6 +147,7 @@
   <DashboardListItemDialog v-model:open="manageOpen" :title="`Manage ${noun}`" :show-actions="false" :error="actionError">
     <div v-if="booking" class="divide-y divide-default">
       <NuxtLink v-if="canChangeBooking && !personalScope" :to="{ path: `${editorPath}/change`, query: route.query }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false; beginChange()"><span>Change {{ noun }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
+      <NuxtLink v-if="personalScope && canChangeBooking && messageTo" :to="{ path: messageTo, query: { intent: 'booking-change' } }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>{{ t('booking.request_change') }}</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <NuxtLink v-if="!purchase" :to="{ path: personalScope ? `/dashboard/account/calendar/${booking.bookingDate}` : `/dashboard/${orgSlug}/calendar/${booking.bookingDate}`, query: !personalScope && booking.locationId ? { locationId: booking.locationId } : undefined }" class="flex items-center justify-between gap-4 py-4 text-base font-medium text-highlighted" @click="manageOpen = false"><span>View on calendar</span><UIcon name="i-lucide-chevron-right" class="size-5" /></NuxtLink>
       <UButton v-for="action in availableActions" :key="action.value" :label="action.label" :icon="action.icon" :color="action.color" variant="ghost" block class="justify-start py-4" :loading="pendingAction === action.value" @click="selectAction(action.value)" />
     </div>
@@ -322,10 +323,20 @@ const callTo = computed(() => booking.value?.guestPhone ? `tel:${booking.value.g
 const contactCallTo = computed(() => props.personalScope ? booking.value?.contactPhone ? `tel:${booking.value.contactPhone}` : null : callTo.value)
 
 const policyOpen = ref(false)
+const { t } = useI18n()
 const manageOpen = ref(false)
 const session = authClient.useSession()
 // The buyer's answer to a change, on the record itself; the email link records the same decision.
 const answering = ref<'accept' | 'decline' | null>(null)
+const pendingChangeDescription = computed(() => {
+  const change = booking.value?.pendingChange
+  if (!change) return ''
+  const details = [`${change.beforeLabel} → ${change.afterLabel}`]
+  if (booking.value?.type === 'booking') details.push(`${change.beforeAssignedMemberName ?? 'Unassigned'} → ${change.afterAssignedMemberName ?? 'Unassigned'}`)
+  details.push(`${change.partySize} ${change.partySize === 1 ? 'guest' : 'guests'}`)
+  details.push(props.personalScope ? 'Your appointment stays unchanged until you accept.' : `Waiting for ${firstName(booking.value?.guestName ?? '')} to respond`)
+  return details.join(' · ')
+})
 async function answerChange(decision: 'accept' | 'decline') {
   const change = booking.value?.pendingChange
   if (!change || !booking.value?.threadId || answering.value) return
@@ -338,8 +349,10 @@ async function answerChange(decision: 'accept' | 'decline') {
       validate: (value: unknown): value is Record<string, unknown> => isRecord(value),
     })
     await refreshDetails()
+    await refreshNuxtData(`account-guest-thread:${session.value.data?.user.id}:${booking.value?.threadId}`)
   } catch (cause) {
     actionError.value = getErrorMessage(cause, 'Your answer could not be saved')
+    await refreshDetails()
   } finally {
     answering.value = null
   }

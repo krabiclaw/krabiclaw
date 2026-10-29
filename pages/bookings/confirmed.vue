@@ -26,6 +26,7 @@
         {{ receiptDescription }}
       </template>
       <template #actions>
+        <TenantButton v-if="confirmation.manageUrl" :href="confirmation.manageUrl" variant="outline">{{ t('booking.manage_account') }}</TenantButton>
         <TenantButton v-if="confirmation.status !== 'cancelled'" variant="soft" @click="share">
           <TenantIcon name="share" class="mr-1.5 size-4" />
           {{ t(justCopied ? 'social_posts.link_copied' : 'social_posts.share') }}
@@ -36,6 +37,7 @@
         <TenantButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
           {{ t('site.experience_cancel.title') }}
         </TenantButton>
+        <p v-if="confirmation.manageUrl" class="w-full text-sm text-muted">{{ t('booking.manage_account_help') }}</p>
       </template>
     </BookingConfirmation>
 
