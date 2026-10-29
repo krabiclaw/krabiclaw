@@ -118,7 +118,7 @@ export function articleFacebookPostPath(orgSlug: string, articleId: string, loca
   return `${organizationBase(orgSlug)}/website/posts/new?${query}`
 }
 
-export function insightsPath(orgSlug: string, query?: { startDate: string; endDate: string; tab?: 'ads' }): string {
+export function insightsPath(orgSlug: string, query?: { startDate: string; endDate: string; tab?: 'ads' } | { tab: 'reviews'; review: string }): string {
   const path = `${organizationBase(orgSlug)}/insights`
   return query ? `${path}?${new URLSearchParams(query)}` : path
 }

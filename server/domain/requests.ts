@@ -112,6 +112,10 @@ export interface ThreadOperationalRecord {
   user_id: string | null
   check_in_date: string | null
   check_out_date: string | null
+  /** Staff recorded the guest did not come. */
+  no_show_at: string | null
+  /** The review the thread's guest submitted, if any. */
+  review_id: string | null
 }
 
 /** A stay's thread instants, as described on ThreadOperationalRecord; `alias` is the stays row. */
@@ -165,7 +169,7 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
   const record = await queryFirst<ThreadOperationalRecord>(db, `
     SELECT 'booking' AS kind, b.id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone,
            s.location_id, b.product_id, p.name AS product_name, b.assigned_member_id, b.organization_id, b.user_id,
-           NULL AS check_in_date, NULL AS check_out_date
+           NULL AS check_in_date, NULL AS check_out_date, b.no_show_at, owner.review_id
       FROM bookings b
       JOIN requests owner ON owner.id = b.request_id AND owner.kind = 'booking' AND owner.organization_id = b.organization_id
       JOIN product_sessions s ON s.id = b.product_session_id AND s.product_id = b.product_id AND s.organization_id = b.organization_id
@@ -173,13 +177,13 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
      WHERE b.request_id = ?
     UNION ALL
     SELECT 'reservation', r.id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone,
-           r.location_id, NULL, NULL, NULL, r.organization_id, r.user_id, NULL, NULL
+           r.location_id, NULL, NULL, NULL, r.organization_id, r.user_id, NULL, NULL, r.no_show_at, owner.review_id
       FROM reservations r
       JOIN requests owner ON owner.id = r.request_id AND owner.kind = 'reservation' AND owner.organization_id = r.organization_id
      WHERE r.request_id = ?
     UNION ALL
     SELECT 'stay', st.id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone,
-           c.location_id, st.product_id, p.name, c.assigned_member_id, st.organization_id, st.user_id, st.check_in_date, st.check_out_date
+           c.location_id, st.product_id, p.name, c.assigned_member_id, st.organization_id, st.user_id, st.check_in_date, st.check_out_date, st.no_show_at, owner.review_id
       FROM stays st
       JOIN requests owner ON owner.id = st.request_id AND owner.kind = 'stay' AND owner.organization_id = st.organization_id
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
@@ -314,9 +318,19 @@ export function threadPayloadForGuest(input: GuestThreadInput): ThreadPayload {
  * because the clock says so.
  */
 export function requestActions(record: ThreadOperationalRecord | null, now: string): string[] {
+  const noShow = canMarkNoShow(record, now) ? ['no_show'] : []
   // A stay is changed and cancelled from its own screen; its thread is the conversation.
-  if (record?.kind === 'stay' || !canCancelBookingRequest(record, now)) return []
-  return record.kind === 'booking' && record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']
+  if (record?.kind === 'stay' || !canCancelBookingRequest(record, now)) return noShow
+  return [...(record.kind === 'booking' && record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']), ...noShow]
+}
+
+/**
+ * A confirmed visit that has begun can be recorded as a no-show, until the
+ * guest has reviewed it. It is the one thing that stops a visit's review
+ * invitation without cancelling the visit.
+ */
+export function canMarkNoShow(record: ThreadOperationalRecord | null, now: string): record is ThreadOperationalRecord {
+  return Boolean(record && record.status === 'confirmed' && record.no_show_at === null && record.review_id === null && record.starts_at <= now)
 }
 
 export function canCancelBookingRequest(record: ThreadOperationalRecord | null, now: string): record is ThreadOperationalRecord {

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:c0b2d2885db7b366482252919979803a2548d9d6a76c19255dcfdce4d14e3323",
-  "documentationFingerprint": "sha256:b7adc74a9472f4569f77c08e11ceb4f2e2a15afcae766ac94d76d87962e17a6c",
+  "fingerprint": "sha256:a36cac83a71d6fc48894dfbab82720c8fe84bcbc27274b663dc3ae1b2e457ba9",
+  "documentationFingerprint": "sha256:73128d1ab27b0bb59ca2b9a978a0bbf40656c414e1e07649596a33e7dd926b72",
   "tools": [
     {
       "name": "add_organization_language",
@@ -65605,6 +65605,25 @@
                     "null"
                   ]
                 },
+                "category_ratings": {
+                  "description": "The guest's optional 1-5 scores for the visit's fixed questions; a skipped question has no entry.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "type": "string"
+                      },
+                      "rating": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "rating"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "collection_method": {
                   "type": [
                     "string",
@@ -65645,6 +65664,13 @@
                   ]
                 },
                 "owner_reply": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "private_feedback": {
+                  "description": "What the guest told the business privately. Never published.",
                   "type": [
                     "string",
                     "null"
@@ -66706,6 +66732,25 @@
                     "null"
                   ]
                 },
+                "category_ratings": {
+                  "description": "The guest's optional 1-5 scores for the visit's fixed questions; a skipped question has no entry.",
+                  "items": {
+                    "properties": {
+                      "category": {
+                        "type": "string"
+                      },
+                      "rating": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "category",
+                      "rating"
+                    ],
+                    "type": "object"
+                  },
+                  "type": "array"
+                },
                 "collection_method": {
                   "type": [
                     "string",
@@ -66746,6 +66791,13 @@
                   ]
                 },
                 "owner_reply": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "private_feedback": {
+                  "description": "What the guest told the business privately. Never published.",
                   "type": [
                     "string",
                     "null"
@@ -122943,7 +122995,7 @@
         "get_team_conversation": "sha256:fb0eae689fdfa8508658a4477f7fec885ba4b044d464772e4d6182d918c11532",
         "get_workspace_context": "sha256:e8760a2ee1dccde4719c76a07115d3fffd324972c6aa981e567f4934b19a550c",
         "list_guest_conversations": "sha256:c1e112836d43a826e3c31b3351b0bc96a96b452ff9bffca4bf16214e44cdfa0e",
-        "list_location_reviews": "sha256:346fe43967ce2b4471bc28305e8c70fd33357d1b53a4b1dcb10bfecf9551474d",
+        "list_location_reviews": "sha256:95068cff21ac3fea416a9fa8ec3a8ad2d01db79ea0825274c0295b89f15f5d92",
         "list_locations": "sha256:7dd88e7fc4bd7ec81ea85799fc2bfd56d6e492a30ddab39669e4286937b9efdd",
         "list_team_conversation_recipients": "sha256:1dd41b8c0a687298a77151839812ddcf99fbd5cf7283e9f5ea2a85e11a70deb0",
         "list_team_conversations": "sha256:7d0d80ed5a7b2c7b2d46ce8cac3aadddf63040756dafc586723b6bf623914283",

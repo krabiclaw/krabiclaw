@@ -28,7 +28,6 @@ import { registerDevice } from '../../server/domain/devices.ts'
 import { guestPaymentMessage, ownerPaymentMessage } from '../../server/notifications/payment-events.ts'
 import { getResendClient, resendData } from '../../server/utils/resend.ts'
 import { getReviewBookingContext } from '../../server/utils/review-requests.ts'
-import { sendReviewRequestForBooking } from '../../server/utils/review-request-delivery.ts'
 import { renderNotificationEmail } from '../../server/emails/render.ts'
 import { reviewRequestMessage } from '../../server/notifications/guest-events.ts'
 import { formatTimestamp } from '../../utils/timezone.ts'
@@ -677,9 +676,6 @@ test('a review request reads the visit from the record that holds it', async () 
 
   try {
     const db = await runtime.getD1Database('DB')
-    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
-      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests',
-      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     const now = new Date().toISOString()
     for (const statement of [
@@ -709,8 +705,7 @@ test('a review request reads the visit from the record that holds it', async () 
       'status and the visit come from the reservation, not from the thread payload',
     )
 
-    const result = await sendReviewRequestForBooking(env, db, 'reservation', 'reservation-review')
-    assert.deepEqual({ sent: result.sent, error: result.error }, { sent: true, error: undefined })
+    // Sending, its timing and its delivery through the conversation are proven in guest-reviews-d1.
     // The email states the visit. A row that reads "your reservation" is the
     // headline fragment leaking into a value, which is what this guards — the
     // message carries no such phrase at all now, so the check is that the real

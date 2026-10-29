@@ -97,6 +97,8 @@ export interface Stay {
   cancellation_reason: string | null
   /** The policy a guest booked under on the site; null for a stay not paid there. */
   cancellation_policy: StayBookedPolicy | null
+  /** Staff recorded the guest did not arrive; their review invitation is never sent. */
+  no_show_at: string | null
   version: number
   created_at: string
   updated_at: string
@@ -343,7 +345,7 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 
 const STAY_COLUMNS = `s.id, s.product_id, c.location_id, l.timezone, s.channel, s.owner, s.status, s.overbooked, s.check_in_date, s.check_out_date, s.arrival_time,
   s.adults, s.children, s.infants, s.guest_name, s.guest_surname, s.guest_email, s.guest_phone, s.user_id, s.total_minor, s.currency, s.notes,
-  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.cancellation_policy, s.version, s.created_at, s.updated_at`
+  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.cancellation_policy, s.no_show_at, s.version, s.created_at, s.updated_at`
 
 function mapStay(row: Record<string, unknown>): Stay {
   return { ...row, overbooked: Number(row.overbooked) === 1 } as unknown as Stay
