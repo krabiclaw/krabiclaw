@@ -127,6 +127,8 @@ export async function seedE2e(baseURL: string) {
     manifest.tenants.restaurant = await seedRestaurant(create)
     manifest.tenants.experience = await seedExperience(create)
     manifest.tenants.legal = await seedLegal(create)
+    const { seedTraffic } = await import('./traffic.ts')
+    await seedTraffic(baseURL, manifest)
     mkdirSync(new URL('.', SEED_MANIFEST_PATH), { recursive: true })
     writeFileSync(SEED_MANIFEST_PATH, JSON.stringify(manifest, null, 2))
     return manifest

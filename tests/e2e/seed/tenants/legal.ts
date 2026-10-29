@@ -26,7 +26,7 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
 
     const logo = await seedMedia(owner, tenant, 'logo', 'office.avif', 'Harbor Legal Aid')
     await tool('set_media', { placement: { owner_type: 'organization', owner_id: tenant.organizationId, slot: 'logo' }, asset_id: logo.id })
-    await seedMedia(owner, tenant, 'office', 'office.avif', 'The Raleigh office reception')
+    const officeImage = await seedMedia(owner, tenant, 'office', 'office.avif', 'The Raleigh office reception')
     await seedMedia(owner, tenant, 'attorney', 'portrait.avif', 'Dana Brooks')
 
     const practiceArea = async (key: string, name: string, path: string, summary: string) => {
@@ -53,6 +53,17 @@ export async function seedLegal(createTenant: CreateTenant): Promise<SeedTenant>
     await practiceArea('family-law', 'Family Law', '/services/family', 'Custody, child support, divorce and protective orders.')
     await practiceArea('housing', 'Housing Law', '/services/housing', 'Eviction defense and tenant rights.')
     await tool('set_consultation_mode', { mode: 'native' })
+
+    // The home page asks for a consultation, beside a photo of the office.
+    const { pages } = await tool<{ pages: Array<{ id: string; path: string }> }>('list_site_pages', { locale: 'en' })
+    const home = pages.find(page => page.path === '/')
+    if (!home) throw new Error('Harbor Legal Aid has no home page')
+    const { page } = await tool<{ page: { document: { id: string } } }>('get_site_page', { variant_id: home.id })
+    await tool('append_content_block', {
+      document_id: page.document.id, type: 'contact_cta',
+      data: { title: 'Talk to an attorney', description: 'Request a free consultation about your situation.', label: 'Request a consultation', url: '/schedule' },
+      media: [{ asset_id: officeImage.id, slot: 'featured' }],
+    })
     return tenant
   } finally { await owner.dispose() }
 }
