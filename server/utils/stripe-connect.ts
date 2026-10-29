@@ -261,20 +261,34 @@ export async function getStripeConnectedAccountByStripeId(
   return row ? mapConnectedAccount(row) : null
 }
 
+/** How long one start holds the account creation before another may take it over. */
+const CONNECT_CREATION_CLAIM_MS = 60_000
+
+/**
+ * The business's one connected account, claimed for creation until Stripe has
+ * made it. Stripe creates it once, under one idempotency key, so a second
+ * start while the first is still creating it is refused rather than sent to
+ * Stripe. A failed creation, or one unfinished after a minute, is claimed again.
+ */
 export async function reserveStripeConnectedAccount(
   db: DbClient,
   input: { organizationId: string; livemode: boolean },
 ): Promise<StripeConnectedAccount> {
-  const now = new Date().toISOString()
-  await execute(db, `
-    INSERT OR IGNORE INTO stripe_connected_accounts
+  const now = new Date()
+  const claim = await execute(db, `
+    INSERT INTO stripe_connected_accounts
       (id, organization_id, livemode, status, requirements_json, created_at, updated_at)
     VALUES (?, ?, ?, 'creating', '[]', ?, ?)
-  `, [crypto.randomUUID(), input.organizationId, input.livemode ? 1 : 0, now, now])
+    ON CONFLICT(organization_id) DO UPDATE SET status = 'creating', last_error = NULL, updated_at = excluded.updated_at
+    WHERE stripe_account_id IS NULL AND livemode = excluded.livemode AND (status = 'creation_failed' OR updated_at < ?)
+  `, [crypto.randomUUID(), input.organizationId, input.livemode ? 1 : 0, now.toISOString(), now.toISOString(), new Date(now.getTime() - CONNECT_CREATION_CLAIM_MS).toISOString()])
   const row = await getStripeConnectedAccount(db, input.organizationId)
   if (!row) throw new Error('Stripe Connect account reservation was not persisted')
   if (row.livemode !== input.livemode) {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Stripe Connect account belongs to a different Stripe mode' })
+  }
+  if (!row.stripeAccountId && Number(claim.meta.changes) !== 1) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', data: { code: 'CONNECT_SETUP_IN_PROGRESS' } })
   }
   return row
 }

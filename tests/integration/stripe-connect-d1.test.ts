@@ -37,15 +37,25 @@ async function withD1(run: (db: D1Database) => Promise<void>) {
   }
 }
 
-test('connected account reservation is organization-scoped and retry-stable', async () => {
+test('connected account reservation is organization-scoped and claimed by one start at a time', async () => {
   await withD1(async (db) => {
-    const [first, second] = await Promise.all([
+    const outcomes = await Promise.allSettled([
       reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false }),
       reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false }),
     ])
-    assert.equal(first.id, second.id)
+    // One start creates the account; the other is told setup is already starting, never sent to Stripe.
+    const first = outcomes.find(outcome => outcome.status === 'fulfilled')!.value
+    const refused = outcomes.find(outcome => outcome.status === 'rejected')!.reason as { statusCode: number; data: { code: string } }
+    assert.deepEqual([refused.statusCode, refused.data.code], [409, 'CONNECT_SETUP_IN_PROGRESS'])
     assert.equal(first.status, 'creating')
     assert.equal(await db.prepare("SELECT count(*) FROM stripe_connected_accounts WHERE organization_id='org'").first('count(*)'), 1)
+    // A failed creation is claimed again, as is one left unfinished for over a minute.
+    await db.prepare("UPDATE stripe_connected_accounts SET status='creation_failed', last_error='Stripe refused' WHERE organization_id='org'").run()
+    const retried = await reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false })
+    assert.deepEqual([retried.id, retried.status, retried.lastError], [first.id, 'creating', null])
+    await assert.rejects(reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false }), { statusCode: 409, data: { code: 'CONNECT_SETUP_IN_PROGRESS' } })
+    await db.prepare("UPDATE stripe_connected_accounts SET updated_at='2026-01-01T00:00:00.000Z' WHERE organization_id='org'").run()
+    assert.equal((await reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false })).id, first.id)
     // A reservation has no provider identity before Stripe creates the account.
     assert.equal(await db.prepare("SELECT country FROM stripe_connected_accounts WHERE organization_id='org'").first('country'), null)
     await assert.rejects(
@@ -145,6 +155,11 @@ test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect r
 
     const links: Array<Record<string, unknown>> = []
     let created = false
+    // Stripe's account create is held open so a second start arrives while the first is creating the account.
+    let creating!: () => void
+    const createStarted = new Promise<void>(resolve => { creating = resolve })
+    let releaseCreate!: () => void
+    const createReleased = new Promise<void>(resolve => { releaseCreate = resolve })
     const account = { id: 'acct_payouts', object: 'v2.core.account', livemode: false, dashboard: 'express', identity: { country: 'US' },
       defaults: { responsibilities: { fees_collector: 'application', losses_collector: 'stripe' } }, configuration: { merchant: { capabilities: { card_payments: { status: 'pending', status_details: [] } } } },
       requirements: { entries: [{ awaiting_action_from: 'user', minimum_deadline: { status: 'currently_due' }, description: 'Provide a bank account for payouts', errors: [] }] } }
@@ -153,7 +168,13 @@ test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect r
       const url = new URL(request instanceof Request ? request.url : String(request))
       if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
       const method = (request instanceof Request ? request.method : init?.method ?? 'GET').toUpperCase()
-      if (method === 'POST' && url.pathname === '/v2/core/accounts') { created = true; return Response.json(account) }
+      if (method === 'POST' && url.pathname === '/v2/core/accounts') {
+        assert.equal(created, false, 'Stripe is asked to create the account once')
+        created = true
+        creating()
+        await createReleased
+        return Response.json(account)
+      }
       if (method === 'GET' && url.pathname === '/v2/core/accounts/acct_payouts') return Response.json(account)
       if (method === 'POST' && url.pathname === '/v2/core/account_links') {
         links.push(JSON.parse(String(request instanceof Request ? await request.text() : init?.body)) as Record<string, unknown>)
@@ -168,7 +189,12 @@ test('the iPhone app starts Stripe payouts onboarding on the dashboard Connect r
       assert.equal((await call('', { cookie })).status, 403)
       assert.equal((await call('', app_, { returnTo: 'web' })).status, 422)
       assert.equal(created, false)
-      const started = await call('', app_, { returnTo: 'app' })
+      const starting = call('', app_, { returnTo: 'app' })
+      await createStarted
+      // A second Add payout method while Stripe is still creating the account is refused in words, not with Stripe's idempotency error.
+      assert.deepEqual(await call('', app_, { returnTo: 'app' }), { status: 409, body: { status: 409, statusText: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', message: 'Payout setup is already starting for this business. Finish it in the window where it opened, or try again in a minute.', data: { code: 'CONNECT_SETUP_IN_PROGRESS' } } })
+      releaseCreate()
+      const started = await starting
       assert.equal(started.status, 200)
       assert.equal(started.body.onboardingUrl, 'https://connect.stripe.com/d/setup/e/acct_payouts/abc')
       assert.equal((started.body.account as { stripeAccountId: string }).stripeAccountId, 'acct_payouts')
