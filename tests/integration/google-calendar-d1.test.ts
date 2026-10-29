@@ -195,7 +195,7 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
       assert.equal((await db.prepare('SELECT count(*) n FROM google_calendar_event_links').first())?.n, expected)
     }
     const oldest = await db.prepare('SELECT operational_id FROM google_calendar_event_links ORDER BY updated_at, operational_id LIMIT 1').first<{ operational_id: string }>()
-    await db.prepare("UPDATE user SET name='Attorney Host' WHERE id='host'").run()
+    await db.prepare("UPDATE member_scheduling SET public_name='Attorney Host' WHERE member_id='host-org'").run()
     const previous = await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE operational_id=?').bind(oldest!.operational_id).first()
     await syncCalendarOrganization(env, 'org', 0, provider)
     assert.notEqual((await db.prepare('SELECT booking_revision FROM google_calendar_event_links WHERE operational_id=?').bind(oldest!.operational_id).first())?.booking_revision, previous?.booking_revision, 'a changed participant name changes the event revision')
